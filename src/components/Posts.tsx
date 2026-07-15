@@ -198,60 +198,60 @@ export default function Posts({ idToken, channels }: PostsProps) {
               <table className="w-full text-left border-collapse table-fixed">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    <th className="p-4 w-28">Nền tảng</th>
-                    <th className="p-4 w-44">Kênh phát sóng</th>
-                    <th className="p-4 w-32">Ngày đăng</th>
-                    <th className="p-4 w-80">Nội dung tóm tắt</th>
-                    <th className="p-4 w-24">Phân loại</th>
-                    <th className="p-4 w-20 text-center">Likes</th>
-                    <th className="p-4 w-20 text-center">Comments</th>
-                    <th className="p-4 w-20 text-center">Shares</th>
-                    <th className="p-4 w-20 text-center">Views</th>
-                    <th className="p-4 w-20 text-center">Reach</th>
-                    <th className="p-4 w-28 text-center">Tương tác</th>
-                    <th className="p-4 w-20 text-right">Xem bài</th>
+                    <th className="px-2 py-3 w-[65px]">Nền tảng</th>
+                    <th className="px-2 py-3 w-[110px]">Kênh</th>
+                    <th className="px-2 py-3 w-[85px]">Ngày đăng</th>
+                    <th className="px-2 py-3 w-auto">Nội dung tóm tắt</th>
+                    <th className="px-2 py-3 w-[70px]">Phân loại</th>
+                    <th className="px-2 py-3 w-[50px] text-center">Likes</th>
+                    <th className="px-2 py-3 w-[55px] text-center">Comments</th>
+                    <th className="px-2 py-3 w-[50px] text-center">Shares</th>
+                    <th className="px-2 py-3 w-[50px] text-center">Views</th>
+                    <th className="px-2 py-3 w-[50px] text-center">Reach</th>
+                    <th className="px-2 py-3 w-[75px] text-center">Tương tác</th>
+                    <th className="px-2 py-3 w-[45px] text-center">Xem</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-xs">
+                <tbody className="divide-y divide-slate-100 text-[11px]">
                   {posts.map((post) => {
                     const chan = channels.find(c => c.id === post.channelId);
                     return (
                       <tr key={post.postKey} className="hover:bg-slate-50/50">
-                        <td className="p-4">
-                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-semibold text-[10px] ${
+                        <td className="px-2 py-3">
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full font-semibold text-[9px] ${
                             post.platform === 'facebook' 
                               ? 'bg-blue-50 text-blue-700 border border-blue-100' 
                               : 'bg-teal-50 text-teal-700 border border-teal-100'
                           }`}>
-                            {post.platform === 'facebook' ? 'Facebook' : 'Zalo OA'}
+                            {post.platform === 'facebook' ? 'FB' : 'Zalo'}
                           </span>
                         </td>
-                        <td className="p-4 font-medium text-slate-800 truncate" title={chan?.name}>{chan?.name || 'Kênh ẩn'}</td>
-                        <td className="p-4 text-slate-500 whitespace-nowrap">
+                        <td className="px-2 py-3 font-medium text-slate-800 truncate" title={chan?.name}>{chan?.name || 'Kênh ẩn'}</td>
+                        <td className="px-2 py-3 text-slate-500 whitespace-nowrap">
                           {new Date(post.publishedAt).toLocaleDateString('vi-VN')}
                         </td>
-                        <td className="p-4 text-slate-700 font-normal truncate" title={post.message}>
+                        <td className="px-2 py-3 text-slate-700 font-normal truncate" title={post.message}>
                           {post.message || <em className="text-slate-400">Không có văn bản</em>}
                         </td>
-                        <td className="p-4 text-slate-500 capitalize">{post.postType}</td>
-                        <td className="p-4 text-center font-mono text-slate-600 font-medium">{post.reactions.toLocaleString()}</td>
-                        <td className="p-4 text-center font-mono text-slate-600 font-medium">{post.comments.toLocaleString()}</td>
-                        <td className="p-4 text-center font-mono text-slate-600 font-medium">{post.shares.toLocaleString()}</td>
-                        <td className="p-4 text-center font-mono text-slate-600 font-medium">{post.views.toLocaleString()}</td>
-                        <td className="p-4 text-center font-mono text-slate-600 font-medium">{post.reach > 0 ? post.reach.toLocaleString() : '-'}</td>
-                        <td className="p-4 text-center">
-                          <span className="font-semibold text-blue-600 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded font-mono">
+                        <td className="px-2 py-3 text-slate-500 capitalize">{post.postType}</td>
+                        <td className="px-2 py-3 text-center font-mono text-slate-600 font-medium">{post.reactions.toLocaleString()}</td>
+                        <td className="px-2 py-3 text-center font-mono text-slate-600 font-medium">{post.comments.toLocaleString()}</td>
+                        <td className="px-2 py-3 text-center font-mono text-slate-600 font-medium">{post.shares.toLocaleString()}</td>
+                        <td className="px-2 py-3 text-center font-mono text-slate-600 font-medium">{post.views.toLocaleString()}</td>
+                        <td className="px-2 py-3 text-center font-mono text-slate-600 font-medium">{post.reach > 0 ? post.reach.toLocaleString() : '-'}</td>
+                        <td className="px-2 py-3 text-center">
+                          <span className="font-semibold text-blue-600 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded font-mono">
                             {post.totalEngagement.toLocaleString()}
                           </span>
                         </td>
-                        <td className="p-4 text-right">
+                        <td className="px-2 py-3 text-center">
                           <a
                             href={post.postUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex p-1 hover:bg-slate-100 text-blue-600 hover:text-blue-800 rounded transition-colors"
                           >
-                            <ExternalLink className="w-3.5 h-3.5" />
+                            <ExternalLink className="w-3 h-3" />
                           </a>
                         </td>
                       </tr>
