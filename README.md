@@ -8,11 +8,17 @@ Hệ thống phân tích tương tác mạng xã hội Facebook & Zalo OA chuyê
 
 ## 🚀 Khởi chạy nhanh bằng 1 dòng lệnh
 
-Để cài đặt các thư viện cần thiết và khởi chạy ứng dụng ngay lập tức, hãy mở Terminal/Command Prompt trong thư mục dự án và chạy dòng lệnh duy nhất sau:
+Để cài đặt các thư viện cần thiết và khởi chạy ứng dụng ngay lập tức, hãy mở terminal trong thư mục dự án và chạy dòng lệnh tương ứng với môi trường của bạn:
 
-```bash
-npm install && npm run dev
-```
+* **Đối với Windows PowerShell (Mặc định):**
+  ```powershell
+  npm install; npm run dev
+  ```
+
+* **Đối với Command Prompt (cmd), Git Bash hoặc macOS/Linux:**
+  ```bash
+  npm install && npm run dev
+  ```
 
 *Sau khi chạy thành công, ứng dụng sẽ hoạt động tại địa chỉ: **http://localhost:3000***
 
