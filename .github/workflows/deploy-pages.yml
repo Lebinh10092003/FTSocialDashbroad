@@ -32,6 +32,8 @@ jobs:
         run: npm ci
 
       - name: Build frontend
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
         run: npx vite build
 
       - name: Add SPA fallback and disable Jekyll
