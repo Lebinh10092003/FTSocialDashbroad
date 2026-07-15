@@ -13,5 +13,20 @@
     "errorCode": "",
     "errorMessage": "",
     "requestId": "409cbee5-d650-458e-a75c-4bb479af3a1e"
+  },
+  "2c4b581b-8d5d-408c-8cc4-4851a731696c": {
+    "logId": "2c4b581b-8d5d-408c-8cc4-4851a731696c",
+    "startedAt": "2026-07-15T03:49:56.813Z",
+    "endedAt": "2026-07-15T03:53:31.852Z",
+    "platform": "facebook",
+    "action": "sync",
+    "channelId": "dd8dfe3c-82f8-4b98-89d5-6f417e2e0612",
+    "status": "success",
+    "recordsReceived": 25,
+    "recordsInserted": 25,
+    "recordsUpdated": 25,
+    "errorCode": "",
+    "errorMessage": "",
+    "requestId": "409cbee5-d650-458e-a75c-4bb479af3a1e"
   }
 }

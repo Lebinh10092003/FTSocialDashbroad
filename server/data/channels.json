@@ -21,7 +21,9 @@
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.353Z",
     "updatedAt": "2026-07-15T03:44:09.353Z",
-    "totalPosts": 0
+    "totalPosts": 25,
+    "lastSyncAt": "2026-07-15T03:53:31.851Z",
+    "lastSyncStatus": "success"
   },
   "59c12127-3586-4395-8678-73949de9bc2b": {
     "id": "59c12127-3586-4395-8678-73949de9bc2b",

@@ -89,7 +89,7 @@ export default function App() {
         sessionStorage.removeItem('is_mock_login');
         setUser(currentUser);
         try {
-          const token = await currentUser.getIdToken(true);
+          const token = await currentUser.getIdToken();
           setIdToken(token);
           
           // Fetch backend profile & role
