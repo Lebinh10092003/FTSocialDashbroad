@@ -337,7 +337,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                   </div>
                 )}
               </div>
-              <div className="h-64">
+              <div className="h-72">
                 {data.channelStats.length === 0 ? (
                   <div className="flex items-center justify-center h-full text-xs text-slate-400">
                     Chưa cấu hình kênh để so sánh.
@@ -346,10 +346,18 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart 
                       data={data.channelStats.filter(s => selectedChannelsForCompare.has(s.channelName))} 
-                      margin={{ top: 10, right: -5, left: -20, bottom: 0 }}
+                      margin={{ top: 10, right: -5, left: -20, bottom: 5 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="channelName" tickStyle={{ fontSize: 9 }} />
+                      <XAxis 
+                        dataKey="channelName" 
+                        tickStyle={{ fontSize: 8 }}
+                        angle={-25}
+                        textAnchor="end"
+                        height={55}
+                        interval={0}
+                        tickFormatter={(value) => value.length > 20 ? value.substring(0, 18) + '...' : value}
+                      />
                       <YAxis yAxisId="left" orientation="left" stroke="#10b981" tickStyle={{ fontSize: 9 }} />
                       <YAxis yAxisId="right" orientation="right" stroke="#3b82f6" tickStyle={{ fontSize: 9 }} />
                       <Tooltip />
