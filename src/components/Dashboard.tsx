@@ -34,17 +34,17 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   
-  // Interactive channel filter states for comparison chart
-  const [selectedChannelsForCompare, setSelectedChannelsForCompare] = useState<Set<string>>(new Set());
+  // Interactive channel filter states for daily trend chart
+  const [selectedChannelsForTrend, setSelectedChannelsForTrend] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (data && data.channelStats) {
-      setSelectedChannelsForCompare(new Set(data.channelStats.map(s => s.channelName)));
+      setSelectedChannelsForTrend(new Set(data.channelStats.map(s => s.channelName)));
     }
   }, [data]);
 
-  const toggleChannelCompare = (name: string) => {
-    const next = new Set(selectedChannelsForCompare);
+  const toggleChannelTrend = (name: string) => {
+    const next = new Set(selectedChannelsForTrend);
     if (next.has(name)) {
       if (next.size > 1) {
         next.delete(name);
@@ -52,7 +52,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
     } else {
       next.add(name);
     }
-    setSelectedChannelsForCompare(next);
+    setSelectedChannelsForTrend(next);
   };
 
   const fetchDashboardData = async () => {
@@ -280,177 +280,83 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
             </div>
           </div>
 
-          {/* Charts section */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Trends chart */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+          {/* Charts section - Full Width Trend Chart with Integrated Filters */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-5">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
               <div>
-                <h3 className="text-sm font-bold text-slate-800">Xu hướng tương tác theo ngày đăng</h3>
-                <p className="text-[11px] text-slate-400">Biểu đồ thể hiện tổng tương tác & tiếp cận tích lũy theo ngày xuất bản thực tế của các bài đăng.</p>
+                <h3 className="text-base font-bold text-slate-800">Xu hướng tương tác theo ngày đăng</h3>
+                <p className="text-xs text-slate-400">Biểu đồ thể hiện tổng tương tác & tiếp cận tích lũy theo ngày xuất bản thực tế của các bài đăng.</p>
               </div>
-              <div className="h-64">
-                {data.trends.length === 0 ? (
-                  <div className="flex items-center justify-center h-full text-xs text-slate-400">
-                    Không có xu hướng biến động cho khoảng thời gian này.
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={data.trends} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="date" tickStyle={{ fontSize: 10 }} />
-                      <YAxis tickStyle={{ fontSize: 10 }} />
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: '#1e293b', 
-                          border: 'none', 
-                          borderRadius: '8px', 
-                          color: '#fff', 
-                          fontSize: '11px',
-                          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)'
-                        }} 
-                        itemStyle={{ color: '#e2e8f0', padding: '1px 0' }}
-                        labelStyle={{ fontWeight: 'bold', color: '#94a3b8', marginBottom: '4px' }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: 10 }} />
-                      
-                      {/* Đường tham chiếu tổng cộng */}
-                      <Line type="monotone" dataKey="engagement" name="Tổng cộng" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 4" />
-                      
-                      {/* Đường xu hướng riêng cho mỗi kênh active */}
-                      {data.channelStats.map((stat, idx) => (
+              
+              {/* Bộ lọc chọn nhanh hiển thị các đường xu hướng của kênh */}
+              {data.channelStats.length > 0 && (
+                <div className="flex flex-wrap gap-1 p-1.5 bg-slate-50 rounded-xl border border-slate-100">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider self-center px-1.5">Hiển thị kênh:</span>
+                  {data.channelStats.map((stat, idx) => {
+                    const isSelected = selectedChannelsForTrend.has(stat.channelName);
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => toggleChannelTrend(stat.channelName)}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
+                          isSelected 
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+                            : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'
+                        }`}
+                      >
+                        {stat.channelName}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="h-96">
+              {data.trends.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-xs text-slate-400">
+                  Không có xu hướng biến động cho khoảng thời gian này.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={data.trends} margin={{ top: 10, right: 20, left: -10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="date" tickStyle={{ fontSize: 10 }} />
+                    <YAxis tickStyle={{ fontSize: 10 }} />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: '#1e293b', 
+                        border: 'none', 
+                        borderRadius: '8px', 
+                        color: '#fff', 
+                        fontSize: '11px',
+                        boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)'
+                      }} 
+                      itemStyle={{ color: '#e2e8f0', padding: '1px 0' }}
+                      labelStyle={{ fontWeight: 'bold', color: '#94a3b8', marginBottom: '4px' }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    
+                    {/* Đường tham chiếu tổng cộng */}
+                    <Line type="monotone" dataKey="engagement" name="Tổng cộng" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 4" />
+                    
+                    {/* Đường xu hướng riêng cho mỗi kênh active được chọn */}
+                    {data.channelStats
+                      .filter(stat => selectedChannelsForTrend.has(stat.channelName))
+                      .map((stat, idx) => (
                         <Line
                           key={stat.channelName}
                           type="monotone"
                           dataKey={stat.channelName}
                           name={stat.channelName}
                           stroke={COLORS[idx % COLORS.length]}
-                          strokeWidth={2.2}
-                          activeDot={{ r: 5 }}
+                          strokeWidth={2.5}
+                          activeDot={{ r: 6 }}
                         />
                       ))}
-                    </LineChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </div>
-
-            {/* Channels chart */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 flex flex-col justify-between">
-              <div className="space-y-2">
-                <h3 className="text-sm font-bold text-slate-800">So sánh hiệu quả giữa các kênh</h3>
-                <p className="text-[11px] text-slate-400">Tổng số lượng bài đăng và tổng tương tác tích lũy của các bài đăng phát sóng trong khoảng thời gian đã chọn.</p>
-                <p className="text-[10px] text-slate-400 italic">Trục Y bên trái: Tương tác (Cột xanh), Trục Y bên phải: Số bài viết (Đường xanh biển).</p>
-                
-                {/* Chọn kênh hiển thị trên biểu đồ so sánh */}
-                {data.channelStats.length > 0 && (
-                  <div className="flex flex-wrap gap-1 p-2 bg-slate-50 rounded-xl border border-slate-100">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider self-center mr-1">Hiển thị:</span>
-                    {data.channelStats.map((stat, idx) => {
-                      const isSelected = selectedChannelsForCompare.has(stat.channelName);
-                      return (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => toggleChannelCompare(stat.channelName)}
-                          className={`px-2 py-0.5 rounded-md text-[9px] font-bold transition-all border cursor-pointer ${
-                            isSelected 
-                              ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
-                              : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'
-                          }`}
-                        >
-                          {stat.channelName}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-              <div className="h-72">
-                {data.channelStats.length === 0 ? (
-                  <div className="flex items-center justify-center h-full text-xs text-slate-400">
-                    Chưa cấu hình kênh để so sánh.
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart 
-                      data={data.channelStats.filter(s => selectedChannelsForCompare.has(s.channelName))} 
-                      margin={{ top: 10, right: -5, left: -20, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                      <XAxis 
-                        dataKey="channelName" 
-                        tickStyle={{ fontSize: 8 }}
-                        angle={-25}
-                        textAnchor="end"
-                        height={55}
-                        interval={0}
-                        tickFormatter={(value) => value.length > 20 ? value.substring(0, 18) + '...' : value}
-                      />
-                      <YAxis yAxisId="left" orientation="left" stroke="#10b981" tickStyle={{ fontSize: 9 }} />
-                      <YAxis yAxisId="right" orientation="right" stroke="#3b82f6" tickStyle={{ fontSize: 9 }} />
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: '#1e293b', 
-                          border: 'none', 
-                          borderRadius: '8px', 
-                          color: '#fff', 
-                          fontSize: '11px',
-                          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)'
-                        }} 
-                        itemStyle={{ color: '#e2e8f0', padding: '1px 0' }}
-                        labelStyle={{ fontWeight: 'bold', color: '#94a3b8', marginBottom: '4px' }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: 10 }} />
-                      <Bar yAxisId="left" dataKey="engagement" name="Lượt tương tác" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={30} />
-                      <Line yAxisId="right" type="monotone" dataKey="postsCount" name="Số bài viết" stroke="#3b82f6" strokeWidth={2.5} activeDot={{ r: 5 }} />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-
-              {/* Bảng so sánh chi tiết số liệu */}
-              {data.channelStats.length > 0 && (
-                <div className="mt-4 overflow-x-auto border border-slate-100 rounded-xl">
-                  <table className="w-full text-left border-collapse text-[11px]">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-100 text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                        <th className="p-2.5">Kênh</th>
-                        <th className="p-2.5 text-center">Nền tảng</th>
-                        <th className="p-2.5 text-center">Bài viết</th>
-                        <th className="p-2.5 text-center">Tương tác</th>
-                        <th className="p-2.5 text-center">Trung bình / bài</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-700">
-                      {data.channelStats
-                        .filter(s => selectedChannelsForCompare.has(s.channelName))
-                        .map((stat, idx) => {
-                          const avgEngagement = stat.postsCount > 0 
-                            ? Math.round(stat.engagement / stat.postsCount) 
-                            : 0;
-                          return (
-                            <tr key={idx} className="hover:bg-slate-50/40">
-                              <td className="p-2.5 font-semibold text-slate-800 truncate max-w-[120px]" title={stat.channelName}>{stat.channelName}</td>
-                              <td className="p-2.5 text-center">
-                                <span className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-full font-semibold text-[8px] uppercase ${
-                                  stat.platform === 'facebook' 
-                                    ? 'bg-blue-50 text-blue-700 border border-blue-100' 
-                                    : stat.platform === 'zalo'
-                                    ? 'bg-teal-50 text-teal-750 border border-teal-100'
-                                    : 'bg-purple-50 text-purple-700 border border-purple-100'
-                                }`}>
-                                  {stat.platform}
-                                </span>
-                              </td>
-                              <td className="p-2.5 text-center font-mono font-medium text-slate-600">{stat.postsCount}</td>
-                              <td className="p-2.5 text-center font-mono font-medium text-slate-600">{stat.engagement.toLocaleString()}</td>
-                              <td className="p-2.5 text-center font-semibold text-blue-600 font-mono bg-blue-50/20">{avgEngagement.toLocaleString()}</td>
-                            </tr>
-                          );
-                        })}
-                    </tbody>
-                  </table>
-                </div>
+                  </LineChart>
+                </ResponsiveContainer>
               )}
             </div>
           </div>
