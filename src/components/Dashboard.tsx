@@ -584,20 +584,20 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
 
               {/* KPI Breakdown Cards (Mockup Meta style) */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/50 text-left space-y-1">
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">👍 Cảm xúc (Reactions)</span>
-                  <p className="text-xl font-extrabold text-slate-800">{filteredMetrics.reactions.toLocaleString('vi-VN')}</p>
-                  <p className="text-[9px] text-slate-400">Tổng số lượt thích và cảm xúc</p>
+                <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/50 text-left space-y-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.01)]">
+                  <span className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider block">👍 Cảm xúc (Reactions)</span>
+                  <p className="text-2xl font-black text-slate-900">{filteredMetrics.reactions.toLocaleString('vi-VN')}</p>
+                  <p className="text-[10px] text-slate-500 font-bold">Tổng số lượt thích và cảm xúc</p>
                 </div>
-                <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/50 text-left space-y-1">
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">💬 Bình luận (Comments)</span>
-                  <p className="text-xl font-extrabold text-slate-800">{filteredMetrics.comments.toLocaleString('vi-VN')}</p>
-                  <p className="text-[9px] text-slate-400">Tổng số phản hồi trên bài viết</p>
+                <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/50 text-left space-y-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.01)]">
+                  <span className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider block">💬 Bình luận (Comments)</span>
+                  <p className="text-2xl font-black text-slate-900">{filteredMetrics.comments.toLocaleString('vi-VN')}</p>
+                  <p className="text-[10px] text-slate-500 font-bold">Tổng số phản hồi trên bài viết</p>
                 </div>
-                <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/50 text-left space-y-1">
-                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">🔗 Lượt chia sẻ (Shares)</span>
-                  <p className="text-xl font-extrabold text-slate-800">{filteredMetrics.shares.toLocaleString('vi-VN')}</p>
-                  <p className="text-[9px] text-slate-400">Tổng số lượt chia sẻ bài viết</p>
+                <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/50 text-left space-y-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.01)]">
+                  <span className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider block">🔗 Lượt chia sẻ (Shares)</span>
+                  <p className="text-2xl font-black text-slate-900">{filteredMetrics.shares.toLocaleString('vi-VN')}</p>
+                  <p className="text-[10px] text-slate-500 font-bold">Tổng số lượt chia sẻ bài viết</p>
                 </div>
               </div>
             </div>
