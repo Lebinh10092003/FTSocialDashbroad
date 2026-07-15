@@ -42,10 +42,20 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   // Initialize Auth state listener
   useEffect(() => {
+    // Restore cached Google access token if it exists
+    const cachedToken = localStorage.getItem('google_access_token');
+    if (cachedToken) {
+      setGoogleAccessToken(cachedToken);
+    }
+
     // Ensure standard Workspace scopes are added
     googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets');
     googleProvider.addScope('https://www.googleapis.com/auth/userinfo.email');
     googleProvider.addScope('https://www.googleapis.com/auth/userinfo.profile');
+    googleProvider.setCustomParameters({
+      prompt: 'consent',
+      access_type: 'offline'
+    });
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setAuthChecking(true);
@@ -76,6 +86,7 @@ export default function App() {
             const configData = await configRes.json();
             if (configData.lastGoogleAccessToken) {
               setGoogleAccessToken(configData.lastGoogleAccessToken);
+              localStorage.setItem('google_access_token', configData.lastGoogleAccessToken);
               console.log('Tự động khôi phục kết nối Google Sheets từ hệ thống:', configData.lastGoogleAccessToken.substring(0, 10) + '...');
             }
           }
