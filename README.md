@@ -2,19 +2,25 @@
 <img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
 </div>
 
-# Run and deploy your AI Studio app
+# FT Social Dashboard
 
-This contains everything you need to run your app locally.
+Hệ thống phân tích tương tác mạng xã hội Facebook & Zalo OA chuyên nghiệp, kết nối đồng bộ Google Sheets tự động.
 
-View your app in AI Studio: https://ai.studio/apps/d42f8764-a2de-455d-b2ac-185b2f1fbd3e
+## 🚀 Khởi chạy nhanh bằng 1 dòng lệnh
 
-## Run Locally
+Để cài đặt các thư viện cần thiết và khởi chạy ứng dụng ngay lập tức, hãy mở Terminal/Command Prompt trong thư mục dự án và chạy dòng lệnh duy nhất sau:
 
-**Prerequisites:**  Node.js
+```bash
+npm install && npm run dev
+```
 
+*Sau khi chạy thành công, ứng dụng sẽ hoạt động tại địa chỉ: **http://localhost:3000***
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+---
+
+## ⚙️ Cấu hình ban đầu (Tùy chọn)
+
+Nếu bạn muốn kết nối ổn định với Firestore Cloud hoặc Google Sheets vĩnh viễn:
+1. Tạo một tệp `.env` dựa theo mẫu `.env.example` để khai báo các cấu hình API.
+2. Vào giao diện **Cấu hình hệ thống** trong ứng dụng để liên kết Google Service Account JSON (giúp tự động đồng bộ Google Sheets không bị hết hạn token sau 1 giờ).
+
