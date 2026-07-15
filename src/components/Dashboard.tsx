@@ -299,7 +299,18 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                       <CartesianGrid strokeDasharray="3 3" vertical={false} />
                       <XAxis dataKey="date" tickStyle={{ fontSize: 10 }} />
                       <YAxis tickStyle={{ fontSize: 10 }} />
-                      <Tooltip />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: '#1e293b', 
+                          border: 'none', 
+                          borderRadius: '8px', 
+                          color: '#fff', 
+                          fontSize: '11px',
+                          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)'
+                        }} 
+                        itemStyle={{ color: '#e2e8f0', padding: '1px 0' }}
+                        labelStyle={{ fontWeight: 'bold', color: '#94a3b8', marginBottom: '4px' }}
+                      />
                       <Legend wrapperStyle={{ fontSize: 10 }} />
                       
                       {/* Đường tham chiếu tổng cộng */}
@@ -377,7 +388,18 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                       />
                       <YAxis yAxisId="left" orientation="left" stroke="#10b981" tickStyle={{ fontSize: 9 }} />
                       <YAxis yAxisId="right" orientation="right" stroke="#3b82f6" tickStyle={{ fontSize: 9 }} />
-                      <Tooltip />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: '#1e293b', 
+                          border: 'none', 
+                          borderRadius: '8px', 
+                          color: '#fff', 
+                          fontSize: '11px',
+                          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)'
+                        }} 
+                        itemStyle={{ color: '#e2e8f0', padding: '1px 0' }}
+                        labelStyle={{ fontWeight: 'bold', color: '#94a3b8', marginBottom: '4px' }}
+                      />
                       <Legend wrapperStyle={{ fontSize: 10 }} />
                       <Bar yAxisId="left" dataKey="engagement" name="Lượt tương tác" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={30} />
                       <Line yAxisId="right" type="monotone" dataKey="postsCount" name="Số bài viết" stroke="#3b82f6" strokeWidth={2.5} activeDot={{ r: 5 }} />
