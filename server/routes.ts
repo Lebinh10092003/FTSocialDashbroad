@@ -242,7 +242,9 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
       }
     });
 
-    latestSnapshotsMap.forEach(snap => {
+    const activePostKeys = new Set(posts.map(p => p.postKey));
+    latestSnapshotsMap.forEach((snap, postKey) => {
+      if (!activePostKeys.has(postKey)) return;
       reactions += snap.reactions || 0;
       comments += snap.comments || 0;
       shares += snap.shares || 0;

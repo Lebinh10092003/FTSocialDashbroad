@@ -139,6 +139,32 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
     { type: 'Khác', icon: FileText }
   ];
 
+  // Tính toán số liệu động theo danh sách kênh được chọn
+  const getFilteredMetrics = () => {
+    if (!data) return { reactions: 0, comments: 0, shares: 0, engagement: 0 };
+    
+    if (selectedChannelsForTrend.size === 0) {
+      return { reactions: 0, comments: 0, shares: 0, engagement: 0 };
+    }
+
+    let reactions = 0;
+    let comments = 0;
+    let shares = 0;
+
+    data.trends.forEach(t => {
+      selectedChannelsForTrend.forEach(chanName => {
+        reactions += (t as any)[chanName + '_likes'] || 0;
+        comments += (t as any)[chanName + '_comments'] || 0;
+        shares += (t as any)[chanName + '_shares'] || 0;
+      });
+    });
+
+    const engagement = reactions + comments + shares;
+    return { reactions, comments, shares, engagement };
+  };
+
+  const filteredMetrics = getFilteredMetrics();
+
   return (
     <div className="space-y-7 pb-10">
       {/* Upper bar: Post type pills and quick date selectors */}
@@ -560,17 +586,17 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/50 text-left space-y-1">
                   <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">👍 Cảm xúc (Reactions)</span>
-                  <p className="text-xl font-extrabold text-slate-800">{data.kpis.reactions.toLocaleString('vi-VN')}</p>
+                  <p className="text-xl font-extrabold text-slate-800">{filteredMetrics.reactions.toLocaleString('vi-VN')}</p>
                   <p className="text-[9px] text-slate-400">Tổng số lượt thích và cảm xúc</p>
                 </div>
                 <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/50 text-left space-y-1">
                   <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">💬 Bình luận (Comments)</span>
-                  <p className="text-xl font-extrabold text-slate-800">{data.kpis.comments.toLocaleString('vi-VN')}</p>
+                  <p className="text-xl font-extrabold text-slate-800">{filteredMetrics.comments.toLocaleString('vi-VN')}</p>
                   <p className="text-[9px] text-slate-400">Tổng số phản hồi trên bài viết</p>
                 </div>
                 <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/50 text-left space-y-1">
                   <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">🔗 Lượt chia sẻ (Shares)</span>
-                  <p className="text-xl font-extrabold text-slate-800">{data.kpis.shares.toLocaleString('vi-VN')}</p>
+                  <p className="text-xl font-extrabold text-slate-800">{filteredMetrics.shares.toLocaleString('vi-VN')}</p>
                   <p className="text-[9px] text-slate-400">Tổng số lượt chia sẻ bài viết</p>
                 </div>
               </div>
@@ -595,7 +621,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                     <div key={type} className="space-y-2">
                       <div className="flex items-center justify-between text-xs">
                         <div className="flex items-center gap-2 font-bold text-slate-700">
-                          <div className="p-1.5 bg-slate-100 rounded-lg text-slate-505">
+                          <div className="p-1.5 bg-slate-100 rounded-lg text-slate-550">
                             <Icon className="w-3.5 h-3.5" />
                           </div>
                           <span>{type}</span>
@@ -626,9 +652,9 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                   <PieChart>
                     <Pie
                       data={[
-                        { name: 'Cảm xúc', value: data.kpis.reactions },
-                        { name: 'Bình luận', value: data.kpis.comments },
-                        { name: 'Chia sẻ', value: data.kpis.shares }
+                        { name: 'Cảm xúc', value: filteredMetrics.reactions },
+                        { name: 'Bình luận', value: filteredMetrics.comments },
+                        { name: 'Chia sẻ', value: filteredMetrics.shares }
                       ].filter(item => item.value > 0)}
                       cx="50%"
                       cy="50%"
@@ -650,7 +676,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                 
                 <div className="absolute flex flex-col items-center justify-center">
                   <span className="text-base font-extrabold text-slate-900 leading-none">
-                    {(data.kpis.reactions + data.kpis.comments + data.kpis.shares).toLocaleString('vi-VN')}
+                    {filteredMetrics.engagement.toLocaleString('vi-VN')}
                   </span>
                   <span className="text-[8px] font-extrabold text-slate-400 uppercase tracking-widest mt-1">Tổng cộng</span>
                 </div>
@@ -662,21 +688,21 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                     <span className="w-2 h-2 rounded-full bg-blue-500"></span>
                     <span>Cảm xúc</span>
                   </div>
-                  <span className="text-slate-900">{data.kpis.reactions.toLocaleString('vi-VN')} lượt</span>
+                  <span className="text-slate-900">{filteredMetrics.reactions.toLocaleString('vi-VN')} lượt</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                     <span>Bình luận</span>
                   </div>
-                  <span className="text-slate-900">{data.kpis.comments.toLocaleString('vi-VN')} lượt</span>
+                  <span className="text-slate-900">{filteredMetrics.comments.toLocaleString('vi-VN')} lượt</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-purple-500"></span>
                     <span>Lượt chia sẻ</span>
                   </div>
-                  <span className="text-slate-900">{data.kpis.shares.toLocaleString('vi-VN')} lượt</span>
+                  <span className="text-slate-900">{filteredMetrics.shares.toLocaleString('vi-VN')} lượt</span>
                 </div>
               </div>
             </div>
