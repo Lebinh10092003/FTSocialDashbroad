@@ -1,0 +1,135 @@
+{
+  "entities": {
+    "Channel": {
+      "title": "Channel",
+      "description": "Cấu hình kênh mạng xã hội (Facebook Page hoặc Zalo Official Account)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "UUID nội bộ" },
+        "platform": { "type": "string", "enum": ["facebook", "zalo"], "description": "Nền tảng mạng xã hội" },
+        "name": { "type": "string", "description": "Tên hiển thị của kênh" },
+        "externalId": { "type": "string", "description": "ID phía Facebook/Zalo" },
+        "status": { "type": "string", "enum": ["active", "inactive"], "description": "Trạng thái bật/tắt" },
+        "timezone": { "type": "string", "description": "Múi giờ của kênh" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "lastSyncAt": { "type": "string", "format": "date-time" },
+        "lastSyncStatus": { "type": "string", "enum": ["success", "failed"] },
+        "totalPosts": { "type": "number" }
+      },
+      "required": ["id", "platform", "name", "externalId", "status"]
+    },
+    "Post": {
+      "title": "Post",
+      "description": "Thông tin bài đăng đã đồng bộ",
+      "type": "object",
+      "properties": {
+        "postKey": { "type": "string", "description": "platform:channelId:externalPostId" },
+        "platform": { "type": "string", "enum": ["facebook", "zalo"] },
+        "channelId": { "type": "string" },
+        "externalPostId": { "type": "string" },
+        "postUrl": { "type": "string" },
+        "postType": { "type": "string" },
+        "message": { "type": "string" },
+        "publishedAt": { "type": "string", "format": "date-time" },
+        "importedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "isDeleted": { "type": "boolean" }
+      },
+      "required": ["postKey", "platform", "channelId", "externalPostId"]
+    },
+    "DailySnapshot": {
+      "title": "DailySnapshot",
+      "description": "Số liệu tương tác theo ngày của bài đăng",
+      "type": "object",
+      "properties": {
+        "snapshotKey": { "type": "string", "description": "snapshotDate:postKey" },
+        "snapshotDate": { "type": "string", "description": "dd/MM/yyyy hoặc yyyy-MM-dd" },
+        "platform": { "type": "string" },
+        "channelId": { "type": "string" },
+        "postKey": { "type": "string" },
+        "reactions": { "type": "number" },
+        "likes": { "type": "number" },
+        "comments": { "type": "number" },
+        "shares": { "type": "number" },
+        "views": { "type": "number" },
+        "reach": { "type": "number" },
+        "impressions": { "type": "number" },
+        "clicks": { "type": "number" },
+        "totalEngagement": { "type": "number" },
+        "engagementRate": { "type": "number" },
+        "fetchedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["snapshotKey", "snapshotDate", "postKey", "totalEngagement"]
+    },
+    "ApiLog": {
+      "title": "ApiLog",
+      "description": "Nhật ký đồng bộ dữ liệu API",
+      "type": "object",
+      "properties": {
+        "logId": { "type": "string" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "endedAt": { "type": "string", "format": "date-time" },
+        "platform": { "type": "string" },
+        "action": { "type": "string" },
+        "channelId": { "type": "string" },
+        "status": { "type": "string" },
+        "recordsReceived": { "type": "number" },
+        "recordsInserted": { "type": "number" },
+        "recordsUpdated": { "type": "number" },
+        "errorCode": { "type": "string" },
+        "errorMessage": { "type": "string" },
+        "requestId": { "type": "string" }
+      },
+      "required": ["logId", "startedAt", "status"]
+    },
+    "SystemConfig": {
+      "title": "SystemConfig",
+      "description": "Cấu hình chung hệ thống",
+      "type": "object",
+      "properties": {
+        "spreadsheetId": { "type": "string" },
+        "timezone": { "type": "string" },
+        "startDate": { "type": "string" },
+        "syncTime": { "type": "string" }
+      }
+    },
+    "User": {
+      "title": "User",
+      "description": "Người dùng hệ thống và vai trò",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["ADMIN", "VIEWER"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role"]
+    }
+  },
+  "firestore": {
+    "/channels/{channelId}": {
+      "schema": "Channel",
+      "description": "Danh sách các kênh mạng xã hội"
+    },
+    "/posts/{postKey}": {
+      "schema": "Post",
+      "description": "Danh sách các bài đăng"
+    },
+    "/dailySnapshots/{snapshotKey}": {
+      "schema": "DailySnapshot",
+      "description": "Số liệu tương tác theo ngày"
+    },
+    "/apiLogs/{logId}": {
+      "schema": "ApiLog",
+      "description": "Nhật ký đồng bộ hệ thống"
+    },
+    "/systemConfig/main": {
+      "schema": "SystemConfig",
+      "description": "Cấu hình hệ thống"
+    },
+    "/users/{email}": {
+      "schema": "User",
+      "description": "Danh sách người dùng và phân quyền"
+    }
+  }
+}

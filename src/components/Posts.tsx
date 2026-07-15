@@ -1,0 +1,299 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Search, Radio, Layers, ExternalLink, Download, ArrowUpDown, ChevronLeft, ChevronRight, AlertCircle, FileText
+} from 'lucide-react';
+import { Channel, Post, Platform } from '../types';
+
+interface PostsProps {
+  idToken: string;
+  channels: Channel[];
+}
+
+export default function Posts({ idToken, channels }: PostsProps) {
+  const [posts, setPosts] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Filters state
+  const [search, setSearch] = useState('');
+  const [platform, setPlatform] = useState<string>('all');
+  const [channelId, setChannelId] = useState<string>('all');
+  const [page, setPage] = useState(1);
+  const [limit] = useState(15);
+
+  const fetchPosts = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      let url = `/api/posts?page=${page}&limit=${limit}`;
+      if (search) url += `&search=${encodeURIComponent(search)}`;
+      if (platform !== 'all') url += `&platform=${platform}`;
+      if (channelId !== 'all') url += `&channelId=${channelId}`;
+
+      const res = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${idToken}`,
+        }
+      });
+      if (!res.ok) {
+        throw new Error('Không thể tải danh sách bài đăng từ server.');
+      }
+      const data = await res.json();
+      setPosts(data.posts || []);
+      setTotal(data.total || 0);
+    } catch (err: any) {
+      setError(err.message || 'Lỗi mạng.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPosts();
+  }, [idToken, platform, channelId, page]);
+
+  // Handle manual trigger when pressing Enter or clicking Search button
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPage(1);
+    fetchPosts();
+  };
+
+  const handlePlatformChange = (p: string) => {
+    setPlatform(p);
+    setChannelId('all');
+    setPage(1);
+  };
+
+  const handleExportCSV = () => {
+    let url = `/api/reports/export.csv?`;
+    if (platform !== 'all') url += `platform=${platform}&`;
+    if (channelId !== 'all') url += `channelId=${channelId}`;
+
+    // Direct download via browser trigger
+    const link = document.createElement('a');
+    link.href = url;
+    // Embed the Auth Bearer token inside the url or since export.csv is authenticated, we can fetch it first!
+    // Fetch export to get CSV blob
+    fetch(url, {
+      headers: { 'Authorization': `Bearer ${idToken}` }
+    })
+    .then(res => res.blob())
+    .then(blob => {
+      const downloadUrl = window.URL.createObjectURL(blob);
+      link.href = downloadUrl;
+      link.setAttribute('download', `bao_cao_ft_social_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    })
+    .catch(err => {
+      alert('Không thể xuất báo cáo CSV: ' + err.message);
+    });
+  };
+
+  const filteredChannels = platform === 'all' 
+    ? channels 
+    : channels.filter(c => c.platform === platform);
+
+  const totalPages = Math.ceil(total / limit);
+
+  return (
+    <div className="space-y-6">
+      {/* Header and export button */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-150 pb-5">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Danh Sách Bài Đăng</h2>
+          <p className="text-sm text-slate-500">Thống kê tương tác chi tiết từng bài đăng từ Facebook và Zalo OA.</p>
+        </div>
+
+        <button
+          onClick={handleExportCSV}
+          disabled={posts.length === 0}
+          className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 font-semibold text-xs px-4 py-2.5 rounded-xl border border-slate-200 transition-colors shadow-sm"
+        >
+          <Download className="w-4 h-4" />
+          Xuất dữ liệu CSV
+        </button>
+      </div>
+
+      {/* Filter and search bar */}
+      <form onSubmit={handleSearchSubmit} className="flex flex-wrap items-center gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100">
+        <div className="flex-1 min-w-[200px]">
+          <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Tìm kiếm bài đăng</label>
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Nhập nội dung bài đăng cần tìm..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-white border border-slate-200 text-xs rounded-lg pl-9 pr-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Nền tảng</label>
+          <select
+            value={platform}
+            onChange={(e) => handlePlatformChange(e.target.value)}
+            className="bg-white border border-slate-200 text-xs font-medium text-slate-700 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="all">Tất cả</option>
+            <option value="facebook">Facebook</option>
+            <option value="zalo">Zalo OA</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Kênh lọc</label>
+          <select
+            value={channelId}
+            onChange={(e) => { setChannelId(e.target.value); setPage(1); }}
+            className="bg-white border border-slate-200 text-xs font-medium text-slate-700 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="all">Tất cả kênh</option>
+            {filteredChannels.map(chan => (
+              <option key={chan.id} value={chan.id}>{chan.name} ({chan.platform.toUpperCase()})</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="self-end pb-0.5">
+          <button
+            type="submit"
+            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs px-4 py-1.5 rounded-lg shadow-sm transition-colors"
+          >
+            Tìm kiếm
+          </button>
+        </div>
+      </form>
+
+      {/* Main Table view */}
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-20 bg-white border border-slate-100 rounded-2xl shadow-sm space-y-3">
+          <ChevronRight className="w-10 h-10 text-blue-500 animate-spin" />
+          <p className="text-sm font-medium text-slate-500">Đang tải dữ liệu bài đăng...</p>
+        </div>
+      ) : error ? (
+        <div className="p-8 bg-red-50 border border-red-200 rounded-2xl text-center space-y-3">
+          <AlertCircle className="w-10 h-10 text-red-500 mx-auto" />
+          <h3 className="text-base font-bold text-red-900">Không thể tải bài đăng</h3>
+          <p className="text-xs text-red-600">{error}</p>
+        </div>
+      ) : posts.length === 0 ? (
+        <div className="p-12 text-center bg-white border border-slate-150 rounded-2xl shadow-sm space-y-4">
+          <FileText className="w-12 h-12 text-slate-300 mx-auto" />
+          <div>
+            <h3 className="text-base font-bold text-slate-800">Không tìm thấy bài viết nào</h3>
+            <p className="text-xs text-slate-400 mt-1">Chưa có bài viết nào được đồng bộ hoặc kết quả tìm kiếm không phù hợp.</p>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse table-fixed">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    <th className="p-4 w-28">Nền tảng</th>
+                    <th className="p-4 w-44">Kênh phát sóng</th>
+                    <th className="p-4 w-32">Ngày đăng</th>
+                    <th className="p-4 w-80">Nội dung tóm tắt</th>
+                    <th className="p-4 w-24">Phân loại</th>
+                    <th className="p-4 w-20 text-center">Likes</th>
+                    <th className="p-4 w-20 text-center">Comments</th>
+                    <th className="p-4 w-20 text-center">Shares</th>
+                    <th className="p-4 w-20 text-center">Views</th>
+                    <th className="p-4 w-20 text-center">Reach</th>
+                    <th className="p-4 w-28 text-center">Tương tác</th>
+                    <th className="p-4 w-20 text-right">Xem bài</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs">
+                  {posts.map((post) => {
+                    const chan = channels.find(c => c.id === post.channelId);
+                    return (
+                      <tr key={post.postKey} className="hover:bg-slate-50/50">
+                        <td className="p-4">
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-semibold text-[10px] ${
+                            post.platform === 'facebook' 
+                              ? 'bg-blue-50 text-blue-700 border border-blue-100' 
+                              : 'bg-teal-50 text-teal-700 border border-teal-100'
+                          }`}>
+                            {post.platform === 'facebook' ? 'Facebook' : 'Zalo OA'}
+                          </span>
+                        </td>
+                        <td className="p-4 font-medium text-slate-800 truncate" title={chan?.name}>{chan?.name || 'Kênh ẩn'}</td>
+                        <td className="p-4 text-slate-500 whitespace-nowrap">
+                          {new Date(post.publishedAt).toLocaleDateString('vi-VN')}
+                        </td>
+                        <td className="p-4 text-slate-700 font-normal truncate" title={post.message}>
+                          {post.message || <em className="text-slate-400">Không có văn bản</em>}
+                        </td>
+                        <td className="p-4 text-slate-500 capitalize">{post.postType}</td>
+                        <td className="p-4 text-center font-mono text-slate-600 font-medium">{post.reactions.toLocaleString()}</td>
+                        <td className="p-4 text-center font-mono text-slate-600 font-medium">{post.comments.toLocaleString()}</td>
+                        <td className="p-4 text-center font-mono text-slate-600 font-medium">{post.shares.toLocaleString()}</td>
+                        <td className="p-4 text-center font-mono text-slate-600 font-medium">{post.views.toLocaleString()}</td>
+                        <td className="p-4 text-center font-mono text-slate-600 font-medium">{post.reach > 0 ? post.reach.toLocaleString() : '-'}</td>
+                        <td className="p-4 text-center">
+                          <span className="font-semibold text-blue-600 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded font-mono">
+                            {post.totalEngagement.toLocaleString()}
+                          </span>
+                        </td>
+                        <td className="p-4 text-right">
+                          <a
+                            href={post.postUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex p-1 hover:bg-slate-100 text-blue-600 hover:text-blue-800 rounded transition-colors"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Pagination controls */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between bg-white px-4 py-3 rounded-xl border border-slate-100 shadow-sm text-xs">
+              <span className="text-slate-500">
+                Hiển thị dòng <strong>{(page - 1) * limit + 1}</strong> đến{' '}
+                <strong>{Math.min(page * limit, total)}</strong> trên tổng số{' '}
+                <strong>{total}</strong> bài viết
+              </span>
+
+              <div className="inline-flex gap-2">
+                <button
+                  disabled={page === 1}
+                  onClick={() => setPage(p => p - 1)}
+                  className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <div className="inline-flex items-center gap-1 text-slate-700 font-semibold px-2">
+                  Trang <span>{page}</span> / <span>{totalPages}</span>
+                </div>
+                <button
+                  disabled={page === totalPages}
+                  onClick={() => setPage(p => p + 1)}
+                  className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

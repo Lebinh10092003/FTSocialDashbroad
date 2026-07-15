@@ -1,0 +1,6 @@
+{
+  "name": "FT Social Analytics",
+  "description": "Hệ thống quản lý và thống kê tương tác Facebook Page và Zalo Official Account, lưu trữ dữ liệu vào Google Sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
