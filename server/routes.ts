@@ -210,10 +210,15 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
     let snapshots = snapshotsSnap.docs.map(doc => doc.data() as DailySnapshot);
     snapshots = snapshots.filter(s => activeChannelIds.has(s.channelId));
 
-    // Lọc thời gian phía server cho chính xác
+    // Lọc bài đăng theo khoảng thời gian xuất bản (publishedAt) cho chính xác
     if (startDate) {
-      snapshots = snapshots.filter(s => s.snapshotDate >= (startDate as string));
+      posts = posts.filter(p => p.publishedAt.split('T')[0] >= (startDate as string));
     }
+    if (endDate) {
+      posts = posts.filter(p => p.publishedAt.split('T')[0] <= (endDate as string));
+    }
+
+    // Lọc snapshots để lấy trạng thái mới nhất tính đến ngày endDate
     if (endDate) {
       snapshots = snapshots.filter(s => s.snapshotDate <= (endDate as string));
     }
