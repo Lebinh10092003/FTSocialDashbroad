@@ -22,10 +22,36 @@ const Reports = lazy(() => import('./components/Reports'));
 const Config = lazy(() => import('./components/Config'));
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [idToken, setIdToken] = useState<string | null>(null);
-  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<UserRole>('VIEWER');
+  const [user, setUser] = useState<User | null>(() => {
+    if (typeof window !== 'undefined' && sessionStorage.getItem('is_mock_login') === 'true') {
+      return {
+        uid: 'admin-master-uid',
+        email: 'admin@ftsocial.com',
+        displayName: 'Quản trị viên',
+        photoURL: null,
+        getIdToken: async () => 'mock-dev-token-admin@ftsocial.com'
+      } as any;
+    }
+    return null;
+  });
+  const [idToken, setIdToken] = useState<string | null>(() => {
+    if (typeof window !== 'undefined' && sessionStorage.getItem('is_mock_login') === 'true') {
+      return 'mock-dev-token-admin@ftsocial.com';
+    }
+    return null;
+  });
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(() => {
+    if (typeof window !== 'undefined' && sessionStorage.getItem('is_mock_login') === 'true') {
+      return 'mock-google-access-token';
+    }
+    return null;
+  });
+  const [userRole, setUserRole] = useState<UserRole>(() => {
+    if (typeof window !== 'undefined' && sessionStorage.getItem('is_mock_login') === 'true') {
+      return 'ADMIN';
+    }
+    return 'VIEWER';
+  });
   
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -60,6 +86,7 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setAuthChecking(true);
       if (currentUser) {
+        sessionStorage.removeItem('is_mock_login');
         setUser(currentUser);
         try {
           const token = await currentUser.getIdToken(true);
@@ -94,6 +121,10 @@ export default function App() {
           console.error('Lỗi khi lấy ID token hoặc phân quyền:', e);
         }
       } else {
+        if (sessionStorage.getItem('is_mock_login') === 'true') {
+          setAuthChecking(false);
+          return;
+        }
         setUser(null);
         setIdToken(null);
         setGoogleAccessToken(null);
@@ -141,6 +172,9 @@ export default function App() {
         photoURL: null,
         getIdToken: async () => 'mock-dev-token-admin@ftsocial.com'
       } as any;
+      
+      sessionStorage.setItem('is_mock_login', 'true');
+      
       setUser(adminUser);
       setIdToken('mock-dev-token-admin@ftsocial.com');
       setGoogleAccessToken('mock-google-access-token');
@@ -263,6 +297,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    sessionStorage.removeItem('is_mock_login');
     try {
       await auth.signOut();
     } catch (err) {

@@ -1,0 +1,17 @@
+{
+  "14506cc6-d094-42f0-9f16-b5403cf681eb": {
+    "logId": "14506cc6-d094-42f0-9f16-b5403cf681eb",
+    "startedAt": "2026-07-15T03:45:36.560Z",
+    "endedAt": "2026-07-15T03:49:56.811Z",
+    "platform": "facebook",
+    "action": "sync",
+    "channelId": "0d308ac1-bd89-44ea-9e6c-850d05c5fbe1",
+    "status": "success",
+    "recordsReceived": 30,
+    "recordsInserted": 30,
+    "recordsUpdated": 30,
+    "errorCode": "",
+    "errorMessage": "",
+    "requestId": "409cbee5-d650-458e-a75c-4bb479af3a1e"
+  }
+}
