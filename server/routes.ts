@@ -251,15 +251,17 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
       engagementRate = Number(((totalEngagement / impressions) * 100).toFixed(2));
     }
 
-    // Lấy xu hướng tương tác theo ngày
+    // Lấy xu hướng tương tác theo ngày đăng bài (publishedAt) để biểu đồ mượt mà và thực tế hơn
     const trendMap = new Map<string, { date: string; engagement: number; reach: number; likes: number; comments: number }>();
-    snapshots.forEach(snap => {
-      const dateStr = snap.snapshotDate;
+    posts.forEach(post => {
+      const dateStr = post.publishedAt.split('T')[0];
+      const snap = latestSnapshotsMap.get(post.postKey);
+      
       const curr = trendMap.get(dateStr) || { date: dateStr, engagement: 0, reach: 0, likes: 0, comments: 0 };
-      curr.engagement += snap.totalEngagement || 0;
-      curr.reach += snap.reach || 0;
-      curr.likes += snap.likes || 0;
-      curr.comments += snap.comments || 0;
+      curr.engagement += snap?.totalEngagement || 0;
+      curr.reach += snap?.reach || 0;
+      curr.likes += snap?.likes || 0;
+      curr.comments += snap?.comments || 0;
       trendMap.set(dateStr, curr);
     });
     const trends = Array.from(trendMap.values()).sort((a, b) => a.date.localeCompare(b.date));

@@ -283,8 +283,8 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
             {/* Trends chart */}
             <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
               <div>
-                <h3 className="text-sm font-bold text-slate-800">Xu hướng tương tác theo ngày</h3>
-                <p className="text-[11px] text-slate-400">Biểu đồ thể hiện biến động tổng tương tác & reach hàng ngày.</p>
+                <h3 className="text-sm font-bold text-slate-800">Xu hướng tương tác theo ngày đăng</h3>
+                <p className="text-[11px] text-slate-400">Biểu đồ thể hiện tổng tương tác & tiếp cận tích lũy theo ngày xuất bản thực tế của các bài đăng.</p>
               </div>
               <div className="h-64">
                 {data.trends.length === 0 ? (
@@ -311,7 +311,8 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
             <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 flex flex-col justify-between">
               <div className="space-y-2">
                 <h3 className="text-sm font-bold text-slate-800">So sánh hiệu quả giữa các kênh</h3>
-                <p className="text-[11px] text-slate-400">Trục Y bên trái: Tương tác (Cột xanh), Trục Y bên phải: Số bài viết (Đường xanh biển).</p>
+                <p className="text-[11px] text-slate-400">Tổng số lượng bài đăng và tổng tương tác tích lũy của các bài đăng phát sóng trong khoảng thời gian đã chọn.</p>
+                <p className="text-[10px] text-slate-400 italic">Trục Y bên trái: Tương tác (Cột xanh), Trục Y bên phải: Số bài viết (Đường xanh biển).</p>
                 
                 {/* Chọn kênh hiển thị trên biểu đồ so sánh */}
                 {data.channelStats.length > 0 && (
