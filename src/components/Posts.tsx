@@ -51,7 +51,7 @@ export default function Posts({ idToken, channels }: PostsProps) {
 
   useEffect(() => {
     fetchPosts();
-  }, [idToken, platform, channelId, page]);
+  }, [idToken, platform, channelId, page, channels]);
 
   // Handle manual trigger when pressing Enter or clicking Search button
   const handleSearchSubmit = (e: React.FormEvent) => {

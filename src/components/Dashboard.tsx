@@ -63,7 +63,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
     if (idToken) {
       fetchDashboardData();
     }
-  }, [idToken, googleAccessToken, platformFilter, channelFilter, startDate, endDate]);
+  }, [idToken, googleAccessToken, platformFilter, channelFilter, startDate, endDate, channels]);
 
   const handlePlatformChange = (p: string) => {
     setPlatformFilter(p);

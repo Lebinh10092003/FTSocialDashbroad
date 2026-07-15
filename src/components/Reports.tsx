@@ -53,7 +53,7 @@ export default function Reports({ idToken, channels }: ReportsProps) {
       } catch (e) {}
     };
     fetchConfig();
-  }, [idToken]);
+  }, [idToken, channels]);
 
   const handleExportCSV = () => {
     const url = `/api/reports/export.csv`;

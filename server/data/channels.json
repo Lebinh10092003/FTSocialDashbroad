@@ -21,8 +21,8 @@
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.353Z",
     "updatedAt": "2026-07-15T03:44:09.353Z",
-    "totalPosts": 25,
-    "lastSyncAt": "2026-07-15T03:53:31.851Z",
+    "totalPosts": 50,
+    "lastSyncAt": "2026-07-15T04:06:42.222Z",
     "lastSyncStatus": "success"
   },
   "59c12127-3586-4395-8678-73949de9bc2b": {
@@ -34,8 +34,8 @@
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.355Z",
     "updatedAt": "2026-07-15T03:44:09.355Z",
-    "totalPosts": 26,
-    "lastSyncAt": "2026-07-15T03:57:20.044Z",
+    "totalPosts": 52,
+    "lastSyncAt": "2026-07-15T04:10:29.318Z",
     "lastSyncStatus": "success"
   },
   "34e430e6-c266-49e9-a96c-3ecd25c213bb": {
@@ -47,8 +47,8 @@
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.357Z",
     "updatedAt": "2026-07-15T03:44:09.357Z",
-    "totalPosts": 28,
-    "lastSyncAt": "2026-07-15T04:01:28.780Z",
+    "totalPosts": 56,
+    "lastSyncAt": "2026-07-15T04:06:59.997Z",
     "lastSyncStatus": "success"
   },
   "788a45f8-30de-48cf-8ef7-42e8b25bf704": {
@@ -60,7 +60,9 @@
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.359Z",
     "updatedAt": "2026-07-15T03:44:09.359Z",
-    "totalPosts": 0
+    "totalPosts": 21,
+    "lastSyncAt": "2026-07-15T04:04:35.361Z",
+    "lastSyncStatus": "success"
   },
   "194de9c3-a9e9-4a6f-bb4f-f88ac5fc6cb0": {
     "id": "194de9c3-a9e9-4a6f-bb4f-f88ac5fc6cb0",
@@ -71,28 +73,32 @@
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.361Z",
     "updatedAt": "2026-07-15T03:44:09.361Z",
-    "totalPosts": 0
+    "totalPosts": 20,
+    "lastSyncAt": "2026-07-15T04:07:34.027Z",
+    "lastSyncStatus": "success"
   },
   "95a2406a-c3aa-4d23-91bd-13224ee437a5": {
     "id": "95a2406a-c3aa-4d23-91bd-13224ee437a5",
     "platform": "facebook",
     "name": "V+ STEAM LAB",
     "externalId": "645856108614288",
-    "status": "active",
+    "status": "inactive",
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.363Z",
-    "updatedAt": "2026-07-15T03:44:09.363Z",
-    "totalPosts": 0
+    "updatedAt": "2026-07-15T04:11:19.857Z",
+    "totalPosts": 21,
+    "lastSyncAt": "2026-07-15T04:10:49.411Z",
+    "lastSyncStatus": "success"
   },
   "dbe91010-f516-46eb-a2d0-99c73318a2f3": {
     "id": "dbe91010-f516-46eb-a2d0-99c73318a2f3",
     "platform": "facebook",
     "name": "Mê Setup",
     "externalId": "108899684851269",
-    "status": "active",
+    "status": "inactive",
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.365Z",
-    "updatedAt": "2026-07-15T03:44:09.365Z",
+    "updatedAt": "2026-07-15T04:10:41.148Z",
     "totalPosts": 0
   },
   "64ac53f7-9f1e-4c8b-8534-23d549e36eb5": {
@@ -111,10 +117,10 @@
     "platform": "mock",
     "name": "Kênh Thử Nghiệm (Mock Page)",
     "externalId": "mock-external-page-id",
-    "status": "active",
+    "status": "inactive",
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.367Z",
-    "updatedAt": "2026-07-15T04:00:00.000Z",
+    "updatedAt": "2026-07-15T04:11:23.716Z",
     "totalPosts": 0
   }
 }

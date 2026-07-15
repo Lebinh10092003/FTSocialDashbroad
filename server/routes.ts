@@ -446,6 +446,7 @@ apiRouter.delete('/channels/:id', authenticateUser, requireAdmin, async (req: Au
     if (!snap.exists) {
       return res.status(404).json({ error: 'Kênh không tồn tại.' });
     }
+    const channel = snap.data() as Channel;
 
     // Xóa tất cả posts & snapshots thuộc về kênh này
     const postsSnap = await adminDb.collection('posts').where('channelId', '==', id).get();
@@ -456,6 +457,47 @@ apiRouter.delete('/channels/:id', authenticateUser, requireAdmin, async (req: Au
     snapshotsSnap.docs.forEach(doc => batch.delete(doc.ref));
     batch.delete(channelRef);
     await batch.commit();
+
+    // Tự động xóa token tương ứng của kênh này trong cấu hình chi tiết (detailedTokensList) ở systemConfig
+    try {
+      const configRef = adminDb.collection('systemConfig').doc('main');
+      const configSnap = await configRef.get();
+      if (configSnap.exists) {
+        const configData = configSnap.data();
+        const list = configData?.detailedTokensList || [];
+        if (Array.isArray(list)) {
+          const newList = list.filter((t: any) => !(t.platform === channel.platform && t.pageId === channel.externalId));
+          
+          // Cũng cập nhật chuỗi JSON thô (nếu có để đồng bộ)
+          let metaPageTokensJson = configData?.metaPageTokensJson || '';
+          let zaloOaTokensJson = configData?.zaloOaTokensJson || '';
+          
+          if (channel.platform === 'facebook' && metaPageTokensJson) {
+            try {
+              const metaObj = JSON.parse(metaPageTokensJson);
+              delete metaObj[channel.externalId];
+              metaPageTokensJson = JSON.stringify(metaObj);
+            } catch (e) {}
+          } else if (channel.platform === 'zalo' && zaloOaTokensJson) {
+            try {
+              const zaloObj = JSON.parse(zaloOaTokensJson);
+              delete zaloObj[channel.externalId];
+              zaloOaTokensJson = JSON.stringify(zaloObj);
+            } catch (e) {}
+          }
+
+          await configRef.update({
+            detailedTokensList: newList,
+            metaPageTokensJson,
+            zaloOaTokensJson,
+            updatedAt: new Date().toISOString()
+          });
+          console.log(`[CleanUp] Đã xóa token tương ứng cho kênh ${channel.name} (${channel.externalId}) khỏi detailedTokensList.`);
+        }
+      }
+    } catch (configErr: any) {
+      console.warn('Lỗi khi tự động dọn dẹp token trong cấu hình:', configErr.message);
+    }
 
     res.json({ success: true, message: 'Xóa kênh và toàn bộ bài đăng liên quan thành công.' });
   } catch (error: any) {
