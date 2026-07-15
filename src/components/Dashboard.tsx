@@ -656,38 +656,28 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                 </div>
               </div>
 
-              <div className="flex flex-col gap-1.5 text-[11px] font-bold text-slate-655 px-2">
-                {(() => {
-                  const total = (data.kpis.reactions + data.kpis.comments + data.kpis.shares) || 1;
-                  const pctReact = Math.round((data.kpis.reactions / total) * 1000) / 10;
-                  const pctComm = Math.round((data.kpis.comments / total) * 1000) / 10;
-                  const pctShare = Math.round((data.kpis.shares / total) * 1000) / 10;
-                  return (
-                    <>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                          <span>Cảm xúc</span>
-                        </div>
-                        <span className="text-slate-900">{pctReact}%</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                          <span>Bình luận</span>
-                        </div>
-                        <span className="text-slate-900">{pctComm}%</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-purple-500"></span>
-                          <span>Lượt chia sẻ</span>
-                        </div>
-                        <span className="text-slate-900">{pctShare}%</span>
-                      </div>
-                    </>
-                  );
-                })()}
+              <div className="flex flex-col gap-1.5 text-[11px] font-bold text-slate-600 px-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                    <span>Cảm xúc</span>
+                  </div>
+                  <span className="text-slate-900">{data.kpis.reactions.toLocaleString('vi-VN')} lượt</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    <span>Bình luận</span>
+                  </div>
+                  <span className="text-slate-900">{data.kpis.comments.toLocaleString('vi-VN')} lượt</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                    <span>Lượt chia sẻ</span>
+                  </div>
+                  <span className="text-slate-900">{data.kpis.shares.toLocaleString('vi-VN')} lượt</span>
+                </div>
               </div>
             </div>
 
@@ -735,15 +725,13 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                 )}
               </div>
 
-              {/* Legends with customized percentages */}
+              {/* Legends with customized counts */}
               <div className="flex justify-center gap-6 text-xs pt-1">
                 {data.platformStats?.map((entry, index) => {
-                  const total = data.kpis.totalEngagement || 1;
-                  const pct = Math.round((entry.engagement / total) * 100);
                   return (
                     <div key={entry.platform} className="flex items-center gap-1.5 font-bold text-slate-700">
                       <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}></span>
-                      <span>{entry.platform}: {pct}%</span>
+                      <span className="capitalize">{entry.platform}: {entry.engagement.toLocaleString('vi-VN')} lượt</span>
                     </div>
                   );
                 })}
