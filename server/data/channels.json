@@ -34,7 +34,9 @@
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.355Z",
     "updatedAt": "2026-07-15T03:44:09.355Z",
-    "totalPosts": 0
+    "totalPosts": 26,
+    "lastSyncAt": "2026-07-15T03:57:20.044Z",
+    "lastSyncStatus": "success"
   },
   "34e430e6-c266-49e9-a96c-3ecd25c213bb": {
     "id": "34e430e6-c266-49e9-a96c-3ecd25c213bb",
