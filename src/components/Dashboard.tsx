@@ -36,6 +36,9 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   
   // Interactive channel filter states for daily trend chart
   const [selectedChannelsForTrend, setSelectedChannelsForTrend] = useState<Set<string>>(new Set());
+  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
+  const [selectedMetric, setSelectedMetric] = useState<string>('engagement');
+  const [datePreset, setDatePreset] = useState<string>('30days');
 
   useEffect(() => {
     if (data && data.channelStats) {
@@ -46,13 +49,36 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   const toggleChannelTrend = (name: string) => {
     const next = new Set(selectedChannelsForTrend);
     if (next.has(name)) {
-      if (next.size > 1) {
-        next.delete(name);
-      }
+      next.delete(name);
     } else {
       next.add(name);
     }
     setSelectedChannelsForTrend(next);
+  };
+
+  const handleDatePresetChange = (preset: string) => {
+    setDatePreset(preset);
+    const today = new Date();
+    if (preset === '7days') {
+      const start = new Date();
+      start.setDate(today.getDate() - 7);
+      setStartDate(start.toISOString().split('T')[0]);
+      setEndDate(today.toISOString().split('T')[0]);
+    } else if (preset === '30days') {
+      const start = new Date();
+      start.setDate(today.getDate() - 30);
+      setStartDate(start.toISOString().split('T')[0]);
+      setEndDate(today.toISOString().split('T')[0]);
+    } else if (preset === 'thisMonth') {
+      const start = new Date(today.getFullYear(), today.getMonth(), 1);
+      setStartDate(start.toISOString().split('T')[0]);
+      setEndDate(today.toISOString().split('T')[0]);
+    } else if (preset === 'lastMonth') {
+      const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const end = new Date(today.getFullYear(), today.getMonth(), 0);
+      setStartDate(start.toISOString().split('T')[0]);
+      setEndDate(end.toISOString().split('T')[0]);
+    }
   };
 
   const fetchDashboardData = async () => {
@@ -112,17 +138,28 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
             <Calendar className="w-4 h-4 text-slate-400" />
             <span className="text-xs font-semibold text-slate-500">Khoảng thời gian:</span>
           </div>
+          <select
+            value={datePreset}
+            onChange={(e) => handleDatePresetChange(e.target.value)}
+            className="text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white font-medium text-slate-700 cursor-pointer"
+          >
+            <option value="custom">Tùy chọn ngày</option>
+            <option value="7days">7 ngày qua</option>
+            <option value="30days">30 ngày qua</option>
+            <option value="thisMonth">Tháng này</option>
+            <option value="lastMonth">Tháng trước</option>
+          </select>
           <input 
             type="date" 
             value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
+            onChange={(e) => { setStartDate(e.target.value); setDatePreset('custom'); }}
             className="text-xs border border-gray-200 rounded px-2.5 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
           <span className="text-xs text-slate-400">đến</span>
           <input 
             type="date" 
             value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
+            onChange={(e) => { setEndDate(e.target.value); setDatePreset('custom'); }}
             className="text-xs border border-gray-200 rounded px-2.5 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
@@ -285,32 +322,78 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
               <div>
                 <h3 className="text-base font-bold text-slate-800">Xu hướng tương tác theo ngày đăng</h3>
-                <p className="text-xs text-slate-400">Biểu đồ thể hiện tổng tương tác & tiếp cận tích lũy theo ngày xuất bản thực tế của các bài đăng.</p>
+                <p className="text-xs text-slate-400">Biểu đồ thể hiện biến động chỉ số tương tác theo ngày xuất bản thực tế của các bài đăng.</p>
               </div>
               
-              {/* Bộ lọc chọn nhanh hiển thị các đường xu hướng của kênh */}
-              {data.channelStats.length > 0 && (
-                <div className="flex flex-wrap gap-1 p-1.5 bg-slate-50 rounded-xl border border-slate-100">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider self-center px-1.5">Hiển thị kênh:</span>
-                  {data.channelStats.map((stat, idx) => {
-                    const isSelected = selectedChannelsForTrend.has(stat.channelName);
-                    return (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => toggleChannelTrend(stat.channelName)}
-                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
-                          isSelected 
-                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
-                            : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'
-                        }`}
-                      >
-                        {stat.channelName}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Chọn chỉ số hiển thị */}
+                <select
+                  value={selectedMetric}
+                  onChange={(e) => setSelectedMetric(e.target.value)}
+                  className="bg-white border border-slate-200 text-xs font-bold text-slate-700 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                >
+                  <option value="engagement">Tổng tương tác</option>
+                  <option value="likes">Reactions (Like/Tim)</option>
+                  <option value="comments">Bình luận</option>
+                  <option value="shares">Chia sẻ</option>
+                  <option value="views">Lượt xem video</option>
+                  <option value="reach">Lượt tiếp cận (Reach)</option>
+                </select>
+
+                {/* Chọn kênh hiển thị: select choice dropdown */}
+                {data.channelStats.length > 0 && (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                    >
+                      <span>Lọc kênh ({selectedChannelsForTrend.size})</span>
+                      <span className="text-[9px] text-slate-400">▼</span>
+                    </button>
+
+                    {isDropdownOpen && (
+                      <>
+                        <div className="fixed inset-0 z-10" onClick={() => setIsDropdownOpen(false)}></div>
+                        <div className="absolute right-0 mt-2 w-60 bg-white border border-slate-200 rounded-xl shadow-xl z-20 p-2.5 space-y-2">
+                          <div className="flex justify-between border-b border-slate-100 pb-1.5 mb-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedChannelsForTrend(new Set(data.channelStats.map(s => s.channelName)))}
+                              className="text-[10px] font-bold text-blue-600 hover:underline cursor-pointer"
+                            >
+                              Chọn tất cả
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedChannelsForTrend(new Set())}
+                              className="text-[10px] font-bold text-red-600 hover:underline cursor-pointer"
+                            >
+                              Xóa tất cả
+                            </button>
+                          </div>
+                          <div className="max-h-48 overflow-y-auto space-y-1.5">
+                            {data.channelStats.map((stat, idx) => {
+                              const isSelected = selectedChannelsForTrend.has(stat.channelName);
+                              return (
+                                <label key={idx} className="flex items-center gap-2 text-xs font-medium text-slate-700 hover:bg-slate-50 px-1.5 py-1 rounded cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleChannelTrend(stat.channelName)}
+                                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                  />
+                                  <span className="truncate">{stat.channelName}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="h-96">
@@ -339,7 +422,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                     
                     {/* Đường tham chiếu tổng cộng */}
-                    <Line type="monotone" dataKey="engagement" name="Tổng cộng" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 4" />
+                    <Line type="monotone" dataKey={selectedMetric} name="Tổng cộng" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 4" />
                     
                     {/* Đường xu hướng riêng cho mỗi kênh active được chọn */}
                     {data.channelStats
@@ -348,7 +431,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                         <Line
                           key={stat.channelName}
                           type="monotone"
-                          dataKey={stat.channelName}
+                          dataKey={`${stat.channelName}_${selectedMetric}`}
                           name={stat.channelName}
                           stroke={COLORS[idx % COLORS.length]}
                           strokeWidth={2.5}

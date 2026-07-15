@@ -252,7 +252,7 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
       engagementRate = Number(((totalEngagement / impressions) * 100).toFixed(2));
     }
 
-    // Lấy xu hướng tương tác theo ngày đăng bài (publishedAt) phân rã theo từng kênh
+    // Lấy xu hướng tương tác theo ngày đăng bài (publishedAt) phân rã theo từng kênh và từng chỉ số
     const channelMap = new Map<string, string>();
     channels.forEach(c => channelMap.set(c.id, c.name));
 
@@ -262,21 +262,42 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
       const snap = latestSnapshotsMap.get(post.postKey);
       const chanName = channelMap.get(post.channelId) || 'Kênh ẩn';
       
-      const curr = trendMap.get(dateStr) || { date: dateStr, engagement: 0, reach: 0 };
+      const curr = trendMap.get(dateStr) || { 
+        date: dateStr, 
+        engagement: 0, 
+        likes: 0, 
+        comments: 0, 
+        shares: 0, 
+        views: 0, 
+        reach: 0 
+      };
+      
       curr.engagement += snap?.totalEngagement || 0;
+      curr.likes += snap?.reactions || 0;
+      curr.comments += snap?.comments || 0;
+      curr.shares += snap?.shares || 0;
+      curr.views += snap?.views || 0;
       curr.reach += snap?.reach || 0;
       
-      // Gán lượng tương tác riêng cho kênh này vào ngày này
-      curr[chanName] = (curr[chanName] || 0) + (snap?.totalEngagement || 0);
+      // Gán lượng riêng cho kênh này vào ngày này cho tất cả các chỉ số
+      curr[chanName + '_engagement'] = (curr[chanName + '_engagement'] || 0) + (snap?.totalEngagement || 0);
+      curr[chanName + '_likes'] = (curr[chanName + '_likes'] || 0) + (snap?.reactions || 0);
+      curr[chanName + '_comments'] = (curr[chanName + '_comments'] || 0) + (snap?.comments || 0);
+      curr[chanName + '_shares'] = (curr[chanName + '_shares'] || 0) + (snap?.shares || 0);
+      curr[chanName + '_views'] = (curr[chanName + '_views'] || 0) + (snap?.views || 0);
+      curr[chanName + '_reach'] = (curr[chanName + '_reach'] || 0) + (snap?.reach || 0);
       
       trendMap.set(dateStr, curr);
     });
 
     const trends = Array.from(trendMap.values()).map(point => {
       channels.forEach(c => {
-        if (point[c.name] === undefined) {
-          point[c.name] = 0;
-        }
+        const metrics = ['engagement', 'likes', 'comments', 'shares', 'views', 'reach'];
+        metrics.forEach(m => {
+          if (point[c.name + '_' + m] === undefined) {
+            point[c.name + '_' + m] = 0;
+          }
+        });
       });
       return point;
     }).sort((a, b) => a.date.localeCompare(b.date));
