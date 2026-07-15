@@ -77,30 +77,6 @@
     "lastSyncAt": "2026-07-15T04:20:27.396Z",
     "lastSyncStatus": "success"
   },
-  "95a2406a-c3aa-4d23-91bd-13224ee437a5": {
-    "id": "95a2406a-c3aa-4d23-91bd-13224ee437a5",
-    "platform": "facebook",
-    "name": "V+ STEAM LAB",
-    "externalId": "645856108614288",
-    "status": "inactive",
-    "timezone": "Asia/Bangkok",
-    "createdAt": "2026-07-15T03:44:09.363Z",
-    "updatedAt": "2026-07-15T04:11:19.857Z",
-    "totalPosts": 21,
-    "lastSyncAt": "2026-07-15T04:10:49.411Z",
-    "lastSyncStatus": "success"
-  },
-  "dbe91010-f516-46eb-a2d0-99c73318a2f3": {
-    "id": "dbe91010-f516-46eb-a2d0-99c73318a2f3",
-    "platform": "facebook",
-    "name": "Mê Setup",
-    "externalId": "108899684851269",
-    "status": "inactive",
-    "timezone": "Asia/Bangkok",
-    "createdAt": "2026-07-15T03:44:09.365Z",
-    "updatedAt": "2026-07-15T04:10:41.148Z",
-    "totalPosts": 0
-  },
   "64ac53f7-9f1e-4c8b-8534-23d549e36eb5": {
     "id": "64ac53f7-9f1e-4c8b-8534-23d549e36eb5",
     "platform": "facebook",
@@ -110,28 +86,6 @@
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.367Z",
     "updatedAt": "2026-07-15T03:44:09.367Z",
-    "totalPosts": 0
-  },
-  "mock-channel-demo-id": {
-    "id": "mock-channel-demo-id",
-    "platform": "mock",
-    "name": "Kênh Thử Nghiệm (Mock Page)",
-    "externalId": "mock-external-page-id",
-    "status": "inactive",
-    "timezone": "Asia/Bangkok",
-    "createdAt": "2026-07-15T03:44:09.367Z",
-    "updatedAt": "2026-07-15T04:11:23.716Z",
-    "totalPosts": 0
-  },
-  "53e8c91a-2930-438e-bbd4-6a37d9e4d78f": {
-    "id": "53e8c91a-2930-438e-bbd4-6a37d9e4d78f",
-    "platform": "facebook",
-    "name": "Test Channel ABC",
-    "externalId": "1234567890",
-    "status": "active",
-    "timezone": "Asia/Bangkok",
-    "createdAt": "2026-07-15T04:15:12.531Z",
-    "updatedAt": "2026-07-15T04:15:12.531Z",
     "totalPosts": 0
   }
 }

@@ -94,8 +94,8 @@ export default function Posts({ idToken, channels }: PostsProps) {
   };
 
   const filteredChannels = platform === 'all' 
-    ? channels 
-    : channels.filter(c => c.platform === platform);
+    ? channels.filter(c => c.status === 'active') 
+    : channels.filter(c => c.platform === platform && c.status === 'active');
 
   const totalPages = Math.ceil(total / limit);
 

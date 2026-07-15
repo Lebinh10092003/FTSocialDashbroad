@@ -31,6 +31,27 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Interactive channel filter states for comparison chart
+  const [selectedChannelsForCompare, setSelectedChannelsForCompare] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (data && data.channelStats) {
+      setSelectedChannelsForCompare(new Set(data.channelStats.map(s => s.channelName)));
+    }
+  }, [data]);
+
+  const toggleChannelCompare = (name: string) => {
+    const next = new Set(selectedChannelsForCompare);
+    if (next.has(name)) {
+      if (next.size > 1) {
+        next.delete(name);
+      }
+    } else {
+      next.add(name);
+    }
+    setSelectedChannelsForCompare(next);
+  };
 
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -71,8 +92,8 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   };
 
   const filteredChannels = platformFilter === 'all' 
-    ? channels 
-    : channels.filter(c => c.platform === platformFilter);
+    ? channels.filter(c => c.status === 'active') 
+    : channels.filter(c => c.platform === platformFilter && c.status === 'active');
 
   return (
     <div className="space-y-6">
@@ -288,9 +309,33 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
 
             {/* Channels chart */}
             <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 flex flex-col justify-between">
-              <div>
+              <div className="space-y-2">
                 <h3 className="text-sm font-bold text-slate-800">So sánh hiệu quả giữa các kênh</h3>
                 <p className="text-[11px] text-slate-400">Trục Y bên trái: Tương tác (Cột xanh), Trục Y bên phải: Số bài viết (Đường xanh biển).</p>
+                
+                {/* Chọn kênh hiển thị trên biểu đồ so sánh */}
+                {data.channelStats.length > 0 && (
+                  <div className="flex flex-wrap gap-1 p-2 bg-slate-50 rounded-xl border border-slate-100">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider self-center mr-1">Hiển thị:</span>
+                    {data.channelStats.map((stat, idx) => {
+                      const isSelected = selectedChannelsForCompare.has(stat.channelName);
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => toggleChannelCompare(stat.channelName)}
+                          className={`px-2 py-0.5 rounded-md text-[9px] font-bold transition-all border cursor-pointer ${
+                            isSelected 
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+                              : 'bg-white text-slate-500 hover:bg-slate-100 border-slate-200'
+                          }`}
+                        >
+                          {stat.channelName}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
               <div className="h-64">
                 {data.channelStats.length === 0 ? (
@@ -299,7 +344,10 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={data.channelStats} margin={{ top: 10, right: -5, left: -20, bottom: 0 }}>
+                    <ComposedChart 
+                      data={data.channelStats.filter(s => selectedChannelsForCompare.has(s.channelName))} 
+                      margin={{ top: 10, right: -5, left: -20, bottom: 0 }}
+                    >
                       <CartesianGrid strokeDasharray="3 3" vertical={false} />
                       <XAxis dataKey="channelName" tickStyle={{ fontSize: 9 }} />
                       <YAxis yAxisId="left" orientation="left" stroke="#10b981" tickStyle={{ fontSize: 9 }} />
@@ -327,30 +375,32 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700">
-                      {data.channelStats.map((stat, idx) => {
-                        const avgEngagement = stat.postsCount > 0 
-                          ? Math.round(stat.engagement / stat.postsCount) 
-                          : 0;
-                        return (
-                          <tr key={idx} className="hover:bg-slate-50/40">
-                            <td className="p-2.5 font-semibold text-slate-800 truncate max-w-[120px]" title={stat.channelName}>{stat.channelName}</td>
-                            <td className="p-2.5 text-center">
-                              <span className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-full font-semibold text-[8px] uppercase ${
-                                stat.platform === 'facebook' 
-                                  ? 'bg-blue-50 text-blue-700 border border-blue-100' 
-                                  : stat.platform === 'zalo'
-                                  ? 'bg-teal-50 text-teal-700 border border-teal-100'
-                                  : 'bg-purple-50 text-purple-700 border border-purple-100'
-                              }`}>
-                                {stat.platform}
-                              </span>
-                            </td>
-                            <td className="p-2.5 text-center font-mono font-medium text-slate-600">{stat.postsCount}</td>
-                            <td className="p-2.5 text-center font-mono font-medium text-slate-600">{stat.engagement.toLocaleString()}</td>
-                            <td className="p-2.5 text-center font-semibold text-blue-600 font-mono bg-blue-50/20">{avgEngagement.toLocaleString()}</td>
-                          </tr>
-                        );
-                      })}
+                      {data.channelStats
+                        .filter(s => selectedChannelsForCompare.has(s.channelName))
+                        .map((stat, idx) => {
+                          const avgEngagement = stat.postsCount > 0 
+                            ? Math.round(stat.engagement / stat.postsCount) 
+                            : 0;
+                          return (
+                            <tr key={idx} className="hover:bg-slate-50/40">
+                              <td className="p-2.5 font-semibold text-slate-800 truncate max-w-[120px]" title={stat.channelName}>{stat.channelName}</td>
+                              <td className="p-2.5 text-center">
+                                <span className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-full font-semibold text-[8px] uppercase ${
+                                  stat.platform === 'facebook' 
+                                    ? 'bg-blue-50 text-blue-700 border border-blue-100' 
+                                    : stat.platform === 'zalo'
+                                    ? 'bg-teal-50 text-teal-750 border border-teal-100'
+                                    : 'bg-purple-50 text-purple-700 border border-purple-100'
+                                }`}>
+                                  {stat.platform}
+                                </span>
+                              </td>
+                              <td className="p-2.5 text-center font-mono font-medium text-slate-600">{stat.postsCount}</td>
+                              <td className="p-2.5 text-center font-mono font-medium text-slate-600">{stat.engagement.toLocaleString()}</td>
+                              <td className="p-2.5 text-center font-semibold text-blue-600 font-mono bg-blue-50/20">{avgEngagement.toLocaleString()}</td>
+                            </tr>
+                          );
+                        })}
                     </tbody>
                   </table>
                 </div>

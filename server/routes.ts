@@ -190,7 +190,12 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
     if (channelId) postsQuery = postsQuery.where('channelId', '==', channelId);
 
     const postsSnap = await postsQuery.get();
-    const posts = postsSnap.docs.map(doc => doc.data() as Post);
+    let posts = postsSnap.docs.map(doc => doc.data() as Post);
+
+    // Lọc chỉ giữ lại dữ liệu của các kênh đang hoạt động (active)
+    const activeChannelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
+    const activeChannelIds = new Set(activeChannelsSnap.docs.map(doc => doc.id));
+    posts = posts.filter(p => activeChannelIds.has(p.channelId));
 
     // Lấy snapshots theo thời gian lọc
     let snapshotsQuery: any = adminDb.collection('dailySnapshots');
@@ -199,6 +204,7 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
 
     const snapshotsSnap = await snapshotsQuery.get();
     let snapshots = snapshotsSnap.docs.map(doc => doc.data() as DailySnapshot);
+    snapshots = snapshots.filter(s => activeChannelIds.has(s.channelId));
 
     // Lọc thời gian phía server cho chính xác
     if (startDate) {
@@ -258,8 +264,8 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
     });
     const trends = Array.from(trendMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 
-    // Thống kê theo kênh
-    const channelsSnap = await adminDb.collection('channels').get();
+    // Thống kê theo kênh (chỉ lấy các kênh đang hoạt động)
+    const channelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
     const channels = channelsSnap.docs.map(doc => doc.data() as Channel);
 
     const channelStats = channels.map(chan => {
@@ -552,12 +558,17 @@ apiRouter.get('/posts', authenticateUser, async (req: AuthenticatedRequest, res:
   try {
     const { platform, channelId, search, page = '1', limit = '20' } = req.query;
 
+    // Chỉ lấy bài viết từ các kênh đang hoạt động (active)
+    const activeChannelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
+    const activeChannelIds = new Set(activeChannelsSnap.docs.map(doc => doc.id));
+
     let query: any = adminDb.collection('posts');
     if (platform) query = query.where('platform', '==', platform);
     if (channelId) query = query.where('channelId', '==', channelId);
 
     const snap = await query.get();
     let posts = snap.docs.map(doc => doc.data() as Post);
+    posts = posts.filter(p => activeChannelIds.has(p.channelId));
 
     // Lọc theo search (tiếng Việt không dấu / có dấu)
     if (search) {
@@ -618,12 +629,17 @@ apiRouter.get('/reports/export.csv', authenticateUser, async (req: Authenticated
   try {
     const { platform, channelId } = req.query;
 
+    // Chỉ xuất báo cáo của các kênh đang hoạt động (active)
+    const activeChannelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
+    const activeChannelIds = new Set(activeChannelsSnap.docs.map(doc => doc.id));
+
     let query: any = adminDb.collection('posts');
     if (platform) query = query.where('platform', '==', platform);
     if (channelId) query = query.where('channelId', '==', channelId);
 
     const snap = await query.get();
-    const posts = snap.docs.map(doc => doc.data() as Post);
+    let posts = snap.docs.map(doc => doc.data() as Post);
+    posts = posts.filter(p => activeChannelIds.has(p.channelId));
 
     // Lấy metrics
     const snapsSnap = await adminDb.collection('dailySnapshots').get();
