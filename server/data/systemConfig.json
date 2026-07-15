@@ -1,0 +1,78 @@
+{
+  "main": {
+    "lastGoogleAccessToken": "mock-google-access-token",
+    "lastGoogleAccessTokenTime": "2026-07-15T03:44:58.490Z",
+    "metaPageTokensJson": "{\n  \"1133904153144780\": \"EAAMjvSwDA4sBR2xd3DjoB6vaft10jEtIaywNWI9u5ZCmbJsUa0LcIEXgZAZCZCRpzSyECsM5KUurQjLqaHVRZA9Ynu26TtqqH4FuIMrjhdJ6fZCuvZBlcRgp7qf8pUvZBMToOcv1hNoV4Ecg5WNEdRvUadubkNkhEdIErBGRJsU7Io2aIXy2Ja9SGZACN1lBQhXBZAx5gb0hvSaNZATdYUstWfc\",\n  \"1108690205657905\": \"EAAMjvSwDA4sBRzPr5CrwWMcZCLR8uRamDIfnH8CEVe7PfZCj4ZB4aAjxBDGTbVcdvuusN1MRGmdX7pDzx5CaVMYVeSpkZBS1aUMb6YoOeiIBZA7t4GVssQcugevxAArSJ17nmhMHLQKgm8ZCsWWR5GrBrrb90zq1gbhTOzuoFnKqgFdnKLpupEkNm1Xf3rTBEMYD51aU4Rnsf7l2st5hyc\",\n  \"1118074088045944\": \"EAAMjvSwDA4sBR76z26orZAWItY5Sld0pRJimnZBfVHMhNIrBDeagLXLrXxvDS6Ddx13hLaDj1VDExSrOzekLoxh4t7o4I5FF5k5zqLBaVRrQnfGZB59ubQCsQ33GsmVfnilugWZB2h0xH3Bqys910ZBqfgZCns9S9O8iVTMz9l8I41JcLbplVa7s5LKZCqlOscswBtb1SjceGOkX4UQHttQ\",\n  \"1004405742767396\": \"EAAMjvSwDA4sBRzE1421LNNe5whLl86u6aEJAc5BSRMoMRR9AyF5XGVAlX46TidjnoSs8IU6boZBUtZB1gIZCI6ozCPFTZAK9ZAYi8pRWsFBaV3l6hY8R4Rg4gEgmJNGMU73MUDalYOxjTH4EoOnkIYd24ZBm1lEqMS9rmbLuZBe8TX428eunN1tkBhai22tWxzEAKvas55UFJ37QOcQtHi1\",\n  \"1024612590731278\": \"EAAMjvSwDA4sBR1xT4cV3YCik5dT3nUSw3UeVDRsJmLR6mWJ52hqmWZBhAzGnneogdZC2AofIcjVSTXKmov6RqZCK5gbIOQTAZAIZC919d2MZCHTyXKBb1A9gQ8XDRKnkCShmodRsMZC9YqOZC1eDYeygYAvlG6pIJAIe3Acd02l8GlVgLxLNONnmBu0rHIGkIvqDZBsdNR7yGUALjVrwh8Kwg\",\n  \"1023438644179980\": \"EAAMjvSwDA4sBRwCtrZBUa0QM1CRKLQsjC00zYBpUZAtVbeVwdMisf9wa0K7GAgerH3etluJflqjeZCS28eVu9T27VBXxuNovxMSrfEG9L5WXmwtbxKYIxpaGRp731a6eytGNZA2ZAslA5fEJDy02CGZC5Cuc2mWPLOF0MbPykW5axJZCALborAyvHMiuEa6tbdr0ivkiV5ZA2qBJFHiO0gHQ\",\n  \"645856108614288\": \"EAAMjvSwDA4sBR2ZBuDcchoHxcWp9Knwhavh4gHEy96bXxU8ytCAHYV9f1XYl6dxyczXCsISzFv8BVwdQQzXqtEc3YCBP84TwBYWeW6R1Wl3btK9ZAgzPkt6ZCymdkQrDW5kdaBVSuLj3bnVUtP4YVELGLb3uZCY1KDyvuUZA7T0vX00vHkW6e4ERFqZCeWYx8rZCOSYAmZC2a1E1ZA93USJoV\",\n  \"108899684851269\": \"EAAMjvSwDA4sBR94Tv2j69OGJNtynIyNHsbJefVAyveNNLAQakSLfZAuMHDhiI7KajRrwxsBeU7zXTnl9wvPjlwvuRhBqfOz2XsvZAlVmeJuhHj4ZBHNmdmZBxzoR0i1Usg0q4zP3Is4NKQANtSdi3uy4u3SZBETxp7BT8ZCZBrmW3sfibXak3KVcYADKSAc45EzL25Y3jmQZCDwvTs7iCSUZD\",\n  \"111290387234174\": \"EAAMjvSwDA4sBR8fZBMrZBNoZBYB6y2GZCVxnkrOdI6nNoDvWaHClAgmGBPEuuFdZCFbtET4JlIYKrFhL06OTgQeW0Q4llZADFkYQRIsOkOhVKQZAqY4xpbYDtxhIsfcUdYiFtG0QPu3EcMQtmoQM0bbMKnZAr76ZCvl1DzDR2vkYjkrdJbc9HCk1xsZAeSjjnBZAJPIpiuqJsjZCHu1eUp7iBjcZD\"\n}",
+    "zaloOaTokensJson": "{}",
+    "detailedTokensList": [
+      {
+        "id": "facebook-1133904153144780",
+        "platform": "facebook",
+        "pageId": "1133904153144780",
+        "pageName": "AYSBC Việt Nam",
+        "accessToken": "EAAMjvSwDA4sBR2xd3DjoB6vaft10jEtIaywNWI9u5ZCmbJsUa0LcIEXgZAZCZCRpzSyECsM5KUurQjLqaHVRZA9Ynu26TtqqH4FuIMrjhdJ6fZCuvZBlcRgp7qf8pUvZBMToOcv1hNoV4Ecg5WNEdRvUadubkNkhEdIErBGRJsU7Io2aIXy2Ja9SGZACN1lBQhXBZAx5gb0hvSaNZATdYUstWfc"
+      },
+      {
+        "id": "facebook-1108690205657905",
+        "platform": "facebook",
+        "pageId": "1108690205657905",
+        "pageName": "ISO - Kỳ thi Olympic Quốc tế về Khoa học ",
+        "accessToken": "EAAMjvSwDA4sBRzPr5CrwWMcZCLR8uRamDIfnH8CEVe7PfZCj4ZB4aAjxBDGTbVcdvuusN1MRGmdX7pDzx5CaVMYVeSpkZBS1aUMb6YoOeiIBZA7t4GVssQcugevxAArSJ17nmhMHLQKgm8ZCsWWR5GrBrrb90zq1gbhTOzuoFnKqgFdnKLpupEkNm1Xf3rTBEMYD51aU4Rnsf7l2st5hyc"
+      },
+      {
+        "id": "facebook-1118074088045944",
+        "platform": "facebook",
+        "pageId": "1118074088045944",
+        "pageName": "IEO - Kỳ thi Olympic Quốc tế về Tiếng Anh",
+        "accessToken": "EAAMjvSwDA4sBR76z26orZAWItY5Sld0pRJimnZBfVHMhNIrBDeagLXLrXxvDS6Ddx13hLaDj1VDExSrOzekLoxh4t7o4I5FF5k5zqLBaVRrQnfGZB59ubQCsQ33GsmVfnilugWZB2h0xH3Bqys910ZBqfgZCns9S9O8iVTMz9l8I41JcLbplVa7s5LKZCqlOscswBtb1SjceGOkX4UQHttQ"
+      },
+      {
+        "id": "facebook-1004405742767396",
+        "platform": "facebook",
+        "pageId": "1004405742767396",
+        "pageName": "IMO - Kỳ thi Olympic Quốc tế về Toán học",
+        "accessToken": "EAAMjvSwDA4sBRzE1421LNNe5whLl86u6aEJAc5BSRMoMRR9AyF5XGVAlX46TidjnoSs8IU6boZBUtZB1gIZCI6ozCPFTZAK9ZAYi8pRWsFBaV3l6hY8R4Rg4gEgmJNGMU73MUDalYOxjTH4EoOnkIYd24ZBm1lEqMS9rmbLuZBe8TX428eunN1tkBhai22tWxzEAKvas55UFJ37QOcQtHi1"
+      },
+      {
+        "id": "facebook-1024612590731278",
+        "platform": "facebook",
+        "pageId": "1024612590731278",
+        "pageName": "ICO - Kỳ thi Olympic Lập trình Quốc tế",
+        "accessToken": "EAAMjvSwDA4sBR1xT4cV3YCik5dT3nUSw3UeVDRsJmLR6mWJ52hqmWZBhAzGnneogdZC2AofIcjVSTXKmov6RqZCK5gbIOQTAZAIZC919d2MZCHTyXKBb1A9gQ8XDRKnkCShmodRsMZC9YqOZC1eDYeygYAvlG6pIJAIe3Acd02l8GlVgLxLNONnmBu0rHIGkIvqDZBsdNR7yGUALjVrwh8Kwg"
+      },
+      {
+        "id": "facebook-1023438644179980",
+        "platform": "facebook",
+        "pageId": "1023438644179980",
+        "pageName": "International Artificial Intelligence Olympiad - IAIO Việt Nam",
+        "accessToken": "EAAMjvSwDA4sBRwCtrZBUa0QM1CRKLQsjC00zYBpUZAtVbeVwdMisf9wa0K7GAgerH3etluJflqjeZCS28eVu9T27VBXxuNovxMSrfEG9L5WXmwtbxKYIxpaGRp731a6eytGNZA2ZAslA5fEJDy02CGZC5Cuc2mWPLOF0MbPykW5axJZCALborAyvHMiuEa6tbdr0ivkiV5ZA2qBJFHiO0gHQ"
+      },
+      {
+        "id": "facebook-645856108614288",
+        "platform": "facebook",
+        "pageId": "645856108614288",
+        "pageName": "V+ STEAM LAB",
+        "accessToken": "EAAMjvSwDA4sBR2ZBuDcchoHxcWp9Knwhavh4gHEy96bXxU8ytCAHYV9f1XYl6dxyczXCsISzFv8BVwdQQzXqtEc3YCBP84TwBYWeW6R1Wl3btK9ZAgzPkt6ZCymdkQrDW5kdaBVSuLj3bnVUtP4YVELGLb3uZCY1KDyvuUZA7T0vX00vHkW6e4ERFqZCeWYx8rZCOSYAmZC2a1E1ZA93USJoV"
+      },
+      {
+        "id": "facebook-108899684851269",
+        "platform": "facebook",
+        "pageId": "108899684851269",
+        "pageName": "Mê Setup",
+        "accessToken": "EAAMjvSwDA4sBR94Tv2j69OGJNtynIyNHsbJefVAyveNNLAQakSLfZAuMHDhiI7KajRrwxsBeU7zXTnl9wvPjlwvuRhBqfOz2XsvZAlVmeJuhHj4ZBHNmdmZBxzoR0i1Usg0q4zP3Is4NKQANtSdi3uy4u3SZBETxp7BT8ZCZBrmW3sfibXak3KVcYADKSAc45EzL25Y3jmQZCDwvTs7iCSUZD"
+      },
+      {
+        "id": "facebook-111290387234174",
+        "platform": "facebook",
+        "pageId": "111290387234174",
+        "pageName": "FermatTech",
+        "accessToken": "EAAMjvSwDA4sBR8fZBMrZBNoZBYB6y2GZCVxnkrOdI6nNoDvWaHClAgmGBPEuuFdZCFbtET4JlIYKrFhL06OTgQeW0Q4llZADFkYQRIsOkOhVKQZAqY4xpbYDtxhIsfcUdYiFtG0QPu3EcMQtmoQM0bbMKnZAr76ZCvl1DzDR2vkYjkrdJbc9HCk1xsZAeSjjnBZAJPIpiuqJsjZCHu1eUp7iBjcZD"
+      }
+    ],
+    "cronSecret": "",
+    "adminEmails": "09.levanbinh2003@gmail.com",
+    "autoSyncEnabled": true,
+    "googleServiceAccountJson": "",
+    "updatedAt": "2026-07-15T03:44:21.998Z"
+  }
+}

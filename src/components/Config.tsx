@@ -43,7 +43,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
   // Token Table state
   const [tokensList, setTokensList] = useState<TokenRow[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [formPlatform, setFormPlatform] = useState<'facebook' | 'zalo'>('facebook');
+  const [formPlatform, setFormPlatform] = useState<'facebook' | 'zalo' | 'mock'>('facebook');
   const [formPageId, setFormPageId] = useState('');
   const [formPageName, setFormPageName] = useState('');
   const [formAccessToken, setFormAccessToken] = useState('');
@@ -694,6 +694,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
                         >
                           <option value="facebook">Facebook Page</option>
                           <option value="zalo">Zalo Official Account (OA)</option>
+                          <option value="mock">Mock Platform (Để thử nghiệm)</option>
                         </select>
                       </div>
 

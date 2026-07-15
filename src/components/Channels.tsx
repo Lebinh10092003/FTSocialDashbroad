@@ -15,7 +15,7 @@ interface ChannelsProps {
 
 export default function Channels({ idToken, googleAccessToken, channels, userRole, onRefreshChannels }: ChannelsProps) {
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newChanPlatform, setNewChanPlatform] = useState<'facebook' | 'zalo'>('facebook');
+  const [newChanPlatform, setNewChanPlatform] = useState<'facebook' | 'zalo' | 'mock'>('facebook');
   const [newChanName, setNewChanName] = useState('');
   const [newChanExternalId, setNewChanExternalId] = useState('');
   const [newChanTimezone, setNewChanTimezone] = useState('Asia/Bangkok');
@@ -244,6 +244,7 @@ export default function Channels({ idToken, googleAccessToken, channels, userRol
               >
                 <option value="facebook">Facebook Page</option>
                 <option value="zalo">Zalo Official Account (OA)</option>
+                <option value="mock">Mock Platform (Thử nghiệm)</option>
               </select>
             </div>
 

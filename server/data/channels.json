@@ -1,0 +1,101 @@
+{
+  "0d308ac1-bd89-44ea-9e6c-850d05c5fbe1": {
+    "id": "0d308ac1-bd89-44ea-9e6c-850d05c5fbe1",
+    "platform": "facebook",
+    "name": "AYSBC Việt Nam",
+    "externalId": "1133904153144780",
+    "status": "active",
+    "timezone": "Asia/Bangkok",
+    "createdAt": "2026-07-15T03:44:09.352Z",
+    "updatedAt": "2026-07-15T03:44:09.352Z",
+    "totalPosts": 0
+  },
+  "dd8dfe3c-82f8-4b98-89d5-6f417e2e0612": {
+    "id": "dd8dfe3c-82f8-4b98-89d5-6f417e2e0612",
+    "platform": "facebook",
+    "name": "ISO - Kỳ thi Olympic Quốc tế về Khoa học ",
+    "externalId": "1108690205657905",
+    "status": "active",
+    "timezone": "Asia/Bangkok",
+    "createdAt": "2026-07-15T03:44:09.353Z",
+    "updatedAt": "2026-07-15T03:44:09.353Z",
+    "totalPosts": 0
+  },
+  "59c12127-3586-4395-8678-73949de9bc2b": {
+    "id": "59c12127-3586-4395-8678-73949de9bc2b",
+    "platform": "facebook",
+    "name": "IEO - Kỳ thi Olympic Quốc tế về Tiếng Anh",
+    "externalId": "1118074088045944",
+    "status": "active",
+    "timezone": "Asia/Bangkok",
+    "createdAt": "2026-07-15T03:44:09.355Z",
+    "updatedAt": "2026-07-15T03:44:09.355Z",
+    "totalPosts": 0
+  },
+  "34e430e6-c266-49e9-a96c-3ecd25c213bb": {
+    "id": "34e430e6-c266-49e9-a96c-3ecd25c213bb",
+    "platform": "facebook",
+    "name": "IMO - Kỳ thi Olympic Quốc tế về Toán học",
+    "externalId": "1004405742767396",
+    "status": "active",
+    "timezone": "Asia/Bangkok",
+    "createdAt": "2026-07-15T03:44:09.357Z",
+    "updatedAt": "2026-07-15T03:44:09.357Z",
+    "totalPosts": 0
+  },
+  "788a45f8-30de-48cf-8ef7-42e8b25bf704": {
+    "id": "788a45f8-30de-48cf-8ef7-42e8b25bf704",
+    "platform": "facebook",
+    "name": "ICO - Kỳ thi Olympic Lập trình Quốc tế",
+    "externalId": "1024612590731278",
+    "status": "active",
+    "timezone": "Asia/Bangkok",
+    "createdAt": "2026-07-15T03:44:09.359Z",
+    "updatedAt": "2026-07-15T03:44:09.359Z",
+    "totalPosts": 0
+  },
+  "194de9c3-a9e9-4a6f-bb4f-f88ac5fc6cb0": {
+    "id": "194de9c3-a9e9-4a6f-bb4f-f88ac5fc6cb0",
+    "platform": "facebook",
+    "name": "International Artificial Intelligence Olympiad - IAIO Việt Nam",
+    "externalId": "1023438644179980",
+    "status": "active",
+    "timezone": "Asia/Bangkok",
+    "createdAt": "2026-07-15T03:44:09.361Z",
+    "updatedAt": "2026-07-15T03:44:09.361Z",
+    "totalPosts": 0
+  },
+  "95a2406a-c3aa-4d23-91bd-13224ee437a5": {
+    "id": "95a2406a-c3aa-4d23-91bd-13224ee437a5",
+    "platform": "facebook",
+    "name": "V+ STEAM LAB",
+    "externalId": "645856108614288",
+    "status": "active",
+    "timezone": "Asia/Bangkok",
+    "createdAt": "2026-07-15T03:44:09.363Z",
+    "updatedAt": "2026-07-15T03:44:09.363Z",
+    "totalPosts": 0
+  },
+  "dbe91010-f516-46eb-a2d0-99c73318a2f3": {
+    "id": "dbe91010-f516-46eb-a2d0-99c73318a2f3",
+    "platform": "facebook",
+    "name": "Mê Setup",
+    "externalId": "108899684851269",
+    "status": "active",
+    "timezone": "Asia/Bangkok",
+    "createdAt": "2026-07-15T03:44:09.365Z",
+    "updatedAt": "2026-07-15T03:44:09.365Z",
+    "totalPosts": 0
+  },
+  "64ac53f7-9f1e-4c8b-8534-23d549e36eb5": {
+    "id": "64ac53f7-9f1e-4c8b-8534-23d549e36eb5",
+    "platform": "facebook",
+    "name": "FermatTech",
+    "externalId": "111290387234174",
+    "status": "active",
+    "timezone": "Asia/Bangkok",
+    "createdAt": "2026-07-15T03:44:09.367Z",
+    "updatedAt": "2026-07-15T03:44:09.367Z",
+    "totalPosts": 0
+  }
+}

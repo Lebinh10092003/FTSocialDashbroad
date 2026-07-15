@@ -1,4 +1,4 @@
-export type Platform = 'facebook' | 'zalo';
+export type Platform = 'facebook' | 'zalo' | 'mock';
 export type UserRole = 'ADMIN' | 'VIEWER';
 
 export interface Channel {
