@@ -118,6 +118,16 @@ export interface DashboardData {
     comments: number;
     shares: number;
   })[];
+  typeStats?: {
+    type: string;
+    count: number;
+    engagement: number;
+  }[];
+  platformStats?: {
+    platform: string;
+    count: number;
+    engagement: number;
+  }[];
   lastSync?: string;
   errors?: string[];
 }

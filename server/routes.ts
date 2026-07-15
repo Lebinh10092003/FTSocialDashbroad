@@ -182,12 +182,15 @@ apiRouter.get('/auth/me', authenticateUser, (req: AuthenticatedRequest, res: Res
  */
 apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { platform, channelId, startDate, endDate } = req.query;
+    const { platform, channelId, startDate, endDate, postType } = req.query;
 
     // Lấy danh sách posts
     let postsQuery: any = adminDb.collection('posts');
     if (platform) postsQuery = postsQuery.where('platform', '==', platform);
     if (channelId) postsQuery = postsQuery.where('channelId', '==', channelId);
+    if (postType && postType !== 'all') {
+      postsQuery = postsQuery.where('postType', '==', postType);
+    }
 
     const postsSnap = await postsQuery.get();
     let posts = postsSnap.docs.map(doc => doc.data() as Post);
@@ -345,6 +348,39 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
       }
     });
 
+    // Thống kê theo loại nội dung (ảnh, video, link...)
+    const typeStatsMap = new Map<string, { type: string; count: number; engagement: number }>();
+    posts.forEach(p => {
+      const rawType = p.postType || 'Khác';
+      const type = rawType.toLowerCase() === 'photo' ? 'Ảnh / Album' 
+                 : rawType.toLowerCase() === 'video' ? 'Video / Reel'
+                 : rawType.toLowerCase() === 'link' ? 'Liên kết'
+                 : 'Khác';
+      const snap = latestSnapshotsMap.get(p.postKey);
+      const eng = snap?.totalEngagement || 0;
+      
+      const curr = typeStatsMap.get(type) || { type, count: 0, engagement: 0 };
+      curr.count += 1;
+      curr.engagement += eng;
+      typeStatsMap.set(type, curr);
+    });
+    const typeStats = Array.from(typeStatsMap.values());
+
+    // Thống kê theo nền tảng (Facebook vs Zalo)
+    const platformStatsMap = new Map<string, { platform: string; count: number; engagement: number }>();
+    posts.forEach(p => {
+      const rawPlatform = p.platform || 'facebook';
+      const platform = rawPlatform.toLowerCase() === 'facebook' ? 'Facebook' : 'Zalo OA';
+      const snap = latestSnapshotsMap.get(p.postKey);
+      const eng = snap?.totalEngagement || 0;
+      
+      const curr = platformStatsMap.get(platform) || { platform, count: 0, engagement: 0 };
+      curr.count += 1;
+      curr.engagement += eng;
+      platformStatsMap.set(platform, curr);
+    });
+    const platformStats = Array.from(platformStatsMap.values());
+
     res.json({
       kpis: {
         postsCount,
@@ -359,6 +395,8 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
       trends,
       channelStats,
       topPosts,
+      typeStats,
+      platformStats,
       lastSync: lastSyncChannel?.lastSyncAt || null,
       errors
     });
