@@ -3,9 +3,33 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
-// Tự động cấu hình fetch interceptor toàn cục để trỏ API về URL backend bên ngoài (như Render/Vercel)
-// khi chạy ứng dụng tĩnh trên GitHub Pages.
-const originalFetch = window.fetch;
+// Tự động chuyển các request /api/... sang backend bên ngoài khi frontend chạy trên GitHub Pages.
+// GitHub Pages chỉ phục vụ file tĩnh, vì vậy nếu chưa cấu hình VITE_API_URL thì trả về
+// JSON 503 rõ ràng thay vì để GitHub Pages trả HTML 404 gây lỗi "Unexpected token '<'".
+const originalFetch = window.fetch.bind(window);
+const configuredApiBase = String((import.meta as any).env?.VITE_API_URL || '')
+  .trim()
+  .replace(/\/$/, '');
+
+function createBackendUnavailableResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      success: false,
+      error:
+        'Backend API chưa được cấu hình. GitHub Pages chỉ chạy frontend tĩnh. Hãy khai báo VITE_API_URL trỏ tới backend Express để sử dụng đồng bộ Facebook, Zalo OA, Google Sheets và quản trị dữ liệu.',
+      code: 'BACKEND_NOT_CONFIGURED',
+    }),
+    {
+      status: 503,
+      statusText: 'Backend API not configured',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+      },
+    },
+  );
+}
+
 window.fetch = async (input, init) => {
   let url = '';
   if (typeof input === 'string') {
@@ -16,50 +40,54 @@ window.fetch = async (input, init) => {
     url = input.toString();
   }
 
-  // Chỉ can thiệp nếu là request gọi API hệ thống (/api/...)
-  const isApiCall = url.startsWith('/api/') || url.startsWith(window.location.origin + '/api/');
-  const apiBase = ((import.meta as any).env?.VITE_API_URL as string) || '';
+  const isRelativeApiCall = url.startsWith('/api/');
+  const isSameOriginApiCall = url.startsWith(`${window.location.origin}/api/`);
+  const isApiCall = isRelativeApiCall || isSameOriginApiCall;
 
-  if (isApiCall && apiBase) {
-    let targetUrl = url;
-    if (url.startsWith('/api/')) {
-      targetUrl = `${apiBase.replace(/\/$/, '')}${url}`;
-    } else {
-      targetUrl = url.replace(window.location.origin + '/api/', apiBase.replace(/\/$/, '') + '/api/');
-    }
+  if (isApiCall && !configuredApiBase) {
+    return createBackendUnavailableResponse();
+  }
+
+  if (isApiCall && configuredApiBase) {
+    const apiPath = isRelativeApiCall
+      ? url
+      : url.slice(window.location.origin.length);
+    const targetUrl = `${configuredApiBase}${apiPath}`;
 
     if (typeof input === 'string') {
       return originalFetch(targetUrl, init);
-    } else if (input instanceof URL) {
-      return originalFetch(new URL(targetUrl), init);
-    } else {
-      // Nếu input là Request, tạo một Request mới an toàn bằng cách trích xuất RequestInit để tránh TypeError trên trình duyệt
-      const headers = new Headers(input.headers);
-      const requestInit: RequestInit = {
-        method: input.method,
-        headers: headers,
-        credentials: input.credentials,
-        mode: input.mode,
-        cache: input.cache,
-        redirect: input.redirect,
-        referrer: input.referrer,
-        integrity: input.integrity,
-        keepalive: input.keepalive,
-        signal: input.signal
-      };
-      
-      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(input.method) && input.body !== null) {
-        try {
-          requestInit.body = await input.clone().blob();
-        } catch (e) {
-          // Bỏ qua lỗi clone body
-        }
-      }
-      return originalFetch(new Request(targetUrl, requestInit));
     }
+
+    if (input instanceof URL) {
+      return originalFetch(new URL(targetUrl), init);
+    }
+
+    // Giữ nguyên method, headers và body khi chuyển Request sang backend ngoài.
+    const requestInit: RequestInit = {
+      method: input.method,
+      headers: new Headers(input.headers),
+      credentials: input.credentials,
+      mode: input.mode,
+      cache: input.cache,
+      redirect: input.redirect,
+      referrer: input.referrer,
+      integrity: input.integrity,
+      keepalive: input.keepalive,
+      signal: input.signal,
+    };
+
+    if (!['GET', 'HEAD'].includes(input.method) && input.body !== null) {
+      try {
+        requestInit.body = await input.clone().blob();
+      } catch (error) {
+        console.warn('Không thể sao chép body của API request:', error);
+      }
+    }
+
+    return originalFetch(new Request(targetUrl, requestInit));
   }
 
-  // Đối với các request khác (Firebase Auth, Vite HMR,...) sử dụng fetch gốc không can thiệp
+  // Firebase Auth, Facebook Graph API và các request ngoài hệ thống giữ nguyên.
   return originalFetch(input, init);
 };
 
