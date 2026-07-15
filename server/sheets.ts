@@ -1,12 +1,73 @@
 import { google } from 'googleapis';
+import { adminDb } from './firebase';
+
+/**
+ * Hàm helper tự động lấy thông tin xác thực Google Sheets theo thứ tự ưu tiên:
+ * 1. Biến môi trường GOOGLE_SERVICE_ACCOUNT_JSON
+ * 2. Cấu hình googleServiceAccountJson lưu trong Firestore (systemConfig/main)
+ * 3. Fallback: User Access Token tạm thời
+ */
+export async function getGoogleSheetsAuth(userToken: string | null): Promise<any> {
+  // 1. Kiểm tra biến môi trường
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    try {
+      const sa = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+      if (sa.client_email && sa.private_key) {
+        console.log('[Sheets] Sử dụng Google Service Account từ biến môi trường GOOGLE_SERVICE_ACCOUNT_JSON.');
+        return sa;
+      }
+    } catch (e: any) {
+      console.error('[Sheets] Lỗi parse GOOGLE_SERVICE_ACCOUNT_JSON từ env:', e.message);
+    }
+  }
+
+  // 2. Kiểm tra tài liệu cấu hình Firestore
+  try {
+    const configSnap = await adminDb.collection('systemConfig').doc('main').get();
+    if (configSnap.exists) {
+      const configData = configSnap.data();
+      if (configData?.googleServiceAccountJson) {
+        try {
+          const sa = JSON.parse(configData.googleServiceAccountJson);
+          if (sa.client_email && sa.private_key) {
+            console.log('[Sheets] Sử dụng Google Service Account từ Firestore systemConfig/main.');
+            return sa;
+          }
+        } catch (e: any) {
+          console.error('[Sheets] Lỗi parse googleServiceAccountJson từ Firestore:', e.message);
+        }
+      }
+    }
+  } catch (e: any) {
+    console.warn('[Sheets] Không thể đọc googleServiceAccountJson từ Firestore:', e.message);
+  }
+
+  // 3. Fallback
+  if (userToken && userToken.trim() !== '') {
+    console.log('[Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.');
+    return userToken;
+  }
+
+  return null;
+}
 
 export class SheetsService {
   private sheetsClient;
   private spreadsheetId: string;
 
-  constructor(accessToken: string, spreadsheetId: string) {
-    const auth = new google.auth.OAuth2();
-    auth.setCredentials({ access_token: accessToken });
+  constructor(authConfig: string | { client_email: string; private_key: string }, spreadsheetId: string) {
+    let auth: any;
+    if (typeof authConfig === 'string') {
+      const oauth2Client = new google.auth.OAuth2();
+      oauth2Client.setCredentials({ access_token: authConfig });
+      auth = oauth2Client;
+    } else {
+      auth = new google.auth.JWT({
+        email: authConfig.client_email,
+        key: authConfig.private_key.replace(/\\n/g, '\n'), // Đảm bảo dòng xuống dòng trong private key được format đúng
+        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+      });
+    }
     this.sheetsClient = google.sheets({ version: 'v4', auth });
     this.spreadsheetId = spreadsheetId;
   }

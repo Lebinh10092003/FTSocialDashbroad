@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { adminAuth, adminDb } from './firebase';
 import { SyncEngine } from './sync';
-import { SheetsService } from './sheets';
+import { SheetsService, getGoogleSheetsAuth } from './sheets';
 import { Channel, Post, DailySnapshot, ApiLog, UserProfile, UserRole } from '../src/types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -628,18 +628,19 @@ apiRouter.post('/setup/sheets', authenticateUser, requireAdmin, async (req: Auth
       }
     }
 
-    if (!req.googleAccessToken) {
-      return res.status(401).json({ error: 'Yêu cầu token xác thực Google để truy cập Sheets.' });
-    }
-
     // 1. Lưu cấu trúc vào Firestore
     await adminDb.collection('systemConfig').doc('main').set({
       spreadsheetId: extractedId,
       updatedAt: new Date().toISOString()
     }, { merge: true });
 
+    const googleAuth = await getGoogleSheetsAuth(req.googleAccessToken);
+    if (!googleAuth) {
+      return res.status(401).json({ error: 'Yêu cầu token xác thực Google hoặc Service Account để truy cập Sheets.' });
+    }
+
     // 2. Gọi Google Sheets Service để khởi tạo
-    const sheetsService = new SheetsService(req.googleAccessToken, extractedId);
+    const sheetsService = new SheetsService(googleAuth, extractedId);
     const initResult = await sheetsService.initializeSheetsStructure();
 
     res.json({
@@ -847,6 +848,7 @@ apiRouter.get('/admin/config', authenticateUser, async (req: AuthenticatedReques
         cronSecret,
         adminEmails,
         spreadsheetId: '',
+        googleServiceAccountJson: '',
         updatedAt: new Date().toISOString()
       };
 
@@ -866,7 +868,7 @@ apiRouter.get('/admin/config', authenticateUser, async (req: AuthenticatedReques
  */
 apiRouter.post('/admin/config', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { metaPageTokensJson, zaloOaTokensJson, detailedTokensList, cronSecret, adminEmails, autoSyncEnabled } = req.body;
+    const { metaPageTokensJson, zaloOaTokensJson, detailedTokensList, cronSecret, adminEmails, autoSyncEnabled, googleServiceAccountJson } = req.body;
     
     await adminDb.collection('systemConfig').doc('main').set({
       metaPageTokensJson: metaPageTokensJson || '',
@@ -875,6 +877,7 @@ apiRouter.post('/admin/config', authenticateUser, requireAdmin, async (req: Auth
       cronSecret: cronSecret || '',
       adminEmails: adminEmails || '09.levanbinh2003@gmail.com',
       autoSyncEnabled: autoSyncEnabled !== undefined ? autoSyncEnabled : true,
+      googleServiceAccountJson: googleServiceAccountJson || '',
       updatedAt: new Date().toISOString()
     }, { merge: true });
 

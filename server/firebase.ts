@@ -1,4 +1,4 @@
-import { initializeApp, getApps, getApp } from 'firebase-admin/app';
+import { initializeApp, getApps, getApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import fs from 'fs';
@@ -18,9 +18,26 @@ try {
   console.error('Không thể đọc file cấu hình firebase-applet-config.json:', e);
 }
 
-const app = getApps().length === 0 
-  ? initializeApp({ projectId: projectId || process.env.GOOGLE_CLOUD_PROJECT }) 
-  : getApp();
+let app: any;
+if (getApps().length === 0) {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    try {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+      app = initializeApp({
+        credential: cert(serviceAccount),
+        projectId: serviceAccount.project_id || projectId
+      });
+      console.log('[FirebaseAdmin] Khởi tạo thành công bằng FIREBASE_SERVICE_ACCOUNT_JSON.');
+    } catch (err: any) {
+      console.error('[FirebaseAdmin] Lỗi parse FIREBASE_SERVICE_ACCOUNT_JSON:', err.message);
+      app = initializeApp({ projectId: projectId || process.env.GOOGLE_CLOUD_PROJECT });
+    }
+  } else {
+    app = initializeApp({ projectId: projectId || process.env.GOOGLE_CLOUD_PROJECT });
+  }
+} else {
+  app = getApp();
+}
 
 export const adminAuth = getAuth(app);
 

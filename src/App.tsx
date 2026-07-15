@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
@@ -10,16 +10,16 @@ import {
 import { auth, googleProvider } from './firebase-config';
 import { Channel, UserRole } from './types';
 
-// Components
-// Icons for login screen
+// Components (Lazy Loaded)
 import { ShieldAlert, AlertTriangle, Key, Layers, Lock, Mail, UserPlus, LogIn, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import Sidebar from './components/Sidebar';
-import Dashboard from './components/Dashboard';
-import Channels from './components/Channels';
-import Posts from './components/Posts';
-import Sync from './components/Sync';
-import Reports from './components/Reports';
-import Config from './components/Config';
+
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const Channels = lazy(() => import('./components/Channels'));
+const Posts = lazy(() => import('./components/Posts'));
+const Sync = lazy(() => import('./components/Sync'));
+const Reports = lazy(() => import('./components/Reports'));
+const Config = lazy(() => import('./components/Config'));
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -309,10 +309,11 @@ export default function App() {
         setLoading(true);
         handleRefreshChannels().finally(() => setLoading(false));
       } else {
+        // Tải ngầm danh sách kênh để tránh chặn UI và giảm thiểu loading spinner khi chuyển tab
         handleRefreshChannels();
       }
     }
-  }, [idToken, activeTab]);
+  }, [idToken]);
 
   // Loading screen
   if (authChecking) {
@@ -495,52 +496,59 @@ export default function App() {
           </div>
         ) : (
           <div className="max-w-7xl mx-auto">
-            {activeTab === 'dashboard' && (
-              <Dashboard 
-                idToken={idToken} 
-                googleAccessToken={googleAccessToken}
-                channels={channels}
-              />
-            )}
-            {activeTab === 'channels' && (
-              <Channels 
-                idToken={idToken}
-                googleAccessToken={googleAccessToken}
-                channels={channels}
-                userRole={userRole}
-                onRefreshChannels={handleRefreshChannels}
-              />
-            )}
-            {activeTab === 'posts' && (
-              <Posts 
-                idToken={idToken}
-                channels={channels}
-              />
-            )}
-            {activeTab === 'sync' && (
-              <Sync 
-                idToken={idToken}
-                googleAccessToken={googleAccessToken}
-                channels={channels}
-                userRole={userRole}
-                onRefreshChannels={handleRefreshChannels}
-                onConnectGoogle={handleConnectGoogle}
-              />
-            )}
-            {activeTab === 'reports' && (
-              <Reports 
-                idToken={idToken}
-                channels={channels}
-              />
-            )}
-            {activeTab === 'config' && (
-              <Config 
-                idToken={idToken}
-                googleAccessToken={googleAccessToken}
-                userRole={userRole}
-                onConnectGoogle={handleConnectGoogle}
-              />
-            )}
+            <Suspense fallback={
+              <div className="flex flex-col items-center justify-center h-full py-20 space-y-3">
+                <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                <p className="text-xs font-semibold text-slate-400">Đang tải mô-đun...</p>
+              </div>
+            }>
+              {activeTab === 'dashboard' && (
+                <Dashboard 
+                  idToken={idToken} 
+                  googleAccessToken={googleAccessToken}
+                  channels={channels}
+                />
+              )}
+              {activeTab === 'channels' && (
+                <Channels 
+                  idToken={idToken}
+                  googleAccessToken={googleAccessToken}
+                  channels={channels}
+                  userRole={userRole}
+                  onRefreshChannels={handleRefreshChannels}
+                />
+              )}
+              {activeTab === 'posts' && (
+                <Posts 
+                  idToken={idToken}
+                  channels={channels}
+                />
+              )}
+              {activeTab === 'sync' && (
+                <Sync 
+                  idToken={idToken}
+                  googleAccessToken={googleAccessToken}
+                  channels={channels}
+                  userRole={userRole}
+                  onRefreshChannels={handleRefreshChannels}
+                  onConnectGoogle={handleConnectGoogle}
+                />
+              )}
+              {activeTab === 'reports' && (
+                <Reports 
+                  idToken={idToken}
+                  channels={channels}
+                />
+              )}
+              {activeTab === 'config' && (
+                <Config 
+                  idToken={idToken}
+                  googleAccessToken={googleAccessToken}
+                  userRole={userRole}
+                  onConnectGoogle={handleConnectGoogle}
+                />
+              )}
+            </Suspense>
           </div>
         )}
       </main>

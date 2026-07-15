@@ -36,6 +36,7 @@ interface ConfigProps {
 export default function Config({ idToken, googleAccessToken, userRole, onConnectGoogle }: ConfigProps) {
   const [spreadsheetId, setSpreadsheetId] = useState('');
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
+  const [googleServiceAccountJson, setGoogleServiceAccountJson] = useState('');
   const [initLoading, setInitLoading] = useState(false);
   const [initStatus, setInitStatus] = useState<{ status: 'success' | 'failed' | 'idle'; message: string }>({ status: 'idle', message: '' });
 
@@ -123,6 +124,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
       if (res.ok) {
         const data = await res.json();
         setSpreadsheetId(data.spreadsheetId || '');
+        setGoogleServiceAccountJson(data.googleServiceAccountJson || '');
         const metaJson = data.metaPageTokensJson || '';
         const zaloJson = data.zaloOaTokensJson || '';
         setMetaPageTokensJson(metaJson);
@@ -218,7 +220,8 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
           detailedTokensList: tokensList,
           cronSecret: cronSecret.trim(),
           adminEmails: adminEmails.trim(),
-          autoSyncEnabled
+          autoSyncEnabled,
+          googleServiceAccountJson
         })
       });
 
@@ -266,7 +269,8 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
           detailedTokensList: newList,
           cronSecret: cronSecret.trim(),
           adminEmails: adminEmails.trim(),
-          autoSyncEnabled
+          autoSyncEnabled,
+          googleServiceAccountJson
         })
       });
 
@@ -1154,6 +1158,20 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
                   className="w-full bg-slate-50 border border-slate-200 text-xs rounded-lg p-2 focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700"
                 />
               </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 mb-1">
+                  Google Service Account JSON (Khuyên dùng cho Sheets vĩnh viễn)
+                </label>
+                <textarea
+                  placeholder='Dán nội dung JSON của tệp khóa Service Account vào đây...'
+                  value={googleServiceAccountJson}
+                  onChange={(e) => setGoogleServiceAccountJson(e.target.value)}
+                  disabled={!isAdmin}
+                  rows={4}
+                  className="w-full bg-slate-50 border border-slate-200 text-[10px] rounded-lg p-2 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono text-slate-700"
+                />
+              </div>
             </div>
           </form>
 
@@ -1299,7 +1317,8 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
                             detailedTokensList: tokensList,
                             cronSecret: cronSecret.trim(),
                             adminEmails: adminEmails.trim(),
-                            autoSyncEnabled: nextState
+                            autoSyncEnabled: nextState,
+                            googleServiceAccountJson
                           })
                         });
                       } catch (e) {

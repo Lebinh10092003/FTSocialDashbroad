@@ -1,5 +1,5 @@
 import { adminDb } from './firebase';
-import { SheetsService } from './sheets';
+import { SheetsService, getGoogleSheetsAuth } from './sheets';
 import { FacebookProvider, ZaloOAProvider, MockProvider, SocialProvider } from './providers';
 import { Channel, Post, DailySnapshot, ApiLog } from '../src/types';
 import { v4 as uuidv4 } from 'uuid';
@@ -126,9 +126,10 @@ export class SyncEngine {
         spreadsheetId = configSnap.data()?.spreadsheetId || '';
       }
 
-      if (googleAccessToken && spreadsheetId) {
+      const googleAuth = await getGoogleSheetsAuth(googleAccessToken);
+      if (googleAuth && spreadsheetId) {
         try {
-          const sheetsService = new SheetsService(googleAccessToken, spreadsheetId);
+          const sheetsService = new SheetsService(googleAuth, spreadsheetId);
           
           // Upsert Kênh MXH dòng hiện tại
           const channelRow = {
@@ -227,12 +228,13 @@ export class SyncEngine {
       await adminDb.collection('apiLogs').doc(logId).set(apiLog).catch(console.error);
 
       // Ghi log vào Google Sheets nếu có thể
-      if (googleAccessToken) {
+      const googleAuthLog = await getGoogleSheetsAuth(googleAccessToken);
+      if (googleAuthLog) {
         try {
           const configSnap = await adminDb.collection('systemConfig').doc('main').get();
           const spreadsheetId = configSnap.data()?.spreadsheetId;
           if (spreadsheetId) {
-            const sheetsService = new SheetsService(googleAccessToken, spreadsheetId);
+            const sheetsService = new SheetsService(googleAuthLog, spreadsheetId);
             await sheetsService.upsertRecords('NHAT_KY_API', 'log_id', [{
               log_id: apiLog.logId,
               started_at: apiLog.startedAt,
