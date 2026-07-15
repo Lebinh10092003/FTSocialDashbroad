@@ -39,6 +39,13 @@ jobs:
           cp dist/index.html dist/404.html
           touch dist/.nojekyll
 
+      - name: Enable GitHub Actions as Pages source
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/pages" -f build_type=workflow || \
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/pages" -f build_type=workflow
+
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
