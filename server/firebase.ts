@@ -42,7 +42,26 @@ if (getApps().length === 0) {
 export const adminAuth = getAuth(app);
 
 // Thừa kế cơ sở dữ liệu gốc để gọi khi có kết nối
-const rawFirestore = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
+// Chỉ kết nối Firestore nếu phát hiện credentials hợp lệ, tránh lỗi NO_ADC_FOUND gây crash server ở môi trường local
+const hasCredentials = !!(
+  process.env.FIREBASE_SERVICE_ACCOUNT_JSON ||
+  process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+  process.env.GOOGLE_CLOUD_PROJECT ||
+  fs.existsSync(path.join(process.cwd(), 'service-account.json')) ||
+  fs.existsSync(path.join(process.cwd(), 'serviceAccountKey.json'))
+);
+
+let rawFirestore: any = null;
+if (hasCredentials) {
+  try {
+    rawFirestore = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
+    console.log('[FirebaseAdmin] Đã kết nối Firestore Database.');
+  } catch (err: any) {
+    console.warn('[FirebaseAdmin] Khởi tạo Firestore thất bại, sẽ fallback sang LocalDb:', err.message);
+  }
+} else {
+  console.log('[FirebaseAdmin] Không phát hiện cấu hình xác thực. Sử dụng chế độ offline (LocalDb).');
+}
 
 class WrappedDocRef {
   constructor(private colName: string, private docId: string) {}
@@ -52,22 +71,24 @@ class WrappedDocRef {
   }
 
   public async get(): Promise<any> {
-    try {
-      const snap = await rawFirestore.collection(this.colName).doc(this.docId).get();
-      if (snap.exists) {
-        const data = snap.data();
-        if (data) {
-          // Lưu cache vào LocalDb khi tải thành công từ Firestore
-          LocalDb.setDoc(this.colName, this.docId, data);
+    if (rawFirestore) {
+      try {
+        const snap = await rawFirestore.collection(this.colName).doc(this.docId).get();
+        if (snap.exists) {
+          const data = snap.data();
+          if (data) {
+            // Lưu cache vào LocalDb khi tải thành công từ Firestore
+            LocalDb.setDoc(this.colName, this.docId, data);
+          }
+          return {
+            exists: true,
+            id: this.docId,
+            data: () => data
+          };
         }
-        return {
-          exists: true,
-          id: this.docId,
-          data: () => data
-        };
+      } catch (err: any) {
+        console.warn(`[DualDb] Đọc tài liệu '${this.colName}/${this.docId}' từ Firestore thất bại (sẽ fallback sang LocalDb):`, err.message);
       }
-    } catch (err: any) {
-      console.warn(`[DualDb] Đọc tài liệu '${this.colName}/${this.docId}' từ Firestore thất bại (sẽ fallback sang LocalDb):`, err.message);
     }
 
     // Fallback sang LocalDb nội bộ
@@ -86,10 +107,12 @@ class WrappedDocRef {
     LocalDb.setDoc(this.colName, this.docId, data, merge);
 
     // Thử đồng bộ sang Firestore
-    try {
-      await rawFirestore.collection(this.colName).doc(this.docId).set(data, options);
-    } catch (err: any) {
-      console.warn(`[DualDb] Ghi tài liệu '${this.colName}/${this.docId}' lên Firestore thất bại:`, err.message);
+    if (rawFirestore) {
+      try {
+        await rawFirestore.collection(this.colName).doc(this.docId).set(data, options);
+      } catch (err: any) {
+        console.warn(`[DualDb] Ghi tài liệu '${this.colName}/${this.docId}' lên Firestore thất bại:`, err.message);
+      }
     }
     return { writeTime: new Date() };
   }
@@ -99,10 +122,12 @@ class WrappedDocRef {
     LocalDb.updateDoc(this.colName, this.docId, data);
 
     // Thử đồng bộ sang Firestore
-    try {
-      await rawFirestore.collection(this.colName).doc(this.docId).update(data);
-    } catch (err: any) {
-      console.warn(`[DualDb] Cập nhật tài liệu '${this.colName}/${this.docId}' lên Firestore thất bại:`, err.message);
+    if (rawFirestore) {
+      try {
+        await rawFirestore.collection(this.colName).doc(this.docId).update(data);
+      } catch (err: any) {
+        console.warn(`[DualDb] Cập nhật tài liệu '${this.colName}/${this.docId}' lên Firestore thất bại:`, err.message);
+      }
     }
     return { writeTime: new Date() };
   }
@@ -112,10 +137,12 @@ class WrappedDocRef {
     LocalDb.deleteDoc(this.colName, this.docId);
 
     // Thử đồng bộ sang Firestore
-    try {
-      await rawFirestore.collection(this.colName).doc(this.docId).delete();
-    } catch (err: any) {
-      console.warn(`[DualDb] Xóa tài liệu '${this.colName}/${this.docId}' trên Firestore thất bại:`, err.message);
+    if (rawFirestore) {
+      try {
+        await rawFirestore.collection(this.colName).doc(this.docId).delete();
+      } catch (err: any) {
+        console.warn(`[DualDb] Xóa tài liệu '${this.colName}/${this.docId}' trên Firestore thất bại:`, err.message);
+      }
     }
     return { writeTime: new Date() };
   }
@@ -146,36 +173,38 @@ class WrappedQuery {
   }
 
   public async get(): Promise<any> {
-    try {
-      let q: any = rawFirestore.collection(this.colName);
-      for (const f of this.filters) {
-        q = q.where(f.field, f.op, f.val);
-      }
-      if (this.orderField) {
-        q = q.orderBy(this.orderField, this.orderDir);
-      }
-      if (this.limitCount !== null) {
-        q = q.limit(this.limitCount);
-      }
+    if (rawFirestore) {
+      try {
+        let q: any = rawFirestore.collection(this.colName);
+        for (const f of this.filters) {
+          q = q.where(f.field, f.op, f.val);
+        }
+        if (this.orderField) {
+          q = q.orderBy(this.orderField, this.orderDir);
+        }
+        if (this.limitCount !== null) {
+          q = q.limit(this.limitCount);
+        }
 
-      const snap = await q.get();
-      const docs = snap.docs.map((doc: any) => {
-        const d = doc.data();
-        // Cập nhật bộ nhớ cache cục bộ
-        LocalDb.setDoc(this.colName, doc.id, d);
+        const snap = await q.get();
+        const docs = snap.docs.map((doc: any) => {
+          const d = doc.data();
+          // Cập nhật bộ nhớ cache cục bộ
+          LocalDb.setDoc(this.colName, doc.id, d);
+          return {
+            id: doc.id,
+            data: () => d
+          };
+        });
+
         return {
-          id: doc.id,
-          data: () => d
+          docs,
+          empty: docs.length === 0,
+          size: docs.length
         };
-      });
-
-      return {
-        docs,
-        empty: docs.length === 0,
-        size: docs.length
-      };
-    } catch (err: any) {
-      console.warn(`[DualDb] Truy vấn collection '${this.colName}' từ Firestore thất bại (sẽ fallback sang LocalDb):`, err.message);
+      } catch (err: any) {
+        console.warn(`[DualDb] Truy vấn collection '${this.colName}' từ Firestore thất bại (sẽ fallback sang LocalDb):`, err.message);
+      }
     }
 
     // Fallback sang LocalDb
