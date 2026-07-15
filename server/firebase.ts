@@ -263,15 +263,23 @@ class WrappedQuery {
 }
 
 class WrappedBatch {
-  private operations: Array<{ docRef: WrappedDocRef; data: any; options?: any }> = [];
+  private operations: Array<{ docRef: WrappedDocRef; type: 'set' | 'delete'; data?: any; options?: any }> = [];
 
   public set(docRef: WrappedDocRef, data: any, options?: any) {
-    this.operations.push({ docRef, data, options });
+    this.operations.push({ docRef, type: 'set', data, options });
+  }
+
+  public delete(docRef: WrappedDocRef) {
+    this.operations.push({ docRef, type: 'delete' });
   }
 
   public async commit(): Promise<void> {
     for (const op of this.operations) {
-      await op.docRef.set(op.data, op.options);
+      if (op.type === 'set') {
+        await op.docRef.set(op.data, op.options);
+      } else if (op.type === 'delete') {
+        await op.docRef.delete();
+      }
     }
   }
 }

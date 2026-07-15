@@ -453,8 +453,12 @@ apiRouter.delete('/channels/:id', authenticateUser, requireAdmin, async (req: Au
     const snapshotsSnap = await adminDb.collection('dailySnapshots').where('channelId', '==', id).get();
 
     const batch = adminDb.batch();
-    postsSnap.docs.forEach(doc => batch.delete(doc.ref));
-    snapshotsSnap.docs.forEach(doc => batch.delete(doc.ref));
+    postsSnap.docs.forEach(doc => {
+      batch.delete(adminDb.collection('posts').doc(doc.id));
+    });
+    snapshotsSnap.docs.forEach(doc => {
+      batch.delete(adminDb.collection('dailySnapshots').doc(doc.id));
+    });
     batch.delete(channelRef);
     await batch.commit();
 

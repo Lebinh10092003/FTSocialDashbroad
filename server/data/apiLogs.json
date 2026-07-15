@@ -163,5 +163,35 @@
     "errorCode": "",
     "errorMessage": "",
     "requestId": "409cbee5-d650-458e-a75c-4bb479af3a1e"
+  },
+  "aed3541c-9743-4e31-907d-1c5b9f2f3ed6": {
+    "logId": "aed3541c-9743-4e31-907d-1c5b9f2f3ed6",
+    "startedAt": "2026-07-15T04:10:30.560Z",
+    "endedAt": "2026-07-15T04:14:34.125Z",
+    "platform": "facebook",
+    "action": "sync",
+    "channelId": "34e430e6-c266-49e9-a96c-3ecd25c213bb",
+    "status": "success",
+    "recordsReceived": 28,
+    "recordsInserted": 28,
+    "recordsUpdated": 28,
+    "errorCode": "",
+    "errorMessage": "",
+    "requestId": "99f024d8-444d-4eaf-8deb-c005868f8d5d"
+  },
+  "93586034-a3ed-4b7c-8524-864f1f83a6ce": {
+    "logId": "93586034-a3ed-4b7c-8524-864f1f83a6ce",
+    "startedAt": "2026-07-15T04:14:34.402Z",
+    "endedAt": "2026-07-15T04:17:35.685Z",
+    "platform": "facebook",
+    "action": "sync",
+    "channelId": "788a45f8-30de-48cf-8ef7-42e8b25bf704",
+    "status": "success",
+    "recordsReceived": 21,
+    "recordsInserted": 21,
+    "recordsUpdated": 21,
+    "errorCode": "",
+    "errorMessage": "",
+    "requestId": "99f024d8-444d-4eaf-8deb-c005868f8d5d"
   }
 }

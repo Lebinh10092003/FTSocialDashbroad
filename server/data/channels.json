@@ -47,8 +47,8 @@
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.357Z",
     "updatedAt": "2026-07-15T03:44:09.357Z",
-    "totalPosts": 56,
-    "lastSyncAt": "2026-07-15T04:06:59.997Z",
+    "totalPosts": 84,
+    "lastSyncAt": "2026-07-15T04:14:33.789Z",
     "lastSyncStatus": "success"
   },
   "788a45f8-30de-48cf-8ef7-42e8b25bf704": {
@@ -60,8 +60,8 @@
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.359Z",
     "updatedAt": "2026-07-15T03:44:09.359Z",
-    "totalPosts": 21,
-    "lastSyncAt": "2026-07-15T04:04:35.361Z",
+    "totalPosts": 42,
+    "lastSyncAt": "2026-07-15T04:17:35.323Z",
     "lastSyncStatus": "success"
   },
   "194de9c3-a9e9-4a6f-bb4f-f88ac5fc6cb0": {
@@ -121,6 +121,17 @@
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.367Z",
     "updatedAt": "2026-07-15T04:11:23.716Z",
+    "totalPosts": 0
+  },
+  "53e8c91a-2930-438e-bbd4-6a37d9e4d78f": {
+    "id": "53e8c91a-2930-438e-bbd4-6a37d9e4d78f",
+    "platform": "facebook",
+    "name": "Test Channel ABC",
+    "externalId": "1234567890",
+    "status": "active",
+    "timezone": "Asia/Bangkok",
+    "createdAt": "2026-07-15T04:15:12.531Z",
+    "updatedAt": "2026-07-15T04:15:12.531Z",
     "totalPosts": 0
   }
 }
