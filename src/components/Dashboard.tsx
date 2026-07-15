@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+  ComposedChart, LineChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
 import { 
   Calendar, Radio, Layers, MessageSquare, Heart, Share2, Eye, EyeOff, Users, Award, RefreshCw, AlertCircle, TrendingUp
@@ -287,10 +287,10 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
             </div>
 
             {/* Channels chart */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 flex flex-col justify-between">
               <div>
                 <h3 className="text-sm font-bold text-slate-800">So sánh hiệu quả giữa các kênh</h3>
-                <p className="text-[11px] text-slate-400">So sánh số lượng bài đăng và khối lượng tương tác tích lũy.</p>
+                <p className="text-[11px] text-slate-400">Trục Y bên trái: Tương tác (Cột xanh), Trục Y bên phải: Số bài viết (Đường xanh biển).</p>
               </div>
               <div className="h-64">
                 {data.channelStats.length === 0 ? (
@@ -299,18 +299,62 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                   </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={data.channelStats} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <ComposedChart data={data.channelStats} margin={{ top: 10, right: -5, left: -20, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="channelName" tickStyle={{ fontSize: 10 }} />
-                      <YAxis tickStyle={{ fontSize: 10 }} />
+                      <XAxis dataKey="channelName" tickStyle={{ fontSize: 9 }} />
+                      <YAxis yAxisId="left" orientation="left" stroke="#10b981" tickStyle={{ fontSize: 9 }} />
+                      <YAxis yAxisId="right" orientation="right" stroke="#3b82f6" tickStyle={{ fontSize: 9 }} />
                       <Tooltip />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Line type="monotone" dataKey="postsCount" name="Số bài viết" stroke="#3b82f6" strokeWidth={2} activeDot={{ r: 5 }} />
-                      <Line type="monotone" dataKey="engagement" name="Tương tác" stroke="#10b981" strokeWidth={2.5} activeDot={{ r: 6 }} />
-                    </LineChart>
+                      <Legend wrapperStyle={{ fontSize: 10 }} />
+                      <Bar yAxisId="left" dataKey="engagement" name="Lượt tương tác" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={30} />
+                      <Line yAxisId="right" type="monotone" dataKey="postsCount" name="Số bài viết" stroke="#3b82f6" strokeWidth={2.5} activeDot={{ r: 5 }} />
+                    </ComposedChart>
                   </ResponsiveContainer>
                 )}
               </div>
+
+              {/* Bảng so sánh chi tiết số liệu */}
+              {data.channelStats.length > 0 && (
+                <div className="mt-4 overflow-x-auto border border-slate-100 rounded-xl">
+                  <table className="w-full text-left border-collapse text-[11px]">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-100 text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                        <th className="p-2.5">Kênh</th>
+                        <th className="p-2.5 text-center">Nền tảng</th>
+                        <th className="p-2.5 text-center">Bài viết</th>
+                        <th className="p-2.5 text-center">Tương tác</th>
+                        <th className="p-2.5 text-center">Trung bình / bài</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                      {data.channelStats.map((stat, idx) => {
+                        const avgEngagement = stat.postsCount > 0 
+                          ? Math.round(stat.engagement / stat.postsCount) 
+                          : 0;
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50/40">
+                            <td className="p-2.5 font-semibold text-slate-800 truncate max-w-[120px]" title={stat.channelName}>{stat.channelName}</td>
+                            <td className="p-2.5 text-center">
+                              <span className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-full font-semibold text-[8px] uppercase ${
+                                stat.platform === 'facebook' 
+                                  ? 'bg-blue-50 text-blue-700 border border-blue-100' 
+                                  : stat.platform === 'zalo'
+                                  ? 'bg-teal-50 text-teal-700 border border-teal-100'
+                                  : 'bg-purple-50 text-purple-700 border border-purple-100'
+                              }`}>
+                                {stat.platform}
+                              </span>
+                            </td>
+                            <td className="p-2.5 text-center font-mono font-medium text-slate-600">{stat.postsCount}</td>
+                            <td className="p-2.5 text-center font-mono font-medium text-slate-600">{stat.engagement.toLocaleString()}</td>
+                            <td className="p-2.5 text-center font-semibold text-blue-600 font-mono bg-blue-50/20">{avgEngagement.toLocaleString()}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
 

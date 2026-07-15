@@ -8,8 +8,8 @@
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.352Z",
     "updatedAt": "2026-07-15T03:44:09.352Z",
-    "totalPosts": 30,
-    "lastSyncAt": "2026-07-15T03:49:56.809Z",
+    "totalPosts": 60,
+    "lastSyncAt": "2026-07-15T04:03:06.105Z",
     "lastSyncStatus": "success"
   },
   "dd8dfe3c-82f8-4b98-89d5-6f417e2e0612": {
@@ -47,7 +47,9 @@
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.357Z",
     "updatedAt": "2026-07-15T03:44:09.357Z",
-    "totalPosts": 0
+    "totalPosts": 28,
+    "lastSyncAt": "2026-07-15T04:01:28.780Z",
+    "lastSyncStatus": "success"
   },
   "788a45f8-30de-48cf-8ef7-42e8b25bf704": {
     "id": "788a45f8-30de-48cf-8ef7-42e8b25bf704",
@@ -102,6 +104,17 @@
     "timezone": "Asia/Bangkok",
     "createdAt": "2026-07-15T03:44:09.367Z",
     "updatedAt": "2026-07-15T03:44:09.367Z",
+    "totalPosts": 0
+  },
+  "mock-channel-demo-id": {
+    "id": "mock-channel-demo-id",
+    "platform": "mock",
+    "name": "Kênh Thử Nghiệm (Mock Page)",
+    "externalId": "mock-external-page-id",
+    "status": "active",
+    "timezone": "Asia/Bangkok",
+    "createdAt": "2026-07-15T03:44:09.367Z",
+    "updatedAt": "2026-07-15T04:00:00.000Z",
     "totalPosts": 0
   }
 }
