@@ -4,8 +4,8 @@ import { FacebookProvider, ZaloOAProvider, MockProvider, SocialProvider } from '
 import { Channel, Post, DailySnapshot, ApiLog } from '../src/types';
 import { v4 as uuidv4 } from 'uuid';
 
-// In-memory sync locks
-const syncLocks = new Set<string>();
+// In-memory sync locks with timestamps
+const syncLocks = new Map<string, number>();
 
 export class SyncEngine {
   private static getProvider(platform: string): SocialProvider {
@@ -31,11 +31,20 @@ export class SyncEngine {
     untilDate?: Date,
     requestId: string = uuidv4()
   ): Promise<any> {
+    const now = Date.now();
+    const LOCK_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes timeout
+
     if (syncLocks.has(channelId)) {
-      throw new Error('Kênh này đang được đồng bộ hóa. Vui lòng thử lại sau.');
+      const lockedAt = syncLocks.get(channelId) || 0;
+      if (now - lockedAt < LOCK_TIMEOUT_MS) {
+        throw new Error('Kênh này đang được đồng bộ hóa. Vui lòng thử lại sau.');
+      } else {
+        console.warn(`Lock đồng bộ của kênh ${channelId} đã bị treo quá 5 phút. Tự động giải phóng lock.`);
+        syncLocks.delete(channelId);
+      }
     }
 
-    syncLocks.add(channelId);
+    syncLocks.set(channelId, now);
     const startedAt = new Date().toISOString();
 
     // 1. Đọc kênh từ Firestore

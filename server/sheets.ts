@@ -170,34 +170,130 @@ export class SheetsService {
       }
     }
 
-    // Thiết lập Dashboard cơ bản nếu trống
-    const dbCheck = await this.sheetsClient.spreadsheets.values.get({
+    // Thiết lập và định dạng Dashboard
+    const metadata = await this.sheetsClient.spreadsheets.get({
       spreadsheetId: this.spreadsheetId,
-      range: 'DASHBOARD!A1:B1',
     });
-    if (!dbCheck.data.values?.[0]?.[0]) {
-      const dashboardValues = [
-        ['FT SOCIAL ANALYTICS - BẢO CÁO TỔNG QUAN', ''],
-        ['Thời điểm khởi tạo:', new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Bangkok' })],
-        ['', ''],
-        ['Số liệu KPI tổng hợp (Tự động cập nhật qua sync)', ''],
-        ['Chỉ số', 'Giá trị'],
-        ['Tổng số bài viết', '=COUNTA(BAI_DANG!A2:A)'],
-        ['Tổng lượt tương tác (Engagement)', '=SUM(DU_LIEU_NGAY!N2:N)'],
-        ['Tổng lượt tiếp cận (Reach)', '=SUM(DU_LIEU_NGAY!K2:K)'],
-        ['Lượt xem (Views)', '=SUM(DU_LIEU_NGAY!J2:J)'],
-        ['Phản hồi (Reactions)', '=SUM(DU_LIEU_NGAY!F2:F)'],
-        ['Bình luận (Comments)', '=SUM(DU_LIEU_NGAY!H2:H)'],
-        ['Chia sẻ (Shares)', '=SUM(DU_LIEU_NGAY!I2:I)'],
-        ['', ''],
-        ['Lưu ý:', 'Đây là bảng tổng hợp công thức từ các tab chi tiết.'],
-      ];
-      await this.sheetsClient.spreadsheets.values.update({
-        spreadsheetId: this.spreadsheetId,
-        range: 'DASHBOARD!A1',
-        valueInputOption: 'USER_ENTERED',
-        requestBody: { values: dashboardValues },
-      });
+    const dbSheet = metadata.data.sheets?.find(s => s.properties?.title === 'DASHBOARD');
+    const dbSheetId = dbSheet?.properties?.sheetId;
+
+    const dashboardValues = [
+      ['FT SOCIAL ANALYTICS - BẢO CÁO TỔNG QUAN', ''],
+      ['Thời điểm cập nhật:', new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Bangkok' })],
+      ['', ''],
+      ['Số liệu KPI tổng hợp (Tự động cập nhật qua sync)', ''],
+      ['Chỉ số', 'Giá trị'],
+      ['Tổng số bài viết', '=COUNTA(BAI_DANG!A2:A)'],
+      ['Tổng lượt tương tác (Engagement)', '=SUM(DU_LIEU_NGAY!N2:N)'],
+      ['Tổng lượt tiếp cận (Reach)', '=SUM(DU_LIEU_NGAY!K2:K)'],
+      ['Lượt xem (Views)', '=SUM(DU_LIEU_NGAY!J2:J)'],
+      ['Phản hồi (Reactions)', '=SUM(DU_LIEU_NGAY!F2:F)'],
+      ['Bình luận (Comments)', '=SUM(DU_LIEU_NGAY!H2:H)'],
+      ['Chia sẻ (Shares)', '=SUM(DU_LIEU_NGAY!I2:I)'],
+      ['', ''],
+      ['Lưu ý:', 'Đây là bảng tổng hợp công thức từ các tab chi tiết.'],
+      ['', ''],
+      ['Thống kê tương tác theo Kênh', ''],
+      ['Tên Kênh', 'Tổng tương tác'],
+      ['=IFERROR(INDEX(KENH_MXH!C2:C, 1), "")', '=IF(A18="","",SUMIF(DU_LIEU_NGAY!D:D, INDEX(KENH_MXH!A2:A, 1), DU_LIEU_NGAY!N:N))'],
+      ['=IFERROR(INDEX(KENH_MXH!C3:C, 1), "")', '=IF(A19="","",SUMIF(DU_LIEU_NGAY!D:D, INDEX(KENH_MXH!A3:A, 1), DU_LIEU_NGAY!N:N))'],
+      ['=IFERROR(INDEX(KENH_MXH!C4:C, 1), "")', '=IF(A20="","",SUMIF(DU_LIEU_NGAY!D:D, INDEX(KENH_MXH!A4:A, 1), DU_LIEU_NGAY!N:N))'],
+      ['=IFERROR(INDEX(KENH_MXH!C5:C, 1), "")', '=IF(A21="","",SUMIF(DU_LIEU_NGAY!D:D, INDEX(KENH_MXH!A5:A, 1), DU_LIEU_NGAY!N:N))'],
+      ['=IFERROR(INDEX(KENH_MXH!C6:C, 1), "")', '=IF(A22="","",SUMIF(DU_LIEU_NGAY!D:D, INDEX(KENH_MXH!A6:A, 1), DU_LIEU_NGAY!N:N))'],
+      ['=IFERROR(INDEX(KENH_MXH!C7:C, 1), "")', '=IF(A23="","",SUMIF(DU_LIEU_NGAY!D:D, INDEX(KENH_MXH!A7:A, 1), DU_LIEU_NGAY!N:N))'],
+      ['=IFERROR(INDEX(KENH_MXH!C8:C, 1), "")', '=IF(A24="","",SUMIF(DU_LIEU_NGAY!D:D, INDEX(KENH_MXH!A8:A, 1), DU_LIEU_NGAY!N:N))'],
+    ];
+
+    await this.sheetsClient.spreadsheets.values.update({
+      spreadsheetId: this.spreadsheetId,
+      range: 'DASHBOARD!A1',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: dashboardValues },
+    });
+
+    // Thêm biểu đồ cột cho dữ liệu Kênh nếu chưa có biểu đồ nào
+    if (dbSheet && dbSheetId !== undefined && (!dbSheet.charts || dbSheet.charts.length === 0)) {
+      try {
+        await this.sheetsClient.spreadsheets.batchUpdate({
+          spreadsheetId: this.spreadsheetId,
+          requestBody: {
+            requests: [
+              {
+                addChart: {
+                  chart: {
+                    spec: {
+                      title: 'Tổng tương tác tích lũy theo Kênh MXH',
+                      basicChart: {
+                        chartType: 'COLUMN',
+                        legendPosition: 'NONE',
+                        axis: [
+                          {
+                            position: 'BOTTOM_AXIS',
+                            title: 'Kênh MXH'
+                          },
+                          {
+                            position: 'LEFT_AXIS',
+                            title: 'Tổng tương tác'
+                          }
+                        ],
+                        domains: [
+                          {
+                            domain: {
+                              sourceRange: {
+                                sources: [
+                                  {
+                                    sheetId: dbSheetId,
+                                    startRowIndex: 16, // Dòng 17 (Tên Kênh)
+                                    endRowIndex: 25,   // Dòng 25
+                                    startColumnIndex: 0, // Cột A
+                                    endColumnIndex: 1  // Cột A
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        ],
+                        series: [
+                          {
+                            series: {
+                              sourceRange: {
+                                sources: [
+                                  {
+                                    sheetId: dbSheetId,
+                                    startRowIndex: 16, // Dòng 17 (Tổng tương tác)
+                                    endRowIndex: 25,   // Dòng 25
+                                    startColumnIndex: 1, // Cột B
+                                    endColumnIndex: 2  // Cột B
+                                  }
+                                ]
+                              }
+                            },
+                            targetAxis: 'LEFT_AXIS'
+                          }
+                        ]
+                      }
+                    },
+                    position: {
+                      overlayPosition: {
+                        anchorCell: {
+                          sheetId: dbSheetId,
+                          rowIndex: 3, // Dòng 4
+                          columnIndex: 3 // Cột D (index 3)
+                        },
+                        widthPixels: 600,
+                        heightPixels: 350
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        });
+        console.log('[Sheets] Đã khởi tạo biểu đồ cột tổng quan trên tab DASHBOARD.');
+      } catch (chartErr: any) {
+        console.error('Lỗi khi chèn biểu đồ vào Google Sheets:', chartErr.message);
+      }
     }
   }
 
