@@ -194,7 +194,8 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
 
     // Lọc chỉ giữ lại dữ liệu của các kênh đang hoạt động (active)
     const activeChannelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
-    const activeChannelIds = new Set(activeChannelsSnap.docs.map(doc => doc.id));
+    const channels = activeChannelsSnap.docs.map(doc => doc.data() as Channel);
+    const activeChannelIds = new Set(channels.map(c => c.id));
     posts = posts.filter(p => activeChannelIds.has(p.channelId));
 
     // Lấy snapshots theo thời gian lọc
@@ -251,24 +252,36 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
       engagementRate = Number(((totalEngagement / impressions) * 100).toFixed(2));
     }
 
-    // Lấy xu hướng tương tác theo ngày đăng bài (publishedAt) để biểu đồ mượt mà và thực tế hơn
-    const trendMap = new Map<string, { date: string; engagement: number; reach: number; likes: number; comments: number }>();
+    // Lấy xu hướng tương tác theo ngày đăng bài (publishedAt) phân rã theo từng kênh
+    const channelMap = new Map<string, string>();
+    channels.forEach(c => channelMap.set(c.id, c.name));
+
+    const trendMap = new Map<string, any>();
     posts.forEach(post => {
       const dateStr = post.publishedAt.split('T')[0];
       const snap = latestSnapshotsMap.get(post.postKey);
+      const chanName = channelMap.get(post.channelId) || 'Kênh ẩn';
       
-      const curr = trendMap.get(dateStr) || { date: dateStr, engagement: 0, reach: 0, likes: 0, comments: 0 };
+      const curr = trendMap.get(dateStr) || { date: dateStr, engagement: 0, reach: 0 };
       curr.engagement += snap?.totalEngagement || 0;
       curr.reach += snap?.reach || 0;
-      curr.likes += snap?.likes || 0;
-      curr.comments += snap?.comments || 0;
+      
+      // Gán lượng tương tác riêng cho kênh này vào ngày này
+      curr[chanName] = (curr[chanName] || 0) + (snap?.totalEngagement || 0);
+      
       trendMap.set(dateStr, curr);
     });
-    const trends = Array.from(trendMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+    const trends = Array.from(trendMap.values()).map(point => {
+      channels.forEach(c => {
+        if (point[c.name] === undefined) {
+          point[c.name] = 0;
+        }
+      });
+      return point;
+    }).sort((a, b) => a.date.localeCompare(b.date));
 
     // Thống kê theo kênh (chỉ lấy các kênh đang hoạt động)
-    const channelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
-    const channels = channelsSnap.docs.map(doc => doc.data() as Channel);
 
     const channelStats = channels.map(chan => {
       const chanPosts = posts.filter(p => p.channelId === chan.id);

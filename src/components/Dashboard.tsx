@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { Channel, DashboardData, Platform } from '../types';
 
+const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+
 interface DashboardProps {
   idToken: string;
   googleAccessToken: string | null;
@@ -298,9 +300,23 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                       <XAxis dataKey="date" tickStyle={{ fontSize: 10 }} />
                       <YAxis tickStyle={{ fontSize: 10 }} />
                       <Tooltip />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Line type="monotone" dataKey="engagement" name="Lượt tương tác" stroke="#2563eb" strokeWidth={2.5} activeDot={{ r: 6 }} />
-                      <Line type="monotone" dataKey="reach" name="Reach" stroke="#6366f1" strokeWidth={1.5} strokeDasharray="4 4" />
+                      <Legend wrapperStyle={{ fontSize: 10 }} />
+                      
+                      {/* Đường tham chiếu tổng cộng */}
+                      <Line type="monotone" dataKey="engagement" name="Tổng cộng" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 4" />
+                      
+                      {/* Đường xu hướng riêng cho mỗi kênh active */}
+                      {data.channelStats.map((stat, idx) => (
+                        <Line
+                          key={stat.channelName}
+                          type="monotone"
+                          dataKey={stat.channelName}
+                          name={stat.channelName}
+                          stroke={COLORS[idx % COLORS.length]}
+                          strokeWidth={2.2}
+                          activeDot={{ r: 5 }}
+                        />
+                      ))}
                     </LineChart>
                   </ResponsiveContainer>
                 )}
