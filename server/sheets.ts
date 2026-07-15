@@ -127,12 +127,13 @@ export class SheetsService {
       KENH_MXH: [
         'channel_id', 'platform', 'channel_name', 'external_id', 'channel_url',
         'status', 'timezone', 'created_at', 'updated_at', 'last_sync_at',
-        'last_sync_status', 'total_posts'
+        'last_sync_status', 'total_posts', 'reactions', 'comments', 'shares', 'total_engagement'
       ],
       BAI_DANG: [
         'post_key', 'platform', 'channel_id', 'external_post_id', 'post_url',
         'post_type', 'message', 'published_at', 'imported_at', 'updated_at',
-        'is_deleted'
+        'is_deleted', 'reactions', 'likes', 'comments', 'shares', 'views', 'reach',
+        'total_engagement', 'engagement_rate'
       ],
       DU_LIEU_NGAY: [
         'snapshot_key', 'snapshot_date', 'platform', 'channel_id', 'post_key',

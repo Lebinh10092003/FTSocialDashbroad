@@ -540,29 +540,50 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                 </ResponsiveContainer>
               )}
             </div>
-            
-            {/* Toggle switch for showing total line */}
-            <div className="flex justify-end pt-1">
-              <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-500">
-                <input 
-                  type="checkbox" 
-                  checked={showTotalLine}
-                  onChange={(e) => setShowTotalLine(e.target.checked)}
-                  className="sr-only peer"
-                />
-                <span className="relative w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></span>
-                <span>Hiển thị đường Tổng cộng</span>
-              </label>
+
+            {/* Toggle switch for showing total line & breakdown cards */}
+            <div className="flex flex-col space-y-4 pt-3 border-t border-slate-100">
+              <div className="flex justify-end">
+                <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-500">
+                  <input 
+                    type="checkbox" 
+                    checked={showTotalLine}
+                    onChange={(e) => setShowTotalLine(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <span className="relative w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></span>
+                  <span>Hiển thị đường Tổng cộng</span>
+                </label>
+              </div>
+
+              {/* KPI Breakdown Cards (Mockup Meta style) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/50 text-left space-y-1">
+                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">👍 Cảm xúc (Reactions)</span>
+                  <p className="text-xl font-extrabold text-slate-800">{data.kpis.reactions.toLocaleString('vi-VN')}</p>
+                  <p className="text-[9px] text-slate-400">Tổng số lượt thích và cảm xúc</p>
+                </div>
+                <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/50 text-left space-y-1">
+                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">💬 Bình luận (Comments)</span>
+                  <p className="text-xl font-extrabold text-slate-800">{data.kpis.comments.toLocaleString('vi-VN')}</p>
+                  <p className="text-[9px] text-slate-400">Tổng số phản hồi trên bài viết</p>
+                </div>
+                <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/50 text-left space-y-1">
+                  <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">🔗 Lượt chia sẻ (Shares)</span>
+                  <p className="text-xl font-extrabold text-slate-800">{data.kpis.shares.toLocaleString('vi-VN')}</p>
+                  <p className="text-[9px] text-slate-400">Tổng số lượt chia sẻ bài viết</p>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Row 3: Progress Bars Content Type (Left) & Platform Donut (Right) */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Content Type Card */}
-            <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_12px_30px_-10px_rgba(0,0,0,0.015)] space-y-5">
+          {/* Row 3: Progress Bars Content Type (Left) & Interaction Donut (Middle) & Platform Donut (Right) */}
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            {/* Card 1: Content Type */}
+            <div className="bg-white p-5 rounded-3xl border border-slate-200/60 shadow-[0_12px_30px_-10px_rgba(0,0,0,0.015)] space-y-5">
               <div>
-                <h3 className="text-sm font-extrabold text-slate-800">Tương tác theo loại nội dung</h3>
-                <p className="text-[11px] text-slate-400">Phần trăm tương tác tích lũy của từng định dạng bài đăng.</p>
+                <h3 className="text-sm font-extrabold text-slate-800">Theo loại nội dung</h3>
+                <p className="text-[11px] text-slate-400">Tỷ lệ tương tác của từng định dạng đăng tải.</p>
               </div>
               
               <div className="space-y-4 pt-1">
@@ -574,16 +595,16 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                     <div key={type} className="space-y-2">
                       <div className="flex items-center justify-between text-xs">
                         <div className="flex items-center gap-2 font-bold text-slate-700">
-                          <div className="p-1.5 bg-slate-100 rounded-lg text-slate-500">
+                          <div className="p-1.5 bg-slate-100 rounded-lg text-slate-505">
                             <Icon className="w-3.5 h-3.5" />
                           </div>
                           <span>{type}</span>
                         </div>
                         <span className="font-extrabold text-slate-900">{percent}%</span>
                       </div>
-                      <div className="w-full bg-slate-100 rounded-full h-2">
+                      <div className="w-full bg-slate-100 rounded-full h-1.5">
                         <div 
-                          className="bg-gradient-to-r from-blue-500 to-indigo-500 h-2 rounded-full transition-all duration-500" 
+                          className="bg-gradient-to-r from-blue-500 to-indigo-500 h-1.5 rounded-full transition-all duration-500" 
                           style={{ width: `${percent}%` }}
                         ></div>
                       </div>
@@ -593,14 +614,91 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
               </div>
             </div>
 
-            {/* Platform Donut Card */}
-            <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_12px_30px_-10px_rgba(0,0,0,0.015)] flex flex-col justify-between space-y-4">
+            {/* Card 2: Theo loại tương tác (Donut Chart) */}
+            <div className="bg-white p-5 rounded-3xl border border-slate-200/60 shadow-[0_12px_30px_-10px_rgba(0,0,0,0.015)] flex flex-col justify-between space-y-4">
               <div>
-                <h3 className="text-sm font-extrabold text-slate-800">Phân bổ tương tác theo nền tảng</h3>
+                <h3 className="text-sm font-extrabold text-slate-800">Theo loại tương tác</h3>
+                <p className="text-[11px] text-slate-400">Tỷ lệ tương tác chia theo cảm xúc, bình luận, chia sẻ.</p>
+              </div>
+              
+              <div className="flex items-center justify-center h-36 relative">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={[
+                        { name: 'Cảm xúc', value: data.kpis.reactions },
+                        { name: 'Bình luận', value: data.kpis.comments },
+                        { name: 'Chia sẻ', value: data.kpis.shares }
+                      ].filter(item => item.value > 0)}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={48}
+                      outerRadius={62}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      <Cell key="cell-0" fill="#3b82f6" />
+                      <Cell key="cell-1" fill="#10b981" />
+                      <Cell key="cell-2" fill="#8b5cf6" />
+                    </Pie>
+                    <Tooltip 
+                      formatter={(value: any) => [`${value.toLocaleString()} lượt`, 'Số lượng']}
+                      contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '10px' }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                
+                <div className="absolute flex flex-col items-center justify-center">
+                  <span className="text-base font-extrabold text-slate-900 leading-none">
+                    {(data.kpis.reactions + data.kpis.comments + data.kpis.shares).toLocaleString('vi-VN')}
+                  </span>
+                  <span className="text-[8px] font-extrabold text-slate-400 uppercase tracking-widest mt-1">Tổng cộng</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5 text-[11px] font-bold text-slate-655 px-2">
+                {(() => {
+                  const total = (data.kpis.reactions + data.kpis.comments + data.kpis.shares) || 1;
+                  const pctReact = Math.round((data.kpis.reactions / total) * 1000) / 10;
+                  const pctComm = Math.round((data.kpis.comments / total) * 1000) / 10;
+                  const pctShare = Math.round((data.kpis.shares / total) * 1000) / 10;
+                  return (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                          <span>Cảm xúc</span>
+                        </div>
+                        <span className="text-slate-900">{pctReact}%</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                          <span>Bình luận</span>
+                        </div>
+                        <span className="text-slate-900">{pctComm}%</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                          <span>Lượt chia sẻ</span>
+                        </div>
+                        <span className="text-slate-900">{pctShare}%</span>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {/* Card 3: Phân bổ tương tác theo nền tảng */}
+            <div className="bg-white p-5 rounded-3xl border border-slate-200/60 shadow-[0_12px_30px_-10px_rgba(0,0,0,0.015)] flex flex-col justify-between space-y-4">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-800">Theo nền tảng</h3>
                 <p className="text-[11px] text-slate-400">Tỷ lệ tương tác chia theo Facebook và Zalo OA.</p>
               </div>
               
-              <div className="flex items-center justify-center h-44 relative">
+              <div className="flex items-center justify-center h-36 relative">
                 {!data.platformStats || data.platformStats.length === 0 ? (
                   <span className="text-xs text-slate-400">Không có dữ liệu</span>
                 ) : (
@@ -611,9 +709,9 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                           data={data.platformStats}
                           cx="50%"
                           cy="50%"
-                          innerRadius={58}
-                          outerRadius={75}
-                          paddingAngle={4}
+                          innerRadius={48}
+                          outerRadius={62}
+                          paddingAngle={3}
                           dataKey="engagement"
                         >
                           {data.platformStats.map((entry, index) => (
@@ -627,12 +725,11 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                       </PieChart>
                     </ResponsiveContainer>
                     
-                    {/* Centered overall label */}
                     <div className="absolute flex flex-col items-center justify-center">
-                      <span className="text-xl font-extrabold text-slate-900 leading-none">
+                      <span className="text-base font-extrabold text-slate-900 leading-none">
                         {data.kpis.totalEngagement.toLocaleString('vi-VN')}
                       </span>
-                      <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-widest mt-1">Tương tác</span>
+                      <span className="text-[8px] font-extrabold text-slate-400 uppercase tracking-widest mt-1">Tương tác</span>
                     </div>
                   </>
                 )}

@@ -140,6 +140,37 @@ export class SyncEngine {
         try {
           const sheetsService = new SheetsService(googleAuth, spreadsheetId);
           
+          // Tính tổng tương tác tích lũy của kênh này từ Firestore
+          let totalReactions = 0;
+          let totalComments = 0;
+          let totalShares = 0;
+          try {
+            const allSnapsSnap = await adminDb.collection('dailySnapshots').where('channelId', '==', channel.id).get();
+            const latestPostSnaps = new Map<string, DailySnapshot>();
+            allSnapsSnap.docs.forEach(doc => {
+              const s = doc.data() as DailySnapshot;
+              const curr = latestPostSnaps.get(s.postKey);
+              if (!curr || s.snapshotDate > curr.snapshotDate) {
+                latestPostSnaps.set(s.postKey, s);
+              }
+            });
+            // Hợp nhất với các snapshot vừa lấy được trong lần sync này
+            snapshotsToUpsert.forEach(s => {
+              const curr = latestPostSnaps.get(s.postKey);
+              if (!curr || s.snapshotDate > curr.snapshotDate) {
+                latestPostSnaps.set(s.postKey, s);
+              }
+            });
+            latestPostSnaps.forEach(s => {
+              totalReactions += s.reactions || 0;
+              totalComments += s.comments || 0;
+              totalShares += s.shares || 0;
+            });
+          } catch (err: any) {
+            console.error('Lỗi tính tổng lượng tương tác của kênh cho Sheets:', err.message);
+          }
+          const totalEngagement = totalReactions + totalComments + totalShares;
+
           // Upsert Kênh MXH dòng hiện tại
           const channelRow = {
             channel_id: channel.id,
@@ -153,25 +184,40 @@ export class SyncEngine {
             updated_at: new Date().toISOString(),
             last_sync_at: updatedChannelFields.lastSyncAt,
             last_sync_status: updatedChannelFields.lastSyncStatus,
-            total_posts: updatedChannelFields.totalPosts
+            total_posts: updatedChannelFields.totalPosts,
+            reactions: totalReactions,
+            comments: totalComments,
+            shares: totalShares,
+            total_engagement: totalEngagement
           };
           await sheetsService.upsertRecords('KENH_MXH', 'channel_id', [channelRow]);
 
           // Upsert Bài viết
           if (postsToUpsert.length > 0) {
-            const sheetPosts = postsToUpsert.map(p => ({
-              post_key: p.postKey,
-              platform: p.platform,
-              channel_id: p.channelId,
-              external_post_id: p.externalPostId,
-              post_url: p.postUrl,
-              post_type: p.postType,
-              message: p.message,
-              published_at: p.publishedAt,
-              imported_at: p.importedAt,
-              updated_at: p.updatedAt,
-              is_deleted: p.isDeleted
-            }));
+            const sheetPosts = postsToUpsert.map(p => {
+              const snap = snapshotsToUpsert.find(s => s.postKey === p.postKey);
+              return {
+                post_key: p.postKey,
+                platform: p.platform,
+                channel_id: p.channelId,
+                external_post_id: p.externalPostId,
+                post_url: p.postUrl,
+                post_type: p.postType,
+                message: p.message,
+                published_at: p.publishedAt,
+                imported_at: p.importedAt,
+                updated_at: p.updatedAt,
+                is_deleted: p.isDeleted,
+                reactions: snap?.reactions || 0,
+                likes: snap?.likes || 0,
+                comments: snap?.comments || 0,
+                shares: snap?.shares || 0,
+                views: snap?.views || 0,
+                reach: snap?.reach || 0,
+                total_engagement: snap?.totalEngagement || 0,
+                engagement_rate: snap?.engagementRate || 0
+              };
+            });
             await sheetsService.upsertRecords('BAI_DANG', 'post_key', sheetPosts);
           }
 
