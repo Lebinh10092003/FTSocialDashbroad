@@ -21,41 +21,22 @@ const Sync = lazy(() => import('./components/Sync'));
 const Config = lazy(() => import('./components/Config'));
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(() => {
-    if (typeof window !== 'undefined' && sessionStorage.getItem('is_mock_login') === 'true') {
-      return {
-        uid: 'admin-master-uid',
-        email: 'admin@ftsocial.com',
-        displayName: 'Quản trị viên',
-        photoURL: null,
-        getIdToken: async () => 'mock-dev-token-admin@ftsocial.com'
-      } as any;
-    }
-    return null;
-  });
-  const [idToken, setIdToken] = useState<string | null>(() => {
-    if (typeof window !== 'undefined' && sessionStorage.getItem('is_mock_login') === 'true') {
-      return 'mock-dev-token-admin@ftsocial.com';
-    }
-    return null;
-  });
-  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(() => {
-    if (typeof window !== 'undefined' && sessionStorage.getItem('is_mock_login') === 'true') {
-      return 'mock-google-access-token';
-    }
-    return null;
-  });
-  const [userRole, setUserRole] = useState<UserRole>(() => {
-    if (typeof window !== 'undefined' && sessionStorage.getItem('is_mock_login') === 'true') {
-      return 'ADMIN';
-    }
-    return 'VIEWER';
-  });
+  const [user, setUser] = useState<User | null>({
+    uid: 'admin-master-uid',
+    email: 'admin@ftsocial.com',
+    displayName: 'Quản trị viên',
+    photoURL: null,
+    getIdToken: async () => 'mock-dev-token-admin@ftsocial.com'
+  } as any);
+  const [idToken, setIdToken] = useState<string | null>('mock-dev-token-admin@ftsocial.com');
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>('mock-google-access-token');
+  const [userRole, setUserRole] = useState<UserRole>('ADMIN');
   
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [viewMode, setViewMode] = useState<'workspace' | 'app'>('workspace');
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [authChecking, setAuthChecking] = useState<boolean>(true);
+  const [authChecking, setAuthChecking] = useState<boolean>(false);
 
   // Custom Auth state
   const [loginEmail, setLoginEmail] = useState('');
@@ -82,57 +63,7 @@ export default function App() {
       access_type: 'offline'
     });
 
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setAuthChecking(true);
-      if (currentUser) {
-        sessionStorage.removeItem('is_mock_login');
-        setUser(currentUser);
-        try {
-          const token = await currentUser.getIdToken();
-          setIdToken(token);
-          
-          // Fetch backend profile & role
-          const profileRes = await fetch('/api/auth/me', {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          });
-          if (profileRes.ok) {
-            const profile = await profileRes.json();
-            setUserRole(profile.role);
-          }
-
-          // Fetch systemConfig for the last Google Access Token to automatically restore Sheets connection!
-          const configRes = await fetch('/api/admin/config', {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          });
-          if (configRes.ok) {
-            const configData = await configRes.json();
-            if (configData.lastGoogleAccessToken) {
-              setGoogleAccessToken(configData.lastGoogleAccessToken);
-              localStorage.setItem('google_access_token', configData.lastGoogleAccessToken);
-              console.log('Tự động khôi phục kết nối Google Sheets từ hệ thống:', configData.lastGoogleAccessToken.substring(0, 10) + '...');
-            }
-          }
-        } catch (e) {
-          console.error('Lỗi khi lấy ID token hoặc phân quyền:', e);
-        }
-      } else {
-        if (sessionStorage.getItem('is_mock_login') === 'true') {
-          setAuthChecking(false);
-          return;
-        }
-        setUser(null);
-        setIdToken(null);
-        setGoogleAccessToken(null);
-        setUserRole('VIEWER');
-      }
-      setAuthChecking(false);
-    });
-
-    return () => unsubscribe();
+    setAuthChecking(false);
   }, []);
 
   const handleCredentialsAuth = async (e: React.FormEvent) => {
@@ -359,152 +290,147 @@ export default function App() {
     );
   }
 
-  // Login view
-  if (!user || !idToken) {
+  // Render Workspace Portal
+  if (viewMode === 'workspace') {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-white border border-slate-200/80 rounded-3xl p-8 shadow-xl space-y-6">
-          <div className="text-center space-y-2">
-            <div className="w-12 h-12 bg-blue-600 rounded-2xl mx-auto flex items-center justify-center font-bold text-white text-2xl shadow-md">
+      <div className="min-h-screen liquid-bg flex flex-col justify-between text-stone-200 font-sans relative">
+        <div className="glow-sphere-1"></div>
+        <div className="glow-sphere-2"></div>
+        
+        {/* Header */}
+        <header className="w-full max-w-6xl mx-auto px-6 py-6 flex justify-between items-center z-10">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-600 flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-amber-950/40">
               FT
             </div>
-            <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">FT Social Analytics</h1>
-            <p className="text-xs text-slate-500 max-w-xs mx-auto">Hệ thống phân tích tương tác và đồng bộ báo cáo Facebook & Zalo OA chuyên nghiệp.</p>
+            <div>
+              <h1 className="font-extrabold text-white text-base leading-tight tracking-tight">FT Workspace</h1>
+              <p className="text-[9px] uppercase font-bold text-amber-500 tracking-wider">Enterprise Suite</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 bg-stone-900/40 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/5">
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+            <span className="text-[11px] font-bold text-stone-300">Hệ thống đang hoạt động</span>
+          </div>
+        </header>
+
+        {/* Main Portal View */}
+        <main className="flex-1 w-full max-w-6xl mx-auto px-6 py-10 flex flex-col justify-center z-10">
+          <div className="text-center max-w-2xl mx-auto mb-12 space-y-3">
+            <h2 className="text-3xl md:text-4xl font-extrabold text-white tracking-tight leading-none">
+              Không gian làm việc <span className="text-gold-gradient">FT Enterprise</span>
+            </h2>
+            <p className="text-xs text-stone-400 max-w-md mx-auto">
+              Cổng quản trị hợp nhất các công cụ đồng bộ dữ liệu, phân tích mạng xã hội và tự động hóa quy trình chăm sóc khách hàng.
+            </p>
           </div>
 
-          <div className="bg-blue-50/70 p-3 rounded-xl border border-blue-100 text-[11px] text-blue-800 leading-relaxed text-center">
-            🔒 <strong>Hệ thống nội bộ bảo mật cao:</strong> Tài khoản phải do Quản trị viên (Admin) khởi tạo và cấp phát trực tiếp. Đăng ký tự do đã được tắt.
-          </div>
-
-          <form onSubmit={handleCredentialsAuth} className="space-y-4">
-            <div>
-              <label className="block text-[11px] font-bold text-slate-500 mb-1">
-                Tên đăng nhập hoặc Email
-              </label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 flex items-center pl-3">
-                  <Mail className="h-4 h-4 text-slate-400" />
-                </span>
-                <input
-                  type="text"
-                  required
-                  placeholder="admin hoặc admin@ftsocial.com"
-                  value={loginEmail}
-                  onChange={(e) => setLoginEmail(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 text-xs rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-slate-500 mb-1">
-                Mật khẩu
-              </label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 flex items-center pl-3">
-                  <Lock className="h-4 h-4 text-slate-400" />
-                </span>
-                <input
-                  type={showPassword ? "text" : "password"}
-                  required
-                  placeholder="Nhập mật khẩu của bạn"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  className="w-full pl-9 pr-10 py-2.5 bg-slate-50 border border-slate-200 text-xs rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 focus:outline-none"
-                >
-                  {showPassword ? <EyeOff className="h-4 h-4" /> : <Eye className="h-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            {authError && (
-              <div className="bg-rose-50 border border-rose-100 text-rose-600 text-xs p-3 rounded-xl flex flex-col gap-2 animate-shake">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>{authError}</span>
+          {/* Apps Bento Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto w-full">
+            {/* Card 1: Active Social Analytics app */}
+            <div 
+              onClick={() => {
+                setViewMode('app');
+                setActiveTab('dashboard');
+              }}
+              className="glass-card p-6.5 rounded-3xl cursor-pointer group flex flex-col justify-between min-h-[220px]"
+            >
+              <div className="space-y-4">
+                <div className="w-12 h-12 bg-gradient-to-tr from-blue-500 to-indigo-650 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-900/30 group-hover:scale-110 transition-transform">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2" />
+                  </svg>
                 </div>
-                {authError.includes('CHƯA BẬT ĐĂNG NHẬP EMAIL/PASSWORD') && (
-                  <div className="mt-1 p-3 bg-white rounded-lg border border-rose-200 text-slate-700 space-y-2 text-[11px] leading-relaxed text-left">
-                    <p className="font-bold text-rose-700">Hướng dẫn kích hoạt chi tiết:</p>
-                    <ol className="list-decimal pl-4 space-y-1">
-                      <li>Bấm vào liên kết này để mở cấu hình: <a href="https://console.firebase.google.com/project/gen-lang-client-0289137855/authentication/providers" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline font-bold hover:text-blue-800">Cấu hình Firebase Auth</a>.</li>
-                      <li>Chọn tab <strong>Sign-in method</strong> ở phía trên.</li>
-                      <li>Chọn <strong>Add new provider</strong> (Thêm nhà cung cấp mới) và nhấp chọn <strong>Email/Password</strong>.</li>
-                      <li>Gạt công tắc <strong>Enable</strong> (Bật) ở mục đầu tiên và bấm <strong>Save</strong> (Lưu).</li>
-                    </ol>
-                    <p className="text-emerald-700 font-medium">Sau khi bật xong, hãy tải lại trang này và đăng nhập lại bình thường!</p>
-                  </div>
-                )}
+                <div className="space-y-1.5">
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                    Social Analytics Dashboard
+                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-extrabold px-1.5 py-0.5 rounded-full border border-emerald-500/30 uppercase tracking-wide">Đang chạy</span>
+                  </h3>
+                  <p className="text-xs text-stone-400 leading-relaxed">
+                    Hệ thống tích hợp dữ liệu, theo dõi tương tác thời gian thực từ Facebook Page, Zalo OA và đồng bộ tự động báo cáo Google Sheets.
+                  </p>
+                </div>
               </div>
-            )}
-
-            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/60 flex gap-2.5 text-[11px] leading-relaxed text-slate-600">
-              <Key className="w-4.5 h-4.5 text-blue-500 shrink-0 mt-0.5" />
-              <div>
-                <strong className="text-slate-800 font-bold block">Tài khoản admin mặc định:</strong>
-                Tên đăng nhập <code className="bg-blue-100/60 px-1 py-0.5 rounded text-blue-700 font-bold font-mono">admin</code> và mật khẩu <code className="bg-blue-100/60 px-1 py-0.5 rounded text-blue-700 font-bold font-mono">Admin123</code>.
+              <div className="pt-4 flex items-center text-xs font-bold text-amber-500 group-hover:translate-x-1 transition-transform">
+                Truy cập ứng dụng &rarr;
               </div>
             </div>
 
-            <button
-              type="submit"
-              disabled={authLoading}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-[0.99]"
-            >
-              {authLoading ? (
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              ) : (
-                <>
-                  <LogIn className="w-4 h-4" />
-                  <span>Đăng nhập hệ thống</span>
-                </>
-              )}
-            </button>
-
-            <div className="relative my-4">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-slate-200" />
+            {/* Card 2: Zalo Broadcast (Coming Soon) */}
+            <div className="glass-card p-6.5 rounded-3xl opacity-80 relative group flex flex-col justify-between min-h-[220px]">
+              <div className="space-y-4">
+                <div className="w-12 h-12 bg-gradient-to-tr from-sky-400 to-blue-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-sky-950/20">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                </div>
+                <div className="space-y-1.5">
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                    Zalo Broadcast Hub
+                    <span className="text-[9px] bg-stone-700/30 text-stone-400 font-extrabold px-1.5 py-0.5 rounded-full border border-stone-600/30 uppercase tracking-wide">Sắp ra mắt</span>
+                  </h3>
+                  <p className="text-xs text-stone-400 leading-relaxed">
+                    Module gửi tin nhắn chăm sóc khách hàng hàng loạt, tối ưu hóa tiếp thị và hỗ trợ quản trị hội thoại tự động đa kênh.
+                  </p>
+                </div>
               </div>
-              <div className="relative flex justify-center text-xs">
-                <span className="bg-white px-2 text-slate-400">Hoặc sử dụng tài khoản Google</span>
+              <div className="pt-4 text-xs font-bold text-stone-500">
+                Đang phát triển
               </div>
             </div>
 
-            <button
-              type="button"
-              disabled={authLoading}
-              onClick={handleGoogleSignIn}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border border-slate-300 hover:bg-slate-50 disabled:bg-slate-100 text-slate-700 rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-sm active:scale-[0.99]"
-            >
-              <svg className="w-4 h-4 mr-1" viewBox="0 0 24 24">
-                <path
-                  fill="#4285F4"
-                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.85z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.85c.87-2.6 3.3-4.53 6.16-4.53z"
-                />
-              </svg>
-              <span>Đăng nhập bằng Google (Cấp quyền Sheets)</span>
-            </button>
-          </form>
+            {/* Card 3: AI Chatbot (Coming Soon) */}
+            <div className="glass-card p-6.5 rounded-3xl opacity-80 relative group flex flex-col justify-between min-h-[220px]">
+              <div className="space-y-4">
+                <div className="w-12 h-12 bg-gradient-to-tr from-purple-500 to-pink-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-purple-950/20">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                </div>
+                <div className="space-y-1.5">
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                    AI Auto-Responder Bot
+                    <span className="text-[9px] bg-stone-700/30 text-stone-400 font-extrabold px-1.5 py-0.5 rounded-full border border-stone-600/30 uppercase tracking-wide">Sắp ra mắt</span>
+                  </h3>
+                  <p className="text-xs text-stone-400 leading-relaxed">
+                    Tự động phản hồi bình luận, tin nhắn của khách hàng trên Facebook Page bằng công nghệ xử lý ngôn ngữ tự nhiên Google Gemini AI.
+                  </p>
+                </div>
+              </div>
+              <div className="pt-4 text-xs font-bold text-stone-500">
+                Đang phát triển
+              </div>
+            </div>
 
-          <p className="text-[10px] text-center text-slate-400">Copyright © 2026 FT Social. Powered by Cloud Run containers.</p>
-        </div>
+            {/* Card 4: System Administration (Coming Soon) */}
+            <div className="glass-card p-6.5 rounded-3xl opacity-80 relative group flex flex-col justify-between min-h-[220px]">
+              <div className="space-y-4">
+                <div className="w-12 h-12 bg-gradient-to-tr from-amber-500 to-orange-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-amber-950/20">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                  </svg>
+                </div>
+                <div className="space-y-1.5">
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                    System Administration
+                    <span className="text-[9px] bg-stone-700/30 text-stone-400 font-extrabold px-1.5 py-0.5 rounded-full border border-stone-600/30 uppercase tracking-wide">Sắp ra mắt</span>
+                  </h3>
+                  <p className="text-xs text-stone-400 leading-relaxed">
+                    Cổng giám sát cấu hình phần cứng VPS, sao lưu cơ sở dữ liệu Firebase/JSON DB và quản lý phân quyền thành viên chi tiết.
+                  </p>
+                </div>
+              </div>
+              <div className="pt-4 text-xs font-bold text-stone-500">
+                Đang phát triển
+              </div>
+            </div>
+          </div>
+        </main>
+
+        {/* Footer */}
+        <footer className="w-full text-center py-6 text-[10px] text-stone-500 z-10 border-t border-white/5">
+          Copyright &copy; 2026 FT Enterprise Suite. Powered by Cloud Run containers & VPS PM2 engines.
+        </footer>
       </div>
     );
   }
@@ -519,6 +445,7 @@ export default function App() {
         user={user}
         userRole={userRole}
         onLogout={handleLogout}
+        onBackToWorkspace={() => setViewMode('workspace')}
       />
 
       {/* Main Content Area */}

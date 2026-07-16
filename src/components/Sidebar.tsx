@@ -6,7 +6,8 @@ import {
   RefreshCw, 
   Settings, 
   LogOut,
-  UserCheck
+  UserCheck,
+  ArrowLeft
 } from 'lucide-react';
 import { UserRole } from '../types';
 
@@ -16,9 +17,10 @@ interface SidebarProps {
   user: any;
   userRole: UserRole;
   onLogout: () => void;
+  onBackToWorkspace: () => void;
 }
 
-export default function Sidebar({ activeTab, setActiveTab, user, userRole, onLogout }: SidebarProps) {
+export default function Sidebar({ activeTab, setActiveTab, user, userRole, onLogout, onBackToWorkspace }: SidebarProps) {
   const menuItems = [
     { id: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
     { id: 'media', label: 'Tổng hợp truyền thông', icon: Radio },
@@ -38,6 +40,17 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, onLog
           <h1 className="font-extrabold text-slate-900 text-sm leading-tight tracking-tight">FT Social</h1>
           <p className="text-[9px] uppercase font-extrabold text-blue-600 tracking-widest mt-0.5">Analytics Suite</p>
         </div>
+      </div>
+
+      {/* Back to Workspace button */}
+      <div className="px-4.5 pt-4">
+        <button
+          onClick={onBackToWorkspace}
+          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200/50 transition-all cursor-pointer shadow-sm active:scale-[0.99]"
+        >
+          <ArrowLeft className="w-4 h-4 text-slate-500" />
+          <span>Quay lại Workspace</span>
+        </button>
       </div>
 
       {/* Navigation menu items */}

@@ -95,6 +95,51 @@ https://YOUR_BACKEND_DOMAIN/api/health
 
 Backend cần được phép truy cập công khai ở tầng HTTP vì frontend GitHub Pages phải gọi được API. Quyền truy cập dữ liệu vẫn được kiểm soát bằng Firebase ID token và role ADMIN/VIEWER trong backend.
 
+## Triển khai lên VPS chỉ bằng 1 câu lệnh (1-Click Deploy)
+
+Hệ thống hỗ trợ cơ chế deploy tự động cực kỳ nhanh chóng từ máy local lên VPS thông qua giao thức SSH & SFTP bảo mật. Toàn bộ quy trình từ build, đóng gói, upload, giải nén, cài đặt dependency và khởi chạy PM2 trên VPS sẽ được thực thi qua **1 câu lệnh duy nhất**.
+
+Đặc biệt, hệ thống được tích hợp **cơ chế tự động phát hiện và chuyển cổng khi bị chiếm**. Nếu cổng mặc định (như 3000 hoặc 5174) đang có dự án khác trên VPS sử dụng, server sẽ tự động tìm kiếm và lắng nghe ở cổng trống tiếp theo (ví dụ: 5175, 5176...), đảm bảo không ảnh hưởng đến các dự án khác. Sau khi deploy thành công, terminal local sẽ in ra chính xác địa chỉ IP và cổng đang hoạt động của ứng dụng.
+
+### Bước 1: Cấu hình thông tin VPS
+Mở file `.env` ở thư mục gốc và điền các thông tin VPS của bạn ở cuối file:
+
+```env
+# IP hoặc domain của VPS
+DEPLOY_HOST="123.45.67.89"
+# Cổng SSH của VPS (mặc định là 22)
+DEPLOY_PORT="22"
+# Tài khoản SSH (thường là root)
+DEPLOY_USER="root"
+# Mật khẩu SSH (để trống nếu dùng SSH Key)
+DEPLOY_PASSWORD="your_vps_ssh_password"
+# Đường dẫn tới SSH Private Key ở local (để trống nếu dùng mật khẩu)
+DEPLOY_KEY_PATH=""
+# Thư mục triển khai ứng dụng trên VPS
+DEPLOY_PATH="/var/www/ft-social-dashboard"
+```
+
+### Bước 2: Thực thi Deploy
+
+Bạn có thể chạy deploy trực tiếp bằng 1 câu lệnh tùy theo hệ điều hành:
+
+- **Trên Windows**: 
+  Chỉ cần click đúp chuột vào file [deploy.bat](deploy.bat) ở thư mục gốc (hoặc mở CMD/PowerShell gõ `deploy.bat`).
+  
+- **Trên Linux / macOS**:
+  Mở terminal tại thư mục gốc và chạy:
+  ```bash
+  chmod +x deploy.sh
+  ./deploy.sh
+  ```
+  
+- **Hoặc sử dụng npm**:
+  ```bash
+  npm run deploy
+  ```
+
+Sau khi chạy, ứng dụng sẽ được build và tự động tải lên VPS. Script sẽ tự động quét log khởi động trên VPS và hiển thị đường dẫn URL truy cập chứa cổng rảnh thực tế cho bạn trên màn hình máy local.
+
 ## Kết nối GitHub Pages với backend
 
 Frontend GitHub Pages được build tĩnh, nên `VITE_API_URL` phải được cung cấp tại thời điểm build.

@@ -8,7 +8,8 @@
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "deploy": "node scripts/deploy.js"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -37,6 +38,9 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "ssh2": "^1.15.0",
+    "archiver": "^7.0.1",
+    "@types/archiver": "^6.0.2"
   }
 }

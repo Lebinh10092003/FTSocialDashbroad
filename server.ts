@@ -5,6 +5,7 @@ import { createServer as createViteServer } from 'vite';
 import { apiRouter } from './server/routes';
 import { SyncEngine } from './server/sync';
 import { adminDb } from './server/firebase';
+import net from 'net';
 
 function setupAutoSyncScheduler() {
   let lastCronRunDay = '';
@@ -50,10 +51,35 @@ function setupAutoSyncScheduler() {
   }, 60000); // Kiểm tra mỗi phút
 }
 
+function isPortAvailable(port: number, host: string = '0.0.0.0'): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => {
+      resolve(false);
+    });
+    server.once('listening', () => {
+      server.close(() => {
+        resolve(true);
+      });
+    });
+    server.listen(port, host);
+  });
+}
+
+async function findAvailablePort(startPort: number, host: string = '0.0.0.0'): Promise<number> {
+  let port = startPort;
+  while (!(await isPortAvailable(port, host))) {
+    console.log(`[PortCheck] Cổng ${port} đã bị chiếm. Đang kiểm tra cổng ${port + 1}...`);
+    port++;
+  }
+  return port;
+}
+
 async function startServer() {
   const app = express();
   const parsedPort = Number.parseInt(process.env.PORT || '3000', 10);
-  const PORT = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : 3000;
+  const requestedPort = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : 3000;
+  const PORT = await findAvailablePort(requestedPort, '0.0.0.0');
 
   // Allow the deployed GitHub Pages origin (or another explicitly configured
   // frontend origin) to call this API. Local development remains permissive
