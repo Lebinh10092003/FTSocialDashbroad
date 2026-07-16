@@ -35,6 +35,19 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Keep the dashboard legible while fitting the KPI, trend and breakdown cards
+   within a standard laptop viewport. */
+.text-\[8px\] { font-size: 0.625rem !important; }
+.text-\[9px\] { font-size: 0.6875rem !important; }
+.text-\[10px\] { font-size: 0.75rem !important; }
+.text-\[11px\] { font-size: 0.8125rem !important; }
+.text-xs { font-size: 0.8125rem !important; line-height: 1.4 !important; }
+.text-sm { font-size: 0.875rem !important; line-height: 1.4 !important; }
+.text-base { font-size: 1rem !important; }
+.text-lg { font-size: 1.125rem !important; }
+.text-xl { font-size: 1.25rem !important; }
+.text-2xl { font-size: 1.5rem !important; }
+
 /* Card hover glow & transitions */
 .premium-card {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);

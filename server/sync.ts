@@ -121,10 +121,20 @@ export class SyncEngine {
       }
 
       // 5. Cập nhật thông tin kênh
+      // Count persisted posts by their unique key instead of adding the number
+      // received in every sync. This keeps channel totals aligned with reports.
+      const storedPostsSnap = await adminDb.collection('posts').where('channelId', '==', channel.id).get();
+      let followersCount = channel.followersCount || 0;
+      try {
+        followersCount = await provider.getFollowers(channelId, channel.externalId);
+      } catch (followersError: any) {
+        console.warn(`Could not load followers for channel ${channel.id}:`, followersError.message);
+      }
       const updatedChannelFields = {
         lastSyncAt: new Date().toISOString(),
         lastSyncStatus: 'success',
-        totalPosts: (channel.totalPosts || 0) + recordsInserted
+        totalPosts: storedPostsSnap.docs.length,
+        followersCount
       };
       await channelRef.update(updatedChannelFields);
 
@@ -185,6 +195,7 @@ export class SyncEngine {
             last_sync_at: updatedChannelFields.lastSyncAt,
             last_sync_status: updatedChannelFields.lastSyncStatus,
             total_posts: updatedChannelFields.totalPosts,
+            followers_count: updatedChannelFields.followersCount,
             reactions: totalReactions,
             comments: totalComments,
             shares: totalShares,

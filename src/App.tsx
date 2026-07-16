@@ -15,10 +15,9 @@ import { ShieldAlert, AlertTriangle, Key, Layers, Lock, Mail, UserPlus, LogIn, A
 import Sidebar from './components/Sidebar';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
-const Channels = lazy(() => import('./components/Channels'));
+const MediaSummary = lazy(() => import('./components/MediaSummary'));
 const Posts = lazy(() => import('./components/Posts'));
 const Sync = lazy(() => import('./components/Sync'));
-const Reports = lazy(() => import('./components/Reports'));
 const Config = lazy(() => import('./components/Config'));
 
 export default function App() {
@@ -523,14 +522,14 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto px-8 py-8 md:px-12">
+      <main className="flex-1 overflow-y-auto px-5 py-6 md:px-7 md:py-7">
         {loading ? (
           <div className="flex flex-col items-center justify-center h-full space-y-2">
             <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
             <p className="text-xs font-semibold text-slate-400">Đang đồng bộ danh mục kênh...</p>
           </div>
         ) : (
-          <div className="max-w-7xl mx-auto">
+          <div className="max-w-[1600px] mx-auto">
             <Suspense fallback={
               <div className="flex flex-col items-center justify-center h-full py-20 space-y-3">
                 <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
@@ -544,15 +543,7 @@ export default function App() {
                   channels={channels}
                 />
               )}
-              {activeTab === 'channels' && (
-                <Channels 
-                  idToken={idToken}
-                  googleAccessToken={googleAccessToken}
-                  channels={channels}
-                  userRole={userRole}
-                  onRefreshChannels={handleRefreshChannels}
-                />
-              )}
+              {activeTab === 'media' && <MediaSummary idToken={idToken} />}
               {activeTab === 'posts' && (
                 <Posts 
                   idToken={idToken}
@@ -567,12 +558,6 @@ export default function App() {
                   userRole={userRole}
                   onRefreshChannels={handleRefreshChannels}
                   onConnectGoogle={handleConnectGoogle}
-                />
-              )}
-              {activeTab === 'reports' && (
-                <Reports 
-                  idToken={idToken}
-                  channels={channels}
                 />
               )}
               {activeTab === 'config' && (

@@ -10,6 +10,9 @@ const originalFetch = window.fetch.bind(window);
 const configuredApiBase = String((import.meta as any).env?.VITE_API_URL || '')
   .trim()
   .replace(/\/$/, '');
+const isGitHubPagesHost =
+  window.location.hostname === 'github.io' || window.location.hostname.endsWith('.github.io');
+const useSameOriginBackend = !configuredApiBase && !isGitHubPagesHost;
 
 function createBackendUnavailableResponse(): Response {
   return new Response(
@@ -44,7 +47,10 @@ window.fetch = async (input, init) => {
   const isSameOriginApiCall = url.startsWith(`${window.location.origin}/api/`);
   const isApiCall = isRelativeApiCall || isSameOriginApiCall;
 
-  if (isApiCall && !configuredApiBase) {
+  // Local development and a production Docker deployment serve the frontend
+  // and API from the same Express origin. GitHub Pages is static-only, so it
+  // still requires VITE_API_URL to point to the separately deployed backend.
+  if (isApiCall && !configuredApiBase && !useSameOriginBackend) {
     return createBackendUnavailableResponse();
   }
 

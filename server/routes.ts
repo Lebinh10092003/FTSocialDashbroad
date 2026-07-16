@@ -4,6 +4,7 @@ import { SyncEngine } from './sync';
 import { SheetsService, getGoogleSheetsAuth } from './sheets';
 import { Channel, Post, DailySnapshot, ApiLog, UserProfile, UserRole } from '../src/types';
 import { v4 as uuidv4 } from 'uuid';
+import * as XLSX from 'xlsx';
 
 export const apiRouter = Router();
 
@@ -197,7 +198,10 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
 
     // Lọc chỉ giữ lại dữ liệu của các kênh đang hoạt động (active)
     const activeChannelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
-    const channels = activeChannelsSnap.docs.map(doc => doc.data() as Channel);
+    let channels = activeChannelsSnap.docs.map(doc => doc.data() as Channel);
+    channels = channels.filter(channel =>
+      (!platform || channel.platform === platform) && (!channelId || channel.id === channelId),
+    );
     const activeChannelIds = new Set(channels.map(c => c.id));
     posts = posts.filter(p => activeChannelIds.has(p.channelId));
 
@@ -242,13 +246,15 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
       }
     });
 
+    const effectiveViews = (snapshot?: DailySnapshot) => snapshot?.views || snapshot?.impressions || snapshot?.reach || 0;
+
     const activePostKeys = new Set(posts.map(p => p.postKey));
     latestSnapshotsMap.forEach((snap, postKey) => {
       if (!activePostKeys.has(postKey)) return;
       reactions += snap.reactions || 0;
       comments += snap.comments || 0;
       shares += snap.shares || 0;
-      views += snap.views || 0;
+      views += effectiveViews(snap);
       reach += snap.reach || 0;
       impressions += snap.impressions || 0;
       clicks += snap.clicks || 0;
@@ -275,6 +281,7 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
       const curr = trendMap.get(dateStr) || { 
         date: dateStr, 
         engagement: 0, 
+        postsCount: 0,
         likes: 0, 
         comments: 0, 
         shares: 0, 
@@ -283,18 +290,20 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
       };
       
       curr.engagement += snap?.totalEngagement || 0;
+      curr.postsCount += 1;
       curr.likes += snap?.reactions || 0;
       curr.comments += snap?.comments || 0;
       curr.shares += snap?.shares || 0;
-      curr.views += snap?.views || 0;
+      curr.views += effectiveViews(snap);
       curr.reach += snap?.reach || 0;
       
       // Gán lượng riêng cho kênh này vào ngày này cho tất cả các chỉ số
       curr[chanName + '_engagement'] = (curr[chanName + '_engagement'] || 0) + (snap?.totalEngagement || 0);
+      curr[chanName + '_postsCount'] = (curr[chanName + '_postsCount'] || 0) + 1;
       curr[chanName + '_likes'] = (curr[chanName + '_likes'] || 0) + (snap?.reactions || 0);
       curr[chanName + '_comments'] = (curr[chanName + '_comments'] || 0) + (snap?.comments || 0);
       curr[chanName + '_shares'] = (curr[chanName + '_shares'] || 0) + (snap?.shares || 0);
-      curr[chanName + '_views'] = (curr[chanName + '_views'] || 0) + (snap?.views || 0);
+      curr[chanName + '_views'] = (curr[chanName + '_views'] || 0) + effectiveViews(snap);
       curr[chanName + '_reach'] = (curr[chanName + '_reach'] || 0) + (snap?.reach || 0);
       
       trendMap.set(dateStr, curr);
@@ -302,12 +311,22 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
 
     const trends = Array.from(trendMap.values()).map(point => {
       channels.forEach(c => {
-        const metrics = ['engagement', 'likes', 'comments', 'shares', 'views', 'reach'];
+        const metrics = ['engagement', 'postsCount', 'likes', 'comments', 'shares', 'views', 'reach', 'engagementRate'];
         metrics.forEach(m => {
           if (point[c.name + '_' + m] === undefined) {
             point[c.name + '_' + m] = 0;
           }
         });
+      });
+      point.engagementRate = point.reach > 0
+        ? Number(((point.engagement / point.reach) * 100).toFixed(2))
+        : 0;
+      channels.forEach(c => {
+        const channelEngagement = point[c.name + '_engagement'] || 0;
+        const channelReach = point[c.name + '_reach'] || 0;
+        point[c.name + '_engagementRate'] = channelReach > 0
+          ? Number(((channelEngagement / channelReach) * 100).toFixed(2))
+          : 0;
       });
       return point;
     }).sort((a, b) => a.date.localeCompare(b.date));
@@ -331,7 +350,7 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
       };
     });
 
-    // Top 10 bài viết
+    // 10 bài viết mới nhất, kèm thumbnail nếu provider cung cấp.
     const topPosts = posts.map(p => {
       const snap = latestSnapshotsMap.get(p.postKey);
       return {
@@ -340,8 +359,9 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
         likes: snap?.likes || 0,
         comments: snap?.comments || 0,
         shares: snap?.shares || 0,
+        views: effectiveViews(snap),
       };
-    }).sort((a, b) => b.engagement - a.engagement).slice(0, 10);
+    }).sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, 10);
 
     // Thời điểm đồng bộ gần nhất
     const lastSyncChannel = channels
@@ -356,7 +376,7 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
     });
 
     // Thống kê theo loại nội dung (ảnh, video, link...)
-    const typeStatsMap = new Map<string, { type: string; count: number; engagement: number }>();
+    const typeStatsMap = new Map<string, { type: string; count: number; views: number; engagement: number; engagementRate: number | null }>();
     posts.forEach(p => {
       const rawType = p.postType || 'Khác';
       const type = rawType.toLowerCase() === 'photo' ? 'Ảnh / Album' 
@@ -365,13 +385,18 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
                  : 'Khác';
       const snap = latestSnapshotsMap.get(p.postKey);
       const eng = snap?.totalEngagement || 0;
+      const viewsForType = effectiveViews(snap);
       
-      const curr = typeStatsMap.get(type) || { type, count: 0, engagement: 0 };
+      const curr = typeStatsMap.get(type) || { type, count: 0, views: 0, engagement: 0, engagementRate: null };
       curr.count += 1;
+      curr.views += viewsForType;
       curr.engagement += eng;
       typeStatsMap.set(type, curr);
     });
-    const typeStats = Array.from(typeStatsMap.values());
+    const typeStats = Array.from(typeStatsMap.values()).map(stat => ({
+      ...stat,
+      engagementRate: stat.views > 0 ? Number(((stat.engagement / stat.views) * 100).toFixed(2)) : null,
+    }));
 
     // Thống kê theo nền tảng (Facebook vs Zalo)
     const platformStatsMap = new Map<string, { platform: string; count: number; engagement: number }>();
@@ -398,6 +423,8 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
         reach,
         totalEngagement,
         engagementRate,
+        followers: channels.reduce((total, channel) => total + Number(channel.followersCount || 0), 0),
+        followersAvailable: channels.some(channel => channel.followersCount !== undefined),
       },
       trends,
       channelStats,
@@ -421,9 +448,119 @@ apiRouter.get('/channels', authenticateUser, async (req: AuthenticatedRequest, r
   try {
     const snap = await adminDb.collection('channels').get();
     const channels = snap.docs.map(doc => doc.data() as Channel);
-    res.json(channels);
+    const postsSnap = await adminDb.collection('posts').get();
+    const postCounts = new Map<string, number>();
+    postsSnap.docs.forEach(doc => {
+      const post = doc.data() as Post;
+      postCounts.set(post.channelId, (postCounts.get(post.channelId) || 0) + 1);
+    });
+    res.json(channels.map(channel => ({
+      ...channel,
+      totalPosts: postCounts.get(channel.id) || 0,
+    })));
   } catch (error: any) {
     res.status(500).json({ error: 'Lỗi khi tải danh sách kênh: ' + error.message });
+  }
+});
+
+/**
+ * GET /api/media-summary - Bảng tổng hợp dùng số bài viết thực tế theo postKey,
+ * không dùng channel.totalPosts vì trường legacy này có thể từng bị cộng dồn qua nhiều lần sync.
+ */
+apiRouter.get('/media-summary', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const channelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
+    const channels = channelsSnap.docs.map(doc => doc.data() as Channel);
+    const activeChannelIds = new Set(channels.map(channel => channel.id));
+
+    const postsSnap = await adminDb.collection('posts').get();
+    const posts = postsSnap.docs
+      .map(doc => doc.data() as Post)
+      .filter(post => activeChannelIds.has(post.channelId));
+
+    const snapshotsSnap = await adminDb.collection('dailySnapshots').get();
+    const latestSnapshots = new Map<string, DailySnapshot>();
+    snapshotsSnap.docs.forEach(doc => {
+      const snapshot = doc.data() as DailySnapshot;
+      if (!activeChannelIds.has(snapshot.channelId)) return;
+      const current = latestSnapshots.get(snapshot.postKey);
+      if (!current || snapshot.snapshotDate > current.snapshotDate) {
+        latestSnapshots.set(snapshot.postKey, snapshot);
+      }
+    });
+
+    const summary = channels.map(channel => {
+      const channelPosts = posts.filter(post => post.channelId === channel.id);
+      const totalEngagement = channelPosts.reduce(
+        (total, post) => total + (latestSnapshots.get(post.postKey)?.totalEngagement || 0),
+        0,
+      );
+
+      return {
+        id: channel.id,
+        platform: channel.platform,
+        name: channel.name,
+        externalId: channel.externalId,
+        lastSyncAt: channel.lastSyncAt || null,
+        lastSyncStatus: channel.lastSyncStatus || null,
+        postsCount: channelPosts.length,
+        totalEngagement,
+      };
+    });
+
+    res.json(summary);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Không thể tải tổng hợp truyền thông: ' + error.message });
+  }
+});
+
+/**
+ * GET /api/reports/media-summary.xlsx - Xuất bảng tổng hợp truyền thông.
+ */
+apiRouter.get('/reports/media-summary.xlsx', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const channelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
+    const channels = channelsSnap.docs.map(doc => doc.data() as Channel);
+    const activeChannelIds = new Set(channels.map(channel => channel.id));
+    const postsSnap = await adminDb.collection('posts').get();
+    const posts = postsSnap.docs
+      .map(doc => doc.data() as Post)
+      .filter(post => activeChannelIds.has(post.channelId));
+    const snapshotsSnap = await adminDb.collection('dailySnapshots').get();
+    const latestSnapshots = new Map<string, DailySnapshot>();
+    snapshotsSnap.docs.forEach(doc => {
+      const snapshot = doc.data() as DailySnapshot;
+      const current = latestSnapshots.get(snapshot.postKey);
+      if (!current || snapshot.snapshotDate > current.snapshotDate) latestSnapshots.set(snapshot.postKey, snapshot);
+    });
+
+    const rows = channels.map((channel, index) => {
+      const channelPosts = posts.filter(post => post.channelId === channel.id);
+      const totalEngagement = channelPosts.reduce(
+        (total, post) => total + (latestSnapshots.get(post.postKey)?.totalEngagement || 0),
+        0,
+      );
+      return {
+        'STT': index + 1,
+        'Nền tảng': channel.platform === 'facebook' ? 'Facebook' : 'Zalo OA',
+        'Tên trang': channel.name,
+        'Số bài đăng': channelPosts.length,
+        'Tổng tương tác': totalEngagement,
+      };
+    });
+
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    worksheet['!cols'] = [{ wch: 8 }, { wch: 16 }, { wch: 48 }, { wch: 16 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Tong hop truyen thong');
+
+    const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
+    const filename = `tong_hop_truyen_thong_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Không thể xuất file Excel: ' + error.message });
   }
 });
 
@@ -611,17 +748,6 @@ apiRouter.post('/sync/all', authenticateUser, requireAdmin, async (req: Authenti
 /**
  * GET /api/sync/history - Lịch sử đồng bộ hệ thống
  */
-apiRouter.get('/api/sync/history', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
-  // Wait, let's also support `/api/sync/history` without prefix and with prefix
-  try {
-    const snap = await adminDb.collection('apiLogs').orderBy('startedAt', 'desc').limit(50).get();
-    const logs = snap.docs.map(doc => doc.data() as ApiLog);
-    res.json(logs);
-  } catch (error: any) {
-    res.status(500).json({ error: 'Lỗi tải lịch sử đồng bộ: ' + error.message });
-  }
-});
-// Alias route
 apiRouter.get('/sync/history', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const snap = await adminDb.collection('apiLogs').orderBy('startedAt', 'desc').limit(50).get();
@@ -1101,4 +1227,3 @@ apiRouter.get('/admin/users', authenticateUser, async (req: AuthenticatedRequest
     res.status(500).json({ error: 'Không thể tải danh sách thành viên: ' + error.message });
   }
 });
-

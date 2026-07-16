@@ -8,11 +8,13 @@ export interface SocialPostRaw {
   published_at?: string;
   permalink_url?: string;
   post_type?: string;
+  image_url?: string;
   rawMetrics?: any;
 }
 
 export interface SocialProvider {
   validateCredentials(channelId: string, externalId: string): Promise<boolean>;
+  getFollowers(channelId: string, externalId: string): Promise<number>;
   listPosts(channelId: string, externalId: string, since?: Date, until?: Date): Promise<SocialPostRaw[]>;
   getPostMetrics(channelId: string, externalId: string, posts: SocialPostRaw[]): Promise<any[]>;
   normalizePost(raw: SocialPostRaw, channelId: string): any;
@@ -107,9 +109,16 @@ export class FacebookProvider implements SocialProvider {
     }
   }
 
+  async getFollowers(channelId: string, externalId: string): Promise<number> {
+    const token = await this.getToken(externalId);
+    const url = `https://graph.facebook.com/${this.apiVersion}/${externalId}?fields=followers_count,fan_count&access_token=${token}`;
+    const data = await fetchWithRetry(url, { timeout: 5000 });
+    return Number(data.followers_count ?? data.fan_count ?? 0);
+  }
+
   async listPosts(channelId: string, externalId: string, since?: Date, until?: Date): Promise<SocialPostRaw[]> {
     const token = await this.getToken(externalId);
-    let url = `https://graph.facebook.com/${this.apiVersion}/${externalId}/posts?fields=id,message,created_time,permalink_url,attachments{media_type}&access_token=${token}&limit=100`;
+    let url = `https://graph.facebook.com/${this.apiVersion}/${externalId}/posts?fields=id,message,created_time,permalink_url,attachments{media_type,media,subattachments{media}}&access_token=${token}&limit=100`;
 
     if (since) {
       url += `&since=${Math.floor(since.getTime() / 1000)}`;
@@ -122,9 +131,10 @@ export class FacebookProvider implements SocialProvider {
       const data = await fetchWithRetry(url);
       const rawPosts = data.data || [];
       return rawPosts.map((p: any) => {
+        const attachment = p.attachments?.data?.[0];
         let postType = 'status';
-        if (p.attachments?.data?.[0]?.media_type) {
-          postType = p.attachments.data[0].media_type.toLowerCase();
+        if (attachment?.media_type) {
+          postType = attachment.media_type.toLowerCase();
         }
         return {
           id: p.id,
@@ -132,6 +142,7 @@ export class FacebookProvider implements SocialProvider {
           created_time: p.created_time,
           permalink_url: p.permalink_url,
           post_type: postType,
+          image_url: attachment?.media?.image?.src || attachment?.subattachments?.data?.[0]?.media?.image?.src,
         };
       });
     } catch (error: any) {
@@ -176,7 +187,7 @@ export class FacebookProvider implements SocialProvider {
         }
 
         // Lấy insights nếu có quyền (reach, impressions, clicks, video views)
-        const insightsUrl = `https://graph.facebook.com/${this.apiVersion}/${post.id}/insights?metric=post_impressions_unique,post_impressions,post_clicks&access_token=${token}`;
+        const insightsUrl = `https://graph.facebook.com/${this.apiVersion}/${post.id}/insights?metric=post_media_view,post_total_media_view_unique&access_token=${token}`;
         const insightsData = await fetchWithRetry(insightsUrl, { timeout: 4000 }).catch(err => {
           postMetrics.metadata.insights_unavailable = true;
           return null;
@@ -185,23 +196,20 @@ export class FacebookProvider implements SocialProvider {
         if (insightsData?.data) {
           for (const item of insightsData.data) {
             const val = item.values?.[0]?.value ?? 0;
-            if (item.name === 'post_impressions_unique') postMetrics.reach = val;
-            if (item.name === 'post_impressions') postMetrics.impressions = val;
-            if (item.name === 'post_clicks') postMetrics.clicks = val;
+            if (item.name === 'post_media_view') {
+              postMetrics.views = val;
+              postMetrics.impressions = val;
+            }
+            if (item.name === 'post_total_media_view_unique') postMetrics.reach = val;
           }
         } else {
           postMetrics.metadata.insights_unavailable = true;
         }
 
         // Thêm views nếu là video
-        if (post.post_type === 'video') {
-          const videoUrl = `https://graph.facebook.com/${this.apiVersion}/${post.id}/insights?metric=post_video_views&access_token=${token}`;
-          const videoData = await fetchWithRetry(videoUrl, { timeout: 4000 }).catch(() => null);
-          if (videoData?.data?.[0]) {
-            postMetrics.views = videoData.data[0].values?.[0]?.value ?? 0;
-          } else {
-            postMetrics.metadata.video_views_unavailable = true;
-          }
+        if (postMetrics.views === 0) {
+          postMetrics.views = postMetrics.impressions || postMetrics.reach || 0;
+          if (postMetrics.views > 0) postMetrics.metadata.views_source = postMetrics.impressions ? 'impressions' : 'reach';
         }
 
       } catch (e: any) {
@@ -221,6 +229,7 @@ export class FacebookProvider implements SocialProvider {
       channelId,
       externalPostId: raw.id,
       postUrl: raw.permalink_url || `https://facebook.com/${raw.id}`,
+      ...(raw.image_url ? { imageUrl: raw.image_url } : {}),
       postType: raw.post_type || 'status',
       message: raw.message || '',
       publishedAt: raw.created_time || new Date().toISOString(),
@@ -325,6 +334,16 @@ export class ZaloOAProvider implements SocialProvider {
     }
   }
 
+  async getFollowers(channelId: string, externalId: string): Promise<number> {
+    const token = await this.getToken(externalId);
+    const res = await fetch('https://openapi.zalo.me/v2.0/oa/getprofile', {
+      headers: { access_token: token, 'Content-Type': 'application/json' }
+    });
+    const data = await res.json();
+    if (data.error !== 0) throw new Error(`Zalo API error ${data.error}: ${data.message}`);
+    return Number(data.data?.followers ?? data.data?.follower ?? data.data?.followers_count ?? 0);
+  }
+
   async listPosts(channelId: string, externalId: string, since?: Date, until?: Date): Promise<SocialPostRaw[]> {
     const token = await this.getToken(externalId);
     // OA API to list broadcast/article posts
@@ -346,8 +365,9 @@ export class ZaloOAProvider implements SocialProvider {
           id: a.id,
           message: a.title + (a.description ? ` - ${a.description}` : ''),
           created_time: new Date(Number(a.create_date || Date.now())).toISOString(),
-          permalink_url: `https://oa.zalo.me/details/${a.id}`,
-          post_type: 'article',
+        permalink_url: `https://oa.zalo.me/details/${a.id}`,
+        post_type: 'article',
+        image_url: a.thumb || a.thumbnail || a.cover || undefined,
         }))
         .filter((p: any) => {
           const pubDate = new Date(p.created_time);
@@ -414,6 +434,7 @@ export class ZaloOAProvider implements SocialProvider {
       channelId,
       externalPostId: raw.id,
       postUrl: raw.permalink_url || `https://oa.zalo.me/details/${raw.id}`,
+      ...(raw.image_url ? { imageUrl: raw.image_url } : {}),
       postType: 'article',
       message: raw.message || '',
       publishedAt: raw.created_time || new Date().toISOString(),
@@ -469,6 +490,10 @@ export class MockProvider implements SocialProvider {
     return true;
   }
 
+  async getFollowers(channelId: string, externalId: string): Promise<number> {
+    return 0;
+  }
+
   async listPosts(channelId: string, externalId: string, since?: Date, until?: Date): Promise<SocialPostRaw[]> {
     return [
       {
@@ -494,7 +519,7 @@ export class MockProvider implements SocialProvider {
       reactions: 10 + index * 5,
       comments: 5 + index * 2,
       shares: 2 + index,
-      views: post.post_type === 'video' ? 120 : 0,
+      views: post.post_type === 'video' ? 120 : 150 + index * 80,
       reach: 100 + index * 50,
       impressions: 150 + index * 80,
       clicks: 8 + index * 3,

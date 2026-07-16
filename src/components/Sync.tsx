@@ -72,6 +72,9 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
       confirmText: 'Đồng bộ tất cả',
       type: 'info',
       onConfirm: async () => {
+        // Close before starting the long-running request. The result is shown
+        // in the sync page, so the confirmation dialog must not remain open.
+        setConfirmState(current => ({ ...current, isOpen: false }));
         setSyncingId('all');
         setSyncResult(null);
 

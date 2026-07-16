@@ -4,7 +4,6 @@ import {
   Radio, 
   FileText, 
   RefreshCw, 
-  BarChart3, 
   Settings, 
   LogOut,
   UserCheck
@@ -22,10 +21,9 @@ interface SidebarProps {
 export default function Sidebar({ activeTab, setActiveTab, user, userRole, onLogout }: SidebarProps) {
   const menuItems = [
     { id: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
-    { id: 'channels', label: 'Kênh mạng xã hội', icon: Radio },
+    { id: 'media', label: 'Tổng hợp truyền thông', icon: Radio },
     { id: 'posts', label: 'Bài đăng', icon: FileText },
     { id: 'sync', label: 'Đồng bộ dữ liệu', icon: RefreshCw },
-    { id: 'reports', label: 'Báo cáo hiệu suất', icon: BarChart3 },
     { id: 'config', label: 'Cấu hình hệ thống', icon: Settings },
   ];
 

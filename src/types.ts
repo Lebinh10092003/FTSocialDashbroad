@@ -13,6 +13,7 @@ export interface Channel {
   lastSyncAt?: string;
   lastSyncStatus?: 'success' | 'failed';
   totalPosts?: number;
+  followersCount?: number;
 }
 
 export interface Post {
@@ -21,6 +22,7 @@ export interface Post {
   channelId: string;
   externalPostId: string;
   postUrl: string;
+  imageUrl?: string;
   postType: string;
   message: string;
   publishedAt: string;
@@ -88,6 +90,8 @@ export interface DashboardData {
     reach: number;
     totalEngagement: number;
     engagementRate: number | null;
+    followers: number;
+    followersAvailable: boolean;
   };
   previousKpis?: {
     postsCount: number;
@@ -99,13 +103,17 @@ export interface DashboardData {
     totalEngagement: number;
     engagementRate: number | null;
   };
-  trends: {
+  trends: Array<{
     date: string;
     engagement: number;
+    postsCount: number;
+    views: number;
     reach: number;
     likes: number;
     comments: number;
-  }[];
+    shares: number;
+    [key: string]: string | number;
+  }>;
   channelStats: {
     channelName: string;
     platform: Platform;
@@ -121,7 +129,9 @@ export interface DashboardData {
   typeStats?: {
     type: string;
     count: number;
+    views: number;
     engagement: number;
+    engagementRate: number | null;
   }[];
   platformStats?: {
     platform: string;

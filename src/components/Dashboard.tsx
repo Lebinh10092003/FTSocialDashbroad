@@ -1,15 +1,34 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell
+import React, { useEffect, useState } from 'react';
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from 'recharts';
-import { 
-  Calendar, Layers, TrendingUp, Users, Award, RefreshCw, AlertCircle, 
-  Image, Video, Link as LinkIcon, FileText, CheckCircle2, ChevronRight, Filter
+import {
+  AlertCircle,
+  Calendar,
+  ChevronRight,
+  Eye,
+  Filter,
+  Image as ImageIcon,
+  Layers,
+  RefreshCw,
+  TrendingUp,
+  Users,
 } from 'lucide-react';
 import { Channel, DashboardData } from '../types';
 
-const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
-const PIE_COLORS = ['#3b82f6', '#14b8a6'];
+const COLORS = ['#2563eb', '#0f766e', '#f59e0b', '#ef4444', '#7c3aed', '#ec4899', '#0891b2', '#ea580c'];
 
 interface DashboardProps {
   idToken: string;
@@ -17,808 +36,442 @@ interface DashboardProps {
   channels: Channel[];
 }
 
+type TrendMetric = 'views' | 'engagement' | 'postsCount' | 'engagementRate';
+
+const getPastDateStr = (days: number) => {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toISOString().slice(0, 10);
+};
+
+const getTodayStr = () => new Date().toISOString().slice(0, 10);
+
 export default function Dashboard({ idToken, googleAccessToken, channels }: DashboardProps) {
-  const [platformFilter, setPlatformFilter] = useState<string>('all');
-  const [channelFilter, setChannelFilter] = useState<string>('all');
-  const [postTypeFilter, setPostTypeFilter] = useState<string>('all');
-  
-  // Default date range: Last 30 days
-  const getPastDateStr = (days: number) => {
-    const d = new Date();
-    d.setDate(d.getDate() - days);
-    return d.toISOString().split('T')[0];
-  };
-  const getTodayStr = () => new Date().toISOString().split('T')[0];
-
-  const [startDate, setStartDate] = useState<string>(getPastDateStr(30));
-  const [endDate, setEndDate] = useState<string>(getTodayStr());
-  const [datePreset, setDatePreset] = useState<string>('30days');
-
+  const [platformFilter, setPlatformFilter] = useState('all');
+  const [channelFilter, setChannelFilter] = useState('all');
+  const [postTypeFilter, setPostTypeFilter] = useState('all');
+  const [startDate, setStartDate] = useState(getPastDateStr(30));
+  const [endDate, setEndDate] = useState(getTodayStr());
+  const [datePreset, setDatePreset] = useState('30days');
   const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
-  // Interactive channel filter states for daily trend chart
-  const [selectedChannelsForTrend, setSelectedChannelsForTrend] = useState<Set<string>>(new Set());
-  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
-  
-  // Active metric tab (KPI Card selector)
-  const [activeMetric, setActiveMetric] = useState<'engagement' | 'postsCount' | 'reach' | 'engagementRate'>('engagement');
-  
-  // Toggle switch to show/hide total reference line
-  const [showTotalLine, setShowTotalLine] = useState<boolean>(true);
-
-  useEffect(() => {
-    if (data && data.channelStats) {
-      setSelectedChannelsForTrend(new Set(data.channelStats.map(s => s.channelName)));
-    }
-  }, [data]);
-
-  const toggleChannelTrend = (name: string) => {
-    const next = new Set(selectedChannelsForTrend);
-    if (next.has(name)) {
-      next.delete(name);
-    } else {
-      next.add(name);
-    }
-    setSelectedChannelsForTrend(next);
-  };
-
-  const handleDatePresetChange = (preset: string) => {
-    setDatePreset(preset);
-    const today = new Date();
-    if (preset === '7days') {
-      const start = new Date();
-      start.setDate(today.getDate() - 7);
-      setStartDate(start.toISOString().split('T')[0]);
-      setEndDate(today.toISOString().split('T')[0]);
-    } else if (preset === '30days') {
-      const start = new Date();
-      start.setDate(today.getDate() - 30);
-      setStartDate(start.toISOString().split('T')[0]);
-      setEndDate(today.toISOString().split('T')[0]);
-    } else if (preset === 'thisMonth') {
-      const start = new Date(today.getFullYear(), today.getMonth(), 1);
-      setStartDate(start.toISOString().split('T')[0]);
-      setEndDate(today.toISOString().split('T')[0]);
-    } else if (preset === 'lastMonth') {
-      const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-      const end = new Date(today.getFullYear(), today.getMonth(), 0);
-      setStartDate(start.toISOString().split('T')[0]);
-      setEndDate(end.toISOString().split('T')[0]);
-    }
-  };
+  const [activeMetric, setActiveMetric] = useState<TrendMetric>('views');
+  const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
+  const [isChannelPickerOpen, setIsChannelPickerOpen] = useState(false);
+  const [onlyShowTotal, setOnlyShowTotal] = useState(false);
 
   const fetchDashboardData = async () => {
     setLoading(true);
     setError(null);
     try {
-      let url = `/api/dashboard?startDate=${startDate}&endDate=${endDate}`;
-      if (platformFilter !== 'all') url += `&platform=${platformFilter}`;
-      if (channelFilter !== 'all') url += `&channelId=${channelFilter}`;
-      if (postTypeFilter !== 'all') url += `&postType=${postTypeFilter}`;
+      const params = new URLSearchParams({ startDate, endDate });
+      if (platformFilter !== 'all') params.set('platform', platformFilter);
+      if (channelFilter !== 'all') params.set('channelId', channelFilter);
+      if (postTypeFilter !== 'all') params.set('postType', postTypeFilter);
 
-      const res = await fetch(url, {
+      const response = await fetch(`/api/dashboard?${params.toString()}`, {
         headers: {
-          'Authorization': `Bearer ${idToken}`,
+          Authorization: `Bearer ${idToken}`,
           'X-Google-OAuth-Token': googleAccessToken || '',
-        }
+        },
       });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || `Lỗi tải thống kê (${res.status}): ${res.statusText}`);
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || `Không thể tải thống kê (${response.status}).`);
       }
-      const json = await res.json();
-      setData(json);
-    } catch (err: any) {
-      setError(err.message || 'Lỗi mạng hoặc hệ thống.');
+      setData(await response.json());
+    } catch (fetchError: any) {
+      setError(fetchError.message || 'Không thể kết nối tới hệ thống.');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (idToken) {
-      fetchDashboardData();
-    }
+    if (idToken) fetchDashboardData();
   }, [idToken, googleAccessToken, platformFilter, channelFilter, postTypeFilter, startDate, endDate, channels]);
 
-  const handlePlatformChange = (p: string) => {
-    setPlatformFilter(p);
-    setChannelFilter('all'); // Reset channel filter when platform changes
-  };
+  useEffect(() => {
+    if (data) setSelectedChannels(new Set(data.channelStats.map(stat => stat.channelName)));
+  }, [data]);
 
-  const filteredChannels = platformFilter === 'all' 
-    ? channels.filter(c => c.status === 'active') 
-    : channels.filter(c => c.platform === platformFilter && c.status === 'active');
-
-  const typeLabels = [
-    { type: 'Ảnh / Album', icon: Image },
-    { type: 'Video / Reel', icon: Video },
-    { type: 'Liên kết', icon: LinkIcon },
-    { type: 'Khác', icon: FileText }
-  ];
-
-  // Tính toán số liệu động theo danh sách kênh được chọn
-  const getFilteredMetrics = () => {
-    if (!data) return { reactions: 0, comments: 0, shares: 0, engagement: 0 };
-    
-    if (selectedChannelsForTrend.size === 0) {
-      return { reactions: 0, comments: 0, shares: 0, engagement: 0 };
+  const updatePreset = (preset: string) => {
+    setDatePreset(preset);
+    const today = new Date();
+    const start = new Date();
+    if (preset === '7days') start.setDate(today.getDate() - 7);
+    if (preset === '30days') start.setDate(today.getDate() - 30);
+    if (preset === 'thisMonth') start.setDate(1);
+    if (preset === 'lastMonth') {
+      start.setMonth(today.getMonth() - 1, 1);
+      today.setDate(0);
     }
-
-    let reactions = 0;
-    let comments = 0;
-    let shares = 0;
-
-    data.trends.forEach(t => {
-      selectedChannelsForTrend.forEach(chanName => {
-        reactions += (t as any)[chanName + '_likes'] || 0;
-        comments += (t as any)[chanName + '_comments'] || 0;
-        shares += (t as any)[chanName + '_shares'] || 0;
-      });
-    });
-
-    const engagement = reactions + comments + shares;
-    return { reactions, comments, shares, engagement };
+    if (preset !== 'custom') {
+      setStartDate(start.toISOString().slice(0, 10));
+      setEndDate(today.toISOString().slice(0, 10));
+    }
   };
 
-  const filteredMetrics = getFilteredMetrics();
+  const filteredChannels = channels.filter(channel =>
+    channel.status === 'active' && (platformFilter === 'all' || channel.platform === platformFilter),
+  );
+  const typeStats = data?.typeStats || [];
+  const isSingleChannelScope = channelFilter !== 'all';
+  const selectedMetricLabel: Record<TrendMetric, string> = {
+    views: 'lượt xem',
+    engagement: 'tương tác',
+    postsCount: 'số bài đăng',
+    engagementRate: 'tỷ lệ tương tác',
+  };
+
+  const toggleChannel = (channelName: string) => {
+    setSelectedChannels(current => {
+      const next = new Set(current);
+      if (next.has(channelName)) next.delete(channelName);
+      else next.add(channelName);
+      return next;
+    });
+  };
+
+  const selectedBreakdown = () => {
+    if (!data) return { reactions: 0, comments: 0, shares: 0 };
+    return data.trends.reduce(
+      (totals, point) => {
+        selectedChannels.forEach(channelName => {
+          totals.reactions += Number(point[`${channelName}_likes`] || 0);
+          totals.comments += Number(point[`${channelName}_comments`] || 0);
+          totals.shares += Number(point[`${channelName}_shares`] || 0);
+        });
+        return totals;
+      },
+      { reactions: 0, comments: 0, shares: 0 },
+    );
+  };
+
+  const breakdown = selectedBreakdown();
+  const interactionDistribution = [
+    { label: 'Cảm xúc', value: breakdown.reactions, color: '#2563eb' },
+    { label: 'Bình luận', value: breakdown.comments, color: '#0f766e' },
+    { label: 'Lượt chia sẻ', value: breakdown.shares, color: '#7c3aed' },
+  ];
+  const interactionTotal = interactionDistribution.reduce((total, item) => total + item.value, 0);
+
+  const cards: Array<{
+    metric?: TrendMetric;
+    title: string;
+    value: string;
+    description: string;
+    icon: React.ElementType;
+    accent: string;
+    idle: string;
+  }> = data ? [
+    {
+      metric: 'views',
+      title: 'Lượt xem',
+      value: data.kpis.views.toLocaleString('vi-VN'),
+      description: 'Tổng lượt xem từ nội dung hỗ trợ chỉ số này',
+      icon: Eye,
+      accent: 'border-cyan-600 ring-cyan-600 bg-cyan-50/40',
+      idle: 'bg-cyan-50 text-cyan-700',
+    },
+    {
+      metric: 'engagement',
+      title: 'Lượt tương tác',
+      value: data.kpis.totalEngagement.toLocaleString('vi-VN'),
+      description: 'Cảm xúc, bình luận, chia sẻ và lượt nhấp',
+      icon: TrendingUp,
+      accent: 'border-blue-600 ring-blue-600 bg-blue-50/40',
+      idle: 'bg-blue-50 text-blue-700',
+    },
+    {
+      metric: 'postsCount',
+      title: 'Số bài đăng',
+      value: data.kpis.postsCount.toLocaleString('vi-VN'),
+      description: 'Bài đăng duy nhất trong khoảng thời gian đã chọn',
+      icon: Layers,
+      accent: 'border-emerald-600 ring-emerald-600 bg-emerald-50/40',
+      idle: 'bg-emerald-50 text-emerald-700',
+    },
+    {
+      title: 'Lượt follow',
+      value: data.kpis.followersAvailable ? data.kpis.followers.toLocaleString('vi-VN') : 'Chưa có dữ liệu',
+      description: channelFilter === 'all' ? 'Tổng follower hiện tại của các trang đã chọn' : 'Follower hiện tại của trang đã chọn',
+      icon: Users,
+      accent: 'border-violet-600 ring-violet-600 bg-violet-50/40',
+      idle: 'bg-violet-50 text-violet-700',
+    },
+  ] : [];
 
   return (
-    <div className="space-y-7 pb-10">
-      {/* Upper bar: Post type pills and quick date selectors */}
-      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 border-b border-slate-200/60 pb-5">
+    <div className="space-y-5 pb-6">
+      <section className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 border-b border-slate-200/70 pb-4">
         <div>
-          <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">Thống kê tương tác</h2>
-          <p className="text-xs text-slate-500 mt-0.5">Theo dõi và phân tích chỉ số hiệu quả đa kênh theo thời gian thực.</p>
+          <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Thống kê tương tác</h2>
+          <p className="text-sm text-slate-500 mt-1">Theo dõi hiệu quả nội dung đa kênh theo thời gian thực.</p>
         </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Post Type Pills */}
-          <div className="flex p-1 bg-slate-100 rounded-2xl border border-slate-200/50">
-            <button
-              onClick={() => setPostTypeFilter('all')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                postTypeFilter === 'all' 
-                  ? 'bg-white text-blue-650 shadow-[0_2px_8px_rgba(59,130,246,0.08)] border border-slate-200/40' 
-                  : 'text-slate-550 hover:text-slate-900'
-              }`}
-            >
-              Tất cả
-            </button>
-            <button
-              onClick={() => setPostTypeFilter('photo')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                postTypeFilter === 'photo' 
-                  ? 'bg-white text-blue-650 shadow-[0_2px_8px_rgba(59,130,246,0.08)] border border-slate-200/40' 
-                  : 'text-slate-550 hover:text-slate-900'
-              }`}
-            >
-              Ảnh
-            </button>
-            <button
-              onClick={() => setPostTypeFilter('video')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                postTypeFilter === 'video' 
-                  ? 'bg-white text-blue-650 shadow-[0_2px_8px_rgba(59,130,246,0.08)] border border-slate-200/40' 
-                  : 'text-slate-550 hover:text-slate-900'
-              }`}
-            >
-              Video / Reel
-            </button>
-            <button
-              onClick={() => setPostTypeFilter('link')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                postTypeFilter === 'link' 
-                  ? 'bg-white text-blue-650 shadow-[0_2px_8px_rgba(59,130,246,0.08)] border border-slate-200/40' 
-                  : 'text-slate-550 hover:text-slate-900'
-              }`}
-            >
-              Liên kết
-            </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200/60">
+            {[
+              ['all', 'Tất cả'],
+              ['photo', 'Ảnh'],
+              ['video', 'Video / Reel'],
+              ['link', 'Liên kết'],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setPostTypeFilter(value)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${postTypeFilter === value ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          
-          {/* Quick Preset + Calendar Inputs */}
-          <div className="flex flex-wrap items-center gap-2 bg-white p-1.5 rounded-2xl border border-slate-200/80 shadow-[0_4px_12px_rgba(15,23,42,0.015)]">
-            <div className="flex items-center gap-1 pl-1.5 text-slate-400">
-              <Calendar className="w-3.5 h-3.5" />
-            </div>
-            <select
-              value={datePreset}
-              onChange={(e) => handleDatePresetChange(e.target.value)}
-              className="text-[11px] border-0 focus:ring-0 focus:outline-none bg-transparent font-bold text-slate-700 cursor-pointer pr-5"
-            >
+          <div className="flex flex-wrap items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm">
+            <Calendar className="w-4 h-4 text-slate-400" />
+            <select value={datePreset} onChange={event => updatePreset(event.target.value)} className="text-sm font-bold text-slate-700 bg-transparent outline-none">
               <option value="custom">Tùy chọn ngày</option>
               <option value="7days">7 ngày qua</option>
               <option value="30days">30 ngày qua</option>
               <option value="thisMonth">Tháng này</option>
               <option value="lastMonth">Tháng trước</option>
             </select>
-            <div className="w-[1px] h-3.5 bg-slate-200"></div>
-            <input 
-              type="date" 
-              value={startDate}
-              onChange={(e) => { setStartDate(e.target.value); setDatePreset('custom'); }}
-              className="text-[11px] border-0 focus:ring-0 bg-transparent text-slate-650 focus:outline-none p-0 w-24"
-            />
-            <span className="text-[10px] text-slate-400 font-bold uppercase">Đến</span>
-            <input 
-              type="date" 
-              value={endDate}
-              onChange={(e) => { setEndDate(e.target.value); setDatePreset('custom'); }}
-              className="text-[11px] border-0 focus:ring-0 bg-transparent text-slate-650 focus:outline-none p-0 w-24"
-            />
+            <input type="date" value={startDate} onChange={event => { setStartDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none" />
+            <span className="text-sm text-slate-400">đến</span>
+            <input type="date" value={endDate} onChange={event => { setEndDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none" />
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Row 2: Secondary Platform/Channel filters */}
-      <div className="flex flex-wrap items-center gap-3 bg-slate-50 border border-slate-200/60 p-3 rounded-2xl">
-        <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-slate-400" />
-          <span className="text-xs font-bold text-slate-500">Lọc nhanh:</span>
-        </div>
-        
-        <select
-          value={platformFilter}
-          onChange={(e) => handlePlatformChange(e.target.value)}
-          className="bg-white border border-slate-200 text-xs font-bold text-slate-700 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-        >
+      <section className="flex flex-wrap items-center gap-3 bg-slate-50 border border-slate-200/70 p-3 rounded-xl">
+        <Filter className="w-5 h-5 text-slate-400" />
+        <span className="text-sm font-bold text-slate-600">Lọc nhanh:</span>
+        <select value={platformFilter} onChange={event => { setPlatformFilter(event.target.value); setChannelFilter('all'); }} className="bg-white border border-slate-200 text-sm font-bold text-slate-700 rounded-lg px-3 py-1.5">
           <option value="all">Tất cả nền tảng</option>
           <option value="facebook">Facebook Pages</option>
           <option value="zalo">Zalo OA</option>
         </select>
-
-        <select
-          value={channelFilter}
-          onChange={(e) => setChannelFilter(e.target.value)}
-          className="bg-white border border-slate-200 text-xs font-bold text-slate-700 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer max-w-xs truncate"
-        >
+        <select value={channelFilter} onChange={event => setChannelFilter(event.target.value)} className="bg-white border border-slate-200 text-sm font-bold text-slate-700 rounded-lg px-3 py-1.5 max-w-sm">
           <option value="all">Tất cả các kênh</option>
-          {filteredChannels.map(chan => (
-            <option key={chan.id} value={chan.id}>{chan.name}</option>
-          ))}
+          {filteredChannels.map(channel => <option key={channel.id} value={channel.id}>{channel.name}</option>)}
         </select>
+        <button onClick={fetchDashboardData} className="ml-auto inline-flex items-center gap-2 bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-sm font-extrabold text-slate-700 hover:bg-slate-100">
+          <RefreshCw className="w-4 h-4" /> Đồng bộ lại
+        </button>
+      </section>
 
-        <div className="ml-auto">
-          <button 
-            onClick={fetchDashboardData}
-            className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 font-extrabold text-xs px-3.5 py-1.5 rounded-xl border border-slate-200 shadow-sm active:scale-[0.98] transition-all cursor-pointer"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            Đồng bộ lại
-          </button>
-        </div>
-      </div>
-
-      {/* Synchronized status & Errors */}
-      {data && (
-        <div className="space-y-2">
-          {data.lastSync && (
-            <div className="text-xs text-slate-450 flex items-center gap-2 bg-emerald-50/50 border border-emerald-100/50 px-3.5 py-2 rounded-xl w-fit">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>Dữ liệu khớp thực tế tính đến: <strong className="text-slate-700 font-bold">{new Date(data.lastSync).toLocaleString('vi-VN')}</strong></span>
-            </div>
-          )}
-          {data.errors && data.errors.map((err, idx) => (
-            <div key={idx} className="flex items-start gap-2.5 text-xs text-amber-800 bg-amber-50/80 border border-amber-200/50 p-3.5 rounded-2xl shadow-sm">
-              <AlertCircle className="w-4 h-4 shrink-0 text-amber-500 mt-0.5" />
-              <span>{err}</span>
-            </div>
-          ))}
+      {data?.lastSync && (
+        <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg text-xs text-emerald-800">
+          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+          Dữ liệu cập nhật đến <strong>{new Date(data.lastSync).toLocaleString('vi-VN')}</strong>
         </div>
       )}
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-24 bg-white border border-slate-200/60 rounded-3xl shadow-sm space-y-4">
-          <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-xs font-bold text-slate-555 animate-pulse">Đang truy xuất chỉ số tương tác...</p>
+        <div className="flex flex-col items-center justify-center py-28 bg-white border border-slate-200 rounded-3xl space-y-4">
+          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm font-bold text-slate-500">Đang tải thống kê truyền thông...</p>
         </div>
       ) : error ? (
-        <div className="p-10 bg-rose-50 border border-rose-200/50 rounded-3xl text-center space-y-4 shadow-sm max-w-lg mx-auto">
+        <div className="p-10 bg-rose-50 border border-rose-200 rounded-3xl text-center space-y-4 max-w-xl mx-auto">
           <AlertCircle className="w-12 h-12 text-rose-500 mx-auto" />
-          <h3 className="text-base font-extrabold text-rose-950">Lỗi nạp dữ liệu thống kê</h3>
-          <p className="text-xs text-rose-700 leading-relaxed">{error}</p>
-          <button onClick={fetchDashboardData} className="text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 px-5 py-2.5 rounded-xl cursor-pointer">Thử lại ngay</button>
+          <p className="text-base text-rose-800">{error}</p>
+          <button onClick={fetchDashboardData} className="bg-rose-600 text-white px-5 py-2.5 rounded-xl font-bold">Thử lại</button>
         </div>
       ) : !data || data.kpis.postsCount === 0 ? (
-        <div className="p-16 text-center bg-white border border-slate-200/60 rounded-3xl shadow-sm space-y-4 max-w-xl mx-auto">
-          <Layers className="w-12 h-12 text-slate-350 mx-auto" />
-          <div>
-            <h3 className="text-sm font-extrabold text-slate-800">Không tìm thấy bài đăng nào</h3>
-            <p className="text-xs text-slate-450 leading-relaxed max-w-sm mx-auto mt-1.5">Không có dữ liệu bài đăng được ghi nhận cho bộ lọc đã chọn trong khoảng thời gian này.</p>
-          </div>
+        <div className="p-16 text-center bg-white border border-slate-200 rounded-3xl">
+          <Layers className="w-14 h-14 text-slate-300 mx-auto mb-4" />
+          <h3 className="text-lg font-extrabold text-slate-800">Chưa có bài đăng trong khoảng thời gian này</h3>
         </div>
       ) : (
         <>
-          {/* KPI Interactive Grid Cards (Mockup Meta style) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {/* Card 1: Engagement */}
-            <div 
-              onClick={() => setActiveMetric('engagement')}
-              className={`p-5 rounded-2xl border transition-all cursor-pointer premium-card relative ${
-                activeMetric === 'engagement'
-                  ? 'border-blue-600 bg-gradient-to-br from-blue-50/20 to-indigo-50/20 ring-2 ring-blue-600'
-                  : 'bg-white border-slate-200/60 hover:border-slate-300'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Lượt tương tác</span>
-                <div className={`p-2 rounded-xl ${activeMetric === 'engagement' ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600'}`}>
-                  <TrendingUp className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="flex items-baseline gap-2 mt-3">
-                <h4 className="text-2xl font-extrabold text-slate-900 leading-none">{data.kpis.totalEngagement.toLocaleString('vi-VN')}</h4>
-                <span className="text-[9px] font-extrabold text-emerald-600 bg-emerald-50 border border-emerald-100/50 px-1.5 py-0.5 rounded-lg">↑ 12%</span>
-              </div>
-              <p className="text-[10px] text-slate-400 mt-2 font-medium">Tổng tương tác tích lũy của trang</p>
-            </div>
-
-            {/* Card 2: Reach */}
-            <div 
-              onClick={() => setActiveMetric('reach')}
-              className={`p-5 rounded-2xl border transition-all cursor-pointer premium-card relative ${
-                activeMetric === 'reach'
-                  ? 'border-indigo-600 bg-gradient-to-br from-indigo-50/20 to-purple-50/20 ring-2 ring-indigo-600'
-                  : 'bg-white border-slate-200/60 hover:border-slate-300'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Lượt tiếp cận (Reach)</span>
-                <div className={`p-2 rounded-xl ${activeMetric === 'reach' ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600'}`}>
-                  <Users className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="flex items-baseline gap-2 mt-3">
-                <h4 className="text-2xl font-extrabold text-slate-900 leading-none">
-                  {data.kpis.reach > 0 ? data.kpis.reach.toLocaleString('vi-VN') : 'Không hỗ trợ'}
-                </h4>
-                {data.kpis.reach > 0 && <span className="text-[9px] font-extrabold text-emerald-600 bg-emerald-50 border border-emerald-100/50 px-1.5 py-0.5 rounded-lg">↑ 8%</span>}
-              </div>
-              <p className="text-[10px] text-slate-400 mt-2 font-medium">Số tài khoản tiếp cận thực tế</p>
-            </div>
-
-            {/* Card 3: Posts Count */}
-            <div 
-              onClick={() => setActiveMetric('postsCount')}
-              className={`p-5 rounded-2xl border transition-all cursor-pointer premium-card relative ${
-                activeMetric === 'postsCount'
-                  ? 'border-teal-600 bg-gradient-to-br from-teal-50/20 to-emerald-50/20 ring-2 ring-teal-600'
-                  : 'bg-white border-slate-200/60 hover:border-slate-300'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Số bài đăng</span>
-                <div className={`p-2 rounded-xl ${activeMetric === 'postsCount' ? 'bg-teal-600 text-white' : 'bg-teal-50 text-teal-600'}`}>
-                  <Layers className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="flex items-baseline gap-2 mt-3">
-                <h4 className="text-2xl font-extrabold text-slate-900 leading-none">{data.kpis.postsCount}</h4>
-                <span className="text-[9px] font-extrabold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-lg">0%</span>
-              </div>
-              <p className="text-[10px] text-slate-400 mt-2 font-medium">Tổng số bài phát sóng được ghi nhận</p>
-            </div>
-
-            {/* Card 4: Engagement Rate */}
-            <div 
-              onClick={() => setActiveMetric('engagementRate')}
-              className={`p-5 rounded-2xl border transition-all cursor-pointer premium-card relative ${
-                activeMetric === 'engagementRate'
-                  ? 'border-purple-600 bg-gradient-to-br from-purple-50/20 to-pink-50/20 ring-2 ring-purple-600'
-                  : 'bg-white border-slate-200/60 hover:border-slate-300'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Tỷ lệ tương tác</span>
-                <div className={`p-2 rounded-xl ${activeMetric === 'engagementRate' ? 'bg-purple-600 text-white' : 'bg-purple-50 text-purple-600'}`}>
-                  <Award className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="flex items-baseline gap-2 mt-3">
-                <h4 className="text-2xl font-extrabold text-slate-900 leading-none">
-                  {data.kpis.engagementRate !== null ? `${data.kpis.engagementRate}%` : 'Chưa đủ dữ liệu'}
-                </h4>
-                {data.kpis.engagementRate !== null && <span className="text-[9px] font-extrabold text-emerald-600 bg-emerald-50 border border-emerald-100/50 px-1.5 py-0.5 rounded-lg">↑ 1.2%</span>}
-              </div>
-              <p className="text-[10px] text-slate-400 mt-2 font-medium">Tính trên Reach hoặc Impressions</p>
-            </div>
-          </div>
-
-          {/* Premium Area Chart block */}
-          <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_12px_30px_-10px_rgba(0,0,0,0.015)] space-y-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-              <div>
-                <h3 className="text-sm font-extrabold text-slate-800">
-                  Xu hướng {activeMetric === 'engagement' ? 'Tương tác' 
-                            : activeMetric === 'reach' ? 'Tiếp cận'
-                            : activeMetric === 'postsCount' ? 'Số bài đăng'
-                            : 'Tỷ lệ tương tác'} theo ngày đăng
-                </h3>
-                <p className="text-[11px] text-slate-400">Biểu đồ thể hiện biến động chỉ số theo ngày xuất bản thực tế của các bài đăng.</p>
-              </div>
-              
-              <div>
-                {/* Channel dropdown filter */}
-                {data.channelStats.length > 0 && (
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                      className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 flex items-center gap-2 cursor-pointer shadow-sm active:scale-[0.98] transition-all"
-                    >
-                      <span>Chọn kênh hiển thị ({selectedChannelsForTrend.size})</span>
-                      <span className="text-[9px] text-slate-400">▼</span>
-                    </button>
-
-                    {isDropdownOpen && (
-                      <>
-                        <div className="fixed inset-0 z-10" onClick={() => setIsDropdownOpen(false)}></div>
-                        <div className="absolute right-0 mt-2 w-64 bg-white border border-slate-200 rounded-2xl shadow-xl z-25 p-3 space-y-2 premium-dropdown text-left">
-                          <div className="flex justify-between border-b border-slate-100 pb-2 mb-1.5">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedChannelsForTrend(new Set(data.channelStats.map(s => s.channelName)))}
-                              className="text-[10px] font-bold text-blue-600 hover:underline cursor-pointer"
-                            >
-                              Chọn tất cả
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedChannelsForTrend(new Set())}
-                              className="text-[10px] font-bold text-red-600 hover:underline cursor-pointer"
-                            >
-                              Xóa tất cả
-                            </button>
-                          </div>
-                          <div className="max-h-48 overflow-y-auto space-y-1.5">
-                            {data.channelStats.map((stat, idx) => {
-                              const isSelected = selectedChannelsForTrend.has(stat.channelName);
-                              return (
-                                <label key={idx} className="flex items-center gap-2 text-xs font-semibold text-slate-750 hover:bg-slate-50 px-2 py-1.5 rounded-lg cursor-pointer transition-colors">
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={() => toggleChannelTrend(stat.channelName)}
-                                    className="rounded border-slate-350 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                                  />
-                                  <span className="truncate">{stat.channelName}</span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="h-96">
-              {data.trends.length === 0 ? (
-                <div className="flex items-center justify-center h-full text-xs text-slate-400">
-                  Không có xu hướng biến động cho khoảng thời gian này.
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={data.trends} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
-                    <defs>
-                      <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#94a3b8" stopOpacity={0.15}/>
-                        <stop offset="95%" stopColor="#94a3b8" stopOpacity={0.0}/>
-                      </linearGradient>
-                      {data.channelStats.map((stat, idx) => (
-                        <linearGradient key={stat.channelName} id={`color-${idx}`} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={COLORS[idx % COLORS.length]} stopOpacity={0.12}/>
-                          <stop offset="95%" stopColor={COLORS[idx % COLORS.length]} stopOpacity={0.0}/>
-                        </linearGradient>
-                      ))}
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="date" tickStyle={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} />
-                    <YAxis tickStyle={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: '#0f172a', 
-                        border: 'none', 
-                        borderRadius: '12px', 
-                        color: '#fff', 
-                        fontSize: '11px',
-                        boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)'
-                      }} 
-                      itemStyle={{ color: '#e2e8f0', padding: '1px 0' }}
-                      labelStyle={{ fontWeight: 'bold', color: '#94a3b8', marginBottom: '4px' }}
-                    />
-                    <Legend wrapperStyle={{ fontSize: 11, pt: 10 }} iconType="circle" />
-                    
-                    {/* Area for Total Reference */}
-                    {showTotalLine && (
-                      <Area 
-                        type="monotone" 
-                        dataKey={activeMetric} 
-                        name="Tổng cộng" 
-                        stroke="#94a3b8" 
-                        strokeWidth={1.5} 
-                        strokeDasharray="4 4" 
-                        fill="url(#colorTotal)"
-                      />
-                    )}
-                    
-                    {/* Areas for selected channels */}
-                    {data.channelStats
-                      .filter(stat => selectedChannelsForTrend.has(stat.channelName))
-                      .map((stat, idx) => (
-                        <Area
-                          key={stat.channelName}
-                          type="monotone"
-                          dataKey={`${stat.channelName}_${activeMetric}`}
-                          name={stat.channelName}
-                          stroke={COLORS[idx % COLORS.length]}
-                          strokeWidth={2.5}
-                          fill={`url(#color-${idx})`}
-                          activeDot={{ r: 5, strokeWidth: 0 }}
-                        />
-                      ))}
-                  </AreaChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-
-            {/* Toggle switch for showing total line & breakdown cards */}
-            <div className="flex flex-col space-y-4 pt-3 border-t border-slate-100">
-              <div className="flex justify-end">
-                <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-500">
-                  <input 
-                    type="checkbox" 
-                    checked={showTotalLine}
-                    onChange={(e) => setShowTotalLine(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <span className="relative w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></span>
-                  <span>Hiển thị đường Tổng cộng</span>
-                </label>
-              </div>
-
-              {/* KPI Breakdown Cards (Mockup Meta style) */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/50 text-left space-y-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.01)]">
-                  <span className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider block">👍 Cảm xúc (Reactions)</span>
-                  <p className="text-2xl font-black text-slate-900">{filteredMetrics.reactions.toLocaleString('vi-VN')}</p>
-                  <p className="text-[10px] text-slate-500 font-bold">Tổng số lượt thích và cảm xúc</p>
-                </div>
-                <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/50 text-left space-y-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.01)]">
-                  <span className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider block">💬 Bình luận (Comments)</span>
-                  <p className="text-2xl font-black text-slate-900">{filteredMetrics.comments.toLocaleString('vi-VN')}</p>
-                  <p className="text-[10px] text-slate-500 font-bold">Tổng số phản hồi trên bài viết</p>
-                </div>
-                <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-200/50 text-left space-y-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.01)]">
-                  <span className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider block">🔗 Lượt chia sẻ (Shares)</span>
-                  <p className="text-2xl font-black text-slate-900">{filteredMetrics.shares.toLocaleString('vi-VN')}</p>
-                  <p className="text-[10px] text-slate-500 font-bold">Tổng số lượt chia sẻ bài viết</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Row 3: Progress Bars Content Type (Left) & Interaction Donut (Middle) & Platform Donut (Right) */}
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-            {/* Card 1: Content Type */}
-            <div className="bg-white p-5 rounded-3xl border border-slate-200/60 shadow-[0_12px_30px_-10px_rgba(0,0,0,0.015)] space-y-5">
-              <div>
-                <h3 className="text-sm font-extrabold text-slate-800">Theo loại nội dung</h3>
-                <p className="text-[11px] text-slate-400">Tỷ lệ tương tác của từng định dạng đăng tải.</p>
-              </div>
-              
-              <div className="space-y-4 pt-1">
-                {typeLabels.map(({ type, icon: Icon }) => {
-                  const item = data.typeStats?.find(t => t.type === type) || { type, count: 0, engagement: 0 };
-                  const totalEng = data.kpis.totalEngagement || 1;
-                  const percent = Math.min(100, Math.round((item.engagement / totalEng) * 1000) / 10);
-                  return (
-                    <div key={type} className="space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2 font-bold text-slate-700">
-                          <div className="p-1.5 bg-slate-100 rounded-lg text-slate-550">
-                            <Icon className="w-3.5 h-3.5" />
-                          </div>
-                          <span>{type}</span>
-                        </div>
-                        <span className="font-extrabold text-slate-900">{percent}%</span>
-                      </div>
-                      <div className="w-full bg-slate-100 rounded-full h-1.5">
-                        <div 
-                          className="bg-gradient-to-r from-blue-500 to-indigo-500 h-1.5 rounded-full transition-all duration-500" 
-                          style={{ width: `${percent}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Card 2: Theo loại tương tác (Donut Chart) */}
-            <div className="bg-white p-5 rounded-3xl border border-slate-200/60 shadow-[0_12px_30px_-10px_rgba(0,0,0,0.015)] flex flex-col justify-between space-y-4">
-              <div>
-                <h3 className="text-sm font-extrabold text-slate-800">Theo loại tương tác</h3>
-                <p className="text-[11px] text-slate-400">Tỷ lệ tương tác chia theo cảm xúc, bình luận, chia sẻ.</p>
-              </div>
-              
-              <div className="flex items-center justify-center h-36 relative">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={[
-                        { name: 'Cảm xúc', value: filteredMetrics.reactions },
-                        { name: 'Bình luận', value: filteredMetrics.comments },
-                        { name: 'Chia sẻ', value: filteredMetrics.shares }
-                      ].filter(item => item.value > 0)}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={48}
-                      outerRadius={62}
-                      paddingAngle={3}
-                      dataKey="value"
-                    >
-                      <Cell key="cell-0" fill="#3b82f6" />
-                      <Cell key="cell-1" fill="#10b981" />
-                      <Cell key="cell-2" fill="#8b5cf6" />
-                    </Pie>
-                    <Tooltip 
-                      formatter={(value: any) => [`${value.toLocaleString()} lượt`, 'Số lượng']}
-                      contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '10px' }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-                
-                <div className="absolute flex flex-col items-center justify-center">
-                  <span className="text-base font-extrabold text-slate-900 leading-none">
-                    {filteredMetrics.engagement.toLocaleString('vi-VN')}
+          <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            {cards.map(card => {
+              const Icon = card.icon;
+              const isActive = activeMetric === card.metric;
+              return (
+                <button
+                  key={card.title}
+                  onClick={() => card.metric && setActiveMetric(card.metric)}
+                  className={`text-left p-4 rounded-xl border transition-all premium-card ${card.metric ? 'cursor-pointer' : 'cursor-default'} ${isActive ? `${card.accent} ring-2` : 'bg-white border-slate-200/70 hover:border-slate-300'}`}
+                >
+                  <span className="flex items-center justify-between">
+                    <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wide">{card.title}</span>
+                    <span className={`p-2 rounded-lg ${isActive ? 'bg-slate-900 text-white' : card.idle}`}><Icon className="w-4 h-4" /></span>
                   </span>
-                  <span className="text-[8px] font-extrabold text-slate-400 uppercase tracking-widest mt-1">Tổng cộng</span>
-                </div>
-              </div>
+                  <strong className="block text-2xl font-extrabold text-slate-900 mt-3 leading-none">{card.value}</strong>
+                  <span className="block text-xs text-slate-500 mt-2 leading-snug">{card.description}</span>
+                </button>
+              );
+            })}
+          </section>
 
-              <div className="flex flex-col gap-1.5 text-[11px] font-bold text-slate-600 px-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                    <span>Cảm xúc</span>
-                  </div>
-                  <span className="text-slate-900">{filteredMetrics.reactions.toLocaleString('vi-VN')} lượt</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    <span>Bình luận</span>
-                  </div>
-                  <span className="text-slate-900">{filteredMetrics.comments.toLocaleString('vi-VN')} lượt</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-purple-500"></span>
-                    <span>Lượt chia sẻ</span>
-                  </div>
-                  <span className="text-slate-900">{filteredMetrics.shares.toLocaleString('vi-VN')} lượt</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Card 3: Phân bổ tương tác theo nền tảng */}
-            <div className="bg-white p-5 rounded-3xl border border-slate-200/60 shadow-[0_12px_30px_-10px_rgba(0,0,0,0.015)] flex flex-col justify-between space-y-4">
+          <section className="bg-white p-4 md:p-5 rounded-2xl border border-slate-200/70 shadow-sm space-y-4">
+            <div className="flex flex-col lg:flex-row justify-between gap-4">
               <div>
-                <h3 className="text-sm font-extrabold text-slate-800">Theo nền tảng</h3>
-                <p className="text-[11px] text-slate-400">Tỷ lệ tương tác chia theo Facebook và Zalo OA.</p>
+                <h3 className="text-lg font-extrabold text-slate-800">Xu hướng {selectedMetricLabel[activeMetric]} theo ngày đăng</h3>
+                <p className="text-sm text-slate-500 mt-1">Chọn KPI phía trên để đổi chỉ số hiển thị trên biểu đồ.</p>
               </div>
-              
-              <div className="flex items-center justify-center h-36 relative">
-                {!data.platformStats || data.platformStats.length === 0 ? (
-                  <span className="text-xs text-slate-400">Không có dữ liệu</span>
-                ) : (
+              <div className="relative">
+                <button onClick={() => setIsChannelPickerOpen(open => !open)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm">
+                  Chọn kênh hiển thị ({selectedChannels.size}) ▾
+                </button>
+                {isChannelPickerOpen && (
                   <>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={data.platformStats}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={48}
-                          outerRadius={62}
-                          paddingAngle={3}
-                          dataKey="engagement"
-                        >
-                          {data.platformStats.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip 
-                          formatter={(value: any) => [`${value.toLocaleString()} tương tác`, 'Tương tác']}
-                          contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '10px' }}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    
-                    <div className="absolute flex flex-col items-center justify-center">
-                      <span className="text-base font-extrabold text-slate-900 leading-none">
-                        {data.kpis.totalEngagement.toLocaleString('vi-VN')}
-                      </span>
-                      <span className="text-[8px] font-extrabold text-slate-400 uppercase tracking-widest mt-1">Tương tác</span>
+                    <button aria-label="Đóng bộ chọn kênh" className="fixed inset-0 z-10 cursor-default" onClick={() => setIsChannelPickerOpen(false)} />
+                    <div className="absolute right-0 mt-2 z-20 w-72 bg-white border border-slate-200 rounded-2xl shadow-xl p-3">
+                      <div className="flex justify-between border-b border-slate-100 pb-2 mb-2">
+                        <button onClick={() => setSelectedChannels(new Set(data.channelStats.map(stat => stat.channelName)))} className="text-sm font-bold text-blue-700">Chọn tất cả</button>
+                        <button onClick={() => setSelectedChannels(new Set())} className="text-sm font-bold text-rose-600">Bỏ chọn</button>
+                      </div>
+                      <div className="max-h-64 overflow-y-auto space-y-1">
+                        {data.channelStats.map(stat => (
+                          <label key={stat.channelName} className="flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 text-sm font-medium text-slate-700 cursor-pointer">
+                            <input type="checkbox" checked={selectedChannels.has(stat.channelName)} onChange={() => toggleChannel(stat.channelName)} className="rounded text-blue-600" />
+                            <span className="truncate">{stat.channelName}</span>
+                          </label>
+                        ))}
+                      </div>
                     </div>
                   </>
                 )}
               </div>
+            </div>
 
-              {/* Legends with customized counts */}
-              <div className="flex justify-center gap-6 text-xs pt-1">
-                {data.platformStats?.map((entry, index) => {
-                  return (
-                    <div key={entry.platform} className="flex items-center gap-1.5 font-bold text-slate-700">
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}></span>
-                      <span className="capitalize">{entry.platform}: {entry.engagement.toLocaleString('vi-VN')} lượt</span>
-                    </div>
-                  );
-                })}
+            <div className="h-[230px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={data.trends} margin={{ top: 10, right: 15, left: -10, bottom: 5 }}>
+                  <defs>
+                    <linearGradient id="totalLine" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#94a3b8" stopOpacity={0.2} /><stop offset="95%" stopColor="#94a3b8" stopOpacity={0} /></linearGradient>
+                    {data.channelStats.map((stat, index) => <linearGradient key={stat.channelName} id={`channel-${index}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={COLORS[index % COLORS.length]} stopOpacity={0.18} /><stop offset="95%" stopColor={COLORS[index % COLORS.length]} stopOpacity={0} /></linearGradient>)}
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: 10, color: '#fff', fontSize: 12 }}
+                    itemStyle={{ color: '#fff' }}
+                    labelStyle={{ color: '#fff', fontWeight: 700 }}
+                    wrapperStyle={{ zIndex: 30, outline: 'none', pointerEvents: 'none' }}
+                    formatter={(value: number, name: string) => [Number(value).toLocaleString('vi-VN'), name]}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" />
+                  {!isSingleChannelScope && <Area type="monotone" dataKey={activeMetric} name="Tổng cộng" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 4" fill="url(#totalLine)" />}
+                  {!onlyShowTotal && data.channelStats.filter(stat => selectedChannels.has(stat.channelName)).map((stat, index) => <Area key={stat.channelName} type="monotone" dataKey={`${stat.channelName}_${activeMetric}`} name={stat.channelName} stroke={COLORS[index % COLORS.length]} strokeWidth={2.5} fill={`url(#channel-${index})`} />)}
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="border-t border-slate-100 pt-3 space-y-3">
+              {!isSingleChannelScope && <label className="flex items-center justify-end gap-2 text-xs font-bold text-slate-600 cursor-pointer">
+                <input type="checkbox" checked={onlyShowTotal} onChange={event => setOnlyShowTotal(event.target.checked)} className="w-4 h-4 accent-blue-600" /> Chỉ hiện đường tổng
+              </label>}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {[
+                  ['Cảm xúc', breakdown.reactions, 'Tổng lượt thích và cảm xúc'],
+                  ['Bình luận', breakdown.comments, 'Tổng phản hồi trên bài viết'],
+                  ['Lượt chia sẻ', breakdown.shares, 'Tổng lượt chia sẻ bài viết'],
+                ].map(([title, value, description]) => (
+                  <div key={String(title)} className="bg-slate-50 p-3 rounded-xl border border-slate-200/70">
+                    <p className="text-xs font-extrabold uppercase tracking-wide text-slate-600">{title}</p>
+                    <p className="text-2xl font-extrabold text-slate-900 mt-1">{Number(value).toLocaleString('vi-VN')}</p>
+                    <p className="text-xs text-slate-500 mt-1">{description}</p>
+                  </div>
+                ))}
               </div>
             </div>
-          </div>
+          </section>
 
-          {/* Row 4: Horizontal Carousel of Recent Posts */}
-          <div className="bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_12px_30px_-10px_rgba(0,0,0,0.015)] space-y-5">
-            <div>
-              <h3 className="text-sm font-extrabold text-slate-800">Bài viết mới đây</h3>
-              <p className="text-[11px] text-slate-400">Danh sách bài đăng mới đồng bộ sắp xếp theo thời gian đăng thực tế.</p>
+          <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <ContentBarChart title="Lượt xem theo loại nội dung" subtitle="Tổng lượt xem của từng định dạng bài đăng." data={typeStats} dataKey="views" color="#0891b2" formatter="lượt xem" />
+            <ContentBarChart title="Lượt tương tác theo loại nội dung" subtitle="Tổng tương tác theo từng định dạng bài đăng." data={typeStats} dataKey="engagement" color="#2563eb" formatter="tương tác" />
+            <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm">
+              <h3 className="text-lg font-extrabold text-slate-800">Tỷ lệ tương tác</h3>
+              <p className="text-sm text-slate-500 mt-1">Tỷ trọng cảm xúc, bình luận và lượt chia sẻ.</p>
+              <div className="h-56 relative mt-2">
+                {interactionTotal > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={interactionDistribution} dataKey="value" nameKey="label" innerRadius={54} outerRadius={82} paddingAngle={3}>
+                        {interactionDistribution.map(entry => <Cell key={entry.label} fill={entry.color} />)}
+                      </Pie>
+                      <Tooltip formatter={(value: number) => [`${value.toLocaleString('vi-VN')} tương tác`, '']} contentStyle={{ borderRadius: 12, fontSize: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : <div className="h-full grid place-items-center text-sm text-slate-400">Chưa có dữ liệu tương tác</div>}
+                <div className="absolute inset-0 grid place-items-center pointer-events-none text-center">
+                  <div><strong className="block text-2xl text-slate-900">{interactionTotal.toLocaleString('vi-VN')}</strong><span className="text-xs text-slate-400">Tổng tương tác</span></div>
+                </div>
+              </div>
+              <div className="space-y-2 mt-2">
+                {interactionDistribution.map(item => <div key={item.label} className="flex justify-between gap-3 text-sm"><span className="flex items-center gap-2 text-slate-600"><i className="w-2.5 h-2.5 rounded-full" style={{ background: item.color }} />{item.label}</span><strong className="text-slate-800">{item.value.toLocaleString('vi-VN')} ({interactionTotal ? Math.round((item.value / interactionTotal) * 100) : 0}%)</strong></div>)}
+              </div>
             </div>
-            
-            <div className="flex overflow-x-auto gap-4.5 pb-4 scrollbar-thin scrollbar-thumb-slate-200">
-              {data.topPosts.map((post) => {
-                const chan = channels.find(c => c.id === post.channelId);
+          </section>
+
+          <section className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm">
+            <h3 className="text-lg font-extrabold text-slate-800">Bài viết mới đây</h3>
+            <p className="text-sm text-slate-500 mt-1">Các bài mới nhất đã đồng bộ, có thumbnail khi nền tảng cung cấp.</p>
+            <div className="flex overflow-x-auto gap-4 pt-4 pb-2">
+              {data.topPosts.map(post => {
+                const channel = channels.find(item => item.id === post.channelId);
                 return (
-                  <a
-                    key={post.postKey}
-                    href={post.postUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-shrink-0 w-64 border border-slate-200/70 hover:border-blue-500 rounded-2xl p-4 transition-all space-y-3 bg-slate-50/30 hover:bg-white hover:shadow-lg hover:shadow-blue-500/5 relative group"
-                  >
-                    {/* Cover photo placeholder (vibrant modern gradient with overlay logo) */}
-                    <div className="w-full h-32 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-650 to-violet-650 flex items-center justify-center text-white relative overflow-hidden">
-                      <span className="text-[8px] font-extrabold tracking-widest uppercase opacity-20 absolute -right-3 -bottom-3 rotate-12 scale-150 select-none">FT Social</span>
-                      <CheckCircle2 className="w-10 h-10 opacity-70 group-hover:scale-110 transition-transform duration-300" />
-                      <span className="absolute top-2.5 right-2.5 inline-flex items-center px-2 py-0.5 rounded-lg text-[8px] font-extrabold bg-white/20 backdrop-blur-md uppercase tracking-wider">
-                        {post.platform === 'facebook' ? 'FB' : 'Zalo'}
-                      </span>
+                  <a key={post.postKey} href={post.postUrl} target="_blank" rel="noreferrer" className="flex-none w-64 border border-slate-200 rounded-xl p-3 bg-white hover:border-blue-400 hover:shadow-lg transition-all group">
+                    <div className="w-full h-32 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 grid place-items-center text-white relative overflow-hidden">
+                      <ImageIcon className="w-11 h-11 opacity-60" />
+                      {post.imageUrl && <img src={post.imageUrl} alt="" onError={event => { event.currentTarget.style.display = 'none'; }} className="absolute inset-0 w-full h-full object-cover" />}
+                      <span className="absolute top-2 right-2 px-2 py-1 rounded-lg text-xs font-extrabold bg-slate-950/50">{post.platform === 'facebook' ? 'FB' : 'Zalo'}</span>
                     </div>
-
-                    <div className="space-y-1">
-                      <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">
-                        {new Date(post.publishedAt).toLocaleString('vi-VN', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                      <p className="text-xs font-bold text-slate-800 truncate" title={chan?.name}>{chan?.name || 'Kênh ẩn'}</p>
-                      <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed h-8">
-                        {post.message || <em className="text-slate-400">Không có nội dung văn bản</em>}
-                      </p>
+                    <div className="mt-4 space-y-2">
+                      <p className="text-xs font-bold uppercase tracking-wide text-slate-400">{new Date(post.publishedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>
+                      <p className="text-sm font-extrabold text-slate-800 truncate" title={channel?.name}>{channel?.name || 'Kênh ẩn'}</p>
+                      <p className="text-sm text-slate-600 leading-relaxed line-clamp-2 h-11">{post.message || <em>Không có nội dung văn bản</em>}</p>
                     </div>
-
-                    <div className="flex items-center justify-between border-t border-slate-100 pt-2.5 text-[10px]">
-                      <span className="text-slate-450 font-bold uppercase tracking-widest">{post.postType || 'Photo'}</span>
-                      <span className="font-extrabold text-blue-650 bg-blue-50/80 border border-blue-100/50 px-2.5 py-0.5 rounded-full">
-                        {post.engagement.toLocaleString()} tương tác
-                      </span>
-                    </div>
-                    
-                    <span className="absolute bottom-4 right-4 text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <ChevronRight className="w-4 h-4" />
-                    </span>
+                    <div className="flex items-center justify-between border-t border-slate-100 mt-4 pt-3 text-sm"><span className="font-bold uppercase text-slate-500">{post.postType || 'Khác'}</span><span className="font-extrabold text-blue-700">{post.engagement.toLocaleString('vi-VN')} tương tác</span></div>
+                    <ChevronRight className="w-5 h-5 text-blue-600 ml-auto mt-3 opacity-0 group-hover:opacity-100" />
                   </a>
                 );
               })}
             </div>
-          </div>
+          </section>
         </>
       )}
+    </div>
+  );
+}
+
+function ContentBarChart({
+  title,
+  subtitle,
+  data,
+  dataKey,
+  color,
+  formatter,
+}: {
+  title: string;
+  subtitle: string;
+  data: NonNullable<DashboardData['typeStats']>;
+  dataKey: 'views' | 'engagement';
+  color: string;
+  formatter: string;
+}) {
+  return (
+    <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm">
+      <h3 className="text-lg font-extrabold text-slate-800">{title}</h3>
+      <p className="text-sm text-slate-500 mt-1">{subtitle}</p>
+      <div className="h-60 mt-3">
+        {data.length ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} layout="vertical" margin={{ top: 0, right: 18, left: 6, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+              <XAxis type="number" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="type" width={92} tick={{ fontSize: 12, fill: '#475569' }} axisLine={false} tickLine={false} />
+              <Tooltip formatter={(value: number) => [`${value.toLocaleString('vi-VN')} ${formatter}`, '']} contentStyle={{ borderRadius: 12, fontSize: 12 }} />
+              <Bar dataKey={dataKey} fill={color} radius={[0, 7, 7, 0]} barSize={18} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : <div className="h-full grid place-items-center text-sm text-slate-400">Chưa có dữ liệu</div>}
+      </div>
     </div>
   );
 }

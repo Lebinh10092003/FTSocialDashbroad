@@ -1,13 +1,10 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
-import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 import { apiRouter } from './server/routes';
 import { SyncEngine } from './server/sync';
 import { adminDb } from './server/firebase';
-
-// Load environment variables from .env file
-dotenv.config();
 
 function setupAutoSyncScheduler() {
   let lastCronRunDay = '';
@@ -55,18 +52,39 @@ function setupAutoSyncScheduler() {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const parsedPort = Number.parseInt(process.env.PORT || '3000', 10);
+  const PORT = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : 3000;
+
+  // Allow the deployed GitHub Pages origin (or another explicitly configured
+  // frontend origin) to call this API. Local development remains permissive
+  // when CORS_ORIGIN is not configured.
+  const configuredOrigins = (process.env.CORS_ORIGIN || process.env.APP_URL || '')
+    .split(',')
+    .map(origin => origin.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+  const allowAllOrigins = configuredOrigins.length === 0 || configuredOrigins.includes('*');
+  app.set('trust proxy', 1);
 
   // Middleware for parsing JSON requests
   app.use(express.json());
 
   // CORS headers
   app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    const requestOrigin = req.headers.origin;
+    if (allowAllOrigins) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    } else if (requestOrigin && configuredOrigins.includes(requestOrigin)) {
+      res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+      res.setHeader('Vary', 'Origin');
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Google-OAuth-Token, X-CRON-SECRET');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Google-OAuth-Token, X-CRON-SECRET, X-Requested-With',
+    );
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
     if (req.method === 'OPTIONS') {
-      return res.sendStatus(200);
+      return res.sendStatus(204);
     }
     next();
   });

@@ -31,6 +31,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate backend URL
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+        run: |
+          if [ -z "$VITE_API_URL" ]; then
+            echo "Missing repository variable VITE_API_URL. Configure it with the public backend URL before deploying GitHub Pages."
+            exit 1
+          fi
+
       - name: Build frontend
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL }}
