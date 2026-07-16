@@ -31,9 +31,10 @@ interface ConfigProps {
   googleAccessToken: string | null;
   userRole: UserRole;
   onConnectGoogle?: () => Promise<boolean>;
+  showUserManagement?: boolean;
 }
 
-export default function Config({ idToken, googleAccessToken, userRole, onConnectGoogle }: ConfigProps) {
+export default function Config({ idToken, googleAccessToken, userRole, onConnectGoogle, showUserManagement = false }: ConfigProps) {
   const [spreadsheetId, setSpreadsheetId] = useState('');
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
   const [googleServiceAccountJson, setGoogleServiceAccountJson] = useState('');
@@ -77,7 +78,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
   const [newEmail, setNewEmail] = useState('');
   const [newName, setNewName] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [newRole, setNewRole] = useState<UserRole>('VIEWER');
+  const [newRole, setNewRole] = useState<UserRole>('EMPLOYEE');
   const [userActionLoading, setUserActionLoading] = useState(false);
 
   // Custom confirmation modal state to bypass iframe window.confirm limits
@@ -1367,7 +1368,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
             )}
           </div>
 
-          {/* User Roles Management widget */}
+          {showUserManagement && (
           <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-sm space-y-4">
             <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
               <Users className="w-5 h-5 text-blue-600" />
@@ -1422,7 +1423,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
                     onChange={(e) => setNewRole(e.target.value as any)}
                     className="w-full bg-white border border-slate-200 text-xs rounded-lg p-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
-                    <option value="VIEWER">VIEWER (Chỉ xem báo cáo)</option>
+                    <option value="MANAGER">MANAGER (Quản lý)</option><option value="EMPLOYEE">EMPLOYEE (Nhân viên)</option>
                     <option value="ADMIN">ADMIN (Quản trị toàn quyền)</option>
                   </select>
                 </div>
@@ -1509,6 +1510,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
               </table>
             </div>
           </div>
+          )}
         </div>
       </div>
 

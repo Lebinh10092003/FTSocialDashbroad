@@ -14,8 +14,14 @@ interface SyncProps {
   onConnectGoogle?: () => Promise<boolean>;
 }
 
+function getDefaultSinceDate(): string {
+  const date = new Date();
+  date.setMonth(date.getMonth() - 3);
+  return date.toISOString().slice(0, 10);
+}
+
 export default function Sync({ idToken, googleAccessToken, channels, userRole, onRefreshChannels, onConnectGoogle }: SyncProps) {
-  const [since, setSince] = useState('');
+  const [since, setSince] = useState(getDefaultSinceDate);
   const [until, setUntil] = useState('');
   const [syncHistory, setSyncHistory] = useState<ApiLog[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -38,7 +44,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
     onConfirm: () => {},
   });
 
-  const isAdmin = userRole === 'ADMIN';
+  const canManage = userRole === 'ADMIN' || userRole === 'MANAGER';
 
   const fetchSyncHistory = async () => {
     setLoadingHistory(true);
@@ -64,7 +70,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
   }, [idToken]);
 
   const handleSyncAll = () => {
-    if (!isAdmin) return;
+    if (!canManage) return;
     setConfirmState({
       isOpen: true,
       title: 'Đồng bộ toàn bộ các kênh',
@@ -109,7 +115,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
   };
 
   const handleSyncChannel = async (channelId: string) => {
-    if (!isAdmin) return;
+    if (!canManage) return;
     setSyncingId(channelId);
     setSyncResult(null);
 
@@ -155,7 +161,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
           <p className="text-sm text-slate-500">Yêu cầu kéo dữ liệu tức thời từ API Facebook/Zalo và đồng bộ hóa sang Google Sheets.</p>
         </div>
 
-        {isAdmin ? (
+        {canManage ? (
           <button
             onClick={handleSyncAll}
             disabled={syncingId !== null || activeChannels.length === 0 || !googleAccessToken}
@@ -172,7 +178,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
         )}
       </div>
 
-      {!googleAccessToken && isAdmin && (
+      {!googleAccessToken && canManage && (
         <div className="bg-amber-50 border border-amber-200/50 p-4 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
@@ -216,13 +222,13 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
       )}
 
       {/* Date filters and controls for manual syncing */}
-      {isAdmin && (
+      {canManage && (
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
           <h3 className="text-sm font-bold text-slate-800">Cấu hình tham số đồng bộ thủ công</h3>
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
             <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">Đồng bộ từ ngày (Tùy chọn)</label>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Đồng bộ từ ngày (mặc định 3 tháng gần nhất)</label>
               <input 
                 type="date"
                 value={since}

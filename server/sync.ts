@@ -8,6 +8,14 @@ import { v4 as uuidv4 } from 'uuid';
 const syncLocks = new Map<string, number>();
 
 export class SyncEngine {
+  private static readonly DEFAULT_SYNC_MONTHS = 3;
+
+  private static getDefaultSinceDate(): Date {
+    const since = new Date();
+    since.setMonth(since.getMonth() - this.DEFAULT_SYNC_MONTHS);
+    return since;
+  }
+
   private static getProvider(platform: string): SocialProvider {
     switch (platform) {
       case 'facebook':
@@ -72,7 +80,8 @@ export class SyncEngine {
 
     try {
       // 2. Gọi API nhà mạng lấy danh sách bài đăng
-      const rawPosts = await provider.listPosts(channelId, channel.externalId, sinceDate, untilDate);
+      const effectiveSinceDate = sinceDate || this.getDefaultSinceDate();
+      const rawPosts = await provider.listPosts(channelId, channel.externalId, effectiveSinceDate, untilDate);
       recordsReceived = rawPosts.length;
 
       const postsToUpsert: Post[] = [];
@@ -125,11 +134,28 @@ export class SyncEngine {
       // received in every sync. This keeps channel totals aligned with reports.
       const storedPostsSnap = await adminDb.collection('posts').where('channelId', '==', channel.id).get();
       let followersCount = channel.followersCount || 0;
+      let followersLoaded = false;
       try {
         followersCount = await provider.getFollowers(channelId, channel.externalId);
+        followersLoaded = true;
       } catch (followersError: any) {
         console.warn(`Could not load followers for channel ${channel.id}:`, followersError.message);
       }
+
+      if (followersLoaded) {
+        const tzOffset = 7 * 60 * 60 * 1000;
+        const snapshotDate = new Date(Date.now() + tzOffset).toISOString().slice(0, 10);
+        const snapshotKey = `${snapshotDate}:${channelId}`;
+        await adminDb.collection('followerSnapshots').doc(snapshotKey).set({
+          snapshotKey,
+          snapshotDate,
+          channelId,
+          channelName: channel.name,
+          followersCount: Number(followersCount || 0),
+          fetchedAt: new Date().toISOString(),
+        }, { merge: true });
+      }
+
       const updatedChannelFields = {
         lastSyncAt: new Date().toISOString(),
         lastSyncStatus: 'success',
@@ -340,14 +366,19 @@ export class SyncEngine {
   /**
    * Đồng bộ hóa tất cả các kênh đang hoạt động
    */
-  static async syncAllChannels(googleAccessToken: string | null, requestId: string = uuidv4()): Promise<any> {
+  static async syncAllChannels(
+    googleAccessToken: string | null,
+    sinceDate?: Date,
+    untilDate?: Date,
+    requestId: string = uuidv4(),
+  ): Promise<any> {
     const channelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
     const results: any[] = [];
     
     for (const doc of channelsSnap.docs) {
       const channelId = doc.id;
       try {
-        const res = await this.syncChannel(channelId, googleAccessToken, undefined, undefined, requestId);
+        const res = await this.syncChannel(channelId, googleAccessToken, sinceDate, untilDate, requestId);
         results.push({ channelId, success: true, ...res });
       } catch (e: any) {
         results.push({ channelId, success: false, error: e.message });

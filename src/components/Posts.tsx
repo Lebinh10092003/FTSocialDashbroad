@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Search, Radio, Layers, ExternalLink, Download, ArrowUpDown, ChevronLeft, ChevronRight, AlertCircle, FileText
+  Search, Radio, Layers, ExternalLink, Download, ArrowUpDown, ChevronLeft, ChevronRight, AlertCircle, FileText, Calendar
 } from 'lucide-react';
 import { Channel, Post, Platform } from '../types';
 
@@ -9,6 +9,17 @@ interface PostsProps {
   channels: Channel[];
 }
 
+type DatePreset = 'custom' | '7days' | '30days' | '3months';
+
+function getPastDateStr(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
+function getTodayStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 export default function Posts({ idToken, channels }: PostsProps) {
   const [posts, setPosts] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
@@ -19,6 +30,9 @@ export default function Posts({ idToken, channels }: PostsProps) {
   const [search, setSearch] = useState('');
   const [platform, setPlatform] = useState<string>('all');
   const [channelId, setChannelId] = useState<string>('all');
+  const [startDate, setStartDate] = useState(getPastDateStr(29));
+  const [endDate, setEndDate] = useState(getTodayStr());
+  const [datePreset, setDatePreset] = useState<DatePreset>('30days');
   const [page, setPage] = useState(1);
   const [limit] = useState(15);
 
@@ -26,7 +40,7 @@ export default function Posts({ idToken, channels }: PostsProps) {
     setLoading(true);
     setError(null);
     try {
-      let url = `/api/posts?page=${page}&limit=${limit}`;
+      let url = `/api/posts?page=${page}&limit=${limit}&startDate=${startDate}&endDate=${endDate}`;
       if (search) url += `&search=${encodeURIComponent(search)}`;
       if (platform !== 'all') url += `&platform=${platform}`;
       if (channelId !== 'all') url += `&channelId=${channelId}`;
@@ -51,7 +65,7 @@ export default function Posts({ idToken, channels }: PostsProps) {
 
   useEffect(() => {
     fetchPosts();
-  }, [idToken, platform, channelId, page, channels]);
+  }, [idToken, platform, channelId, startDate, endDate, page, channels]);
 
   // Handle manual trigger when pressing Enter or clicking Search button
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -66,10 +80,23 @@ export default function Posts({ idToken, channels }: PostsProps) {
     setPage(1);
   };
 
+  const updatePreset = (preset: DatePreset) => {
+    setDatePreset(preset);
+    if (preset === 'custom') return;
+    const end = new Date();
+    const start = new Date();
+    if (preset === '7days') start.setDate(end.getDate() - 6);
+    if (preset === '30days') start.setDate(end.getDate() - 29);
+    if (preset === '3months') start.setMonth(end.getMonth() - 3);
+    setStartDate(start.toISOString().slice(0, 10));
+    setEndDate(end.toISOString().slice(0, 10));
+    setPage(1);
+  };
   const handleExportCSV = () => {
     let url = `/api/reports/export.csv?`;
     if (platform !== 'all') url += `platform=${platform}&`;
-    if (channelId !== 'all') url += `channelId=${channelId}`;
+    if (channelId !== 'all') url += `channelId=${channelId}&`;
+    url += `startDate=${startDate}&endDate=${endDate}`;
 
     // Direct download via browser trigger
     const link = document.createElement('a');
@@ -161,6 +188,21 @@ export default function Posts({ idToken, channels }: PostsProps) {
           </select>
         </div>
 
+        <div>
+          <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Thời gian</label>
+          <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5">
+            <Calendar className="w-3.5 h-3.5 text-slate-400" />
+            <select value={datePreset} onChange={event => updatePreset(event.target.value as DatePreset)} className="text-xs font-medium text-slate-700 bg-transparent outline-none max-w-28">
+              <option value="custom">Tùy chọn</option>
+              <option value="7days">7 ngày qua</option>
+              <option value="30days">30 ngày qua</option>
+              <option value="3months">3 tháng qua</option>
+            </select>
+            <input type="date" value={startDate} min={getPastDateStr(365)} max={endDate} onChange={event => { setStartDate(event.target.value); setDatePreset('custom'); setPage(1); }} className="w-28 text-[11px] text-slate-600 outline-none" />
+            <span className="text-slate-400 text-[11px]">đến</span>
+            <input type="date" value={endDate} min={startDate} max={getTodayStr()} onChange={event => { setEndDate(event.target.value); setDatePreset('custom'); setPage(1); }} className="w-28 text-[11px] text-slate-600 outline-none" />
+          </div>
+        </div>
         <div className="self-end pb-0.5">
           <button
             type="submit"

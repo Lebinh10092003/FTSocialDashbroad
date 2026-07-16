@@ -19,24 +19,17 @@ const MediaSummary = lazy(() => import('./components/MediaSummary'));
 const Posts = lazy(() => import('./components/Posts'));
 const Sync = lazy(() => import('./components/Sync'));
 const Config = lazy(() => import('./components/Config'));
+const AccountManagement = lazy(() => import('./components/AccountManagement'));
 
 export default function App() {
-  const [user, setUser] = useState<User | null>({
-    uid: 'admin-master-uid',
-    email: 'admin@ftsocial.com',
-    displayName: 'Quản trị viên',
-    photoURL: null,
-    getIdToken: async () => 'mock-dev-token-admin@ftsocial.com'
-  } as any);
-  const [idToken, setIdToken] = useState<string | null>('mock-dev-token-admin@ftsocial.com');
-  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>('mock-google-access-token');
-  const [userRole, setUserRole] = useState<UserRole>('ADMIN');
-  
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [user, setUser] = useState<User | null>(null);
+  const [idToken, setIdToken] = useState<string | null>(null);
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<UserRole>('EMPLOYEE');  const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [viewMode, setViewMode] = useState<'workspace' | 'app'>('workspace');
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [authChecking, setAuthChecking] = useState<boolean>(false);
+  const [authChecking, setAuthChecking] = useState<boolean>(true);
 
   // Custom Auth state
   const [loginEmail, setLoginEmail] = useState('');
@@ -63,7 +56,18 @@ export default function App() {
       access_type: 'offline'
     });
 
-    setAuthChecking(false);
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser) { setUser(null); setIdToken(null); setUserRole('EMPLOYEE'); setAuthChecking(false); return; }
+      setUser(currentUser);
+      const token = await currentUser.getIdToken();
+      setIdToken(token);
+      try {
+        const profile = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+        if (profile.role) setUserRole(profile.role);
+      } catch (error) { console.error('Không thể tải vai trò:', error); }
+      setAuthChecking(false);
+    });
+    return unsubscribe;
   }, []);
 
   const handleCredentialsAuth = async (e: React.FormEvent) => {
@@ -236,7 +240,7 @@ export default function App() {
     setUser(null);
     setIdToken(null);
     setGoogleAccessToken(null);
-    setUserRole('VIEWER');
+    setUserRole('EMPLOYEE');
   };
 
   // Fetch all channels
@@ -290,6 +294,23 @@ export default function App() {
     );
   }
 
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <form onSubmit={handleCredentialsAuth} className="w-full max-w-lg bg-white rounded-3xl border border-slate-200 shadow-lg shadow-slate-200/60 p-9 md:p-10 space-y-5">
+          <div className="text-center mb-2">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-extrabold text-lg shadow-md shadow-blue-200">FT</div>
+            <h1 className="mt-4 text-2xl font-extrabold text-slate-900">FermatTech Workspace</h1>
+          </div>
+          <input value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="Email" className="w-full rounded-xl border border-slate-200 px-4 py-3.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" autoComplete="username" />
+          <input value={loginPassword} onChange={e => setLoginPassword(e.target.value)} type="password" placeholder="Mật khẩu" className="w-full rounded-xl border border-slate-200 px-4 py-3.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" autoComplete="current-password" />
+          {authError && <p className="text-xs text-rose-600">{authError}</p>}
+          <button disabled={authLoading} className="w-full rounded-xl bg-blue-600 py-3.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">{authLoading ? 'Đang đăng nhập...' : 'Đăng nhập'}</button>
+          <button type="button" onClick={handleGoogleSignIn} disabled={authLoading} className="w-full rounded-xl border border-slate-200 py-3.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Đăng nhập bằng Google</button>
+        </form>
+      </div>
+    );
+  }
   // Render Workspace Portal
   if (viewMode === 'workspace') {
     return (
@@ -305,7 +326,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-extrabold text-white text-base leading-tight tracking-tight">FT Workspace</h1>
-              <p className="text-[9px] uppercase font-bold text-amber-500 tracking-wider">Enterprise Suite</p>
+              <p className="text-[9px] uppercase font-bold text-amber-500 tracking-wider">Workspace</p>
             </div>
           </div>
           <div className="flex items-center gap-4 bg-stone-900/40 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/5">
@@ -318,7 +339,7 @@ export default function App() {
         <main className="flex-1 w-full max-w-6xl mx-auto px-6 py-10 flex flex-col justify-center z-10">
           <div className="text-center max-w-2xl mx-auto mb-12 space-y-3">
             <h2 className="text-3xl md:text-4xl font-extrabold text-white tracking-tight leading-none">
-              Không gian làm việc <span className="text-gold-gradient">FT Enterprise</span>
+              Không gian làm việc <span className="text-gold-gradient">FT Workspace</span>
             </h2>
             <p className="text-xs text-stone-400 max-w-md mx-auto">
               Cổng quản trị hợp nhất các công cụ đồng bộ dữ liệu, phân tích mạng xã hội và tự động hóa quy trình chăm sóc khách hàng.
@@ -424,12 +445,39 @@ export default function App() {
                 Đang phát triển
               </div>
             </div>
-          </div>
+
+            {/* Card 5: Assessment (Coming Soon) */}
+            <div className="glass-card p-6.5 rounded-3xl opacity-80 relative group flex flex-col justify-between min-h-[220px]">
+              <div className="space-y-4">
+                <div className="w-12 h-12 bg-gradient-to-tr from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-950/20">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                </div>
+                <div className="space-y-1.5">
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">Khảo thí <span className="text-[9px] bg-stone-700/30 text-stone-400 font-extrabold px-1.5 py-0.5 rounded-full border border-stone-600/30 uppercase tracking-wide">Sắp ra mắt</span></h3>
+                  <p className="text-xs text-stone-400 leading-relaxed">Quản lý các cuộc thi tại FermatTech.</p>
+                </div>
+              </div>
+              <div className="pt-4 text-xs font-bold text-stone-500">Đang phát triển</div>
+            </div>
+
+            {/* Card 6: Digital Training (Coming Soon) */}
+            <div className="glass-card p-6.5 rounded-3xl opacity-80 relative group flex flex-col justify-between min-h-[220px]">
+              <div className="space-y-4">
+                <div className="w-12 h-12 bg-gradient-to-tr from-cyan-500 to-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-cyan-950/20">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v11.494m-9-5.747h18M4.5 8.5h15M4.5 15.5h15M12 3a9 9 0 100 18 9 9 0 000-18z" /></svg>
+                </div>
+                <div className="space-y-1.5">
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">Đào tạo số <span className="text-[9px] bg-stone-700/30 text-stone-400 font-extrabold px-1.5 py-0.5 rounded-full border border-stone-600/30 uppercase tracking-wide">Sắp ra mắt</span></h3>
+                  <p className="text-xs text-stone-400 leading-relaxed">Công tác đào tạo Chuyển đổi số, Đào tạo Ứng dụng AI trong công việc.</p>
+                </div>
+              </div>
+              <div className="pt-4 text-xs font-bold text-stone-500">Đang phát triển</div>
+            </div>          </div>
         </main>
 
         {/* Footer */}
         <footer className="w-full text-center py-6 text-[10px] text-stone-500 z-10 border-t border-white/5">
-          Copyright &copy; 2026 FT Enterprise Suite. Powered by Cloud Run containers & VPS PM2 engines.
+          Copyright &copy; 2026 FermatTech Workspace. Powered by Cloud Run containers & VPS PM2 engines.
         </footer>
       </div>
     );
@@ -465,21 +513,21 @@ export default function App() {
             }>
               {activeTab === 'dashboard' && (
                 <Dashboard 
-                  idToken={idToken} 
+                  idToken={idToken || ''} 
                   googleAccessToken={googleAccessToken}
                   channels={channels}
                 />
               )}
-              {activeTab === 'media' && <MediaSummary idToken={idToken} />}
+              {activeTab === 'media' && <MediaSummary idToken={idToken || ''} />}
               {activeTab === 'posts' && (
                 <Posts 
-                  idToken={idToken}
+                  idToken={idToken || ''}
                   channels={channels}
                 />
               )}
               {activeTab === 'sync' && (
                 <Sync 
-                  idToken={idToken}
+                  idToken={idToken || ''}
                   googleAccessToken={googleAccessToken}
                   channels={channels}
                   userRole={userRole}
@@ -488,13 +536,9 @@ export default function App() {
                 />
               )}
               {activeTab === 'config' && (
-                <Config 
-                  idToken={idToken}
-                  googleAccessToken={googleAccessToken}
-                  userRole={userRole}
-                  onConnectGoogle={handleConnectGoogle}
-                />
+                <Config idToken={idToken || ''} googleAccessToken={googleAccessToken} userRole={userRole} onConnectGoogle={handleConnectGoogle} showUserManagement={false} />
               )}
+              {activeTab === 'accounts' && <AccountManagement idToken={idToken || ''} userRole={userRole} />}
             </Suspense>
           </div>
         )}

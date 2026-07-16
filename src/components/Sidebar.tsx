@@ -7,6 +7,7 @@ import {
   Settings, 
   LogOut,
   UserCheck,
+  UserCog,
   ArrowLeft
 } from 'lucide-react';
 import { UserRole } from '../types';
@@ -22,11 +23,12 @@ interface SidebarProps {
 
 export default function Sidebar({ activeTab, setActiveTab, user, userRole, onLogout, onBackToWorkspace }: SidebarProps) {
   const menuItems = [
-    { id: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
+    { id: 'dashboard', label: 'Biểu đồ tổng quan', icon: LayoutDashboard },
     { id: 'media', label: 'Tổng hợp truyền thông', icon: Radio },
     { id: 'posts', label: 'Bài đăng', icon: FileText },
     { id: 'sync', label: 'Đồng bộ dữ liệu', icon: RefreshCw },
     { id: 'config', label: 'Cấu hình hệ thống', icon: Settings },
+    ...(userRole === 'ADMIN' || userRole === 'MANAGER' ? [{ id: 'accounts', label: 'Quản lý tài khoản', icon: UserCog }] : []),
   ];
 
   return (

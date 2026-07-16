@@ -1,5 +1,5 @@
 export type Platform = 'facebook' | 'zalo' | 'mock';
-export type UserRole = 'ADMIN' | 'VIEWER';
+export type UserRole = 'ADMIN' | 'MANAGER' | 'EMPLOYEE';
 
 export interface Channel {
   id: string;
@@ -50,6 +50,14 @@ export interface DailySnapshot {
   fetchedAt: string;
 }
 
+export interface FollowerSnapshot {
+  snapshotKey: string;
+  snapshotDate: string;
+  channelId: string;
+  channelName: string;
+  followersCount: number;
+  fetchedAt: string;
+}
 export interface ApiLog {
   logId: string;
   startedAt: string;

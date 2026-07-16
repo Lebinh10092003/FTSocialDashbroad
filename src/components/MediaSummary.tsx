@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertCircle, BarChart3, Download, FileSpreadsheet, RefreshCw } from 'lucide-react';
+import { AlertCircle, BarChart3, Calendar, Download, FileSpreadsheet, RefreshCw } from 'lucide-react';
 import { Platform } from '../types';
 
 interface MediaSummaryRow {
@@ -9,7 +9,9 @@ interface MediaSummaryRow {
   externalId: string;
   lastSyncAt: string | null;
   lastSyncStatus: 'success' | 'failed' | null;
+  followersCount: number;
   postsCount: number;
+  views: number;
   totalEngagement: number;
 }
 
@@ -17,16 +19,31 @@ interface MediaSummaryProps {
   idToken: string;
 }
 
+type DatePreset = 'custom' | '7days' | '30days' | '3months';
+
+function getPastDateStr(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
+function getTodayStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 export default function MediaSummary({ idToken }: MediaSummaryProps) {
   const [rows, setRows] = useState<MediaSummaryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [startDate, setStartDate] = useState(getPastDateStr(29));
+  const [endDate, setEndDate] = useState(getTodayStr());
+  const [datePreset, setDatePreset] = useState<DatePreset>('30days');
 
   const loadSummary = async () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/media-summary', {
+      const params = new URLSearchParams({ startDate, endDate });
+      const response = await fetch(`/api/media-summary?${params.toString()}`, {
         headers: { Authorization: `Bearer ${idToken}` },
       });
       if (!response.ok) {
@@ -41,13 +58,27 @@ export default function MediaSummary({ idToken }: MediaSummaryProps) {
     }
   };
 
+  const updatePreset = (preset: DatePreset) => {
+    setDatePreset(preset);
+    if (preset === 'custom') return;
+
+    const end = new Date();
+    const start = new Date();
+    if (preset === '7days') start.setDate(end.getDate() - 6);
+    if (preset === '30days') start.setDate(end.getDate() - 29);
+    if (preset === '3months') start.setMonth(end.getMonth() - 3);
+
+    setStartDate(start.toISOString().slice(0, 10));
+    setEndDate(end.toISOString().slice(0, 10));
+  };
   useEffect(() => {
     if (idToken) loadSummary();
-  }, [idToken]);
+  }, [idToken, startDate, endDate]);
 
   const downloadXlsx = async () => {
     try {
-      const response = await fetch('/api/reports/media-summary.xlsx', {
+      const params = new URLSearchParams({ startDate, endDate });
+      const response = await fetch(`/api/reports/media-summary.xlsx?${params.toString()}`, {
         headers: { Authorization: `Bearer ${idToken}` },
       });
       if (!response.ok) throw new Error('Không thể tạo file Excel.');
@@ -71,9 +102,21 @@ export default function MediaSummary({ idToken }: MediaSummaryProps) {
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-200/70 pb-6">
         <div>
           <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Tổng hợp truyền thông</h2>
-          <p className="text-sm text-slate-500 mt-1">Theo dõi số bài đăng và hiệu quả tương tác thực tế của từng trang.</p>
+          <p className="text-sm text-slate-500 mt-1">Theo dõi số bài đăng, người theo dõi và hiệu quả tương tác của từng trang trong 30 ngày gần nhất.</p>
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <div className="flex flex-wrap items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm">
+            <Calendar className="w-4 h-4 text-slate-400" />
+            <select value={datePreset} onChange={event => updatePreset(event.target.value as DatePreset)} className="text-sm font-bold text-slate-700 bg-transparent outline-none">
+              <option value="custom">Tùy chọn</option>
+              <option value="7days">7 ngày qua</option>
+              <option value="30days">30 ngày qua</option>
+              <option value="3months">3 tháng qua</option>
+            </select>
+            <input type="date" value={startDate} min={getPastDateStr(365)} max={endDate} onChange={event => { setStartDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none" />
+            <span className="text-sm text-slate-400">đến</span>
+            <input type="date" value={endDate} min={startDate} max={getTodayStr()} onChange={event => { setEndDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none" />
+          </div>
           <button onClick={loadSummary} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-extrabold text-slate-700 hover:bg-slate-50">
             <RefreshCw className="w-4 h-4" /> Làm mới
           </button>
@@ -88,7 +131,7 @@ export default function MediaSummary({ idToken }: MediaSummaryProps) {
           <div className="p-3 rounded-xl bg-blue-50 text-blue-700"><BarChart3 className="w-6 h-6" /></div>
           <div>
             <h3 className="text-lg font-extrabold text-slate-800">Hiệu quả hoạt động theo kênh</h3>
-            <p className="text-sm text-slate-500 mt-1">Số bài đăng được đếm theo bài viết duy nhất, không cộng dồn theo số lần đồng bộ.</p>
+            <p className="text-sm text-slate-500 mt-1">Mặc định chỉ lấy dữ liệu trong 30 ngày gần nhất; số bài đăng được đếm theo bài viết duy nhất.</p>
           </div>
         </div>
 
@@ -100,7 +143,7 @@ export default function MediaSummary({ idToken }: MediaSummaryProps) {
           <div className="py-24 text-center text-slate-500"><FileSpreadsheet className="w-10 h-10 mx-auto text-slate-300 mb-3" />Chưa có kênh đang hoạt động.</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-left border-collapse">
+            <table className="w-full min-w-[1160px] text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-xs font-extrabold uppercase tracking-wide text-slate-500">
                   <th className="px-6 py-4 text-center w-20">STT</th>
@@ -108,7 +151,9 @@ export default function MediaSummary({ idToken }: MediaSummaryProps) {
                   <th className="px-6 py-4">Tên trang</th>
                   <th className="px-6 py-4 font-mono">ID</th>
                   <th className="px-6 py-4">Đồng bộ lần cuối</th>
+                  <th className="px-6 py-4 text-right">Người theo dõi</th>
                   <th className="px-6 py-4 text-center">Số bài đăng</th>
+                  <th className="px-6 py-4 text-right">Lượt xem</th>
                   <th className="px-6 py-4 text-right">Tổng tương tác</th>
                 </tr>
               </thead>
@@ -122,7 +167,9 @@ export default function MediaSummary({ idToken }: MediaSummaryProps) {
                     <td className="px-6 py-5">
                       {row.lastSyncAt ? <div><p className="font-semibold text-slate-700">{new Date(row.lastSyncAt).toLocaleString('vi-VN')}</p><p className={`text-xs font-bold mt-1 ${row.lastSyncStatus === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}>{row.lastSyncStatus === 'success' ? 'Thành công' : 'Thất bại'}</p></div> : <span className="text-slate-400">Chưa đồng bộ</span>}
                     </td>
+                    <td className="px-6 py-5 text-right font-extrabold text-slate-700">{row.followersCount.toLocaleString('vi-VN')}</td>
                     <td className="px-6 py-5 text-center font-extrabold text-slate-700">{row.postsCount.toLocaleString('vi-VN')}</td>
+                    <td className="px-6 py-5 text-right font-extrabold text-slate-700">{row.views.toLocaleString('vi-VN')}</td>
                     <td className="px-6 py-5 text-right font-extrabold text-slate-900">{row.totalEngagement.toLocaleString('vi-VN')}</td>
                   </tr>
                 ))}
@@ -132,7 +179,7 @@ export default function MediaSummary({ idToken }: MediaSummaryProps) {
         )}
       </div>
 
-      <p className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4">Tệp Excel chỉ gồm STT, Nền tảng, Tên trang, Số bài đăng và Tổng tương tác; ID và thời điểm đồng bộ được giữ trên giao diện để tra cứu.</p>
+      <p className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4">Bảng và tệp Excel mặc định chỉ gồm dữ liệu trong 30 ngày gần nhất; Excel có thêm Người theo dõi và Lượt xem. ID và thời điểm đồng bộ được giữ trên giao diện để tra cứu.</p>
     </div>
   );
 }

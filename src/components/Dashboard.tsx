@@ -7,6 +7,8 @@ import {
   CartesianGrid,
   Cell,
   Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -37,6 +39,13 @@ interface DashboardProps {
 }
 
 type TrendMetric = 'views' | 'engagement' | 'postsCount' | 'engagementRate';
+type DatePreset = 'custom' | '7days' | '30days' | '3months';
+type TrendScale = '2000' | '5000' | '10000' | 'auto';
+
+interface FollowerTrendPoint {
+  date: string;
+  followersCount: number;
+}
 
 const getPastDateStr = (days: number) => {
   const date = new Date();
@@ -50,16 +59,21 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   const [platformFilter, setPlatformFilter] = useState('all');
   const [channelFilter, setChannelFilter] = useState('all');
   const [postTypeFilter, setPostTypeFilter] = useState('all');
-  const [startDate, setStartDate] = useState(getPastDateStr(30));
+  const [startDate, setStartDate] = useState(getPastDateStr(29));
   const [endDate, setEndDate] = useState(getTodayStr());
-  const [datePreset, setDatePreset] = useState('30days');
+  const [datePreset, setDatePreset] = useState<DatePreset>('30days');
+  const [syncingSelectedPeriod, setSyncingSelectedPeriod] = useState(false);
   const [data, setData] = useState<DashboardData | null>(null);
+  const [followerTrend, setFollowerTrend] = useState<FollowerTrendPoint[]>([]);
+  const [followerTrendChannelId, setFollowerTrendChannelId] = useState('all');
+  const [followerTrendLoading, setFollowerTrendLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeMetric, setActiveMetric] = useState<TrendMetric>('views');
   const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
   const [isChannelPickerOpen, setIsChannelPickerOpen] = useState(false);
   const [onlyShowTotal, setOnlyShowTotal] = useState(false);
+  const [trendScale, setTrendScale] = useState<TrendScale>('2000');
 
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -88,31 +102,78 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
     }
   };
 
+  const selectedTrendDays = Math.min(
+    365,
+    Math.max(1, Math.round((new Date(`${endDate}T00:00:00`).getTime() - new Date(`${startDate}T00:00:00`).getTime()) / 86_400_000) + 1),
+  );
+
+  const fetchFollowerTrend = async () => {
+    if (!idToken) return;
+    setFollowerTrendLoading(true);
+    try {
+      const params = new URLSearchParams({ days: String(selectedTrendDays) });
+      if (followerTrendChannelId !== 'all') params.set('channelId', followerTrendChannelId);
+      const response = await fetch(`/api/followers/trend?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      if (!response.ok) throw new Error('Không thể tải lịch sử người theo dõi.');
+      setFollowerTrend(await response.json());
+    } catch (trendError) {
+      console.error('Không thể tải xu hướng followers:', trendError);
+      setFollowerTrend([]);
+    } finally {
+      setFollowerTrendLoading(false);
+    }
+  };
   useEffect(() => {
     if (idToken) fetchDashboardData();
   }, [idToken, googleAccessToken, platformFilter, channelFilter, postTypeFilter, startDate, endDate, channels]);
+  useEffect(() => {
+    fetchFollowerTrend();
+  }, [idToken, followerTrendChannelId, startDate, endDate]);
 
   useEffect(() => {
     if (data) setSelectedChannels(new Set(data.channelStats.map(stat => stat.channelName)));
   }, [data]);
 
-  const updatePreset = (preset: string) => {
+  const updatePreset = (preset: DatePreset) => {
     setDatePreset(preset);
-    const today = new Date();
+    if (preset === 'custom') return;
+
+    const end = new Date();
     const start = new Date();
-    if (preset === '7days') start.setDate(today.getDate() - 7);
-    if (preset === '30days') start.setDate(today.getDate() - 30);
-    if (preset === 'thisMonth') start.setDate(1);
-    if (preset === 'lastMonth') {
-      start.setMonth(today.getMonth() - 1, 1);
-      today.setDate(0);
-    }
-    if (preset !== 'custom') {
-      setStartDate(start.toISOString().slice(0, 10));
-      setEndDate(today.toISOString().slice(0, 10));
-    }
+    if (preset === '7days') start.setDate(end.getDate() - 6);
+    if (preset === '30days') start.setDate(end.getDate() - 29);
+    if (preset === '3months') start.setMonth(end.getMonth() - 3);
+
+    setStartDate(start.toISOString().slice(0, 10));
+    setEndDate(end.toISOString().slice(0, 10));
   };
 
+  const syncSelectedPeriod = async () => {
+    setSyncingSelectedPeriod(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/sync/all', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+          'X-Google-OAuth-Token': googleAccessToken || '',
+        },
+        body: JSON.stringify({ since: startDate, until: endDate }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || 'Không thể đồng bộ dữ liệu cho khoảng thời gian đã chọn.');
+      }
+      await fetchDashboardData();
+    } catch (syncError: any) {
+      setError(syncError.message || 'Không thể đồng bộ dữ liệu.');
+    } finally {
+      setSyncingSelectedPeriod(false);
+    }
+  };
   const filteredChannels = channels.filter(channel =>
     channel.status === 'active' && (platformFilter === 'all' || channel.platform === platformFilter),
   );
@@ -229,16 +290,15 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
           </div>
           <div className="flex flex-wrap items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm">
             <Calendar className="w-4 h-4 text-slate-400" />
-            <select value={datePreset} onChange={event => updatePreset(event.target.value)} className="text-sm font-bold text-slate-700 bg-transparent outline-none">
-              <option value="custom">Tùy chọn ngày</option>
+            <select value={datePreset} onChange={event => updatePreset(event.target.value as DatePreset)} className="text-sm font-bold text-slate-700 bg-transparent outline-none">
+              <option value="custom">Tùy chọn</option>
               <option value="7days">7 ngày qua</option>
               <option value="30days">30 ngày qua</option>
-              <option value="thisMonth">Tháng này</option>
-              <option value="lastMonth">Tháng trước</option>
+              <option value="3months">3 tháng qua</option>
             </select>
-            <input type="date" value={startDate} onChange={event => { setStartDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none" />
+            <input type="date" value={startDate} min={getPastDateStr(365)} max={endDate} onChange={event => { setStartDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none" />
             <span className="text-sm text-slate-400">đến</span>
-            <input type="date" value={endDate} onChange={event => { setEndDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none" />
+            <input type="date" value={endDate} min={startDate} max={getTodayStr()} onChange={event => { setEndDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none" />
           </div>
         </div>
       </section>
@@ -255,8 +315,8 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
           <option value="all">Tất cả các kênh</option>
           {filteredChannels.map(channel => <option key={channel.id} value={channel.id}>{channel.name}</option>)}
         </select>
-        <button onClick={fetchDashboardData} className="ml-auto inline-flex items-center gap-2 bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-sm font-extrabold text-slate-700 hover:bg-slate-100">
-          <RefreshCw className="w-4 h-4" /> Đồng bộ lại
+        <button onClick={syncSelectedPeriod} disabled={syncingSelectedPeriod} className="ml-auto inline-flex items-center gap-2 bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-sm font-extrabold text-slate-700 hover:bg-slate-100 disabled:opacity-60">
+          <RefreshCw className={`w-4 h-4 ${syncingSelectedPeriod ? 'animate-spin' : ''}`} /> Đồng bộ lại
         </button>
       </section>
 
@@ -312,7 +372,14 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                 <h3 className="text-lg font-extrabold text-slate-800">Xu hướng {selectedMetricLabel[activeMetric]} theo ngày đăng</h3>
                 <p className="text-sm text-slate-500 mt-1">Chọn KPI phía trên để đổi chỉ số hiển thị trên biểu đồ.</p>
               </div>
-              <div className="relative">
+              <div className="flex items-start gap-2">
+                <select value={trendScale} onChange={event => setTrendScale(event.target.value as TrendScale)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm">
+                  <option value="2000">Thang 2.000</option>
+                  <option value="5000">Thang 5.000</option>
+                  <option value="10000">Thang 10.000</option>
+                  <option value="auto">Tự động</option>
+                </select>
+                <div className="relative">
                 <button onClick={() => setIsChannelPickerOpen(open => !open)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm">
                   Chọn kênh hiển thị ({selectedChannels.size}) ▾
                 </button>
@@ -336,9 +403,10 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                   </>
                 )}
               </div>
+              </div>
             </div>
 
-            <div className="h-[230px]">
+            <div className="h-[320px]">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={data.trends} margin={{ top: 10, right: 15, left: -10, bottom: 5 }}>
                   <defs>
@@ -347,7 +415,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                   <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
+                  <YAxis domain={trendScale === 'auto' ? [0, 'auto'] : [0, Number(trendScale)]} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
                   <Tooltip
                     contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: 10, color: '#fff', fontSize: 12 }}
                     itemStyle={{ color: '#fff' }}
@@ -382,6 +450,47 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
             </div>
           </section>
 
+          <section className="bg-white p-4 md:p-5 rounded-2xl border border-slate-200/70 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-extrabold text-slate-800">Tăng trưởng người theo dõi</h3>
+                <p className="text-sm text-slate-500 mt-1">Lịch sử followers được lưu theo từng ngày đồng bộ.</p>
+              </div>
+              <select
+                value={followerTrendChannelId}
+                onChange={event => setFollowerTrendChannelId(event.target.value)}
+                className="bg-white border border-slate-200 text-sm font-bold text-slate-700 rounded-lg px-3 py-1.5"
+              >
+                <option value="all">Tổng tất cả trang</option>
+                {channels.filter(channel => channel.status === 'active').map(channel => (
+                  <option key={channel.id} value={channel.id}>{channel.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="h-[320px]">
+              {followerTrendLoading ? (
+                <div className="h-full grid place-items-center text-sm text-slate-400">Đang tải lịch sử followers...</div>
+              ) : followerTrend.length ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={followerTrend} margin={{ top: 10, right: 15, left: -10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: 10, color: '#fff', fontSize: 12 }}
+                      itemStyle={{ color: '#fff' }}
+                      labelStyle={{ color: '#fff', fontWeight: 700 }}
+                      formatter={(value: number) => [Number(value).toLocaleString('vi-VN'), 'Người theo dõi']}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" />
+                    <Line type="monotone" dataKey="followersCount" name="Người theo dõi" stroke="#7c3aed" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full grid place-items-center text-sm text-slate-400">Chưa có lịch sử followers. Dữ liệu sẽ xuất hiện sau lần đồng bộ tiếp theo.</div>
+              )}
+            </div>
+          </section>
           <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
             <ContentBarChart title="Lượt xem theo loại nội dung" subtitle="Tổng lượt xem của từng định dạng bài đăng." data={typeStats} dataKey="views" color="#0891b2" formatter="lượt xem" />
             <ContentBarChart title="Lượt tương tác theo loại nội dung" subtitle="Tổng tương tác theo từng định dạng bài đăng." data={typeStats} dataKey="engagement" color="#2563eb" formatter="tương tác" />

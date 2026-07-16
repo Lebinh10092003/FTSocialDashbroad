@@ -8,6 +8,38 @@ import * as XLSX from 'xlsx';
 
 export const apiRouter = Router();
 
+const DEFAULT_RECENT_DAYS = 30;
+
+/** Returns the first date of the default reporting window, including today. */
+function getRecentStartDate(days = DEFAULT_RECENT_DAYS): string {
+  const date = new Date();
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCDate(date.getUTCDate() - (days - 1));
+  return date.toISOString().slice(0, 10);
+}
+
+function getTodayDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function isDateString(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function resolveReportingPeriod(input: { startDate?: unknown; endDate?: unknown }): { periodStart: string; periodEnd: string } {
+  const periodStart = isDateString(input.startDate) ? input.startDate : getRecentStartDate();
+  const periodEnd = isDateString(input.endDate) ? input.endDate : getTodayDate();
+
+  if (periodStart > periodEnd) throw new Error('Ngày bắt đầu phải trước hoặc bằng ngày kết thúc.');
+
+  const oldestAllowedStart = new Date(`${periodEnd}T00:00:00.000Z`);
+  oldestAllowedStart.setUTCFullYear(oldestAllowedStart.getUTCFullYear() - 1);
+  if (periodStart < oldestAllowedStart.toISOString().slice(0, 10)) {
+    throw new Error('Chỉ được chọn khoảng thời gian tối đa một năm.');
+  }
+
+  return { periodStart, periodEnd };
+}
 // Extend Express Request interface to include user info
 interface AuthenticatedRequest extends Request {
   user?: any;
@@ -109,35 +141,26 @@ async function authenticateUser(req: AuthenticatedRequest, res: Response, next: 
       adminEmailsList = adminEmailsEnv.split(',').map(e => e.trim().toLowerCase());
     }
 
-    let role: UserRole = 'VIEWER';
-    if (
-      adminEmailsList.includes(email.toLowerCase()) || 
-      email.toLowerCase() === 'admin' || 
-      email.toLowerCase() === 'admin@ftsocial.com' ||
-      email.toLowerCase() === '09.levanbinh2003@gmail.com'
-    ) {
-      role = 'ADMIN';
-    }
+    const normalizedEmail = email.toLowerCase();
+    const isAdmin = adminEmailsList.includes(normalizedEmail) ||
+      normalizedEmail === 'admin' ||
+      normalizedEmail === 'admin@ftsocial.com';
 
-    // 2. Đồng bộ hóa vai trò vào Firestore của người dùng
+    // 2. Admin is derived from the protected admin identity; other roles are stored in users.
     const userRef = adminDb.collection('users').doc(email);
     const userSnap = await userRef.get();
+    const storedRole = userSnap.exists ? ((userSnap.data() as any)?.role as string | undefined) : undefined;
+    const normalizedStoredRole: UserRole | undefined = storedRole === 'VIEWER'
+      ? 'EMPLOYEE'
+      : (storedRole === 'MANAGER' || storedRole === 'EMPLOYEE' || storedRole === 'ADMIN' ? storedRole : undefined);
+    const role: UserRole = isAdmin ? 'ADMIN' : (normalizedStoredRole || 'EMPLOYEE');
 
     if (userSnap.exists) {
-      const userData = userSnap.data();
-      const storedRole = userData ? (userData as UserProfile).role : null;
       if (storedRole !== role) {
-        // Cập nhật lại vai trò trong Firestore cho đồng bộ
         await userRef.update({ role, updatedAt: new Date().toISOString() });
       }
     } else {
-      // Tạo mới profile nếu chưa có
-      const newUser: UserProfile = {
-        email,
-        role,
-        updatedAt: new Date().toISOString()
-      };
-      await userRef.set(newUser);
+      await userRef.set({ email, role, updatedAt: new Date().toISOString() } as UserProfile);
     }
 
     req.userRole = role;
@@ -154,6 +177,13 @@ async function authenticateUser(req: AuthenticatedRequest, res: Response, next: 
 function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction): any {
   if (req.userRole !== 'ADMIN') {
     return res.status(403).json({ error: 'Quyền truy cập bị từ chối. Bạn không phải là ADMIN.' });
+  }
+  next();
+}
+
+function requireManagerOrAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction): any {
+  if (req.userRole !== 'ADMIN' && req.userRole !== 'MANAGER') {
+    return res.status(403).json({ error: 'Chức năng này yêu cầu quyền Quản lý hoặc Admin.' });
   }
   next();
 }
@@ -184,6 +214,7 @@ apiRouter.get('/auth/me', authenticateUser, (req: AuthenticatedRequest, res: Res
 apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { platform, channelId, startDate, endDate, postType } = req.query;
+    const { periodStart, periodEnd } = resolveReportingPeriod({ startDate, endDate });
 
     // Lấy danh sách posts
     let postsQuery: any = adminDb.collection('posts');
@@ -203,7 +234,10 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
       (!platform || channel.platform === platform) && (!channelId || channel.id === channelId),
     );
     const activeChannelIds = new Set(channels.map(c => c.id));
-    posts = posts.filter(p => activeChannelIds.has(p.channelId));
+    posts = posts.filter(p => {
+      const publishedDate = p.publishedAt.split('T')[0];
+      return activeChannelIds.has(p.channelId) && publishedDate >= periodStart && publishedDate <= periodEnd;
+    });
 
     // Lấy snapshots theo thời gian lọc
     let snapshotsQuery: any = adminDb.collection('dailySnapshots');
@@ -214,18 +248,14 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
     let snapshots = snapshotsSnap.docs.map(doc => doc.data() as DailySnapshot);
     snapshots = snapshots.filter(s => activeChannelIds.has(s.channelId));
 
-    // Lọc bài đăng theo khoảng thời gian xuất bản (publishedAt) cho chính xác
-    if (startDate) {
-      posts = posts.filter(p => p.publishedAt.split('T')[0] >= (startDate as string));
-    }
-    if (endDate) {
-      posts = posts.filter(p => p.publishedAt.split('T')[0] <= (endDate as string));
-    }
-
-    // Lọc snapshots để lấy trạng thái mới nhất tính đến ngày endDate
-    if (endDate) {
-      snapshots = snapshots.filter(s => s.snapshotDate <= (endDate as string));
-    }
+    // Always constrain dashboard output to the selected period (30 days by default).
+    posts = posts.filter(post => {
+      const publishedDate = post.publishedAt.split('T')[0];
+      return publishedDate >= periodStart && publishedDate <= periodEnd;
+    });
+    snapshots = snapshots.filter(snapshot =>
+      snapshot.snapshotDate >= periodStart && snapshot.snapshotDate <= periodEnd,
+    );
 
     // Tính toán KPIs thời điểm hiện tại
     let postsCount = posts.length;
@@ -442,6 +472,49 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
 });
 
 /**
+ * GET /api/followers/trend - Lịch sử followers theo từng kênh hoặc tổng các kênh.
+ */
+apiRouter.get('/followers/trend', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const rawDays = Number(req.query.days || 30);
+    if (!Number.isInteger(rawDays) || rawDays < 1 || rawDays > 365) {
+      return res.status(400).json({ error: 'Tham số days phải nằm trong khoảng từ 1 đến 365.' });
+    }
+
+    const requestedChannelId = typeof req.query.channelId === 'string' && req.query.channelId !== 'all'
+      ? req.query.channelId
+      : null;
+    const periodStart = getRecentStartDate(rawDays);
+    const periodEnd = getTodayDate();
+    const snapshotsSnap = await adminDb.collection('followerSnapshots')
+      .where('snapshotDate', '>=', periodStart)
+      .where('snapshotDate', '<=', periodEnd)
+      .get();
+
+    const trendByDate = new Map<string, number>();
+    snapshotsSnap.docs.forEach(doc => {
+      const snapshot = doc.data() as {
+        snapshotDate: string;
+        channelId: string;
+        followersCount: number;
+      };
+      if (requestedChannelId && snapshot.channelId !== requestedChannelId) return;
+      trendByDate.set(
+        snapshot.snapshotDate,
+        (trendByDate.get(snapshot.snapshotDate) || 0) + Number(snapshot.followersCount || 0),
+      );
+    });
+
+    const trend = Array.from(trendByDate.entries())
+      .map(([date, followersCount]) => ({ date, followersCount }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    res.json(trend);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Không thể tải xu hướng người theo dõi: ' + error.message });
+  }
+});
+/**
  * GET /api/channels - Danh sách kênh
  */
 apiRouter.get('/channels', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
@@ -469,16 +542,17 @@ apiRouter.get('/channels', authenticateUser, async (req: AuthenticatedRequest, r
  */
 apiRouter.get('/media-summary', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const { periodStart, periodEnd } = resolveReportingPeriod(req.query);
     const channelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
     const channels = channelsSnap.docs.map(doc => doc.data() as Channel);
     const activeChannelIds = new Set(channels.map(channel => channel.id));
 
-    const postsSnap = await adminDb.collection('posts').get();
+    const postsSnap = await adminDb.collection('posts').where('publishedAt', '>=', periodStart).where('publishedAt', '<=', `${periodEnd}T23:59:59.999Z`).get();
     const posts = postsSnap.docs
       .map(doc => doc.data() as Post)
       .filter(post => activeChannelIds.has(post.channelId));
 
-    const snapshotsSnap = await adminDb.collection('dailySnapshots').get();
+    const snapshotsSnap = await adminDb.collection('dailySnapshots').where('snapshotDate', '>=', periodStart).where('snapshotDate', '<=', periodEnd).get();
     const latestSnapshots = new Map<string, DailySnapshot>();
     snapshotsSnap.docs.forEach(doc => {
       const snapshot = doc.data() as DailySnapshot;
@@ -503,7 +577,12 @@ apiRouter.get('/media-summary', authenticateUser, async (req: AuthenticatedReque
         externalId: channel.externalId,
         lastSyncAt: channel.lastSyncAt || null,
         lastSyncStatus: channel.lastSyncStatus || null,
+        followersCount: Number(channel.followersCount || 0),
         postsCount: channelPosts.length,
+        views: channelPosts.reduce(
+          (total, post) => total + (latestSnapshots.get(post.postKey)?.views || 0),
+          0,
+        ),
         totalEngagement,
       };
     });
@@ -519,14 +598,15 @@ apiRouter.get('/media-summary', authenticateUser, async (req: AuthenticatedReque
  */
 apiRouter.get('/reports/media-summary.xlsx', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const { periodStart, periodEnd } = resolveReportingPeriod(req.query);
     const channelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
     const channels = channelsSnap.docs.map(doc => doc.data() as Channel);
     const activeChannelIds = new Set(channels.map(channel => channel.id));
-    const postsSnap = await adminDb.collection('posts').get();
+    const postsSnap = await adminDb.collection('posts').where('publishedAt', '>=', periodStart).where('publishedAt', '<=', `${periodEnd}T23:59:59.999Z`).get();
     const posts = postsSnap.docs
       .map(doc => doc.data() as Post)
       .filter(post => activeChannelIds.has(post.channelId));
-    const snapshotsSnap = await adminDb.collection('dailySnapshots').get();
+    const snapshotsSnap = await adminDb.collection('dailySnapshots').where('snapshotDate', '>=', periodStart).where('snapshotDate', '<=', periodEnd).get();
     const latestSnapshots = new Map<string, DailySnapshot>();
     snapshotsSnap.docs.forEach(doc => {
       const snapshot = doc.data() as DailySnapshot;
@@ -544,14 +624,19 @@ apiRouter.get('/reports/media-summary.xlsx', authenticateUser, async (req: Authe
         'STT': index + 1,
         'Nền tảng': channel.platform === 'facebook' ? 'Facebook' : 'Zalo OA',
         'Tên trang': channel.name,
+        'Người theo dõi': Number(channel.followersCount || 0),
         'Số bài đăng': channelPosts.length,
+        'Lượt xem': channelPosts.reduce(
+          (total, post) => total + (latestSnapshots.get(post.postKey)?.views || 0),
+          0,
+        ),
         'Tổng tương tác': totalEngagement,
       };
     });
 
     const workbook = XLSX.utils.book_new();
     const worksheet = XLSX.utils.json_to_sheet(rows);
-    worksheet['!cols'] = [{ wch: 8 }, { wch: 16 }, { wch: 48 }, { wch: 16 }, { wch: 18 }];
+    worksheet['!cols'] = [{ wch: 8 }, { wch: 16 }, { wch: 48 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 18 }];
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Tong hop truyen thong');
 
     const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
@@ -567,7 +652,7 @@ apiRouter.get('/reports/media-summary.xlsx', authenticateUser, async (req: Authe
 /**
  * POST /api/channels - Thêm kênh mới (ADMIN)
  */
-apiRouter.post('/channels', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+apiRouter.post('/channels', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { platform, name, externalId, timezone } = req.body;
     if (!platform || !name || !externalId) {
@@ -597,7 +682,7 @@ apiRouter.post('/channels', authenticateUser, requireAdmin, async (req: Authenti
 /**
  * PUT /api/channels/:id - Cập nhật kênh (ADMIN)
  */
-apiRouter.put('/channels/:id', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+apiRouter.put('/channels/:id', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
     const { name, status, timezone } = req.body;
@@ -623,7 +708,7 @@ apiRouter.put('/channels/:id', authenticateUser, requireAdmin, async (req: Authe
 /**
  * POST /api/channels/:id/test-connection - Kiểm tra kết nối API của kênh (ADMIN)
  */
-apiRouter.post('/channels/:id/test-connection', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+apiRouter.post('/channels/:id/test-connection', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
     const snap = await adminDb.collection('channels').doc(id).get();
@@ -644,13 +729,14 @@ apiRouter.post('/channels/:id/test-connection', authenticateUser, requireAdmin, 
 /**
  * POST /api/channels/:id/sync - Chạy đồng bộ thủ công cho một kênh (ADMIN)
  */
-apiRouter.post('/channels/:id/sync', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+apiRouter.post('/channels/:id/sync', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { since, until } = req.body;
-
-    const sinceDate = since ? new Date(since) : undefined;
-    const untilDate = until ? new Date(until) : undefined;
+    const { since, until } = req.body || {};
+    const hasCustomPeriod = since || until;
+    const period = hasCustomPeriod ? resolveReportingPeriod({ startDate: since, endDate: until }) : null;
+    const sinceDate = period ? new Date(`${period.periodStart}T00:00:00.000Z`) : undefined;
+    const untilDate = period ? new Date(`${period.periodEnd}T23:59:59.999Z`) : undefined;
 
     const result = await SyncEngine.syncChannel(id, req.googleAccessToken, sinceDate, untilDate);
     res.json(result);
@@ -662,7 +748,7 @@ apiRouter.post('/channels/:id/sync', authenticateUser, requireAdmin, async (req:
 /**
  * DELETE /api/channels/:id - Xóa kênh và dữ liệu liên quan (ADMIN)
  */
-apiRouter.delete('/channels/:id', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+apiRouter.delete('/channels/:id', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
     const channelRef = adminDb.collection('channels').doc(id);
@@ -736,9 +822,14 @@ apiRouter.delete('/channels/:id', authenticateUser, requireAdmin, async (req: Au
 /**
  * POST /api/sync/all - Đồng bộ hóa tất cả các kênh (ADMIN)
  */
-apiRouter.post('/sync/all', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+apiRouter.post('/sync/all', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const results = await SyncEngine.syncAllChannels(req.googleAccessToken);
+    const { since, until } = req.body || {};
+    const hasCustomPeriod = since || until;
+    const period = hasCustomPeriod ? resolveReportingPeriod({ startDate: since, endDate: until }) : null;
+    const sinceDate = period ? new Date(`${period.periodStart}T00:00:00.000Z`) : undefined;
+    const untilDate = period ? new Date(`${period.periodEnd}T23:59:59.999Z`) : undefined;
+    const results = await SyncEngine.syncAllChannels(req.googleAccessToken, sinceDate, untilDate);
     res.json({ success: true, results });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -763,7 +854,8 @@ apiRouter.get('/sync/history', authenticateUser, async (req: AuthenticatedReques
  */
 apiRouter.get('/posts', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { platform, channelId, search, page = '1', limit = '20' } = req.query;
+    const { platform, channelId, search, startDate, endDate, page = '1', limit = '20' } = req.query;
+    const { periodStart, periodEnd } = resolveReportingPeriod({ startDate, endDate });
 
     // Chỉ lấy bài viết từ các kênh đang hoạt động (active)
     const activeChannelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
@@ -775,7 +867,10 @@ apiRouter.get('/posts', authenticateUser, async (req: AuthenticatedRequest, res:
 
     const snap = await query.get();
     let posts = snap.docs.map(doc => doc.data() as Post);
-    posts = posts.filter(p => activeChannelIds.has(p.channelId));
+    posts = posts.filter(p => {
+      const publishedDate = p.publishedAt.split('T')[0];
+      return activeChannelIds.has(p.channelId) && publishedDate >= periodStart && publishedDate <= periodEnd;
+    });
 
     // Lọc theo search (tiếng Việt không dấu / có dấu)
     if (search) {
@@ -834,7 +929,8 @@ apiRouter.get('/posts', authenticateUser, async (req: AuthenticatedRequest, res:
  */
 apiRouter.get('/reports/export.csv', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { platform, channelId } = req.query;
+    const { platform, channelId, startDate, endDate } = req.query;
+    const { periodStart, periodEnd } = resolveReportingPeriod({ startDate, endDate });
 
     // Chỉ xuất báo cáo của các kênh đang hoạt động (active)
     const activeChannelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
@@ -846,7 +942,10 @@ apiRouter.get('/reports/export.csv', authenticateUser, async (req: Authenticated
 
     const snap = await query.get();
     let posts = snap.docs.map(doc => doc.data() as Post);
-    posts = posts.filter(p => activeChannelIds.has(p.channelId));
+    posts = posts.filter(p => {
+      const publishedDate = p.publishedAt.split('T')[0];
+      return activeChannelIds.has(p.channelId) && publishedDate >= periodStart && publishedDate <= periodEnd;
+    });
 
     // Lấy metrics
     const snapsSnap = await adminDb.collection('dailySnapshots').get();
@@ -953,7 +1052,7 @@ apiRouter.post('/jobs/daily-sync', async (req: Request, res: Response) => {
     // đồng bộ tự động sẽ cập nhật Firestore, còn người dùng vào giao diện đồng bộ sẽ đẩy lên Sheets,
     // hoặc nếu chúng ta không có token Sheets lúc này, chúng ta chỉ đồng bộ Firestore.
     const requestId = `cron-${uuidv4()}`;
-    const results = await SyncEngine.syncAllChannels(null, requestId);
+    const results = await SyncEngine.syncAllChannels(null, undefined, undefined, requestId);
     res.json({ success: true, message: 'Đồng bộ tự động hoàn tất.', results });
   } catch (error: any) {
     res.status(500).json({ error: 'Lỗi đồng bộ tự động: ' + error.message });
@@ -963,7 +1062,7 @@ apiRouter.post('/jobs/daily-sync', async (req: Request, res: Response) => {
 /**
  * POST /api/admin/create-user - Admin tạo hoặc cập nhật mật khẩu/vai trò của một tài khoản thành viên
  */
-apiRouter.post('/admin/create-user', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+apiRouter.post('/admin/create-user', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { email, password, name, role } = req.body;
     if (!email || !password || !role) {
@@ -971,7 +1070,23 @@ apiRouter.post('/admin/create-user', authenticateUser, requireAdmin, async (req:
     }
 
     const cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail === 'admin' || cleanEmail === 'admin@ftsocial.com') {
+      return res.status(400).json({ error: 'Tài khoản admin được bảo vệ riêng và không quản lý tại đây.' });
+    }
     const cleanName = name?.trim() || 'Thành viên mới';
+    const requestedRole = role as UserRole;
+    if (requestedRole !== 'MANAGER' && requestedRole !== 'EMPLOYEE') {
+      return res.status(400).json({ error: 'Chỉ có thể cấp quyền Quản lý hoặc Nhân viên. Tài khoản Admin được bảo vệ riêng.' });
+    }
+    if (req.userRole === 'MANAGER' && requestedRole !== 'EMPLOYEE') {
+      return res.status(403).json({ error: 'Quản lý chỉ được phép tạo hoặc cập nhật tài khoản Nhân viên.' });
+    }
+    if (req.userRole === 'MANAGER') {
+      const existingProfile = await adminDb.collection('users').doc(cleanEmail).get();
+      if (existingProfile.exists && (existingProfile.data() as UserProfile).role !== 'EMPLOYEE') {
+        return res.status(403).json({ error: 'Quản lý chỉ được phép quản lý tài khoản Nhân viên.' });
+      }
+    }
     
     if (password.length < 6) {
       return res.status(400).json({ error: 'Mật khẩu phải chứa tối thiểu 6 ký tự.' });
@@ -1026,7 +1141,7 @@ apiRouter.post('/admin/create-user', authenticateUser, requireAdmin, async (req:
 /**
  * POST /api/admin/delete-user - Admin xóa tài khoản thành viên khỏi Auth và Database
  */
-apiRouter.post('/admin/delete-user', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+apiRouter.post('/admin/delete-user', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { email } = req.body;
     if (!email) {
@@ -1034,9 +1149,17 @@ apiRouter.post('/admin/delete-user', authenticateUser, requireAdmin, async (req:
     }
 
     const cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail === 'admin' || cleanEmail === 'admin@ftsocial.com') {
+      return res.status(400).json({ error: 'Tài khoản admin được bảo vệ riêng và không quản lý tại đây.' });
+    }
+    const targetProfileSnap = await adminDb.collection('users').doc(cleanEmail).get();
+    const targetRole = targetProfileSnap.exists ? (targetProfileSnap.data() as UserProfile).role : undefined;
 
-    if (cleanEmail === 'admin@ftsocial.com' || cleanEmail === 'admin') {
-      return res.status(400).json({ error: 'Không được phép xóa tài khoản Admin mặc định của hệ thống.' });
+    if (cleanEmail === 'admin@ftsocial.com' || cleanEmail === 'admin' || targetRole === 'ADMIN') {
+      return res.status(400).json({ error: 'Không được phép xóa tài khoản Admin được bảo vệ.' });
+    }
+    if (req.userRole === 'MANAGER' && targetRole !== 'EMPLOYEE') {
+      return res.status(403).json({ error: 'Quản lý chỉ được phép xóa tài khoản Nhân viên.' });
     }
 
     // 1. Tìm và xóa tài khoản trong Firebase Auth
@@ -1217,7 +1340,7 @@ apiRouter.post('/admin/config', authenticateUser, requireAdmin, async (req: Auth
 /**
  * GET /api/admin/users - Lấy danh sách tài khoản thành viên trong hệ thống
  */
-apiRouter.get('/admin/users', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+apiRouter.get('/admin/users', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const usersSnap = await adminDb.collection('users').get();
     const users = usersSnap.docs.map(doc => doc.data() as UserProfile);

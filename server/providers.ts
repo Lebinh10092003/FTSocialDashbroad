@@ -62,7 +62,7 @@ export class FacebookProvider implements SocialProvider {
   private apiVersion: string;
 
   constructor() {
-    this.apiVersion = process.env.META_GRAPH_API_VERSION || 'v20.0';
+    this.apiVersion = process.env.META_GRAPH_API_VERSION || 'v25.0';
   }
 
   private async getToken(externalId: string): Promise<string> {

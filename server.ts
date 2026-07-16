@@ -42,7 +42,7 @@ function setupAutoSyncScheduler() {
           console.error('[AutoSync] Không thể lấy cấu hình từ Firestore:', dbErr.message);
         }
 
-        const results = await SyncEngine.syncAllChannels(googleTokenToUse, `auto-${dayStr}`);
+        const results = await SyncEngine.syncAllChannels(googleTokenToUse, undefined, undefined, `auto-${dayStr}`);
         console.log(`[AutoSync] Hoàn tất đồng bộ tự động hàng ngày:`, JSON.stringify(results));
       }
     } catch (error: any) {
