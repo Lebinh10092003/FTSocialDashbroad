@@ -45,6 +45,10 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   const [showVarPicker, setShowVarPicker] = useState(false);
   const [insertedVar, setInsertedVar] = useState<{ blockId: string; varName: string } | null>(null);
 
+  // Routing modes
+  const [editorMode, setEditorMode] = useState<'list' | 'edit'>('list');
+  const [searchQuery, setSearchQuery] = useState('');
+
   // UI Tabs
   const [activeRightTab, setActiveRightTab] = useState<'block' | 'email'>('email');
   const [mobileActiveTab, setMobileActiveTab] = useState<'library' | 'canvas' | 'settings'>('canvas');
@@ -60,13 +64,32 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
     const loaded = loadTemplates();
     setTemplates(loaded);
     
-    const savedActiveId = getActiveTemplateId();
-    if (savedActiveId && loaded.some(t => t.id === savedActiveId)) {
-      setActiveTemplateIdState(savedActiveId);
-    } else if (loaded.length > 0) {
-      setActiveTemplateIdState(loaded[0].id);
-      setActiveTemplateId(loaded[0].id);
+    // Read route from URL search params
+    const params = new URLSearchParams(window.location.search);
+    const templateId = params.get('id');
+    
+    if (templateId && loaded.some(t => t.id === templateId)) {
+      setActiveTemplateIdState(templateId);
+      setEditorMode('edit');
+    } else {
+      setEditorMode('list');
+      if (loaded.length > 0) {
+        setActiveTemplateIdState(loaded[0].id);
+      }
     }
+
+    // Popstate route listener inside builder
+    const handlePopState = () => {
+      const p = new URLSearchParams(window.location.search);
+      const tId = p.get('id');
+      if (tId && loaded.some(t => t.id === tId)) {
+        setActiveTemplateIdState(tId);
+        setEditorMode('edit');
+      } else {
+        setEditorMode('list');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
 
     // Variables
     const storedVars = localStorage.getItem('ft_email_variables');
@@ -80,6 +103,8 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
       setVariables(DEFAULT_EMAIL_VARIABLES);
       localStorage.setItem('ft_email_variables', JSON.stringify(DEFAULT_EMAIL_VARIABLES));
     }
+
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   // Save templates list automatically on changes
@@ -100,25 +125,45 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
     }
   }, [selectedBlockId]);
 
-  if (!activeTemplate) {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen bg-slate-50 space-y-3">
-        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-xs font-semibold text-slate-500">Đang nạp dữ liệu mẫu email...</p>
-      </div>
-    );
-  }
+  // 2. Navigation Handlers
+  const handleEditTemplate = (id: string) => {
+    setActiveTemplateIdState(id);
+    setActiveTemplateId(id);
+    setSelectedBlockId(null);
+    setEditorMode('edit');
+    window.history.pushState(null, '', `/email-builder?id=${id}`);
+  };
 
-  const activeBlock = activeTemplate.blocks.find(b => b.id === selectedBlockId);
+  const handleBackToList = () => {
+    setEditorMode('list');
+    setSelectedBlockId(null);
+    window.history.pushState(null, '', '/email-builder');
+  };
 
-  // 2. Active Template Operations
+  const handleDuplicateTemplateInline = (tpl: EmailTemplate) => {
+    const clone: EmailTemplate = {
+      ...tpl,
+      id: `copy-${Date.now()}`,
+      name: `Bản sao - ${tpl.name}`,
+      lastUpdated: Date.now()
+    };
+    const newList = [...templates, clone];
+    updateTemplatesList(newList);
+    showToast('Đã nhân bản mẫu email.');
+  };
+
+  const activeBlock = activeTemplate?.blocks.find(b => b.id === selectedBlockId);
+
+  // 3. Active Template Operations
   const handleSelectTemplate = (id: string) => {
     setActiveTemplateIdState(id);
     setActiveTemplateId(id);
     setSelectedBlockId(null);
+    window.history.pushState(null, '', `/email-builder?id=${id}`);
   };
 
   const handleUpdateTemplateBlocks = (newBlocks: EmailBlock[]) => {
+    if (!activeTemplateId) return;
     const updated = templates.map(t => {
       if (t.id === activeTemplateId) {
         return { ...t, blocks: newBlocks, lastUpdated: Date.now() };
@@ -129,6 +174,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   };
 
   const handleUpdateTemplateSettings = (newSettings: EmailSettings) => {
+    if (!activeTemplateId) return;
     const updated = templates.map(t => {
       if (t.id === activeTemplateId) {
         return { ...t, settings: newSettings, lastUpdated: Date.now() };
@@ -138,8 +184,9 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
     updateTemplatesList(updated);
   };
 
-  // 3. Canvas Block Operations
+  // 4. Canvas Block Operations
   const handleAddBlock = (type: BlockType) => {
+    if (!activeTemplate) return;
     const newBlockId = `block-${Date.now()}`;
     let defaultContent: Record<string, any> = {};
     let defaultStyles: Record<string, any> = {
@@ -152,7 +199,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
         defaultContent = {
           url: 'https://fermat.vn/UploadFile/Images/2025/8/18/Hinh_anh_638911101534359159.png',
           alt: 'Logo',
-          width: 130,
+          width: 120,
           align: 'center',
           link: 'https://www.fermat.vn'
         };
@@ -267,6 +314,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   };
 
   const handleMoveBlock = (id: string, direction: 'up' | 'down') => {
+    if (!activeTemplate) return;
     const blocks = [...activeTemplate.blocks];
     const index = blocks.findIndex(b => b.id === id);
     if (index === -1) return;
@@ -284,6 +332,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   };
 
   const handleDuplicateBlock = (id: string) => {
+    if (!activeTemplate) return;
     const blocks = [...activeTemplate.blocks];
     const index = blocks.findIndex(b => b.id === id);
     if (index === -1) return;
@@ -302,6 +351,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   };
 
   const handleDeleteBlock = (id: string) => {
+    if (!activeTemplate) return;
     const blocks = activeTemplate.blocks.filter(b => b.id !== id);
     handleUpdateTemplateBlocks(blocks);
     if (selectedBlockId === id) {
@@ -310,6 +360,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   };
 
   const handleToggleVisibility = (id: string) => {
+    if (!activeTemplate) return;
     const blocks = activeTemplate.blocks.map(b => {
       if (b.id === id) return { ...b, visible: !b.visible };
       return b;
@@ -318,6 +369,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   };
 
   const handleUpdateBlockContent = (id: string, newContent: Record<string, any>) => {
+    if (!activeTemplate) return;
     const blocks = activeTemplate.blocks.map(b => {
       if (b.id === id) return { ...b, content: newContent };
       return b;
@@ -326,6 +378,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   };
 
   const handleUpdateBlockStyles = (id: string, newStyles: Record<string, any>) => {
+    if (!activeTemplate) return;
     const blocks = activeTemplate.blocks.map(b => {
       if (b.id === id) return { ...b, styles: newStyles };
       return b;
@@ -333,7 +386,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
     handleUpdateTemplateBlocks(blocks);
   };
 
-  // 4. Variables Operations
+  // 5. Variables Operations
   const updateVariablesList = (newList: EmailVariable[]) => {
     setVariables(newList);
     localStorage.setItem('ft_email_variables', JSON.stringify(newList));
@@ -365,7 +418,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
     }
   };
 
-  // 5. Header Template Operations
+  // 6. Header Template Operations
   const handleRenameTemplate = (newName: string) => {
     const updated = templates.map(t => {
       if (t.id === activeTemplateId) {
@@ -378,6 +431,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   };
 
   const handleDuplicateTemplate = () => {
+    if (!activeTemplate) return;
     const clone: EmailTemplate = {
       ...activeTemplate,
       id: `copy-${Date.now()}`,
@@ -411,18 +465,16 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   };
 
   const handleImportTemplate = (imported: EmailTemplate) => {
-    // Check if duplicate name or clean name
     const newList = [...templates, imported];
     updateTemplatesList(newList);
-    setActiveTemplateIdState(imported.id);
-    setActiveTemplateId(imported.id);
-    setSelectedBlockId(null);
+    handleEditTemplate(imported.id);
   };
 
-  // 6. Copying to Clipboard
+  // 7. Copying to Clipboard
   const handleCopyEmail = async () => {
-    const { html, plainText } = generateEmailHtml(activeTemplate, variables, false);
-    const success = await copyEmailToClipboard(html, plainText);
+    if (!activeTemplate) return;
+    const { copyHtml, plainText } = generateEmailHtml(activeTemplate, variables, false);
+    const success = await copyEmailToClipboard(copyHtml, plainText);
     if (success) {
       setCopySuccess(true);
       showToast('Đã copy nội dung email.');
@@ -433,6 +485,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   };
 
   const handleCopySubject = async () => {
+    if (!activeTemplate) return;
     const success = await copyTextToClipboard(activeTemplate.subject);
     if (success) {
       setCopySubjectSuccess(true);
@@ -445,6 +498,290 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
   };
+
+  const filteredTemplates = templates.filter(t => 
+    t.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    t.subject.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // RENDER LIST MODE
+  if (editorMode === 'list') {
+    return (
+      <div className="flex flex-col h-screen bg-slate-50 font-sans overflow-y-auto">
+        
+        {/* Toast Notification */}
+        {toastMessage && (
+          <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-55 bg-slate-900/90 backdrop-blur-md text-white text-xs font-bold py-3 px-6 rounded-2xl border border-slate-750/80 shadow-2xl flex items-center gap-2.5 animate-bounce-short">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+            {toastMessage}
+          </div>
+        )}
+
+        {/* Top Header */}
+        <header className="bg-white border-b border-slate-200/80 px-6 py-4.5 flex items-center justify-between shrink-0 z-20 sticky top-0 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-tr from-blue-600 to-indigo-650 rounded-2xl flex items-center justify-center text-white shadow-md">
+              <svg className="w-5.5 h-5.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <div>
+              <h1 className="text-sm font-black text-slate-900 tracking-wide">Trình quản lý mẫu Email</h1>
+              <p className="text-[10px] text-slate-400 font-extrabold uppercase mt-0.5">FermatTech Workspace</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={handleRestoreDefaults}
+              className="px-4 py-2 text-xs font-bold text-slate-650 hover:text-slate-800 hover:bg-slate-100/60 border border-slate-200 rounded-xl cursor-pointer transition-all"
+            >
+              Khôi phục mẫu gốc
+            </button>
+
+            <label className="px-4 py-2 text-xs font-bold text-slate-650 hover:text-slate-850 hover:bg-slate-100/60 border border-slate-200 rounded-xl cursor-pointer transition-all flex items-center gap-1.5">
+              <input
+                type="file"
+                accept=".json"
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                      try {
+                        const parsed = JSON.parse(event.target?.result as string);
+                        if (parsed.id && parsed.name && parsed.blocks) {
+                          handleImportTemplate(parsed);
+                        } else {
+                          alert('Định dạng file JSON không hợp lệ.');
+                        }
+                      } catch (err) {
+                        alert('Lỗi đọc file JSON.');
+                      }
+                    };
+                    reader.readAsText(file);
+                  }
+                }}
+                className="hidden"
+              />
+              Nhập JSON
+            </label>
+
+            <button
+              onClick={() => {
+                const name = prompt('Nhập tên mẫu email mới:');
+                if (name && name.trim()) {
+                  const newId = `template-${Date.now()}`;
+                  const newTemplate: EmailTemplate = {
+                    id: newId,
+                    name: name.trim(),
+                    subject: `[Tiêu đề] ${name.trim()}`,
+                    settings: {
+                      maxWidth: 650,
+                      externalBg: '#f8fafc',
+                      contentBg: '#ffffff',
+                      fontFamily: 'Arial, Helvetica, sans-serif',
+                      textColor: '#1e293b',
+                      contentPadding: 24,
+                      borderRadius: 16,
+                      linkColor: '#1473d1',
+                      btnDefaultBg: '#1473d1',
+                      btnDefaultTextColor: '#ffffff'
+                    },
+                    blocks: [
+                      {
+                        id: `logo-${Date.now()}`,
+                        type: 'logo',
+                        content: {
+                          url: 'https://fermat.vn/UploadFile/Images/2025/8/18/Hinh_anh_638911101534359159.png',
+                          alt: 'Logo',
+                          width: 120,
+                          align: 'center',
+                          link: 'https://www.fermat.vn'
+                        },
+                        styles: { marginTop: 10, marginBottom: 10 },
+                        visible: true
+                      },
+                      {
+                        id: `heading-${Date.now()}`,
+                        type: 'heading',
+                        content: {
+                          text: name.trim(),
+                          level: 'h2',
+                          fontSize: 20,
+                          color: '#0f3a72',
+                          bold: true,
+                          align: 'left'
+                        },
+                        styles: { marginTop: 15, marginBottom: 10 },
+                        visible: true
+                      },
+                      {
+                        id: `para-${Date.now()}`,
+                        type: 'paragraph',
+                        content: {
+                          html: '<p>Kính gửi Quý phụ huynh...</p>',
+                          align: 'left'
+                        },
+                        styles: { marginTop: 10, marginBottom: 10 },
+                        visible: true
+                      }
+                    ],
+                    lastUpdated: Date.now()
+                  };
+                  const newList = [...templates, newTemplate];
+                  updateTemplatesList(newList);
+                  handleEditTemplate(newId);
+                  showToast('Đã tạo mẫu email mới.');
+                }
+              }}
+              className="px-4 py-2 text-xs font-black text-white bg-blue-600 hover:bg-blue-750 rounded-xl cursor-pointer shadow-md transition-all active:scale-95"
+            >
+              Tạo mẫu mới
+            </button>
+
+            <button
+              onClick={onBackToWorkspace}
+              className="px-4 py-2 text-xs font-bold text-slate-650 bg-slate-100 hover:bg-slate-200/80 rounded-xl cursor-pointer transition-all border border-slate-200"
+            >
+              Quay lại Workspace
+            </button>
+          </div>
+        </header>
+
+        {/* Templates grid area */}
+        <main className="flex-1 max-w-6xl mx-auto w-full p-6 md:p-8 space-y-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <h2 className="text-base font-black text-slate-800">Danh sách mẫu thiết kế ({templates.length})</h2>
+              <p className="text-xs text-slate-400">Chọn một mẫu email bên dưới để tiến hành chỉnh sửa hoặc sao chép.</p>
+            </div>
+            
+            <div className="w-full md:w-80">
+              <input
+                type="text"
+                placeholder="Tìm kiếm mẫu email..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full text-xs rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:border-blue-500 bg-white shadow-sm"
+              />
+            </div>
+          </div>
+
+          {filteredTemplates.length === 0 ? (
+            <div className="text-center py-20 bg-white rounded-3xl border border-slate-200/80 shadow-sm space-y-3">
+              <p className="text-sm font-semibold text-slate-450">Không tìm thấy mẫu email nào khớp với tìm kiếm.</p>
+              <button 
+                onClick={() => setSearchQuery('')}
+                className="text-xs text-blue-650 font-bold hover:underline"
+              >
+                Xóa bộ lọc tìm kiếm
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredTemplates.map(tpl => {
+                const isDefault = tpl.id.startsWith('aysbc-');
+                const lastUpdatedStr = new Date(tpl.lastUpdated || Date.now()).toLocaleDateString('vi-VN', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  day: '2-digit',
+                  month: '2-digit'
+                });
+
+                return (
+                  <div
+                    key={tpl.id}
+                    onClick={() => handleEditTemplate(tpl.id)}
+                    className="bg-white border border-slate-200/80 hover:border-blue-300 rounded-3xl p-5 shadow-sm hover:shadow-lg transition-all duration-350 cursor-pointer flex flex-col justify-between group min-h-[190px]"
+                  >
+                    <div className="space-y-3.5">
+                      <div className="flex justify-between items-start gap-2">
+                        <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${isDefault ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                          {isDefault ? 'Mẫu mặc định' : 'Mẫu tùy chỉnh'}
+                        </span>
+                        <span className="text-[9px] text-slate-450 font-bold">{lastUpdatedStr}</span>
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <h3 className="text-sm font-black text-slate-900 group-hover:text-blue-600 transition-colors leading-tight line-clamp-1">{tpl.name}</h3>
+                        <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed">
+                          <strong>Tiêu đề:</strong> {tpl.subject}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-100 flex items-center justify-between mt-4">
+                      <span className="text-[10px] text-slate-450 font-extrabold">{tpl.blocks.length} khối nội dung</span>
+                      
+                      <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={() => handleDuplicateTemplateInline(tpl)}
+                          title="Nhân bản mẫu"
+                          className="p-1.5 hover:bg-slate-100 hover:text-blue-600 text-slate-450 rounded-lg cursor-pointer"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                          </svg>
+                        </button>
+                        
+                        <button
+                          onClick={() => {
+                            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tpl, null, 2));
+                            const downloadAnchor = document.createElement('a');
+                            downloadAnchor.setAttribute("href", dataStr);
+                            downloadAnchor.setAttribute("download", `${tpl.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_template.json`);
+                            document.body.appendChild(downloadAnchor);
+                            downloadAnchor.click();
+                            downloadAnchor.remove();
+                            showToast('Đã xuất file JSON.');
+                          }}
+                          title="Xuất file JSON"
+                          className="p-1.5 hover:bg-slate-100 hover:text-blue-600 text-slate-450 rounded-lg cursor-pointer"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                          </svg>
+                        </button>
+
+                        {!isDefault && (
+                          <button
+                            onClick={() => {
+                              if (confirm(`Bạn chắc chắn muốn xóa mẫu "${tpl.name}"?`)) {
+                                const remaining = templates.filter(t => t.id !== tpl.id);
+                                updateTemplatesList(remaining);
+                                showToast('Đã xóa mẫu email.');
+                              }
+                            }}
+                            title="Xóa mẫu"
+                            className="p-1.5 hover:bg-rose-50 text-rose-600 rounded-lg cursor-pointer"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  // RENDER EDIT MODE
+  if (!activeTemplate) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-slate-50 space-y-3">
+        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-xs font-semibold text-slate-500">Đang nạp dữ liệu mẫu email...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-slate-50 font-sans relative">
@@ -468,7 +805,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
         onRestoreDefaults={handleRestoreDefaults}
         onImportTemplate={handleImportTemplate}
         onPreviewClick={() => setShowPreview(true)}
-        onBackToWorkspace={onBackToWorkspace}
+        onBackToWorkspace={handleBackToList}
         onCopyEmail={handleCopyEmail}
         onCopySubject={handleCopySubject}
         copySuccess={copySuccess}
@@ -481,13 +818,13 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
         {/* DESKTOP / TABLET view panels */}
         <div className="flex-1 flex overflow-hidden">
           
-          {/* Left Block Selection Library: Hidden on mobile unless library tab is active */}
+          {/* Left Block Selection Library */}
           <div className={`hidden md:block ${mobileActiveTab === 'library' ? '!block absolute inset-0 z-40 bg-white md:relative md:inset-auto md:z-auto' : ''}`}>
             <BlockLibrary onAddBlock={handleAddBlock} />
           </div>
 
           {/* Middle Email Design Canvas */}
-          <div className={`flex-1 flex flex-col min-w-0 ${mobileActiveTab === 'canvas' ? 'block' : 'hidden md:flex'}`}>
+          <div className={`flex-1 flex flex-col min-w-0 min-h-0 ${mobileActiveTab === 'canvas' ? 'flex flex-col' : 'hidden md:flex'}`}>
             
             {/* Subject field editor */}
             <div className="bg-white border-b border-slate-200/80 px-6 py-3 shrink-0 flex items-center gap-3">
@@ -519,7 +856,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
             </div>
 
             {/* Scrollable design layout */}
-            <div className="flex-1 overflow-hidden relative flex flex-col">
+            <div className="flex-1 overflow-y-auto relative bg-slate-100 flex flex-col">
               <EmailCanvas
                 blocks={activeTemplate.blocks}
                 selectedBlockId={selectedBlockId}
@@ -538,7 +875,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
           </div>
 
           {/* Right Parameters Settings Sidebar */}
-          <div className={`w-80 border-l border-slate-200/80 bg-white shrink-0 flex flex-col ${mobileActiveTab === 'settings' ? 'block absolute inset-0 z-40 md:relative md:inset-auto md:z-auto' : 'hidden md:flex'}`}>
+          <div className={`w-[360px] border-l border-slate-200/80 bg-white shrink-0 flex flex-col ${mobileActiveTab === 'settings' ? 'block absolute inset-0 z-40 md:relative md:inset-auto md:z-auto' : 'hidden md:flex'}`}>
             {/* Right sidebar tab selector */}
             <div className="flex border-b border-slate-100 bg-slate-50/50 p-1">
               <button
@@ -550,8 +887,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
                     : 'text-slate-500 hover:bg-white/40 disabled:opacity-40'
                 }`}
               >
-                <Layout className="w-4 h-4" />
-                Khối đã chọn
+                Cài đặt khối
               </button>
               <button
                 onClick={() => setActiveRightTab('email')}
@@ -561,18 +897,29 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
                     : 'text-slate-500 hover:bg-white/40'
                 }`}
               >
-                <Settings className="w-4 h-4" />
-                Cài đặt chung
+                Cài đặt email
               </button>
             </div>
 
-            {/* Sidebar content */}
-            <div className="flex-1 overflow-y-auto min-h-0">
+            {/* Sidebar content render */}
+            <div className="flex-1 min-h-0 overflow-y-auto">
               {activeRightTab === 'block' && activeBlock ? (
                 <BlockSettings
                   block={activeBlock}
-                  onUpdateBlockContent={(content) => handleUpdateBlockContent(activeBlock.id, content)}
-                  onUpdateBlockStyles={(styles) => handleUpdateBlockStyles(activeBlock.id, styles)}
+                  onUpdateBlockContent={(content) => {
+                    const blocks = activeTemplate.blocks.map(b => {
+                      if (b.id === selectedBlockId) return { ...b, content };
+                      return b;
+                    });
+                    handleUpdateTemplateBlocks(blocks);
+                  }}
+                  onUpdateBlockStyles={(styles) => {
+                    const blocks = activeTemplate.blocks.map(b => {
+                      if (b.id === selectedBlockId) return { ...b, styles };
+                      return b;
+                    });
+                    handleUpdateTemplateBlocks(blocks);
+                  }}
                 />
               ) : (
                 <EmailSettingsComponent
@@ -581,33 +928,18 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
                 />
               )}
             </div>
-
-            {/* Guide Accordion widget */}
+            
+            {/* Collapse guide Widget */}
             <div className="border-t border-slate-100 p-4.5 bg-slate-50/80">
-              <details className="group">
-                <summary className="flex justify-between items-center text-xs font-extrabold text-slate-700 cursor-pointer list-none select-none">
-                  <span className="flex items-center gap-1.5">
-                    <BookOpen className="w-4 h-4 text-slate-500" />
-                    Hướng dẫn copy sang Gmail
-                  </span>
-                  <span className="text-[10px] text-slate-450 group-open:rotate-180 transition-transform">&darr;</span>
-                </summary>
-                <div className="mt-2.5 text-[11px] text-slate-500 space-y-1.5 leading-relaxed pl-2 list-decimal">
-                  <p className="font-bold text-slate-700">Quy trình gửi bằng YAMM:</p>
-                  <ol className="list-decimal pl-4 space-y-1">
-                    <li>Bấm nút <strong>"Copy nội dung Email"</strong> ở trên.</li>
-                    <li>Mở hòm thư Gmail của bạn.</li>
-                    <li>Bấm <strong>"Soạn thư"</strong> (Compose) mới.</li>
-                    <li>Dán (Ctrl+V) vào ô soạn thảo nội dung.</li>
-                    <li>Kiểm tra hình ảnh và link hoạt động tốt.</li>
-                    <li>Đóng thư (để Gmail tự lưu bản nháp).</li>
-                    <li>Mở Google Sheets chứa danh sách gửi.</li>
-                    <li>Chạy tiện ích mở rộng <strong>Yet Another Mail Merge (YAMM)</strong>.</li>
-                    <li>Chọn đúng bản nháp Gmail vừa đóng ở bước 6.</li>
-                    <li>Thực hiện gửi thư.</li>
-                  </ol>
-                </div>
-              </details>
+              <h4 className="text-[10px] font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                Hướng dẫn nhanh
+              </h4>
+              <ol className="text-[10px] text-slate-500 space-y-1.5 list-decimal list-inside leading-relaxed mt-2.5 font-medium">
+                <li>Bấm <strong>Copy tiêu đề</strong> và dán vào Gmail.</li>
+                <li>Bấm <strong>Copy nội dung</strong> và dán (Ctrl+V) vào soạn thư.</li>
+                <li>Các biến <code className="text-blue-600 font-extrabold">{"{{"}Biến{"}}"}</code> tự động đồng bộ qua YAMM.</li>
+              </ol>
             </div>
 
           </div>
@@ -616,49 +948,23 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
 
       </div>
 
-      {/* MOBILE Navigation Bottom Bar */}
-      <div className="md:hidden flex bg-white border-t border-slate-200/80 p-2 shrink-0 z-30">
-        <button
-          onClick={() => setMobileActiveTab('library')}
-          className={`flex-1 py-2 text-[10px] font-bold rounded-xl flex flex-col items-center justify-center gap-0.5 cursor-pointer ${mobileActiveTab === 'library' ? 'text-blue-650 bg-blue-50' : 'text-slate-500'}`}
-        >
-          <BookOpen className="w-4.5 h-4.5" />
-          Thêm Block
-        </button>
-        <button
-          onClick={() => setMobileActiveTab('canvas')}
-          className={`flex-1 py-2 text-[10px] font-bold rounded-xl flex flex-col items-center justify-center gap-0.5 cursor-pointer ${mobileActiveTab === 'canvas' ? 'text-blue-650 bg-blue-50' : 'text-slate-500'}`}
-        >
-          <FileText className="w-4.5 h-4.5" />
-          Canvas Thiết kế
-        </button>
-        <button
-          onClick={() => setMobileActiveTab('settings')}
-          className={`flex-1 py-2 text-[10px] font-bold rounded-xl flex flex-col items-center justify-center gap-0.5 cursor-pointer ${mobileActiveTab === 'settings' ? 'text-blue-650 bg-blue-50' : 'text-slate-500'}`}
-        >
-          <Settings className="w-4.5 h-4.5" />
-          Thuộc tính
-        </button>
-      </div>
-
-      {/* MODAL: Personalization variables manager */}
-      {showVarPicker && (
-        <VariablePicker
-          variables={variables}
-          onAddVariable={handleAddVariable}
-          onEditVariable={handleEditVariable}
-          onDeleteVariable={handleDeleteVariable}
-          onInsertVariable={selectedBlockId ? handleInsertVariable : undefined}
-          onClose={() => setShowVarPicker(false)}
-        />
-      )}
-
-      {/* MODAL: Isolated HTML Email Preview */}
+      {/* MODALS */}
       {showPreview && (
         <EmailPreview
           template={activeTemplate}
           variables={variables}
           onClose={() => setShowPreview(false)}
+        />
+      )}
+
+      {showVarPicker && (
+        <VariablePicker
+          variables={variables}
+          onClose={() => setShowVarPicker(false)}
+          onAddVariable={handleAddVariable}
+          onEditVariable={handleEditVariable}
+          onDeleteVariable={handleDeleteVariable}
+          onInsertVariable={handleInsertVariable}
         />
       )}
 

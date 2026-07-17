@@ -16,6 +16,155 @@ export default function BlockSettings({
   const content = block.content;
   const styles = block.styles;
 
+  const [isUploading, setIsUploading] = React.useState(false);
+  const [uploadError, setUploadError] = React.useState<string | null>(null);
+
+  const handleFileUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setUploadError('Vui lòng chọn tệp hình ảnh hợp lệ.');
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      setUploadError('Tệp quá lớn. Vui lòng chọn tệp nhỏ hơn 3MB.');
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadError(null);
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = reader.result as string;
+        
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            filename: file.name,
+            base64: base64
+          })
+        });
+
+        const data = await response.json();
+        if (data.success && data.url) {
+          const absoluteUrl = `${window.location.origin}${data.url}`;
+          updateContent('url', absoluteUrl);
+        } else {
+          setUploadError(data.error || 'Lỗi tải ảnh lên máy chủ.');
+        }
+        setIsUploading(false);
+      };
+      
+      reader.onerror = () => {
+        setUploadError('Không thể đọc dữ liệu tệp.');
+        setIsUploading(false);
+      };
+
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      setUploadError(err.message || 'Lỗi kết nối máy chủ.');
+      setIsUploading(false);
+    }
+  };
+
+  const handlePasteEvent = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) {
+            e.preventDefault();
+            await handleFileUpload(file);
+            break;
+          }
+        }
+      }
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      await handleFileUpload(file);
+    }
+  };
+
+  const ImageUploader = () => {
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    
+    return (
+      <div className="space-y-2.5">
+        <label className="block text-[10px] font-bold text-slate-500 mb-1">Tải ảnh hoặc Dán ảnh (Ctrl+V)</label>
+        
+        <div
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          onPaste={handlePasteEvent}
+          className="border-2 border-dashed border-slate-200 hover:border-blue-400 bg-slate-50/50 hover:bg-blue-50/10 rounded-2xl p-4 text-center cursor-pointer transition-all relative group flex flex-col items-center justify-center min-h-[100px] outline-none"
+          tabIndex={0}
+        >
+          {isUploading ? (
+            <div className="flex flex-col items-center gap-1">
+              <div className="w-6 h-6 border-2 border-blue-650 border-t-transparent rounded-full animate-spin"></div>
+              <span className="text-[10px] text-slate-400 font-bold">Đang tải lên...</span>
+            </div>
+          ) : (
+            <label className="cursor-pointer w-full h-full block">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFileUpload(file);
+                }}
+                className="hidden"
+              />
+              <div className="space-y-1.5 pointer-events-none">
+                <div className="text-xs text-slate-650 font-black">
+                  Kéo thả, Click chọn hoặc <span className="text-blue-600 underline">Paste (Ctrl+V)</span> ảnh
+                </div>
+                <div className="text-[9px] text-slate-400">Hỗ trợ JPG, PNG, GIF, tối đa 3MB</div>
+              </div>
+            </label>
+          )}
+        </div>
+
+        {uploadError && (
+          <div className="text-[9px] text-rose-500 bg-rose-50 border border-rose-100 p-2 rounded-xl font-bold">
+            {uploadError}
+          </div>
+        )}
+
+        {isLocalhost && content.url && content.url.includes('localhost') && (
+          <div className="text-[9px] text-amber-600 bg-amber-50 border border-amber-100 p-2.5 rounded-xl leading-relaxed font-semibold">
+            ⚠️ <strong>Lưu ý localhost</strong>: Bạn đang sử dụng ảnh tải lên từ máy cá nhân (localhost). Gmail và người nhận sẽ không nhìn thấy ảnh này. Để hiển thị đúng, hãy deploy ứng dụng hoặc sử dụng ảnh có link public (HTTPS).
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Premium corporate colors swatch list
+  const swatches = [
+    { value: '#0f3a72', name: 'Fermat Deep' },
+    { value: '#1473d1', name: 'Fermat Blue' },
+    { value: '#16a34a', name: 'Emerald' },
+    { value: '#ea580c', name: 'Orange' },
+    { value: '#e11d48', name: 'Rose Red' },
+    { value: '#f1f5f9', name: 'Light Slate' },
+    { value: '#1e293b', name: 'Dark Slate' },
+    { value: '#ffffff', name: 'White' }
+  ];
+
   const updateContent = (key: string, value: any) => {
     onUpdateBlockContent({
       ...content,
@@ -30,7 +179,6 @@ export default function BlockSettings({
     });
   };
 
-  // List block item controls
   const handleAddListItem = () => {
     const items = content.items || [];
     updateContent('items', [...items, 'Mục mới']);
@@ -62,7 +210,6 @@ export default function BlockSettings({
     updateContent('items', items);
   };
 
-  // Social link helpers
   const handleUpdateSocialLink = (index: number, key: string, val: any) => {
     const links = [...(content.links || [])];
     links[index] = {
@@ -72,61 +219,91 @@ export default function BlockSettings({
     updateContent('links', links);
   };
 
+  // Helper render to show swatch buttons
+  const ColorSwatchPicker = ({ label, value, onChange }: { label: string, value: string, onChange: (color: string) => void }) => (
+    <div className="space-y-2">
+      <label className="block text-[10px] font-bold text-slate-500">{label}</label>
+      <div className="flex gap-2">
+        <input
+          type="color"
+          value={value || '#ffffff'}
+          onChange={e => onChange(e.target.value)}
+          className="w-9 h-9 rounded-xl cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0 shadow-sm"
+        />
+        <input
+          type="text"
+          value={value || ''}
+          onChange={e => onChange(e.target.value)}
+          className="w-full text-xs rounded-xl border border-slate-200 px-3 outline-none focus:border-blue-500 shadow-sm bg-white"
+        />
+      </div>
+      {/* Swatch grids */}
+      <div className="grid grid-cols-8 gap-1.5 pt-1">
+        {swatches.map(s => (
+          <button
+            key={s.value}
+            type="button"
+            onClick={() => onChange(s.value)}
+            title={s.name}
+            className={`w-6 h-6 rounded-lg cursor-pointer border transition-all ${value === s.value ? 'ring-2 ring-blue-550 border-white scale-105' : 'border-slate-250/30 hover:scale-105'}`}
+            style={{ backgroundColor: s.value }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+
   return (
-    <div className="space-y-5 p-4.5 bg-white overflow-y-auto h-full">
-      <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
-        <div>
-          <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">Cấu hình Khối</h3>
-          <p className="text-[10px] text-slate-500 mt-0.5 font-semibold uppercase">Loại: {block.type}</p>
-        </div>
+    <div className="space-y-5 p-5 bg-white overflow-y-auto h-full select-text">
+      
+      <div className="border-b border-slate-100 pb-3">
+        <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Thuộc tính Khối</h3>
+        <p className="text-[10px] text-slate-400 font-extrabold mt-1">Phân loại: <span className="text-blue-650 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase">{block.type}</span></p>
       </div>
 
-      {/* Common Spacing Style Settings */}
-      <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/50 space-y-2.5">
-        <h4 className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">Khoảng cách lề (px)</h4>
-        <div className="grid grid-cols-2 gap-2">
-          {block.type !== 'spacer' && (
-            <>
-              <div>
-                <label className="block text-[9px] text-slate-500 font-bold mb-1">Mép trên (margin-top)</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={styles.marginTop ?? 10}
-                  onChange={e => updateStyles('marginTop', parseInt(e.target.value) || 0)}
-                  className="w-full text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 outline-none bg-white focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-[9px] text-slate-500 font-bold mb-1">Mép dưới (margin-bottom)</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={styles.marginBottom ?? 10}
-                  onChange={e => updateStyles('marginBottom', parseInt(e.target.value) || 0)}
-                  className="w-full text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 outline-none bg-white focus:border-blue-500"
-                />
-              </div>
-            </>
-          )}
+      {/* Common margins */}
+      {block.type !== 'spacer' && (
+        <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/50 space-y-2.5">
+          <h4 className="text-[10px] font-black text-slate-650 uppercase tracking-wider">Mép khoảng cách lề (px)</h4>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[9px] text-slate-500 font-bold mb-1">Căn lề trên</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={styles.marginTop ?? 10}
+                onChange={e => updateStyles('marginTop', parseInt(e.target.value) || 0)}
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none bg-white focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[9px] text-slate-500 font-bold mb-1">Căn lề dưới</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={styles.marginBottom ?? 10}
+                onChange={e => updateStyles('marginBottom', parseInt(e.target.value) || 0)}
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none bg-white focus:border-blue-500"
+              />
+            </div>
+          </div>
         </div>
-      </div>
-
-      {/* BLOCK-SPECIFIC PROPERTIES */}
+      )}
 
       {/* LOGO PROPERTIES */}
       {block.type === 'logo' && (
-        <div className="space-y-3.5">
+        <div className="space-y-4">
+          <ImageUploader />
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Đường dẫn ảnh HTTPS</label>
+            <label className="block text-[10px] font-bold text-slate-500 mb-1">URL ảnh Logo</label>
             <input
               type="text"
               value={content.url || ''}
               onChange={e => updateContent('url', e.target.value)}
               placeholder="https://example.com/logo.png"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
             />
           </div>
           <div>
@@ -135,28 +312,28 @@ export default function BlockSettings({
               type="text"
               value={content.alt || ''}
               onChange={e => updateContent('alt', e.target.value)}
-              placeholder="Fermat Logo"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+              placeholder="Logo FermatTech"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Độ rộng ảnh (px)</label>
+              <label className="block text-[10px] font-bold text-slate-500 mb-1">Chiều rộng Logo (px)</label>
               <input
                 type="number"
                 value={content.width || 120}
                 onChange={e => updateContent('width', parseInt(e.target.value) || 120)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
               />
             </div>
             <div>
               <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề</label>
-              <div className="flex bg-slate-50 border border-slate-200 rounded-xl p-0.5">
+              <div className="flex bg-slate-100 border border-slate-200/80 rounded-xl p-0.5 shadow-sm">
                 {(['left', 'center', 'right'] as const).map(align => (
                   <button
                     key={align}
                     onClick={() => updateContent('align', align)}
-                    className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500'}`}
+                    className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer transition-all ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500 hover:text-slate-700'}`}
                   >
                     {align === 'left' && <AlignLeft className="w-4.5 h-4.5" />}
                     {align === 'center' && <AlignCenter className="w-4.5 h-4.5" />}
@@ -167,13 +344,13 @@ export default function BlockSettings({
             </div>
           </div>
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Liên kết khi bấm vào Logo</label>
+            <label className="block text-[10px] font-bold text-slate-500 mb-1">Đường dẫn liên kết khi nhấp</label>
             <input
               type="text"
               value={content.link || ''}
               onChange={e => updateContent('link', e.target.value)}
               placeholder="https://www.fermat.vn"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
             />
           </div>
         </div>
@@ -181,28 +358,28 @@ export default function BlockSettings({
 
       {/* HEADING PROPERTIES */}
       {block.type === 'heading' && (
-        <div className="space-y-3.5">
+        <div className="space-y-4">
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Nội dung tiêu đề</label>
+            <label className="block text-[10px] font-bold text-slate-500 mb-1">Nội dung Tiêu đề</label>
             <input
               type="text"
               value={content.text || ''}
               onChange={e => updateContent('text', e.target.value)}
               placeholder="Nhập tiêu đề..."
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Thẻ tiêu đề</label>
+              <label className="block text-[10px] font-bold text-slate-500 mb-1">Thẻ cấu trúc</label>
               <select
                 value={content.level || 'h2'}
                 onChange={e => updateContent('level', e.target.value)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 bg-white"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 bg-white shadow-sm"
               >
-                <option value="h1">H1 (Lớn nhất)</option>
-                <option value="h2">H2 (Vừa)</option>
-                <option value="h3">H3 (Nhỏ)</option>
+                <option value="h1">H1 (Tiêu đề chính)</option>
+                <option value="h2">H2 (Tiêu đề phụ)</option>
+                <option value="h3">H3 (Mục nhỏ)</option>
               </select>
             </div>
             <div>
@@ -211,57 +388,45 @@ export default function BlockSettings({
                 type="number"
                 value={content.fontSize || 18}
                 onChange={e => updateContent('fontSize', parseInt(e.target.value) || 18)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          
+          <ColorSwatchPicker
+            label="Màu chữ tiêu đề"
+            value={content.color || '#0f3a72'}
+            onChange={color => updateContent('color', color)}
+          />
+
+          <div className="grid grid-cols-2 gap-3 pt-1">
             <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Màu chữ</label>
-              <div className="flex gap-1.5">
+              <label className="block text-[10px] font-bold text-slate-500 mb-1">Định dạng nét</label>
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-650 font-bold select-none pt-1.5">
                 <input
-                  type="color"
-                  value={content.color || '#0f3a72'}
-                  onChange={e => updateContent('color', e.target.value)}
-                  className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 p-0.5 bg-white"
+                  type="checkbox"
+                  checked={content.bold !== false}
+                  onChange={e => updateContent('bold', e.target.checked)}
+                  className="w-4.5 h-4.5 text-blue-600 border-slate-350 rounded focus:ring-blue-500"
                 />
-                <input
-                  type="text"
-                  value={content.color || '#0f3a72'}
-                  onChange={e => updateContent('color', e.target.value)}
-                  className="flex-1 text-xs rounded-xl border border-slate-200 px-2 outline-none focus:border-blue-500"
-                />
-              </div>
+                In đậm (Bold)
+              </label>
             </div>
             <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Định dạng</label>
-              <div className="flex items-center gap-3 pt-1">
-                <label className="flex items-center gap-1.5 cursor-pointer text-xs text-slate-650 font-bold select-none">
-                  <input
-                    type="checkbox"
-                    checked={content.bold !== false}
-                    onChange={e => updateContent('bold', e.target.checked)}
-                    className="w-4.5 h-4.5 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
-                  />
-                  In đậm
-                </label>
+              <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề chữ</label>
+              <div className="flex bg-slate-100 border border-slate-200/80 rounded-xl p-0.5 shadow-sm">
+                {(['left', 'center', 'right'] as const).map(align => (
+                  <button
+                    key={align}
+                    onClick={() => updateContent('align', align)}
+                    className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer transition-all ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    {align === 'left' && <AlignLeft className="w-4.5 h-4.5" />}
+                    {align === 'center' && <AlignCenter className="w-4.5 h-4.5" />}
+                    {align === 'right' && <AlignRight className="w-4.5 h-4.5" />}
+                  </button>
+                ))}
               </div>
-            </div>
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề</label>
-            <div className="flex bg-slate-50 border border-slate-200 rounded-xl p-0.5">
-              {(['left', 'center', 'right'] as const).map(align => (
-                <button
-                  key={align}
-                  onClick={() => updateContent('align', align)}
-                  className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500'}`}
-                >
-                  {align === 'left' && <AlignLeft className="w-4.5 h-4.5" />}
-                  {align === 'center' && <AlignCenter className="w-4.5 h-4.5" />}
-                  {align === 'right' && <AlignRight className="w-4.5 h-4.5" />}
-                </button>
-              ))}
             </div>
           </div>
         </div>
@@ -269,18 +434,18 @@ export default function BlockSettings({
 
       {/* PARAGRAPH PROPERTIES */}
       {block.type === 'paragraph' && (
-        <div className="space-y-3.5">
-          <p className="text-[11px] text-slate-500 leading-normal italic bg-slate-50 p-3 rounded-xl border border-slate-250/20">
-            * Nội dung văn bản của khối Đoạn văn được chỉnh sửa trực tiếp trên vùng Email Canvas ở giữa, sử dụng thanh công cụ soạn thảo nổi bật.
+        <div className="space-y-4">
+          <p className="text-[11px] text-slate-450 leading-normal italic bg-slate-50 p-3.5 rounded-2xl border border-slate-200/50">
+            * Nhấp đúp vào khối Đoạn văn trên canvas để sửa nội dung và chèn biến.
           </p>
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề mặc định</label>
-            <div className="flex bg-slate-50 border border-slate-200 rounded-xl p-0.5">
+            <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề chữ mặc định</label>
+            <div className="flex bg-slate-100 border border-slate-200/80 rounded-xl p-0.5 shadow-sm">
               {(['left', 'center', 'right'] as const).map(align => (
                 <button
                   key={align}
                   onClick={() => updateContent('align', align)}
-                  className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500'}`}
+                  className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer transition-all ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                   {align === 'left' && <AlignLeft className="w-4.5 h-4.5" />}
                   {align === 'center' && <AlignCenter className="w-4.5 h-4.5" />}
@@ -294,7 +459,8 @@ export default function BlockSettings({
 
       {/* IMAGE PROPERTIES */}
       {block.type === 'image' && (
-        <div className="space-y-3.5">
+        <div className="space-y-4">
+          <ImageUploader />
           <div>
             <label className="block text-[10px] font-bold text-slate-500 mb-1">Đường dẫn ảnh HTTPS</label>
             <input
@@ -302,7 +468,7 @@ export default function BlockSettings({
               value={content.url || ''}
               onChange={e => updateContent('url', e.target.value)}
               placeholder="https://example.com/banner.png"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
             />
           </div>
           <div>
@@ -311,104 +477,105 @@ export default function BlockSettings({
               type="text"
               value={content.alt || ''}
               onChange={e => updateContent('alt', e.target.value)}
-              placeholder="Banner cuộc thi AYSBC"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+              placeholder="Banner tuyển sinh AYSBC"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Độ rộng tối đa (px)</label>
+              <label className="block text-[10px] font-bold text-slate-500 mb-1">Rộng tối đa (px)</label>
               <input
                 type="number"
                 value={content.width || 600}
                 onChange={e => updateContent('width', parseInt(e.target.value) || 600)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
               />
             </div>
             <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Bo góc khung ảnh (px)</label>
+              <label className="block text-[10px] font-bold text-slate-500 mb-1">Bo góc ảnh (px)</label>
               <input
                 type="number"
                 value={content.borderRadius || 0}
                 onChange={e => updateContent('borderRadius', parseInt(e.target.value) || 0)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
               />
             </div>
           </div>
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề ảnh</label>
-            <div className="flex bg-slate-50 border border-slate-200 rounded-xl p-0.5">
-              {(['left', 'center', 'right'] as const).map(align => (
-                <button
-                  key={align}
-                  onClick={() => updateContent('align', align)}
-                  className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500'}`}
-                >
-                  {align === 'left' && <AlignLeft className="w-4.5 h-4.5" />}
-                  {align === 'center' && <AlignCenter className="w-4.5 h-4.5" />}
-                  {align === 'right' && <AlignRight className="w-4.5 h-4.5" />}
-                </button>
-              ))}
+          <div className="grid grid-cols-1 gap-3">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề ngang</label>
+              <div className="flex bg-slate-100 border border-slate-200/80 rounded-xl p-0.5 shadow-sm">
+                {(['left', 'center', 'right'] as const).map(align => (
+                  <button
+                    key={align}
+                    onClick={() => updateContent('align', align)}
+                    className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer transition-all ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    {align === 'left' && <AlignLeft className="w-4.5 h-4.5" />}
+                    {align === 'center' && <AlignCenter className="w-4.5 h-4.5" />}
+                    {align === 'right' && <AlignRight className="w-4.5 h-4.5" />}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Liên kết khi bấm vào ảnh</label>
+            <label className="block text-[10px] font-bold text-slate-500 mb-1">Liên kết khi bấm vào hình</label>
             <input
               type="text"
               value={content.link || ''}
               onChange={e => updateContent('link', e.target.value)}
               placeholder="https://www.fermat.vn"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
             />
           </div>
         </div>
       )}
 
-      {/* LIST PROPERTIES (BULLET & NUMBER) */}
+      {/* LIST PROPERTIES */}
       {(block.type === 'bullet-list' || block.type === 'number-list') && (
-        <div className="space-y-3.5">
+        <div className="space-y-4">
           <div className="flex justify-between items-center">
-            <label className="block text-[10px] font-bold text-slate-500">Danh sách dòng</label>
+            <label className="block text-[10px] font-bold text-slate-550">Danh sách dòng</label>
             <button
               onClick={handleAddListItem}
-              className="flex items-center gap-1 text-[10px] font-bold text-blue-650 hover:text-blue-800 bg-blue-50 hover:bg-blue-100/70 border border-blue-200 px-2 py-1 rounded-lg cursor-pointer transition-all"
+              className="flex items-center gap-1 text-[10px] font-bold text-blue-650 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200/80 px-2 py-1 rounded-lg cursor-pointer transition-all"
             >
               <Plus className="w-3.5 h-3.5" />
               Thêm dòng
             </button>
           </div>
-          <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
             {(content.items || []).map((item: string, index: number) => (
-              <div key={index} className="flex items-center gap-1.5 p-2 bg-slate-50 border border-slate-250/20 rounded-xl">
+              <div key={index} className="flex items-center gap-1.5 p-2 bg-slate-50 border border-slate-200 rounded-xl">
                 <input
                   type="text"
                   value={item}
                   onChange={e => handleUpdateListItem(index, e.target.value)}
-                  className="flex-1 text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 outline-none bg-white focus:border-blue-500"
+                  className="flex-1 text-xs rounded-lg border border-slate-200 px-2 py-1.5 outline-none bg-white focus:border-blue-500 shadow-sm"
                 />
-                <button
-                  disabled={index === 0}
-                  onClick={() => handleMoveListItem(index, 'up')}
-                  className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 rounded disabled:opacity-30 cursor-pointer"
-                  title="Di chuyển lên"
-                >
-                  <ArrowUp className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  disabled={index === (content.items || []).length - 1}
-                  onClick={() => handleMoveListItem(index, 'down')}
-                  className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200/50 rounded disabled:opacity-30 cursor-pointer"
-                  title="Di chuyển xuống"
-                >
-                  <ArrowDown className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => handleRemoveListItem(index)}
-                  className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-100 rounded cursor-pointer"
-                  title="Xóa dòng"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex shrink-0">
+                  <button
+                    disabled={index === 0}
+                    onClick={() => handleMoveListItem(index, 'up')}
+                    className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-20 cursor-pointer"
+                  >
+                    <ArrowUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    disabled={index === (content.items || []).length - 1}
+                    onClick={() => handleMoveListItem(index, 'down')}
+                    className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-20 cursor-pointer"
+                  >
+                    <ArrowDown className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => handleRemoveListItem(index)}
+                    className="p-1 text-rose-500 hover:text-rose-700 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -417,93 +584,70 @@ export default function BlockSettings({
 
       {/* CTA BUTTON PROPERTIES */}
       {block.type === 'button' && (
-        <div className="space-y-3.5">
+        <div className="space-y-4">
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Nội dung chữ trên nút</label>
+            <label className="block text-[10px] font-bold text-slate-500 mb-1">Chữ hiển thị trên nút</label>
             <input
               type="text"
               value={content.text || ''}
               onChange={e => updateContent('text', e.target.value)}
-              placeholder="Đăng ký tham gia cho con"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+              placeholder="Đăng ký ngay"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
             />
           </div>
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Đường dẫn liên kết (URL)</label>
+            <label className="block text-[10px] font-bold text-slate-500 mb-1">Liên kết nút (URL)</label>
             <input
               type="text"
               value={content.link || ''}
               onChange={e => updateContent('link', e.target.value)}
-              placeholder="https://example.com/register"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+              placeholder="https://example.com"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Màu nền nút</label>
-              <div className="flex gap-1.5">
-                <input
-                  type="color"
-                  value={content.bg || '#1473d1'}
-                  onChange={e => updateContent('bg', e.target.value)}
-                  className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 p-0.5 bg-white"
-                />
-                <input
-                  type="text"
-                  value={content.bg || '#1473d1'}
-                  onChange={e => updateContent('bg', e.target.value)}
-                  className="flex-1 text-xs rounded-xl border border-slate-200 px-2 outline-none focus:border-blue-500"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Màu chữ trên nút</label>
-              <div className="flex gap-1.5">
-                <input
-                  type="color"
-                  value={content.color || '#ffffff'}
-                  onChange={e => updateContent('color', e.target.value)}
-                  className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 p-0.5 bg-white"
-                />
-                <input
-                  type="text"
-                  value={content.color || '#ffffff'}
-                  onChange={e => updateContent('color', e.target.value)}
-                  className="flex-1 text-xs rounded-xl border border-slate-200 px-2 outline-none focus:border-blue-500"
-                />
-              </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
+          
+          <ColorSwatchPicker
+            label="Màu nền nút"
+            value={content.bg || '#1473d1'}
+            onChange={color => updateContent('bg', color)}
+          />
+
+          <ColorSwatchPicker
+            label="Màu chữ trên nút"
+            value={content.color || '#ffffff'}
+            onChange={color => updateContent('color', color)}
+          />
+
+          <div className="grid grid-cols-2 gap-3 pt-1">
             <div>
               <label className="block text-[10px] font-bold text-slate-500 mb-1">Bo góc nút (px)</label>
               <input
                 type="number"
                 value={content.radius ?? 8}
                 onChange={e => updateContent('radius', parseInt(e.target.value) || 0)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
               />
             </div>
             <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Chiều rộng nút</label>
+              <label className="block text-[10px] font-bold text-slate-500 mb-1">Độ rộng nút</label>
               <select
                 value={content.width || 'auto'}
                 onChange={e => updateContent('width', e.target.value)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 bg-white"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 bg-white shadow-sm"
               >
-                <option value="auto">Tự động vừa chữ</option>
-                <option value="full">Đầy hàng 100%</option>
+                <option value="auto">Vừa khít chữ</option>
+                <option value="full">100% hàng ngang</option>
               </select>
             </div>
           </div>
           <div>
             <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề nút</label>
-            <div className="flex bg-slate-50 border border-slate-200 rounded-xl p-0.5">
+            <div className="flex bg-slate-100 border border-slate-200/80 rounded-xl p-0.5 shadow-sm">
               {(['left', 'center', 'right'] as const).map(align => (
                 <button
                   key={align}
                   onClick={() => updateContent('align', align)}
-                  className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500'}`}
+                  className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer transition-all ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                   {align === 'left' && <AlignLeft className="w-4.5 h-4.5" />}
                   {align === 'center' && <AlignCenter className="w-4.5 h-4.5" />}
@@ -518,30 +662,30 @@ export default function BlockSettings({
       {/* BUTTON GROUP PROPERTIES */}
       {block.type === 'button-group' && (
         <div className="space-y-4">
-          <div>
-            <h4 className="text-[10px] font-extrabold text-blue-650 uppercase border-b border-slate-100 pb-1 mb-2">Cấu hình chung</h4>
+          <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/50 space-y-3">
+            <h4 className="text-[10px] font-black text-slate-650 uppercase tracking-wider">Cấu hình nhóm</h4>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">Khoảng cách 2 nút</label>
+                <label className="block text-[9px] text-slate-500 font-bold mb-1">Mép giãn 2 nút</label>
                 <input
                   type="number"
                   value={content.gap ?? 15}
                   onChange={e => updateContent('gap', parseInt(e.target.value) || 0)}
-                  className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+                  className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 bg-white"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề</label>
-                <div className="flex bg-slate-50 border border-slate-200 rounded-xl p-0.5">
+                <label className="block text-[9px] text-slate-500 font-bold mb-1">Căn lề cụm nút</label>
+                <div className="flex bg-slate-100 border border-slate-200 rounded-lg p-0.5">
                   {(['left', 'center', 'right'] as const).map(align => (
                     <button
                       key={align}
                       onClick={() => updateContent('align', align)}
-                      className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500'}`}
+                      className={`flex-1 flex justify-center py-1 rounded cursor-pointer ${content.align === align ? 'bg-white text-slate-800 shadow-sm font-bold' : 'text-slate-500'}`}
                     >
-                      {align === 'left' && <AlignLeft className="w-4.5 h-4.5" />}
-                      {align === 'center' && <AlignCenter className="w-4.5 h-4.5" />}
-                      {align === 'right' && <AlignRight className="w-4.5 h-4.5" />}
+                      {align === 'left' && <AlignLeft className="w-4 h-4" />}
+                      {align === 'center' && <AlignCenter className="w-4 h-4" />}
+                      {align === 'right' && <AlignRight className="w-4 h-4" />}
                     </button>
                   ))}
                 </div>
@@ -549,83 +693,63 @@ export default function BlockSettings({
             </div>
           </div>
 
-          <div>
-            <h4 className="text-[10px] font-extrabold text-slate-700 uppercase border-b border-slate-100 pb-1 mb-2">Nút bên trái (Nút 1)</h4>
-            <div className="space-y-2.5">
-              <div>
-                <input
-                  type="text"
-                  placeholder="Chữ nút 1"
-                  value={content.btn1?.text || ''}
-                  onChange={e => updateContent('btn1', { ...content.btn1, text: e.target.value })}
-                  className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <input
-                  type="text"
-                  placeholder="URL liên kết 1"
-                  value={content.btn1?.link || ''}
-                  onChange={e => updateContent('btn1', { ...content.btn1, link: e.target.value })}
-                  className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="color"
-                  value={content.btn1?.bg || '#1473d1'}
-                  onChange={e => updateContent('btn1', { ...content.btn1, bg: e.target.value })}
-                  className="w-full h-8 rounded-lg cursor-pointer border border-slate-200 p-0.5 bg-white"
-                  title="Màu nền nút 1"
-                />
-                <input
-                  type="color"
-                  value={content.btn1?.color || '#ffffff'}
-                  onChange={e => updateContent('btn1', { ...content.btn1, color: e.target.value })}
-                  className="w-full h-8 rounded-lg cursor-pointer border border-slate-200 p-0.5 bg-white"
-                  title="Màu chữ nút 1"
-                />
-              </div>
+          <div className="space-y-3 border-t border-slate-100 pt-3">
+            <h4 className="text-[10px] font-black text-slate-700 uppercase">Cài đặt Nút 1 (Trái)</h4>
+            <input
+              type="text"
+              placeholder="Chữ nút 1"
+              value={content.btn1?.text || ''}
+              onChange={e => updateContent('btn1', { ...content.btn1, text: e.target.value })}
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm bg-white"
+            />
+            <input
+              type="text"
+              placeholder="URL đích nút 1"
+              value={content.btn1?.link || ''}
+              onChange={e => updateContent('btn1', { ...content.btn1, link: e.target.value })}
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm bg-white"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <ColorSwatchPicker
+                label="Nền Nút 1"
+                value={content.btn1?.bg || '#1473d1'}
+                onChange={color => updateContent('btn1', { ...content.btn1, bg: color })}
+              />
+              <ColorSwatchPicker
+                label="Chữ Nút 1"
+                value={content.btn1?.color || '#ffffff'}
+                onChange={color => updateContent('btn1', { ...content.btn1, color: color })}
+              />
             </div>
           </div>
 
-          <div>
-            <h4 className="text-[10px] font-extrabold text-slate-700 uppercase border-b border-slate-100 pb-1 mb-2">Nút bên phải (Nút 2)</h4>
-            <div className="space-y-2.5">
-              <div>
-                <input
-                  type="text"
-                  placeholder="Chữ nút 2"
-                  value={content.btn2?.text || ''}
-                  onChange={e => updateContent('btn2', { ...content.btn2, text: e.target.value })}
-                  className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <input
-                  type="text"
-                  placeholder="URL liên kết 2"
-                  value={content.btn2?.link || ''}
-                  onChange={e => updateContent('btn2', { ...content.btn2, link: e.target.value })}
-                  className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="color"
-                  value={content.btn2?.bg || '#f1f5f9'}
-                  onChange={e => updateContent('btn2', { ...content.btn2, bg: e.target.value })}
-                  className="w-full h-8 rounded-lg cursor-pointer border border-slate-200 p-0.5 bg-white"
-                  title="Màu nền nút 2"
-                />
-                <input
-                  type="color"
-                  value={content.btn2?.color || '#0f3a72'}
-                  onChange={e => updateContent('btn2', { ...content.btn2, color: e.target.value })}
-                  className="w-full h-8 rounded-lg cursor-pointer border border-slate-200 p-0.5 bg-white"
-                  title="Màu chữ nút 2"
-                />
-              </div>
+          <div className="space-y-3 border-t border-slate-100 pt-3">
+            <h4 className="text-[10px] font-black text-slate-700 uppercase">Cài đặt Nút 2 (Phải)</h4>
+            <input
+              type="text"
+              placeholder="Chữ nút 2"
+              value={content.btn2?.text || ''}
+              onChange={e => updateContent('btn2', { ...content.btn2, text: e.target.value })}
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm bg-white"
+            />
+            <input
+              type="text"
+              placeholder="URL đích nút 2"
+              value={content.btn2?.link || ''}
+              onChange={e => updateContent('btn2', { ...content.btn2, link: e.target.value })}
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm bg-white"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <ColorSwatchPicker
+                label="Nền Nút 2"
+                value={content.btn2?.bg || '#f1f5f9'}
+                onChange={color => updateContent('btn2', { ...content.btn2, bg: color })}
+              />
+              <ColorSwatchPicker
+                label="Chữ Nút 2"
+                value={content.btn2?.color || '#0f3a72'}
+                onChange={color => updateContent('btn2', { ...content.btn2, color: color })}
+              />
             </div>
           </div>
         </div>
@@ -633,53 +757,30 @@ export default function BlockSettings({
 
       {/* HIGHLIGHT BOX PROPERTIES */}
       {block.type === 'highlight-box' && (
-        <div className="space-y-3.5">
-          <p className="text-[11px] text-slate-500 leading-normal italic bg-slate-50 p-3 rounded-xl border border-slate-250/20">
-            * Chỉnh sửa chữ và biến cá nhân hóa trực tiếp trên vùng Email Canvas ở giữa.
+        <div className="space-y-4">
+          <p className="text-[11px] text-slate-450 leading-normal italic bg-slate-50 p-3.5 rounded-2xl border border-slate-200/50">
+            * Sửa nội dung hộp và chèn biến trực quan trên canvas ở giữa.
           </p>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Màu nền hộp</label>
-              <div className="flex gap-1.5">
-                <input
-                  type="color"
-                  value={content.bg || '#eef6ff'}
-                  onChange={e => updateContent('bg', e.target.value)}
-                  className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 p-0.5 bg-white"
-                />
-                <input
-                  type="text"
-                  value={content.bg || '#eef6ff'}
-                  onChange={e => updateContent('bg', e.target.value)}
-                  className="flex-1 text-xs rounded-xl border border-slate-200 px-2 outline-none focus:border-blue-500"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Màu viền trái</label>
-              <div className="flex gap-1.5">
-                <input
-                  type="color"
-                  value={content.borderColor || '#1473d1'}
-                  onChange={e => updateContent('borderColor', e.target.value)}
-                  className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 p-0.5 bg-white"
-                />
-                <input
-                  type="text"
-                  value={content.borderColor || '#1473d1'}
-                  onChange={e => updateContent('borderColor', e.target.value)}
-                  className="flex-1 text-xs rounded-xl border border-slate-200 px-2 outline-none focus:border-blue-500"
-                />
-              </div>
-            </div>
-          </div>
+          
+          <ColorSwatchPicker
+            label="Màu nền hộp thông tin"
+            value={content.bg || '#eef6ff'}
+            onChange={color => updateContent('bg', color)}
+          />
+
+          <ColorSwatchPicker
+            label="Màu đường viền trái"
+            value={content.borderColor || '#1473d1'}
+            onChange={color => updateContent('borderColor', color)}
+          />
+
           <div>
             <label className="block text-[10px] font-bold text-slate-500 mb-1">Khoảng cách đệm bên trong (px)</label>
             <input
               type="number"
               value={content.padding ?? 16}
               onChange={e => updateContent('padding', parseInt(e.target.value) || 0)}
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
             />
           </div>
         </div>
@@ -687,17 +788,17 @@ export default function BlockSettings({
 
       {/* DIVIDER PROPERTIES */}
       {block.type === 'divider' && (
-        <div className="space-y-3.5">
+        <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Độ dày nét (px)</label>
+              <label className="block text-[10px] font-bold text-slate-500 mb-1">Độ dày nét kẻ (px)</label>
               <input
                 type="number"
                 min="1"
                 max="10"
                 value={styles.thickness ?? 1}
                 onChange={e => updateStyles('thickness', parseInt(e.target.value) || 1)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
               />
             </div>
             <div>
@@ -705,37 +806,26 @@ export default function BlockSettings({
               <select
                 value={styles.borderStyle || 'solid'}
                 onChange={e => updateStyles('borderStyle', e.target.value)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 bg-white"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 bg-white shadow-sm"
               >
                 <option value="solid">Nét liền (Solid)</option>
-                <option value="dashed">Nét đứt to (Dashed)</option>
-                <option value="dotted">Nét đứt chấm (Dotted)</option>
+                <option value="dashed">Nét đứt rời (Dashed)</option>
+                <option value="dotted">Nét chấm tròn (Dotted)</option>
               </select>
             </div>
           </div>
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Màu đường kẻ</label>
-            <div className="flex gap-1.5">
-              <input
-                type="color"
-                value={styles.color || '#e2e8f0'}
-                onChange={e => updateStyles('color', e.target.value)}
-                className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 p-0.5 bg-white"
-              />
-              <input
-                type="text"
-                value={styles.color || '#e2e8f0'}
-                onChange={e => updateStyles('color', e.target.value)}
-                className="flex-1 text-xs rounded-xl border border-slate-200 px-2 outline-none focus:border-blue-500"
-              />
-            </div>
-          </div>
+          
+          <ColorSwatchPicker
+            label="Màu nét đường kẻ"
+            value={styles.color || '#e2e8f0'}
+            onChange={color => updateStyles('color', color)}
+          />
         </div>
       )}
 
       {/* SPACER PROPERTIES */}
       {block.type === 'spacer' && (
-        <div>
+        <div className="space-y-3">
           <label className="block text-[10px] font-bold text-slate-500 mb-1">Chiều cao khoảng trống (px)</label>
           <div className="flex items-center gap-3">
             <input
@@ -752,18 +842,9 @@ export default function BlockSettings({
               max="150"
               value={styles.height ?? 20}
               onChange={e => updateStyles('height', parseInt(e.target.value) || 5)}
-              className="w-16 text-xs rounded-xl border border-slate-200 px-2.5 py-1.5 outline-none focus:border-blue-500"
+              className="w-16 text-xs rounded-xl border border-slate-200 px-2.5 py-1.5 outline-none focus:border-blue-500 shadow-sm bg-white"
             />
           </div>
-        </div>
-      )}
-
-      {/* SIGNATURE PROPERTIES */}
-      {block.type === 'signature' && (
-        <div className="space-y-3.5">
-          <p className="text-[11px] text-slate-500 leading-normal italic bg-slate-50 p-3 rounded-xl border border-slate-250/20">
-            * Chữ ký liên hệ được chỉnh sửa trực tiếp trên vùng Email Canvas ở giữa.
-          </p>
         </div>
       )}
 
@@ -771,13 +852,13 @@ export default function BlockSettings({
       {block.type === 'social-links' && (
         <div className="space-y-4">
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề</label>
-            <div className="flex bg-slate-50 border border-slate-200 rounded-xl p-0.5">
+            <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề ngang</label>
+            <div className="flex bg-slate-100 border border-slate-200/80 rounded-xl p-0.5 shadow-sm">
               {(['left', 'center', 'right'] as const).map(align => (
                 <button
                   key={align}
                   onClick={() => updateContent('align', align)}
-                  className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500'}`}
+                  className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer transition-all ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                   {align === 'left' && <AlignLeft className="w-4.5 h-4.5" />}
                   {align === 'center' && <AlignCenter className="w-4.5 h-4.5" />}
@@ -788,10 +869,10 @@ export default function BlockSettings({
           </div>
 
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-2">Danh sách mạng xã hội</label>
+            <label className="block text-[10px] font-bold text-slate-500 mb-2">Các tài khoản liên kết</label>
             <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
               {(content.links || []).map((link: any, index: number) => (
-                <div key={index} className="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-2">
+                <div key={index} className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-2.5">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-800">{link.label}</span>
                     <label className="flex items-center gap-1.5 cursor-pointer text-[10px] text-slate-500 select-none">
@@ -799,7 +880,7 @@ export default function BlockSettings({
                         type="checkbox"
                         checked={link.visible !== false}
                         onChange={e => handleUpdateSocialLink(index, 'visible', e.target.checked)}
-                        className="w-3.5 h-3.5 text-blue-650 border-slate-300 rounded focus:ring-blue-500"
+                        className="w-3.5 h-3.5 text-blue-650 border-slate-350 rounded focus:ring-blue-500"
                       />
                       Hiển thị
                     </label>
@@ -807,10 +888,10 @@ export default function BlockSettings({
                   <div>
                     <input
                       type="text"
-                      placeholder="URL liên kết mạng xã hội"
+                      placeholder="URL của bạn..."
                       value={link.url || ''}
                       onChange={e => handleUpdateSocialLink(index, 'url', e.target.value)}
-                      className="w-full text-xs rounded-lg border border-slate-200 px-2.5 py-1.5 outline-none bg-white focus:border-blue-500"
+                      className="w-full text-xs rounded-xl border border-slate-200 px-2.5 py-1.5 outline-none bg-white focus:border-blue-500 shadow-sm"
                     />
                   </div>
                 </div>

@@ -118,6 +118,9 @@ async function startServer() {
   // Mount API routes BEFORE Vite middleware
   app.use('/api', apiRouter);
 
+  // Serve uploaded email builder images statically
+  app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
   // Khởi động scheduler
   setupAutoSyncScheduler();
 

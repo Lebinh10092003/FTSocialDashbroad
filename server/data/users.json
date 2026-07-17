@@ -3,5 +3,10 @@
     "email": "admin@ftsocial.com",
     "role": "ADMIN",
     "updatedAt": "2026-07-15T03:41:15.698Z"
+  },
+  "guest@ftsocial.com": {
+    "email": "guest@ftsocial.com",
+    "role": "EMPLOYEE",
+    "updatedAt": "2026-07-17T04:26:54.365Z"
   }
 }

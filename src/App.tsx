@@ -27,8 +27,34 @@ export default function App() {
   const [idToken, setIdToken] = useState<string | null>(null);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('EMPLOYEE');  const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const [viewMode, setViewMode] = useState<'workspace' | 'social-dashboard' | 'email-builder'>('workspace');
+  const [viewMode, setViewModeState] = useState<'workspace' | 'social-dashboard' | 'email-builder'>('workspace');
   const [channels, setChannels] = useState<Channel[]>([]);
+
+  useEffect(() => {
+    const handleLocationChange = () => {
+      const path = window.location.pathname;
+      if (path.startsWith('/social-dashboard')) {
+        setViewModeState('social-dashboard');
+      } else if (path.startsWith('/email-builder')) {
+        setViewModeState('email-builder');
+      } else {
+        setViewModeState('workspace');
+      }
+    };
+
+    handleLocationChange();
+
+    window.addEventListener('popstate', handleLocationChange);
+    return () => window.removeEventListener('popstate', handleLocationChange);
+  }, []);
+
+  const setViewMode = (mode: 'workspace' | 'social-dashboard' | 'email-builder') => {
+    setViewModeState(mode);
+    const newPath = mode === 'workspace' ? '/' : `/${mode}`;
+    if (window.location.pathname !== newPath) {
+      window.history.pushState(null, '', newPath);
+    }
+  };
   const [loading, setLoading] = useState<boolean>(true);
   const [authChecking, setAuthChecking] = useState<boolean>(true);
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);

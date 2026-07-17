@@ -1350,3 +1350,45 @@ apiRouter.get('/admin/users', authenticateUser, requireManagerOrAdmin, async (re
     res.status(500).json({ error: 'Không thể tải danh sách thành viên: ' + error.message });
   }
 });
+
+// POST /api/upload - Public API for image upload from the Email Template Builder
+apiRouter.post('/upload', async (req: Request, res: Response) => {
+  try {
+    const { filename, base64 } = req.body;
+    if (!filename || !base64) {
+      return res.status(400).json({ error: 'Thiếu tham số filename hoặc base64.' });
+    }
+
+    const fs = await import('fs');
+    const path = await import('path');
+
+    // Clean up base64 header if present (e.g. data:image/png;base64,...)
+    const cleanBase64 = base64.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(cleanBase64, 'base64');
+
+    // Create uploads directory if not exists
+    const uploadsDir = path.join(process.cwd(), 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    // Generate a unique filename using timestamp to avoid collisions
+    const ext = path.extname(filename) || '.png';
+    const baseName = path.basename(filename, ext).replace(/[^a-zA-Z0-9_-]/g, '');
+    const uniqueFilename = `${baseName}-${Date.now()}${ext}`;
+    const filePath = path.join(uploadsDir, uniqueFilename);
+
+    // Save file
+    fs.writeFileSync(filePath, buffer);
+    console.log(`[Upload] Đã lưu file thành công tại ${filePath}`);
+
+    // Return the relative URL path
+    res.json({ 
+      success: true, 
+      url: `/uploads/${uniqueFilename}` 
+    });
+  } catch (error: any) {
+    console.error('[Upload] Lỗi tải lên tệp:', error);
+    res.status(500).json({ error: 'Lỗi tải tệp: ' + error.message });
+  }
+});

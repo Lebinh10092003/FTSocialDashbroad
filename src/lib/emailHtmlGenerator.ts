@@ -5,6 +5,7 @@ import { getVariablesInText, detectVariableWarnings, replaceVariables } from './
 interface GeneratedEmail {
   subject: string;
   html: string;
+  copyHtml: string;
   plainText: string;
   variables: string[];
   warnings: string[];
@@ -407,6 +408,21 @@ export function generateEmailHtml(
 </body>
 </html>`;
 
+  // Clean wrapper snippet for safe Gmail copying
+  const copyHtml = `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; background-color: ${settings.externalBg};">
+  <tr>
+    <td align="center" style="padding: 24px 8px;">
+      <table role="presentation" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; background-color: ${settings.contentBg}; border-radius: ${settings.borderRadius}px; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);">
+        <tr>
+          <td style="padding: ${settings.contentPadding}px;">
+            ${blockHtmls}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>`;
+
   // Build plain text fallback
   const plainTextLines: string[] = [];
   plainTextLines.push(`TIÊU ĐỀ: ${processedSubject}`);
@@ -465,6 +481,7 @@ export function generateEmailHtml(
   return {
     subject: processedSubject,
     html,
+    copyHtml,
     plainText,
     variables: allVars,
     warnings
