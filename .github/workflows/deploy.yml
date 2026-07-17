@@ -1,0 +1,43 @@
+name: Auto Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create .env file from Secrets
+        run: |
+          echo "GEMINI_API_KEY=\"${{ secrets.GEMINI_API_KEY }}\"" >> .env
+          echo "APP_URL=\"${{ secrets.APP_URL }}\"" >> .env
+          echo "META_PAGE_TOKENS_JSON='${{ secrets.META_PAGE_TOKENS_JSON }}'" >> .env
+          echo "META_GRAPH_API_VERSION=\"${{ secrets.META_GRAPH_API_VERSION }}\"" >> .env
+          echo "ZALO_OA_TOKENS_JSON='${{ secrets.ZALO_OA_TOKENS_JSON }}'" >> .env
+          echo "CRON_SECRET=\"${{ secrets.CRON_SECRET }}\"" >> .env
+          echo "ADMIN_EMAILS=\"${{ secrets.ADMIN_EMAILS }}\"" >> .env
+          echo "PORT=\"${{ secrets.PORT }}\"" >> .env
+          
+          echo "DEPLOY_HOST=\"${{ secrets.DEPLOY_HOST }}\"" >> .env
+          echo "DEPLOY_PORT=\"${{ secrets.DEPLOY_PORT }}\"" >> .env
+          echo "DEPLOY_USER=\"${{ secrets.DEPLOY_USER }}\"" >> .env
+          echo "DEPLOY_PASSWORD=\"${{ secrets.DEPLOY_PASSWORD }}\"" >> .env
+          echo "DEPLOY_PATH=\"${{ secrets.DEPLOY_PATH }}\"" >> .env
+
+      - name: Run Deploy Script
+        run: npm run deploy
