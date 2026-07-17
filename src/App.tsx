@@ -25,7 +25,9 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [idToken, setIdToken] = useState<string | null>(null);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<UserRole>('EMPLOYEE');  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [userRole, setUserRole] = useState<UserRole>('EMPLOYEE');
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const isGuest = user?.email === 'guest@ftsocial.com';
   const [viewMode, setViewMode] = useState<'workspace' | 'app'>('workspace');
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -236,6 +238,10 @@ export default function App() {
       return false;
     }
   };
+
+  useEffect(() => {
+    if (isGuest && activeTab === 'config') setActiveTab('dashboard');
+  }, [activeTab, isGuest]);
 
   const handleLogout = async () => {
     if (user?.email === 'guest@ftsocial.com') {
@@ -488,7 +494,7 @@ export default function App() {
                   onConnectGoogle={handleConnectGoogle}
                 />
               )}
-              {activeTab === 'config' && (
+              {activeTab === 'config' && !isGuest && (
                 <Config idToken={idToken || ''} googleAccessToken={googleAccessToken} userRole={userRole} onConnectGoogle={handleConnectGoogle} showUserManagement={false} />
               )}
               {activeTab === 'accounts' && <AccountManagement idToken={idToken || ''} userRole={userRole} />}

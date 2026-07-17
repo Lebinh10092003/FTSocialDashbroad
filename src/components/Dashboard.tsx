@@ -38,7 +38,7 @@ interface DashboardProps {
   channels: Channel[];
 }
 
-type TrendMetric = 'views' | 'engagement' | 'postsCount' | 'engagementRate';
+type TrendMetric = 'views' | 'engagement' | 'postsCount' | 'engagementRate' | 'followers';
 type DatePreset = 'custom' | '7days' | '30days' | '3months';
 type TrendScale = '2000' | '5000' | '10000' | 'auto';
 
@@ -46,6 +46,73 @@ interface FollowerTrendPoint {
   date: string;
   followersCount: number;
 }
+
+interface YAxisScale {
+  domain: [number, number];
+  ticks: number[];
+}
+
+const getCalendarDates = (startDate: string, endDate: string): string[] => {
+  const dates: string[] = [];
+  const cursor = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+  while (cursor <= end) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
+};
+const getDateAxisTicks = (startDate: string, endDate: string): string[] => {
+  const start = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+  const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1);
+  const intervalDays = totalDays <= 10
+    ? 1
+    : totalDays <= 20
+      ? 2
+      : totalDays <= 70
+        ? Math.max(1, Math.round(totalDays / 10))
+        : 7;
+  const ticks: string[] = [];
+  const cursor = new Date(start);
+
+  while (cursor <= end) {
+    ticks.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + intervalDays);
+  }
+  if (ticks[ticks.length - 1] !== endDate) ticks.push(endDate);
+  return ticks;
+};
+
+const getNiceStep = (value: number) => {
+  const magnitude = 10 ** Math.floor(Math.log10(Math.max(value, 1)));
+  const normalized = value / magnitude;
+  const multiplier = [1, 2, 5, 10].find(candidate => normalized <= candidate) || 10;
+  return multiplier * magnitude;
+};
+
+const getYAxisScale = (values: number[], trendScale: TrendScale, includeZero = true): YAxisScale => {
+  const validValues = values.filter(value => Number.isFinite(value));
+  const minValue = validValues.length ? Math.min(...validValues) : 0;
+  const maxValue = validValues.length ? Math.max(...validValues) : 0;
+
+  if (!includeZero) {
+    const range = Math.max(maxValue - minValue, Math.max(maxValue * 0.02, 1));
+    const step = getNiceStep(range / 8);
+    const domainMin = Math.max(0, Math.floor((minValue - range * 0.15) / step) * step);
+    const domainMax = Math.ceil((maxValue + range * 0.15) / step) * step;
+    const ticks = Array.from({ length: Math.min(11, Math.round((domainMax - domainMin) / step) + 1) }, (_, index) => domainMin + index * step);
+    return { domain: [domainMin, domainMax || step], ticks };
+  }
+
+  const baseStep = trendScale === 'auto' ? getNiceStep(Math.max(maxValue, 1) / 10) : Number(trendScale);
+  const minimumDomain = baseStep * 5;
+  const requiredDomain = Math.max(maxValue, minimumDomain);
+  const step = Math.ceil(requiredDomain / 10 / baseStep) * baseStep;
+  const domainMax = Math.ceil(requiredDomain / step) * step;
+  const ticks = Array.from({ length: Math.round(domainMax / step) + 1 }, (_, index) => index * step);
+  return { domain: [0, domainMax], ticks };
+};
 
 const getPastDateStr = (days: number) => {
   const date = new Date();
@@ -102,16 +169,11 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
     }
   };
 
-  const selectedTrendDays = Math.min(
-    365,
-    Math.max(1, Math.round((new Date(`${endDate}T00:00:00`).getTime() - new Date(`${startDate}T00:00:00`).getTime()) / 86_400_000) + 1),
-  );
-
   const fetchFollowerTrend = async () => {
     if (!idToken) return;
     setFollowerTrendLoading(true);
     try {
-      const params = new URLSearchParams({ days: String(selectedTrendDays) });
+      const params = new URLSearchParams({ startDate, endDate });
       if (followerTrendChannelId !== 'all') params.set('channelId', followerTrendChannelId);
       const response = await fetch(`/api/followers/trend?${params.toString()}`, {
         headers: { Authorization: `Bearer ${idToken}` },
@@ -184,6 +246,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
     engagement: 'tương tác',
     postsCount: 'số bài đăng',
     engagementRate: 'tỷ lệ tương tác',
+    followers: 'lượt follow',
   };
 
   const toggleChannel = (channelName: string) => {
@@ -263,6 +326,27 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
       idle: 'bg-violet-50 text-violet-700',
     },
   ] : [];
+
+  const isFollowerMetric = activeMetric === 'followers';
+  const contentTrendValues = !data || activeMetric === 'followers'
+    ? []
+    : data.trends.flatMap(point => [
+      Number(point[activeMetric] || 0),
+      ...data.channelStats
+        .filter(stat => selectedChannels.has(stat.channelName))
+        .map(stat => Number(point[`${stat.channelName}_${activeMetric}`] || 0)),
+    ]);
+  const yAxisScale = getYAxisScale(
+    isFollowerMetric ? followerTrend.map(point => point.followersCount) : contentTrendValues,
+    trendScale,
+    !isFollowerMetric,
+  );
+  const xAxisTicks = getDateAxisTicks(startDate, endDate);
+  const followerValuesByDate = new Map(followerTrend.map(point => [point.date, point.followersCount]));
+  const followerChartData = getCalendarDates(startDate, endDate).map(date => ({
+    date,
+    followersCount: followerValuesByDate.get(date) ?? null,
+  }));
 
   return (
     <div className="space-y-5 pb-6">
@@ -369,127 +453,114 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
           <section className="bg-white p-4 md:p-5 rounded-2xl border border-slate-200/70 shadow-sm space-y-4">
             <div className="flex flex-col lg:flex-row justify-between gap-4">
               <div>
-                <h3 className="text-lg font-extrabold text-slate-800">Xu hướng {selectedMetricLabel[activeMetric]} theo ngày đăng</h3>
-                <p className="text-sm text-slate-500 mt-1">Chọn KPI phía trên để đổi chỉ số hiển thị trên biểu đồ.</p>
+                <h3 className="text-lg font-extrabold text-slate-800">Xu hướng {isFollowerMetric ? 'lượt follow' : selectedMetricLabel[activeMetric]} {isFollowerMetric ? 'theo thời gian' : 'theo ngày đăng'}</h3>
+                <p className="text-sm text-slate-500 mt-1">{isFollowerMetric ? 'Chọn trang để xem biến động người theo dõi trong khoảng thời gian đang lọc.' : 'Chọn KPI phía trên để đổi chỉ số hiển thị trên biểu đồ.'}</p>
               </div>
               <div className="flex items-start gap-2">
-                <select value={trendScale} onChange={event => setTrendScale(event.target.value as TrendScale)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm">
-                  <option value="2000">Thang 2.000</option>
-                  <option value="5000">Thang 5.000</option>
-                  <option value="10000">Thang 10.000</option>
-                  <option value="auto">Tự động</option>
-                </select>
-                <div className="relative">
-                <button onClick={() => setIsChannelPickerOpen(open => !open)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm">
-                  Chọn kênh hiển thị ({selectedChannels.size}) ▾
-                </button>
-                {isChannelPickerOpen && (
+                {isFollowerMetric ? (
+                  <select
+                    value={followerTrendChannelId}
+                    onChange={event => setFollowerTrendChannelId(event.target.value)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm"
+                  >
+                    <option value="all">Tổng tất cả trang</option>
+                    {channels.filter(channel => channel.status === 'active').map(channel => (
+                      <option key={channel.id} value={channel.id}>{channel.name}</option>
+                    ))}
+                  </select>
+                ) : (
                   <>
-                    <button aria-label="Đóng bộ chọn kênh" className="fixed inset-0 z-10 cursor-default" onClick={() => setIsChannelPickerOpen(false)} />
-                    <div className="absolute right-0 mt-2 z-20 w-72 bg-white border border-slate-200 rounded-2xl shadow-xl p-3">
-                      <div className="flex justify-between border-b border-slate-100 pb-2 mb-2">
-                        <button onClick={() => setSelectedChannels(new Set(data.channelStats.map(stat => stat.channelName)))} className="text-sm font-bold text-blue-700">Chọn tất cả</button>
-                        <button onClick={() => setSelectedChannels(new Set())} className="text-sm font-bold text-rose-600">Bỏ chọn</button>
-                      </div>
-                      <div className="max-h-64 overflow-y-auto space-y-1">
-                        {data.channelStats.map(stat => (
-                          <label key={stat.channelName} className="flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 text-sm font-medium text-slate-700 cursor-pointer">
-                            <input type="checkbox" checked={selectedChannels.has(stat.channelName)} onChange={() => toggleChannel(stat.channelName)} className="rounded text-blue-600" />
-                            <span className="truncate">{stat.channelName}</span>
-                          </label>
-                        ))}
-                      </div>
+                    <select value={trendScale} onChange={event => setTrendScale(event.target.value as TrendScale)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm">
+                      <option value="2000">Mốc 2.000</option>
+                      <option value="5000">Mốc 5.000</option>
+                      <option value="10000">Mốc 10.000</option>
+                      <option value="auto">Tự động</option>
+                    </select>
+                    <div className="relative">
+                      <button onClick={() => setIsChannelPickerOpen(open => !open)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm">
+                        Chọn kênh hiển thị ({selectedChannels.size}) ▾
+                      </button>
+                      {isChannelPickerOpen && (
+                        <>
+                          <button aria-label="Đóng bộ chọn kênh" className="fixed inset-0 z-10 cursor-default" onClick={() => setIsChannelPickerOpen(false)} />
+                          <div className="absolute right-0 mt-2 z-20 w-72 bg-white border border-slate-200 rounded-2xl shadow-xl p-3">
+                            <div className="flex justify-between border-b border-slate-100 pb-2 mb-2">
+                              <button onClick={() => setSelectedChannels(new Set(data.channelStats.map(stat => stat.channelName)))} className="text-sm font-bold text-blue-700">Chọn tất cả</button>
+                              <button onClick={() => setSelectedChannels(new Set())} className="text-sm font-bold text-rose-600">Bỏ chọn</button>
+                            </div>
+                            <div className="max-h-64 overflow-y-auto space-y-1">
+                              {data.channelStats.map(stat => (
+                                <label key={stat.channelName} className="flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 text-sm font-medium text-slate-700 cursor-pointer">
+                                  <input type="checkbox" checked={selectedChannels.has(stat.channelName)} onChange={() => toggleChannel(stat.channelName)} className="rounded text-blue-600" />
+                                  <span className="truncate">{stat.channelName}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </>
                 )}
               </div>
-              </div>
             </div>
 
-            <div className="h-[320px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={data.trends} margin={{ top: 10, right: 15, left: -10, bottom: 5 }}>
-                  <defs>
-                    <linearGradient id="totalLine" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#94a3b8" stopOpacity={0.2} /><stop offset="95%" stopColor="#94a3b8" stopOpacity={0} /></linearGradient>
-                    {data.channelStats.map((stat, index) => <linearGradient key={stat.channelName} id={`channel-${index}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={COLORS[index % COLORS.length]} stopOpacity={0.18} /><stop offset="95%" stopColor={COLORS[index % COLORS.length]} stopOpacity={0} /></linearGradient>)}
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                  <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
-                  <YAxis domain={trendScale === 'auto' ? [0, 'auto'] : [0, Number(trendScale)]} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: 10, color: '#fff', fontSize: 12 }}
-                    itemStyle={{ color: '#fff' }}
-                    labelStyle={{ color: '#fff', fontWeight: 700 }}
-                    wrapperStyle={{ zIndex: 30, outline: 'none', pointerEvents: 'none' }}
-                    formatter={(value: number, name: string) => [Number(value).toLocaleString('vi-VN'), name]}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" />
-                  {!isSingleChannelScope && <Area type="monotone" dataKey={activeMetric} name="Tổng cộng" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 4" fill="url(#totalLine)" />}
-                  {!onlyShowTotal && data.channelStats.filter(stat => selectedChannels.has(stat.channelName)).map((stat, index) => <Area key={stat.channelName} type="monotone" dataKey={`${stat.channelName}_${activeMetric}`} name={stat.channelName} stroke={COLORS[index % COLORS.length]} strokeWidth={2.5} fill={`url(#channel-${index})`} />)}
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="border-t border-slate-100 pt-3 space-y-3">
-              {!isSingleChannelScope && <label className="flex items-center justify-end gap-2 text-xs font-bold text-slate-600 cursor-pointer">
-                <input type="checkbox" checked={onlyShowTotal} onChange={event => setOnlyShowTotal(event.target.checked)} className="w-4 h-4 accent-blue-600" /> Chỉ hiện đường tổng
-              </label>}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {[
-                  ['Cảm xúc', breakdown.reactions, 'Tổng lượt thích và cảm xúc'],
-                  ['Bình luận', breakdown.comments, 'Tổng phản hồi trên bài viết'],
-                  ['Lượt chia sẻ', breakdown.shares, 'Tổng lượt chia sẻ bài viết'],
-                ].map(([title, value, description]) => (
-                  <div key={String(title)} className="bg-slate-50 p-3 rounded-xl border border-slate-200/70">
-                    <p className="text-xs font-extrabold uppercase tracking-wide text-slate-600">{title}</p>
-                    <p className="text-2xl font-extrabold text-slate-900 mt-1">{Number(value).toLocaleString('vi-VN')}</p>
-                    <p className="text-xs text-slate-500 mt-1">{description}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          <section className="bg-white p-4 md:p-5 rounded-2xl border border-slate-200/70 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-extrabold text-slate-800">Tăng trưởng người theo dõi</h3>
-                <p className="text-sm text-slate-500 mt-1">Lịch sử followers được lưu theo từng ngày đồng bộ.</p>
-              </div>
-              <select
-                value={followerTrendChannelId}
-                onChange={event => setFollowerTrendChannelId(event.target.value)}
-                className="bg-white border border-slate-200 text-sm font-bold text-slate-700 rounded-lg px-3 py-1.5"
-              >
-                <option value="all">Tổng tất cả trang</option>
-                {channels.filter(channel => channel.status === 'active').map(channel => (
-                  <option key={channel.id} value={channel.id}>{channel.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="h-[320px]">
-              {followerTrendLoading ? (
-                <div className="h-full grid place-items-center text-sm text-slate-400">Đang tải lịch sử followers...</div>
-              ) : followerTrend.length ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={followerTrend} margin={{ top: 10, right: 15, left: -10, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: 10, color: '#fff', fontSize: 12 }}
-                      itemStyle={{ color: '#fff' }}
-                      labelStyle={{ color: '#fff', fontWeight: 700 }}
-                      formatter={(value: number) => [Number(value).toLocaleString('vi-VN'), 'Người theo dõi']}
-                    />
-                    <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" />
-                    <Line type="monotone" dataKey="followersCount" name="Người theo dõi" stroke="#7c3aed" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                  </LineChart>
-                </ResponsiveContainer>
+            <div className="h-[440px] md:h-[480px]">
+              {isFollowerMetric ? (
+                followerTrendLoading ? (
+                  <div className="h-full grid place-items-center text-sm text-slate-400">Đang tải lịch sử followers...</div>
+                ) : followerTrend.length ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={followerChartData} margin={{ top: 16, right: 18, left: 0, bottom: 12 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                      <XAxis dataKey="date" ticks={xAxisTicks} interval={0} minTickGap={12} tickFormatter={(value: string) => value.slice(5).replace('-', '/')} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
+                      <YAxis domain={yAxisScale.domain} ticks={yAxisScale.ticks} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
+                      <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: 10, color: '#fff', fontSize: 12 }} itemStyle={{ color: '#fff' }} labelStyle={{ color: '#fff', fontWeight: 700 }} formatter={(value: number) => [Number(value).toLocaleString('vi-VN'), 'Người theo dõi']} />
+                      <Line type="monotone" dataKey="followersCount" name="Người theo dõi" stroke="#7c3aed" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full grid place-items-center text-sm text-slate-400">Chưa có lịch sử followers. Dữ liệu sẽ xuất hiện sau lần đồng bộ tiếp theo.</div>
+                )
               ) : (
-                <div className="h-full grid place-items-center text-sm text-slate-400">Chưa có lịch sử followers. Dữ liệu sẽ xuất hiện sau lần đồng bộ tiếp theo.</div>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={data.trends} margin={{ top: 16, right: 18, left: 0, bottom: 12 }}>
+                    <defs>
+                      <linearGradient id="totalLine" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#94a3b8" stopOpacity={0.2} /><stop offset="95%" stopColor="#94a3b8" stopOpacity={0} /></linearGradient>
+                      {data.channelStats.map((stat, index) => <linearGradient key={stat.channelName} id={`channel-${index}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={COLORS[index % COLORS.length]} stopOpacity={0.18} /><stop offset="95%" stopColor={COLORS[index % COLORS.length]} stopOpacity={0} /></linearGradient>)}
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="date" ticks={xAxisTicks} interval={0} minTickGap={12} tickFormatter={(value: string) => value.slice(5).replace('-', '/')} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
+                    <YAxis domain={yAxisScale.domain} ticks={yAxisScale.ticks} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: 10, color: '#fff', fontSize: 12 }} itemStyle={{ color: '#fff' }} labelStyle={{ color: '#fff', fontWeight: 700 }} wrapperStyle={{ zIndex: 30, outline: 'none', pointerEvents: 'none' }} formatter={(value: number, name: string) => [Number(value).toLocaleString('vi-VN'), name]} />
+                    <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" />
+                    {!isSingleChannelScope && <Area type="monotone" dataKey={activeMetric} name="Tổng cộng" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 4" fill="url(#totalLine)" />}
+                    {!onlyShowTotal && data.channelStats.filter(stat => selectedChannels.has(stat.channelName)).map((stat, index) => <Area key={stat.channelName} type="monotone" dataKey={`${stat.channelName}_${activeMetric}`} name={stat.channelName} stroke={COLORS[index % COLORS.length]} strokeWidth={2.5} fill={`url(#channel-${index})`} />)}
+                  </AreaChart>
+                </ResponsiveContainer>
               )}
             </div>
+
+            {!isFollowerMetric && (
+              <div className="border-t border-slate-100 pt-3 space-y-3">
+                {!isSingleChannelScope && <label className="flex items-center justify-end gap-2 text-xs font-bold text-slate-600 cursor-pointer">
+                  <input type="checkbox" checked={onlyShowTotal} onChange={event => setOnlyShowTotal(event.target.checked)} className="w-4 h-4 accent-blue-600" /> Chỉ hiển đường tổng
+                </label>}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {[
+                    ['Cảm xúc', breakdown.reactions, 'Tổng lượt thích và cảm xúc'],
+                    ['Bình luận', breakdown.comments, 'Tổng phản hồi trên bài viết'],
+                    ['Lượt chia sẻ', breakdown.shares, 'Tổng lượt chia sẻ bài viết'],
+                  ].map(([title, value, description]) => (
+                    <div key={String(title)} className="bg-slate-50 p-3 rounded-xl border border-slate-200/70">
+                      <p className="text-xs font-extrabold uppercase tracking-wide text-slate-600">{title}</p>
+                      <p className="text-2xl font-extrabold text-slate-900 mt-1">{Number(value).toLocaleString('vi-VN')}</p>
+                      <p className="text-xs text-slate-500 mt-1">{description}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </section>
           <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
             <ContentBarChart title="Lượt xem theo loại nội dung" subtitle="Tổng lượt xem của từng định dạng bài đăng." data={typeStats} dataKey="views" color="#0891b2" formatter="lượt xem" />

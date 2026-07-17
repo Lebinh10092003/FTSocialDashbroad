@@ -356,7 +356,27 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
       trendMap.set(dateStr, curr);
     });
 
-    const trends = Array.from(trendMap.values()).map(point => {
+    // Fill dates without posts so the chart uses the requested calendar range, not only posting dates.
+    const trendCursor = new Date(`${periodStart}T00:00:00.000Z`);
+    const trendEnd = new Date(`${periodEnd}T00:00:00.000Z`);
+    while (trendCursor <= trendEnd) {
+      const date = trendCursor.toISOString().slice(0, 10);
+      if (!trendMap.has(date)) {
+        trendMap.set(date, {
+          date,
+          engagement: 0,
+          postsCount: 0,
+          likes: 0,
+          comments: 0,
+          shares: 0,
+          views: 0,
+          reach: 0,
+        });
+      }
+      trendCursor.setUTCDate(trendCursor.getUTCDate() + 1);
+    }
+
+    const trends = Array.from(trendMap.values()).sort((a, b) => a.date.localeCompare(b.date)).map(point => {
       channels.forEach(c => {
         const metrics = ['engagement', 'postsCount', 'likes', 'comments', 'shares', 'views', 'reach', 'engagementRate'];
         metrics.forEach(m => {
@@ -493,16 +513,23 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
  */
 apiRouter.get('/followers/trend', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const rawDays = Number(req.query.days || 30);
-    if (!Number.isInteger(rawDays) || rawDays < 1 || rawDays > 365) {
-      return res.status(400).json({ error: 'Tham số days phải nằm trong khoảng từ 1 đến 365.' });
-    }
-
     const requestedChannelId = typeof req.query.channelId === 'string' && req.query.channelId !== 'all'
       ? req.query.channelId
       : null;
-    const periodStart = getRecentStartDate(rawDays);
-    const periodEnd = getTodayDate();
+    const hasExplicitPeriod = isDateString(req.query.startDate) || isDateString(req.query.endDate);
+    let periodStart: string;
+    let periodEnd: string;
+
+    if (hasExplicitPeriod) {
+      ({ periodStart, periodEnd } = resolveReportingPeriod(req.query));
+    } else {
+      const rawDays = Number(req.query.days || 30);
+      if (!Number.isInteger(rawDays) || rawDays < 1 || rawDays > 365) {
+        return res.status(400).json({ error: 'Khoảng ngày không hợp lệ.' });
+      }
+      periodStart = getRecentStartDate(rawDays);
+      periodEnd = getTodayDate();
+    }
     const snapshotsSnap = await adminDb.collection('followerSnapshots')
       .where('snapshotDate', '>=', periodStart)
       .where('snapshotDate', '<=', periodEnd)
