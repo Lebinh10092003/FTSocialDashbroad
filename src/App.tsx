@@ -47,27 +47,18 @@ export default function App() {
       setGoogleAccessToken(cachedToken);
     }
 
-    // Ensure standard Workspace scopes are added
-    googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets');
-    googleProvider.addScope('https://www.googleapis.com/auth/userinfo.email');
-    googleProvider.addScope('https://www.googleapis.com/auth/userinfo.profile');
-    googleProvider.setCustomParameters({
-      prompt: 'consent',
-      access_type: 'offline'
-    });
-
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) { setUser(null); setIdToken(null); setUserRole('EMPLOYEE'); setAuthChecking(false); return; }
-      setUser(currentUser);
-      const token = await currentUser.getIdToken();
-      setIdToken(token);
-      try {
-        const profile = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
-        if (profile.role) setUserRole(profile.role);
-      } catch (error) { console.error('Không thể tải vai trò:', error); }
-      setAuthChecking(false);
-    });
-    return unsubscribe;
+    // Tự động gán tài khoản Admin ảo để chạy ở chế độ Public hoàn toàn
+    const mockUser = {
+      email: 'admin@ftsocial.com',
+      displayName: 'FermatTech Workspace',
+      uid: 'mock-uid-admin',
+      photoURL: ''
+    } as any;
+    
+    setUser(mockUser);
+    setIdToken('mock-dev-token-admin@ftsocial.com');
+    setUserRole('ADMIN');
+    setAuthChecking(false);
   }, []);
 
   const handleCredentialsAuth = async (e: React.FormEvent) => {
@@ -230,17 +221,9 @@ export default function App() {
     }
   };
 
-  const handleLogout = async () => {
-    sessionStorage.removeItem('is_mock_login');
-    try {
-      await auth.signOut();
-    } catch (err) {
-      console.error('Đăng xuất thất bại:', err);
-    }
-    setUser(null);
-    setIdToken(null);
-    setGoogleAccessToken(null);
-    setUserRole('EMPLOYEE');
+  const handleLogout = () => {
+    // Không cho phép đăng xuất trong chế độ Public, chỉ reload lại trang
+    window.location.reload();
   };
 
   // Fetch all channels
