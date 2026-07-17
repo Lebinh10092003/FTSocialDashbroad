@@ -1,4 +1,4 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { Component, useState, useEffect, lazy, Suspense } from 'react';
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
@@ -21,6 +21,24 @@ const Sync = lazy(() => import('./components/Sync'));
 const Config = lazy(() => import('./components/Config'));
 const AccountManagement = lazy(() => import('./components/AccountManagement'));
 const EmailTemplateBuilder = lazy(() => import('./components/email-builder/EmailTemplateBuilder'));
+const ExaminationModule = lazy(() => import('./components/ExaminationModule'));
+
+class ExaminationErrorBoundary extends Component<{ children: React.ReactNode }, { error: Error | null }> {
+  declare props: { children: React.ReactNode };
+  declare setState: (state: { error: Error | null }) => void;
+  state = { error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  render() {
+    if (this.state.error) {
+      return <div className="grid min-h-screen place-items-center bg-slate-50 p-6 text-slate-800"><div className="w-full max-w-xl rounded-xl border border-rose-200 bg-white p-6 shadow-sm"><h1 className="text-xl font-extrabold text-rose-700">Không thể tải mô-đun Khảo thí</h1><p className="mt-2 text-sm text-slate-600">Hệ thống đã chặn lỗi để không hiển thị màn hình trắng.</p><pre className="mt-4 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-rose-200">{this.state.error.message}</pre><button onClick={() => this.setState({ error: null })} className="mt-5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white">Thử tải lại mô-đun</button></div></div>;
+    }
+    return this.props.children;
+  }
+}
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -29,7 +47,7 @@ export default function App() {
   const [userRole, setUserRole] = useState<UserRole>('EMPLOYEE');
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const isGuest = user?.email === 'guest@ftsocial.com';
-  const [viewMode, setViewModeState] = useState<'workspace' | 'social-dashboard' | 'email-builder'>('workspace');
+  const [viewMode, setViewModeState] = useState<'workspace' | 'social-dashboard' | 'email-builder' | 'examination'>('workspace');
   const [channels, setChannels] = useState<Channel[]>([]);
 
   useEffect(() => {
@@ -39,6 +57,9 @@ export default function App() {
         setViewModeState('social-dashboard');
       } else if (path.startsWith('/email-builder')) {
         setViewModeState('email-builder');
+      }
+      else if (path.startsWith('/examination')) {
+        setViewModeState('examination');
       } else {
         setViewModeState('workspace');
       }
@@ -50,7 +71,7 @@ export default function App() {
     return () => window.removeEventListener('popstate', handleLocationChange);
   }, []);
 
-  const setViewMode = (mode: 'workspace' | 'social-dashboard' | 'email-builder') => {
+  const setViewMode = (mode: 'workspace' | 'social-dashboard' | 'email-builder' | 'examination') => {
     setViewModeState(mode);
     const newPath = mode === 'workspace' ? '/' : `/${mode}`;
     if (window.location.pathname !== newPath) {
@@ -458,20 +479,22 @@ export default function App() {
 
 
 
-            {/* Card 5: Assessment (Coming Soon) */}
-            <div className="glass-card p-6.5 rounded-3xl opacity-80 relative group flex flex-col justify-between min-h-[220px]">
+            {/* Card 5: Examination */}
+            <div
+              onClick={() => setViewMode('examination')}
+              className="glass-card p-6.5 rounded-3xl cursor-pointer group flex flex-col justify-between min-h-[220px]"
+            >
               <div className="space-y-4">
-                <div className="w-12 h-12 bg-gradient-to-tr from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-500/10">
+                <div className="w-12 h-12 bg-gradient-to-tr from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-500/10 group-hover:scale-110 transition-transform">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 </div>
                 <div className="space-y-1.5">
-                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">Khảo thí <span className="text-[9px] bg-slate-100 text-slate-500 font-extrabold px-1.5 py-0.5 rounded-full border border-slate-200 uppercase tracking-wide">Sắp ra mắt</span></h3>
-                  <p className="text-xs text-slate-500 leading-relaxed">Quản lý các cuộc thi tại FermatTech.</p>
+                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">Khảo thí <span className="text-[9px] bg-emerald-50 text-emerald-700 font-extrabold px-1.5 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wide">Đang chạy</span></h3>
+                  <p className="text-xs text-slate-500 leading-relaxed">Quản lý cuộc thi, kỳ tổ chức, thí sinh và quy trình nhập dữ liệu tại FermatTech.</p>
                 </div>
               </div>
-              <div className="pt-4 text-xs font-bold text-slate-400">Đang phát triển</div>
+              <div className="pt-4 flex items-center text-xs font-bold text-amber-600 group-hover:translate-x-1 transition-transform">Truy cập ứng dụng →</div>
             </div>
-
             {/* Card 6: Digital Training (Coming Soon) */}
             <div className="glass-card p-6.5 rounded-3xl opacity-80 relative group flex flex-col justify-between min-h-[220px]">
               <div className="space-y-4">
@@ -508,6 +531,15 @@ export default function App() {
     );
   }
 
+  if (viewMode === 'examination') {
+    return (
+      <ExaminationErrorBoundary>
+        <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50 text-sm font-semibold text-slate-500">Đang nạp mô-đun Khảo thí...</div>}>
+          <ExaminationModule onBackToWorkspace={() => setViewMode('workspace')} userName={user?.displayName} />
+        </Suspense>
+      </ExaminationErrorBoundary>
+    );
+  }
   // Dashboard / Admin Panel view
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">

@@ -145,3 +145,16 @@ body {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+
+/* Examination module */
+.ft-surface { background: #fff; border: 1px solid #cbd5e1; border-radius: .75rem; padding: 1.25rem; }
+.ft-primary { display: inline-flex; align-items: center; gap: .5rem; border-radius: .375rem; background: #aa3000; color: #fff; padding: .65rem 1rem; font-size: .875rem; font-weight: 700; }
+.ft-primary:hover { background: #852400; }
+.ft-input-wrap { display: flex; align-items: center; gap: .6rem; border: 1px solid #cbd5e1; border-radius: .5rem; background: #f8f9ff; padding: .6rem .75rem; }
+.ft-input-wrap input { width: 100%; background: transparent; outline: none; font-size: .875rem; }
+.ft-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: .875rem; }
+.ft-table th { background: #e6eeff; color: #334155; padding: .8rem 1rem; text-align: left; font-weight: 700; white-space: nowrap; }
+.ft-table td { border-top: 1px solid #cbd5e1; padding: 1rem; vertical-align: middle; }
+.ft-table tbody tr:hover { background: #f8f9ff; }
+.ft-page { min-width: 2rem; border: 1px solid #cbd5e1; padding: .3rem .55rem; font-size: .875rem; font-weight: 700; }
+.ft-page.active { background: #001e40; border-color: #001e40; color: #fff; }
