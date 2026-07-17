@@ -269,6 +269,22 @@ export default function BlockSettings({
         </div>
       )}
 
+      {['paragraph', 'signature', 'highlight-box', 'bullet-list', 'number-list', 'button'].includes(block.type) && (
+        <div className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-3.5">
+          <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-650">Kích thước nội dung (email-safe)</h4>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-[9px] font-bold text-slate-500">Cỡ chữ (px)</label>
+              <input type="number" min="10" max="48" value={content.fontSize ?? (block.type === 'button' ? 15 : block.type === 'signature' ? 14 : 15)} onChange={event => updateContent('fontSize', Math.max(10, Math.min(48, parseInt(event.target.value) || 15)))} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500" />
+            </div>
+            {block.type !== 'button' && <div>
+              <label className="mb-1 block text-[9px] font-bold text-slate-500">Giãn dòng</label>
+              <input type="number" min="1" max="2.4" step="0.1" value={content.lineHeight ?? 1.6} onChange={event => updateContent('lineHeight', Math.max(1, Math.min(2.4, parseFloat(event.target.value) || 1.6)))} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500" />
+            </div>}
+          </div>
+          <p className="text-[9px] leading-relaxed text-slate-500">Dùng font-size và line-height inline để giữ định dạng khi copy vào email.</p>
+        </div>
+      )}
       {/* LOGO PROPERTIES */}
       {block.type === 'logo' && (
         <div className="space-y-4">

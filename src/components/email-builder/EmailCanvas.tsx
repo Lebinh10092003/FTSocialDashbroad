@@ -8,7 +8,9 @@ import {
   EyeOff, 
   Tag,
   Plus,
-  GripVertical
+  GripVertical,
+  ImagePlus,
+  Link
 } from 'lucide-react';
 import { BlockType, EmailBlock, EmailSettings } from '../../types/emailBuilder';
 import { BLOCK_CATEGORIES, EMAIL_BLOCK_REGISTRY } from '../../data/emailBlockRegistry';
@@ -63,7 +65,31 @@ export default function EmailCanvas({
   const contentEditableRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [isInserterOpen, setIsInserterOpen] = React.useState(false);
   const [blockQuery, setBlockQuery] = React.useState('');
-  const [isBlockDragOver, setIsBlockDragOver] = React.useState(false);  const handleDropOnBlock = (event: React.DragEvent, target: EmailBlock) => {
+  const [isBlockDragOver, setIsBlockDragOver] = React.useState(false);
+  const imageInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const uploadImageForBlock = async (block: EmailBlock, file: File) => {
+    if (!file.type.startsWith('image/') || file.size > 3 * 1024 * 1024) return;
+    const setUrl = (url: string) => onUpdateBlockContent(block.id, { ...block.content, url });
+    try {
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name) },
+        body: file,
+      });
+      const data = await response.json();
+      if (data.success && data.url) {
+        setUrl(`${window.location.origin}${data.url}`);
+        return;
+      }
+    } catch { /* fall back to a portable data URL */ }
+    const reader = new FileReader();
+    reader.onload = () => setUrl(String(reader.result));
+    reader.readAsDataURL(file);
+  };
+  const setImageUrl = (block: EmailBlock) => {
+    const url = prompt('Dán đường dẫn ảnh:', block.content.url || 'https://');
+    if (url) onUpdateBlockContent(block.id, { ...block.content, url });
+  };  const handleDropOnBlock = (event: React.DragEvent, target: EmailBlock) => {
     event.preventDefault(); event.stopPropagation();
     const sourceId = event.dataTransfer.getData('application/x-ft-email-block-id');
     const type = event.dataTransfer.getData('application/x-ft-email-block') as BlockType;
@@ -188,6 +214,13 @@ export default function EmailCanvas({
                       e.stopPropagation();
                       onSelectBlock(block.id);
                     }}
+                    onDragOver={event => {
+                      if (event.dataTransfer.types.includes('application/x-ft-email-block-id')) {
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = 'move';
+                      }
+                    }}
+                    onDrop={event => handleDropOnBlock(event, block)}
                     className={`relative group border transition-all duration-200 ${
                       isSelected 
                         ? 'border-blue-500 ring-2 ring-blue-100 rounded-xl bg-blue-50/5' 
@@ -206,7 +239,7 @@ export default function EmailCanvas({
 
                     {/* Actions Controller Box (Top Right Corner) */}
                     <div className="absolute -top-4.5 right-3 z-30 hidden group-hover:flex items-center gap-1 bg-white border border-slate-200 p-1.5 rounded-xl shadow-lg scale-90 origin-right select-none">
-                      <button draggable onDragStart={event => { event.dataTransfer.setData('application/x-ft-email-block-id', block.id); event.dataTransfer.effectAllowed = 'move'; }} title="Kéo để sắp xếp hoặc thả vào Section" className="p-1 hover:bg-slate-100 text-slate-550 rounded-lg cursor-grab active:cursor-grabbing flex items-center justify-center"><GripVertical className="w-3.5 h-3.5" /></button>
+                      <button draggable onDragStart={event => { event.dataTransfer.setData('application/x-ft-email-block-id', block.id); event.dataTransfer.setData('text/plain', block.id); event.dataTransfer.effectAllowed = 'move'; }} title="Kéo để sắp xếp hoặc thả vào Section" className="p-1 hover:bg-slate-100 text-slate-550 rounded-lg cursor-grab active:cursor-grabbing flex items-center justify-center"><GripVertical className="w-3.5 h-3.5" /></button>
                       <button
                         disabled={index === 0}
                         onClick={(e) => {
@@ -321,7 +354,7 @@ export default function EmailCanvas({
                             contentEditable
                             suppressContentEditableWarning
                             onBlur={(e) => handleContentBlur(block.id, e.target.innerHTML)}
-                            style={{ textAlign: content.align || 'left' }}
+                            style={{ textAlign: content.align || 'left', fontSize: (content.fontSize || 15) + 'px', lineHeight: content.lineHeight || 1.6 }}
                             className="outline-none min-h-[40px] focus:bg-slate-50/50 p-1 rounded-lg border border-transparent focus:border-slate-200 font-sans"
                             dangerouslySetInnerHTML={{ __html: content.html || '<p><br></p>' }}
                           />
@@ -330,28 +363,25 @@ export default function EmailCanvas({
 
                       {/* IMAGE BLOCK */}
                       {block.type === 'image' && (
-                        <div className={`flex justify-${content.align === 'center' ? 'center' : content.align === 'right' ? 'end' : 'start'}`}>
-                          {content.url ? (
-                            <img 
-                              src={content.url} 
-                              alt={content.alt || 'Banner'} 
-                              style={{ 
-                                width: `${content.width || 600}px`,
-                                borderRadius: `${content.borderRadius || 0}px` 
-                              }}
-                              className="max-w-full height-auto object-cover pointer-events-none"
-                            />
-                          ) : (
-                            <div className="bg-slate-50 p-8 border border-dashed border-slate-350/50 text-[10px] font-bold text-slate-450 rounded-xl text-center w-full">
-                              [Chưa nhập đường dẫn ảnh banner]
-                            </div>
-                          )}
+                        <div className="space-y-2">
+                          {isSelected && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-2 py-1.5 text-[10px] font-bold text-blue-800">
+                            <input ref={el => { imageInputRefs.current[block.id] = el; }} type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) uploadImageForBlock(block, file); event.currentTarget.value = ''; }} />
+                            <button type="button" onClick={() => imageInputRefs.current[block.id]?.click()} className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1.5 shadow-sm hover:bg-blue-100"><ImagePlus className="h-3.5 w-3.5" /> Tải ảnh</button>
+                            <button type="button" onClick={() => setImageUrl(block)} className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1.5 shadow-sm hover:bg-blue-100"><Link className="h-3.5 w-3.5" /> Dán URL</button>
+                            <span className="text-slate-500">hoặc kéo ảnh vào khung bên dưới</span>
+                          </div>}
+                          <div className={`flex justify-${content.align === 'center' ? 'center' : content.align === 'right' ? 'end' : 'start'}`} onDragOver={event => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={event => { event.preventDefault(); event.stopPropagation(); const file = event.dataTransfer.files?.[0]; if (file) uploadImageForBlock(block, file); }}>
+                            {content.url ? (
+                              <img src={content.url} alt={content.alt || 'Banner'} style={{ width: `${content.width || 600}px`, borderRadius: `${content.borderRadius || 0}px` }} className="max-w-full height-auto object-cover pointer-events-none" />
+                            ) : (
+                              <button type="button" onClick={() => imageInputRefs.current[block.id]?.click()} className="w-full rounded-xl border border-dashed border-slate-350/50 bg-slate-50 p-8 text-center text-[10px] font-bold text-slate-450 hover:border-blue-400 hover:bg-blue-50">Chọn hoặc kéo thả ảnh vào đây</button>
+                            )}
+                          </div>
                         </div>
                       )}
-
                       {/* BULLET & NUMBER LIST BLOCKS */}
                       {(block.type === 'bullet-list' || block.type === 'number-list') && (
-                        <div className="pl-4">
+                        <div className="pl-4" style={{ fontSize: (content.fontSize || 15) + 'px', lineHeight: content.lineHeight || 1.6 }}>
                           {block.type === 'number-list' ? (
                             <ol className="list-decimal space-y-1.5 ml-4 font-sans text-sm">
                               {(content.items || []).map((item: string, i: number) => (
@@ -376,7 +406,7 @@ export default function EmailCanvas({
                               backgroundColor: content.bg || '#1473d1',
                               color: content.color || '#ffffff',
                               borderRadius: `${content.radius ?? 8}px`,
-                              width: content.width === 'full' ? '100%' : 'auto'
+                              width: content.width === 'full' ? '100%' : 'auto', fontSize: (content.fontSize || 15) + 'px'
                             }}
                             className="px-6 py-2.5 text-center font-extrabold text-sm shadow-sm select-none border border-black/5"
                           >
@@ -445,7 +475,7 @@ export default function EmailCanvas({
                             contentEditable
                             suppressContentEditableWarning
                             onBlur={(e) => handleContentBlur(block.id, e.target.innerHTML)}
-                            className="outline-none min-h-[50px] focus:bg-slate-50/50 p-2 rounded-lg border border-transparent focus:border-slate-200 font-sans text-sm text-slate-650"
+                            style={{ fontSize: (content.fontSize || 14) + 'px', lineHeight: content.lineHeight || 1.5 }} className="outline-none min-h-[50px] focus:bg-slate-50/50 p-2 rounded-lg border border-transparent focus:border-slate-200 font-sans text-sm text-slate-650"
                             dangerouslySetInnerHTML={{ __html: content.html || '<p><br></p>' }}
                           />
                         </div>

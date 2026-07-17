@@ -535,7 +535,14 @@ export default function App() {
     return (
       <ExaminationErrorBoundary>
         <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50 text-sm font-semibold text-slate-500">Đang nạp mô-đun Khảo thí...</div>}>
-          <ExaminationModule onBackToWorkspace={() => setViewMode('workspace')} userName={user?.displayName} />
+          <ExaminationModule
+            onBackToWorkspace={() => setViewMode('workspace')}
+            userName={user?.displayName}
+            userEmail={user?.email}
+            userRole={userRole}
+            isGuest={isGuest}
+            onAccountClick={() => isGuest ? setShowLoginModal(true) : handleLogout()}
+          />
         </Suspense>
       </ExaminationErrorBoundary>
     );

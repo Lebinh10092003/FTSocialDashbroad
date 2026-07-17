@@ -154,6 +154,7 @@ class WrappedQuery {
   private orderField: string | null = null;
   private orderDir: 'asc' | 'desc' = 'asc';
   private limitCount: number | null = null;
+  private startAfterValue: any = undefined;
 
   constructor(private colName: string) {}
 
@@ -173,6 +174,11 @@ class WrappedQuery {
     return this;
   }
 
+  public startAfter(value: any): WrappedQuery {
+    this.startAfterValue = value;
+    return this;
+  }
+
   public async get(): Promise<any> {
     if (rawFirestore) {
       try {
@@ -182,6 +188,9 @@ class WrappedQuery {
         }
         if (this.orderField) {
           q = q.orderBy(this.orderField, this.orderDir);
+        }
+        if (this.startAfterValue !== undefined) {
+          q = q.startAfter(this.startAfterValue);
         }
         if (this.limitCount !== null) {
           q = q.limit(this.limitCount);
@@ -303,6 +312,9 @@ class WrappedFirestore {
       },
       limit: (n: number) => {
         return new WrappedQuery(name).limit(n);
+      },
+      startAfter: (value: any) => {
+        return new WrappedQuery(name).startAfter(value);
       }
     };
   }

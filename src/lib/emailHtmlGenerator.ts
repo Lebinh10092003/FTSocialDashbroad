@@ -166,6 +166,8 @@ export function generateEmailHtml(
       case 'paragraph': {
         const rawHtml = content.html || '';
         const align = content.align || 'left';
+        const fontSize = content.fontSize || 15;
+        const lineHeight = content.lineHeight || 1.6;
         const sanitized = sanitizeHtml(rawHtml);
         const replaced = rep(sanitized);
 
@@ -173,7 +175,7 @@ export function generateEmailHtml(
 <!-- Paragraph Block -->
 <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
-    <td align="${align}" style="padding: 0; font-family: ${fontFamily}; color: ${textColor}; font-size: 15px; line-height: 1.6; text-align: ${align}; word-break: break-word;">
+    <td align="${align}" style="padding: 0; font-family: ${fontFamily}; color: ${textColor}; font-size: ${fontSize}px; line-height: ${lineHeight}; text-align: ${align}; word-break: break-word;">
       ${replaced}
     </td>
   </tr>
@@ -209,6 +211,8 @@ export function generateEmailHtml(
       case 'bullet-list':
       case 'number-list': {
         const items = content.items || [];
+        const fontSize = content.fontSize || 15;
+        const lineHeight = content.lineHeight || 1.6;
         const isNumbered = block.type === 'number-list';
         const listTag = isNumbered ? 'ol' : 'ul';
 
@@ -216,10 +220,10 @@ export function generateEmailHtml(
 <!-- List Block -->
 <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
-    <td style="padding: 0; font-family: ${fontFamily}; color: ${textColor}; font-size: 15px; line-height: 1.6;">
-      <${listTag} style="margin: 0; padding-left: 20px; font-family: ${fontFamily}; color: ${textColor}; font-size: 15px;">
+    <td style="padding: 0; font-family: ${fontFamily}; color: ${textColor}; font-size: ${fontSize}px; line-height: ${lineHeight};">
+      <${listTag} style="margin: 0; padding-left: 20px; font-family: ${fontFamily}; color: ${textColor}; font-size: ${fontSize}px; line-height: ${lineHeight};">
         ${items.map((item: string) => `
-          <li style="margin-bottom: 6px; font-family: ${fontFamily}; color: ${textColor}; font-size: 15px;">
+          <li style="margin-bottom: 6px; font-family: ${fontFamily}; color: ${textColor}; font-size: ${fontSize}px; line-height: ${lineHeight};">
             ${rep(sanitizeHtml(item))}
           </li>
         `).join('')}
@@ -238,6 +242,7 @@ export function generateEmailHtml(
         const radius = content.radius ?? 8;
         const align = content.align || 'center';
         const width = content.width || 'auto';
+        const fontSize = content.fontSize || 15;
 
         checkLinkUrl(link, 'Nút bấm');
 
@@ -249,7 +254,7 @@ export function generateEmailHtml(
       <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="width: ${width === 'full' ? '100%' : 'auto'}; border-collapse: collapse;">
         <tr>
           <td align="center" bgcolor="${bg}" style="border-radius: ${radius}px; padding: 12px 24px; text-align: center; background-color: ${bg};" valign="middle">
-            <a href="${rep(link)}" target="_blank" style="display: ${width === 'full' ? 'block' : 'inline-block'}; font-family: ${fontFamily}; color: ${color}; font-size: 15px; font-weight: bold; text-decoration: none; border-radius: ${radius}px; background-color: ${bg}; width: 100%; box-sizing: border-box;">
+            <a href="${rep(link)}" target="_blank" style="display: ${width === 'full' ? 'block' : 'inline-block'}; font-family: ${fontFamily}; color: ${color}; font-size: ${fontSize}px; font-weight: bold; text-decoration: none; border-radius: ${radius}px; background-color: ${bg}; width: 100%; box-sizing: border-box;">
               ${rep(text)}
             </a>
           </td>
@@ -274,6 +279,8 @@ export function generateEmailHtml(
         const bg = content.bg || '#eef6ff';
         const borderColor = content.borderColor || '#1473d1';
         const padding = content.padding ?? 16;
+        const fontSize = content.fontSize || 14;
+        const lineHeight = content.lineHeight || 1.5;
         const sanitized = sanitizeHtml(rawHtml);
         const replaced = rep(sanitized);
 
@@ -281,7 +288,7 @@ export function generateEmailHtml(
 <!-- Highlight Box Block -->
 <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
-    <td style="background-color: ${bg}; border-left: 4px solid ${borderColor}; padding: ${padding}px; border-radius: 4px; font-family: ${fontFamily}; color: ${textColor}; font-size: 14px; line-height: 1.5; text-align: left; background-color: ${bg};">
+    <td style="background-color: ${bg}; border-left: 4px solid ${borderColor}; padding: ${padding}px; border-radius: 4px; font-family: ${fontFamily}; color: ${textColor}; font-size: ${fontSize}px; line-height: ${lineHeight}; text-align: left; background-color: ${bg};">
       ${replaced}
     </td>
   </tr>
@@ -319,6 +326,8 @@ export function generateEmailHtml(
 
       case 'signature': {
         const rawHtml = content.html || '';
+        const fontSize = content.fontSize || 14;
+        const lineHeight = content.lineHeight || 1.5;
         const sanitized = sanitizeHtml(rawHtml);
         const replaced = rep(sanitized);
 
@@ -326,7 +335,7 @@ export function generateEmailHtml(
 <!-- Signature Block -->
 <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
-    <td style="padding: 0; font-family: ${fontFamily}; color: ${textColor}; font-size: 14px; line-height: 1.5; text-align: left; word-break: break-word;">
+    <td style="padding: 0; font-family: ${fontFamily}; color: ${textColor}; font-size: ${fontSize}px; line-height: ${lineHeight}; text-align: left; word-break: break-word;">
       ${replaced}
     </td>
   </tr>

@@ -208,6 +208,63 @@ apiRouter.get('/auth/me', authenticateUser, (req: AuthenticatedRequest, res: Res
   });
 });
 
+const EXAMINATION_COLLECTIONS = { competitions: 'examinationCompetitions', sessions: 'examinationSessions', candidates: 'examinationCandidates' } as const;
+const EXAMINATION_SEED = {
+  competitions: [
+    { id: 'aysbc', code: 'AYSBC', name: 'Huy hiệu các Nhà khoa học trẻ Châu Á', parent: 'AYSBC', organizer: 'SCS và META Knowledge' },
+    { id: 'imo', code: 'IMO', name: 'International Maths Olympiad', parent: 'IMO', organizer: 'SCO' },
+    { id: 'ieo', code: 'IEO', name: 'International English Olympiad', parent: 'IEO - English', organizer: 'SCO' },
+    { id: 'iso', code: 'ISO', name: 'International Science Olympiad', parent: 'ISO - Science', organizer: 'SCO' },
+    { id: 'fimo', code: 'FIMO', name: 'FermatTech International Mathematics Olympiad', parent: 'FIMO', organizer: 'FermatTech' },
+    { id: 'fieo', code: 'FIEO', name: 'FermatTech International English Olympiad', parent: 'FIEO - Tiếng Anh', organizer: 'FermatTech' },
+  ],
+  sessions: [
+    { id: 'aysbc', code: 'AYSBC', name: 'Huy hiệu các Nhà khoa học trẻ Châu Á', parent: 'AYSBC', organizer: 'SCS và META Knowledge', time: 'T7/2026', candidates: 1284, national: '26/7/2026', nationalDate: '2026-07-26', international: 'Dự kiến T10/2026', phase: 'Tuyển sinh', note: 'Thí sinh hoàn thành tích lũy sao đến hết ngày 28/7.' },
+    { id: 'imo', code: 'IMO', name: 'International Maths Olympiad', parent: 'IMO', organizer: 'SCO', time: 'T6–T8/2026', candidates: 862, national: '21/6/2026', nationalDate: '2026-06-21', international: '9/8/2026', internationalDate: '2026-08-09', phase: 'Ôn tập vòng Quốc tế', note: 'Đang tổ chức lớp ôn tập.' },
+    { id: 'ieo', code: 'IEO', name: 'International English Olympiad', parent: 'IEO - English', organizer: 'SCO', time: 'T6–T8/2026', candidates: 735, national: '21/6/2026', nationalDate: '2026-06-21', international: '9/8/2026', internationalDate: '2026-08-09', phase: 'Ôn tập vòng Quốc tế', note: 'Đang tổ chức lớp ôn tập.' },
+    { id: 'iso', code: 'ISO', name: 'International Science Olympiad', parent: 'ISO - Science', organizer: 'SCO', time: 'T6–T8/2026', candidates: 691, national: '21/6/2026', nationalDate: '2026-06-21', international: '9/8/2026', internationalDate: '2026-08-09', phase: 'Ôn tập vòng Quốc tế', note: 'Đang tổ chức lớp ôn tập.' },
+    { id: 'fimo', code: 'FIMO', name: 'FermatTech International Mathematics Olympiad', parent: 'FIMO', organizer: 'FermatTech', time: 'Dự kiến T9/2026', candidates: 320, national: 'Dự kiến tháng 9', international: 'Không tổ chức năm đầu', phase: 'Chuẩn bị hồ sơ', note: 'Hoàn thiện điều lệ và đối tác địa phương.' },
+    { id: 'fieo', code: 'FIEO', name: 'FermatTech International English Olympiad', parent: 'FIEO - Tiếng Anh', organizer: 'FermatTech', time: 'Dự kiến T9/2026', candidates: 286, national: 'Dự kiến tháng 9', international: 'Không tổ chức năm đầu', phase: 'Chuẩn bị hồ sơ', note: 'Hoàn thiện điều lệ và đối tác địa phương.' },
+  ],
+  candidates: [
+    { id: 'FT26-0001', code: 'FT26-0001', name: 'Nguyễn Minh Anh', school: 'THCS Cầu Giấy', className: '8A1', city: 'Hà Nội', contests: 'AYSBC, IMO', achievement: 'HCV — AYSBC 2025', updated: '18/07/2026 09:20', email: 'minhanh@example.com', parent: 'Nguyễn Thu Hà', phone: '0988 123 456', identity: '001212345678', address: 'Cầu Giấy, Hà Nội' },
+    { id: 'FT26-0042', code: 'FT26-0042', name: 'Trần Gia Bảo', school: 'THCS Lê Quý Đôn', className: '9A3', city: 'Đà Nẵng', contests: 'IMO, ISO', achievement: 'HCB — IMO 2025', updated: '17/07/2026 16:45', email: 'giabao@example.com', parent: 'Trần Văn Long', phone: '0912 456 789', identity: '048211234567', address: 'Hải Châu, Đà Nẵng' },
+    { id: 'FT26-0079', code: 'FT26-0079', name: 'Lê Hoàng Nam', school: 'Tiểu học Đoàn Thị Điểm', className: '7A2', city: 'Hà Nội', contests: 'AYSBC, IEO', achievement: 'Top 10 — IEO 2025', updated: '16/07/2026 11:05', email: 'hoangnam@example.com', parent: 'Lê Thị Mai', phone: '0903 555 222', identity: '001213456789', address: 'Nam Từ Liêm, Hà Nội' },
+  ],
+};
+function examinationRecord(item: any) { return { ...item, sortKey: `${String(item.code || item.name || item.id).toLowerCase()}_${item.id}`, updatedAt: new Date().toISOString() }; }
+async function ensureExaminationSeed() {
+  const existing = await adminDb.collection(EXAMINATION_COLLECTIONS.sessions).limit(1).get();
+  if (!existing.empty) return;
+  const batch = adminDb.batch();
+  for (const [collectionKey, rows] of Object.entries(EXAMINATION_SEED)) for (const row of rows as any[]) batch.set(adminDb.collection(EXAMINATION_COLLECTIONS[collectionKey as keyof typeof EXAMINATION_COLLECTIONS]).doc(row.id), examinationRecord(row));
+  await batch.commit();
+}
+function pageSize(value: unknown) { const parsed = Number(value); return Number.isInteger(parsed) ? Math.max(1, Math.min(parsed, 100)) : 50; }
+async function listExamination(collection: string, limit: number, cursor?: string) {
+  let query: any = adminDb.collection(collection).orderBy('sortKey').limit(limit + 1);
+  if (cursor) query = query.startAfter(cursor);
+  const snap = await query.get(); const docs = snap.docs.slice(0, limit);
+  return { items: docs.map((doc: any) => ({ id: doc.id, ...doc.data() })), nextCursor: snap.docs.length > limit ? docs[docs.length - 1]?.data().sortKey : null };
+}
+apiRouter.get('/examination/bootstrap', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try { await ensureExaminationSeed(); const [competitions, sessions, candidates] = await Promise.all([listExamination(EXAMINATION_COLLECTIONS.competitions, 100), listExamination(EXAMINATION_COLLECTIONS.sessions, 100), listExamination(EXAMINATION_COLLECTIONS.candidates, 100)]); res.json({ competitions: competitions.items, sessions: sessions.items, candidates: candidates.items }); } catch (error: any) { res.status(500).json({ error: error.message || 'Không thể tải dữ liệu khảo thí.' }); }
+});
+apiRouter.get('/examination/:resource', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  const collection = (EXAMINATION_COLLECTIONS as any)[req.params.resource]; if (!collection) return res.status(404).json({ error: 'Nguồn dữ liệu không hợp lệ.' });
+  try { await ensureExaminationSeed(); res.json(await listExamination(collection, pageSize(req.query.limit), typeof req.query.cursor === 'string' ? req.query.cursor : undefined)); } catch (error: any) { res.status(500).json({ error: error.message || 'Không thể tải dữ liệu.' }); }
+});
+apiRouter.post('/examination/competitions', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const { code, name, organizer, parent } = req.body || {}; if (![code, name, organizer].every(value => typeof value === 'string' && value.trim())) return res.status(400).json({ error: 'Tên, mã cuộc thi và BTC quốc tế là bắt buộc.' });
+  const id = `comp-${uuidv4()}`; const item = examinationRecord({ id, code: code.trim().toUpperCase(), name: name.trim(), organizer: organizer.trim(), parent: typeof parent === 'string' && parent.trim() ? parent.trim() : code.trim().toUpperCase(), createdBy: req.user?.email }); await adminDb.collection(EXAMINATION_COLLECTIONS.competitions).doc(id).set(item); res.status(201).json(item);
+});
+apiRouter.post('/examination/sessions', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const { competitionId, name, national, international } = req.body || {}; if (!competitionId || !name || !national || !international) return res.status(400).json({ error: 'Tên kỳ, cuộc thi và thời gian hai vòng là bắt buộc.' }); const competition = await adminDb.collection(EXAMINATION_COLLECTIONS.competitions).doc(String(competitionId)).get(); if (!competition.exists) return res.status(404).json({ error: 'Không tìm thấy cuộc thi.' });
+  const parent = competition.data(); const id = `session-${uuidv4()}`; const item = examinationRecord({ id, competitionId, code: parent.code, name: String(name).trim(), parent: parent.parent, organizer: parent.organizer, time: `${national.label} · ${international.label}`, candidates: 0, national: national.label, nationalDate: national.date, international: international.label, internationalDate: international.date, phase: 'Chuẩn bị', note: 'Kỳ tổ chức mới tạo.', createdBy: req.user?.email }); await adminDb.collection(EXAMINATION_COLLECTIONS.sessions).doc(id).set(item); res.status(201).json(item);
+});
+apiRouter.put('/examination/candidates/:id', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const allowed = ['email', 'parent', 'phone', 'identity', 'address']; const updates: any = {}; for (const key of allowed) if (typeof req.body?.[key] === 'string') updates[key] = req.body[key].trim(); if (!Object.keys(updates).length) return res.status(400).json({ error: 'Không có thông tin hợp lệ để cập nhật.' }); updates.updated = new Date().toISOString(); updates.updatedBy = req.user?.email; await adminDb.collection(EXAMINATION_COLLECTIONS.candidates).doc(req.params.id).update(updates); const latest = await adminDb.collection(EXAMINATION_COLLECTIONS.candidates).doc(req.params.id).get(); res.json({ id: latest.id, ...latest.data() });
+});
 /**
  * GET /api/dashboard - Tổng hợp KPIs, xu hướng và thống kê kênh
  */
