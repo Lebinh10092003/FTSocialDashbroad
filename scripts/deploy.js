@@ -1,251 +1,425 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import archiver from 'archiver';
 import { Client } from 'ssh2';
 import dotenv from 'dotenv';
 
-// Đọc file .env hiện tại
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Các thông số cấu hình SSH deploy lấy từ .env
 const host = process.env.DEPLOY_HOST;
-const port = parseInt(process.env.DEPLOY_PORT || '22', 10);
+const sshPort = Number.parseInt(process.env.DEPLOY_PORT || '22', 10);
 const username = process.env.DEPLOY_USER || 'root';
 const password = process.env.DEPLOY_PASSWORD;
 const privateKeyPath = process.env.DEPLOY_KEY_PATH;
 const deployPath = process.env.DEPLOY_PATH || '/var/www/ft-social-dashboard';
+const appPort = normalizePort(process.env.PORT || '5500');
+const appName = process.env.PM2_APP_NAME || 'ft-social-dashboard';
+const publicUrl = normalizePublicUrl(
+  process.env.DEPLOY_PUBLIC_URL
+    || process.env.APP_URL
+    || 'https://workspace.fermat.vn',
+);
+const archivePath = path.join(process.cwd(), 'deploy.tar.gz');
 
-// Kiểm tra xem cấu hình SSH có hợp lệ không
-if (!host) {
-  console.error('\n\x1b[31m[Lỗi] Chưa cấu hình DEPLOY_HOST trong file .env hoặc biến môi trường.\x1b[0m');
-  console.error('Vui lòng tạo hoặc bổ sung các biến cấu hình deploy sau vào file .env:');
-  console.error('  DEPLOY_HOST=123.45.67.89');
-  console.error('  DEPLOY_USER=root');
-  console.error('  DEPLOY_PASSWORD=your_password (hoặc DEPLOY_KEY_PATH=C:/path/to/key)');
-  console.error('  DEPLOY_PATH=/var/www/ft-social-dashboard');
-  process.exit(1);
+function normalizePort(value) {
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 65535) {
+    throw new Error(`PORT không hợp lệ: ${value}`);
+  }
+  return parsed;
 }
 
-// Bắt đầu quy trình
-async function main() {
+function normalizePublicUrl(value) {
+  const normalized = String(value || '').trim().replace(/\/$/, '');
   try {
-    // Bước 1: Build dự án ở local
-    console.log('\n\x1b[36m[1/6] Đang build dự án ở máy local...\x1b[0m');
-    execSync('npm run build', { stdio: 'inherit' });
-    console.log('\x1b[32m-> Build dự án thành công!\x1b[0m');
-
-    // Bước 2: Nén các file cần thiết
-    console.log('\n\x1b[36m[2/6] Đang nén các file cần thiết thành deploy.tar.gz...\x1b[0m');
-    const archivePath = path.join(process.cwd(), 'deploy.tar.gz');
-    await createTarball(archivePath);
-    console.log(`\x1b[32m-> Đã tạo file nén tại: ${archivePath}\x1b[0m`);
-
-    // Bước 3: Kết nối SSH & SFTP lên VPS
-    console.log('\n\x1b[36m[3/6] Đang kết nối tới VPS...\x1b[0m');
-    const sshConfig = { host, port, username };
-    if (privateKeyPath) {
-      if (fs.existsSync(privateKeyPath)) {
-        sshConfig.privateKey = fs.readFileSync(privateKeyPath);
-      } else {
-        console.warn(`\x1b[33m[Cảnh báo] File SSH Key tại ${privateKeyPath} không tồn tại. Thử kết nối không dùng Key...\x1b[0m`);
-      }
+    const url = new URL(normalized);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+      throw new Error('Giao thức không hợp lệ');
     }
-    if (password) {
-      sshConfig.password = password;
-    }
-
-    const conn = new Client();
-    await new Promise((resolve, reject) => {
-      conn.on('ready', resolve).on('error', reject).connect(sshConfig);
-    });
-    console.log('\x1b[32m-> Kết nối SSH thành công!\x1b[0m');
-
-    // Bước 4: Upload file lên VPS qua SFTP
-    console.log('\n\x1b[36m[4/6] Đang tải file deploy.tar.gz lên VPS...\x1b[0m');
-    const sftp = await new Promise((resolve, reject) => {
-      conn.sftp((err, sftpSession) => {
-        if (err) reject(err);
-        else resolve(sftpSession);
-      });
-    });
-
-    const remoteArchivePath = `/tmp/deploy_${Date.now()}.tar.gz`;
-    await new Promise((resolve, reject) => {
-      sftp.fastPut(archivePath, remoteArchivePath, {}, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-    console.log(`\x1b[32m-> Đã tải file nén lên VPS tại: ${remoteArchivePath}\x1b[0m`);
-
-    // Bước 5: Giải nén, Cài đặt dependencies và khởi động lại
-    console.log('\n\x1b[36m[5/6] Đang giải nén và cấu hình ứng dụng trên VPS...\x1b[0m');
-    
-    // Tạo thư mục deploy và giải nén
-    console.log(`- Tạo thư mục ${deployPath} (nếu chưa có) và giải nén...`);
-    await executeRemoteCommand(conn, `mkdir -p ${deployPath}`);
-    await executeRemoteCommand(conn, `tar -xzf ${remoteArchivePath} -C ${deployPath}`);
-    await executeRemoteCommand(conn, `rm -f ${remoteArchivePath}`);
-
-    // Cài đặt production dependencies trên VPS
-    console.log('- Đang cài đặt dependencies trên VPS (npm install --omit=dev)...');
-    await executeRemoteCommand(conn, `cd ${deployPath} && npm install --omit=dev`);
-
-    // Giải phóng cổng cấu hình trên VPS trước khi khởi động để tránh xung đột
-    const appPort = process.env.PORT || '3000';
-    console.log(`- Đang giải phóng cổng ${appPort} trên VPS...`);
-    await executeRemoteCommand(conn, `sudo kill -9 $(ss -lptn 'sport = :${appPort}' | grep -oE 'pid=[0-9]+' | cut -d= -f2) || true`);
-
-    // Kiểm tra xem PM2 có được cài đặt hay không
-    console.log('- Đang kiểm tra trạng thái PM2 trên VPS...');
-    let hasPm2 = false;
-    try {
-      const pm2Check = await executeRemoteCommand(conn, 'command -v pm2');
-      if (pm2Check.trim()) {
-        hasPm2 = true;
-      }
-    } catch (e) {
-      // Bỏ qua lỗi nếu command -v pm2 trả về code != 0
-    }
-
-    if (hasPm2) {
-      console.log('\x1b[32m-> Phát hiện PM2 đang được cài đặt trên VPS. Khởi chạy bằng PM2...\x1b[0m');
-      // Chạy khởi động/khởi động lại bằng PM2
-      const appName = 'ft-social-dashboard';
-      await executeRemoteCommand(
-        conn, 
-        `cd ${deployPath} && (pm2 delete ${appName} || true) && NODE_ENV=production pm2 start dist/server.cjs --name "${appName}" --output "server.log" --error "server.log"`
-      );
-      // Tự động lưu cấu hình pm2
-      await executeRemoteCommand(conn, 'pm2 save');
-      console.log('\x1b[32m-> PM2 đã khởi động ứng dụng thành công!\x1b[0m');
-    } else {
-      console.log('\x1b[33m[Cảnh báo] Không tìm thấy PM2 trên VPS. Đang chạy ứng dụng dạng background bằng node...\x1b[0m');
-      console.log('Khuyên dùng: Bạn nên cài đặt PM2 trên VPS bằng lệnh: npm install -g pm2');
-      
-      // Chạy ứng dụng dưới dạng background bằng nohup
-      // Kill app cũ chạy trên cổng cũ nếu có (hoặc kill node dist/server.cjs trước)
-      await executeRemoteCommand(conn, `pkill -f "dist/server.cjs" || true`);
-      await executeRemoteCommand(
-        conn,
-        `cd ${deployPath} && nohup env NODE_ENV=production node dist/server.cjs > server.log 2>&1 &`
-      );
-      console.log('\x1b[32m-> Đã khởi chạy Node background thông qua nohup. Xem log tại server.log trên VPS.\x1b[0m');
-    }
-
-    // Chờ 3 giây để server khởi động và dò tìm cổng rảnh
-    console.log('- Đang chờ 3 giây để ứng dụng khởi tạo cổng trên VPS...');
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // Đọc log để tìm cổng hoạt động thực tế
-    console.log('- Đang quét log trên VPS để lấy cổng hoạt động...');
-    const logContent = await executeRemoteCommand(conn, `tail -n 50 ${deployPath}/server.log || cat ${deployPath}/server.log`);
-    
-    let activePort = null;
-    const portMatch = logContent.match(/Server đang chạy tại http:\/\/(localhost|0\.0\.0\.0|127\.0\.0\.1):(\d+)/i);
-    if (portMatch && portMatch[2]) {
-      activePort = portMatch[2];
-    } else {
-      // Thử tìm regex sơ cua hơn
-      const genericMatch = logContent.match(/(running|chạy).*:(6\d{3}|5\d{3}|4\d{3}|3\d{3}|8\d{3})/i);
-      if (genericMatch && genericMatch[2]) {
-        activePort = genericMatch[2];
-      }
-    }
-
-    // Bước 6: Cleanup local file nén
-    console.log('\n\x1b[36m[6/6] Đang dọn dẹp các tệp tạm thời ở máy local...\x1b[0m');
-    if (fs.existsSync(archivePath)) {
-      fs.unlinkSync(archivePath);
-    }
-    console.log('\x1b[32m-> Đã xóa file deploy.tar.gz ở local.\x1b[0m');
-
-    console.log('\n\x1b[32m==================================================\x1b[0m');
-    console.log('\x1b[32m🎉 TRIỂN KHAI LÊN VPS THÀNH CÔNG HOÀN TOÀN! 🎉\x1b[0m');
-    if (activePort) {
-      console.log(`\x1b[32mỨng dụng đang chạy tại địa chỉ: \x1b[1mhttp://${host}:${activePort}\x1b[0m`);
-      console.log(`\x1b[33m(Cơ chế tự động tránh cổng bị chiếm: Cổng ${activePort} đã được sử dụng thành công)\x1b[0m`);
-    } else {
-      console.log(`\x1b[32mỨng dụng đã khởi chạy thành công tại địa chỉ IP: http://${host}\x1b[0m`);
-      console.log('\x1b[33m(Không trích xuất được cổng cụ thể từ log. Vui lòng kiểm tra log trên VPS tại server.log)\x1b[0m');
-    }
-    console.log('\x1b[32m==================================================\x1b[0m');
-
-    conn.end();
-    process.exit(0);
-
-  } catch (error) {
-    console.error('\n\x1b[31m[Lỗi triển khai]:\x1b[0m', error.message);
-    // Cleanup local archive if error
-    const archivePath = path.join(process.cwd(), 'deploy.tar.gz');
-    if (fs.existsSync(archivePath)) {
-      fs.unlinkSync(archivePath);
-    }
-    process.exit(1);
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    throw new Error(`DEPLOY_PUBLIC_URL/APP_URL không hợp lệ: ${value}`);
   }
 }
 
-// Hàm hỗ trợ nén tarball
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function validateConfiguration() {
+  if (!host) {
+    throw new Error('Chưa cấu hình DEPLOY_HOST trong file .env.');
+  }
+
+  if (!Number.isFinite(sshPort) || sshPort < 1 || sshPort > 65535) {
+    throw new Error(`DEPLOY_PORT không hợp lệ: ${process.env.DEPLOY_PORT}`);
+  }
+
+  if (privateKeyPath && !fs.existsSync(privateKeyPath)) {
+    throw new Error(`Không tìm thấy SSH Private Key: ${privateKeyPath}`);
+  }
+}
+
+function createSshConfig() {
+  const config = {
+    host,
+    port: sshPort,
+    username,
+    readyTimeout: 20_000,
+    keepaliveInterval: 10_000,
+  };
+
+  if (privateKeyPath) config.privateKey = fs.readFileSync(privateKeyPath);
+  if (password) config.password = password;
+  return config;
+}
+
+function buildRuntimeEnvContent() {
+  if (!fs.existsSync('.env')) return '';
+
+  const excludedKeys = new Set([
+    'DEPLOY_HOST',
+    'DEPLOY_PORT',
+    'DEPLOY_USER',
+    'DEPLOY_PASSWORD',
+    'DEPLOY_KEY_PATH',
+    'DEPLOY_PATH',
+    'DEPLOY_PUBLIC_URL',
+    'PM2_APP_NAME',
+  ]);
+
+  return fs.readFileSync('.env', 'utf8')
+    .split(/\r?\n/)
+    .filter(line => {
+      const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+      return !match || !excludedKeys.has(match[1]);
+    })
+    .join('\n')
+    .replace(/\s*$/, '\n');
+}
+
 function createTarball(outPath) {
   return new Promise((resolve, reject) => {
     const output = fs.createWriteStream(outPath);
     const archive = archiver('tar', {
       gzip: true,
-      gzipOptions: { level: 9 }
+      gzipOptions: { level: 9 },
     });
 
-    output.on('close', () => resolve());
-    archive.on('error', (err) => reject(err));
-
+    output.on('close', resolve);
+    output.on('error', reject);
+    archive.on('warning', warning => {
+      if (warning.code === 'ENOENT') console.warn('[Archive]', warning.message);
+      else reject(warning);
+    });
+    archive.on('error', reject);
     archive.pipe(output);
 
-    // Thêm các thư mục cần thiết
     archive.directory('dist/', 'dist');
-    if (fs.existsSync('server/data')) {
-      archive.directory('server/data/', 'server/data');
-    }
-
-    // Thêm các file đơn lẻ
     archive.file('package.json', { name: 'package.json' });
-    archive.file('package-lock.json', { name: 'package-lock.json' });
+
+    if (fs.existsSync('package-lock.json')) {
+      archive.file('package-lock.json', { name: 'package-lock.json' });
+    }
     if (fs.existsSync('firebase-applet-config.json')) {
       archive.file('firebase-applet-config.json', { name: 'firebase-applet-config.json' });
     }
-    if (fs.existsSync('.env')) {
-      archive.file('.env', { name: '.env' });
-    }
 
+    const runtimeEnv = buildRuntimeEnvContent();
+    if (runtimeEnv) archive.append(runtimeEnv, { name: '.env' });
+
+    // Không đóng gói server/data và uploads từ máy local. Đây là dữ liệu bền vững trên VPS.
     archive.finalize();
   });
 }
 
-// Hàm thực thi lệnh SSH từ xa
-function executeRemoteCommand(conn, cmd) {
+function connectSsh() {
   return new Promise((resolve, reject) => {
-    conn.exec(cmd, (err, stream) => {
-      if (err) return reject(err);
+    const conn = new Client();
+    conn.once('ready', () => resolve(conn));
+    conn.once('error', reject);
+    conn.connect(createSshConfig());
+  });
+}
+
+function getSftp(conn) {
+  return new Promise((resolve, reject) => {
+    conn.sftp((error, sftp) => {
+      if (error) reject(error);
+      else resolve(sftp);
+    });
+  });
+}
+
+function uploadFile(sftp, localPath, remotePath) {
+  return new Promise((resolve, reject) => {
+    sftp.fastPut(localPath, remotePath, {}, error => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+function executeRemoteCommand(conn, command, options = {}) {
+  const { allowFailure = false, printOutput = true } = options;
+
+  return new Promise((resolve, reject) => {
+    conn.exec(command, (error, stream) => {
+      if (error) return reject(error);
+
       let stdout = '';
       let stderr = '';
-      stream.on('close', (code) => {
-        if (code !== 0 && !cmd.includes('|| true') && !cmd.includes('command -v')) {
-          reject(new Error(`Lệnh thất bại với mã lỗi ${code}: ${cmd}\nStderr: ${stderr}`));
+
+      stream.on('close', code => {
+        if (code !== 0 && !allowFailure) {
+          reject(new Error(`Lệnh VPS thất bại với mã ${code}.\n${stderr || stdout}`));
         } else {
-          resolve(stdout);
+          resolve({ stdout, stderr, code });
         }
-      }).on('data', (data) => {
-        stdout += data.toString();
-        process.stdout.write(data);
-      }).stderr.on('data', (data) => {
-        stderr += data.toString();
-        process.stderr.write(data);
+      });
+
+      stream.on('data', data => {
+        const text = data.toString();
+        stdout += text;
+        if (printOutput) process.stdout.write(text);
+      });
+
+      stream.stderr.on('data', data => {
+        const text = data.toString();
+        stderr += text;
+        if (printOutput) process.stderr.write(text);
       });
     });
   });
+}
+
+function buildRemoteDeploymentScript(remoteArchivePath, stagingPath) {
+  return `
+set -Eeuo pipefail
+
+DEPLOY_PATH=${shellQuote(deployPath)}
+STAGING_PATH=${shellQuote(stagingPath)}
+REMOTE_ARCHIVE=${shellQuote(remoteArchivePath)}
+APP_PORT=${shellQuote(appPort)}
+APP_NAME=${shellQuote(appName)}
+LOG_FILE="$DEPLOY_PATH/server.log"
+ERROR_LOG_FILE="$DEPLOY_PATH/server-error.log"
+HAS_PM2=0
+
+if command -v pm2 >/dev/null 2>&1; then
+  HAS_PM2=1
+fi
+
+stop_app() {
+  if [ "$HAS_PM2" -eq 1 ]; then
+    pm2 delete "$APP_NAME" >/dev/null 2>&1 || true
+  elif [ -f "$DEPLOY_PATH/app.pid" ]; then
+    kill "$(cat "$DEPLOY_PATH/app.pid")" >/dev/null 2>&1 || true
+    rm -f "$DEPLOY_PATH/app.pid"
+  fi
+
+  pkill -f "$DEPLOY_PATH/dist/server.cjs" >/dev/null 2>&1 || true
+  sleep 1
+}
+
+start_app() {
+  : > "$LOG_FILE"
+  : > "$ERROR_LOG_FILE"
+
+  if [ "$HAS_PM2" -eq 1 ]; then
+    cd "$DEPLOY_PATH"
+    PORT="$APP_PORT" NODE_ENV=production pm2 start dist/server.cjs \
+      --name "$APP_NAME" \
+      --cwd "$DEPLOY_PATH" \
+      --output "$LOG_FILE" \
+      --error "$ERROR_LOG_FILE" \
+      --time
+  else
+    cd "$DEPLOY_PATH"
+    nohup env PORT="$APP_PORT" NODE_ENV=production node dist/server.cjs \
+      > "$LOG_FILE" 2> "$ERROR_LOG_FILE" &
+    echo $! > "$DEPLOY_PATH/app.pid"
+  fi
+}
+
+restore_previous_release() {
+  echo "[Rollback] Đang khôi phục phiên bản trước..." >&2
+  stop_app
+
+  rm -rf "$DEPLOY_PATH/dist" "$DEPLOY_PATH/node_modules"
+  [ -d "$DEPLOY_PATH/dist.previous" ] && mv "$DEPLOY_PATH/dist.previous" "$DEPLOY_PATH/dist"
+  [ -d "$DEPLOY_PATH/node_modules.previous" ] && mv "$DEPLOY_PATH/node_modules.previous" "$DEPLOY_PATH/node_modules"
+
+  for name in package.json package-lock.json .env firebase-applet-config.json; do
+    rm -f "$DEPLOY_PATH/$name"
+    if [ -f "$DEPLOY_PATH/$name.previous" ]; then
+      mv "$DEPLOY_PATH/$name.previous" "$DEPLOY_PATH/$name"
+    fi
+  done
+
+  if [ -f "$DEPLOY_PATH/dist/server.cjs" ]; then
+    start_app || true
+    [ "$HAS_PM2" -eq 1 ] && pm2 save >/dev/null 2>&1 || true
+  fi
+}
+
+rm -rf "$STAGING_PATH"
+mkdir -p "$STAGING_PATH" "$DEPLOY_PATH/uploads" "$DEPLOY_PATH/server/data"
+tar -xzf "$REMOTE_ARCHIVE" -C "$STAGING_PATH"
+rm -f "$REMOTE_ARCHIVE"
+
+if [ ! -f "$STAGING_PATH/dist/server.cjs" ]; then
+  echo "Không tìm thấy dist/server.cjs trong gói triển khai." >&2
+  exit 1
+fi
+
+cd "$STAGING_PATH"
+if [ -f package-lock.json ]; then
+  npm ci --omit=dev
+else
+  npm install --omit=dev
+fi
+
+stop_app
+
+if ss -ltn "sport = :$APP_PORT" | grep -q LISTEN; then
+  echo "Cổng $APP_PORT vẫn đang bị một tiến trình khác sử dụng. Không tự động kill tiến trình không xác định." >&2
+  ss -ltnp "sport = :$APP_PORT" >&2 || true
+  exit 1
+fi
+
+rm -rf "$DEPLOY_PATH/dist.previous" "$DEPLOY_PATH/node_modules.previous"
+[ -d "$DEPLOY_PATH/dist" ] && mv "$DEPLOY_PATH/dist" "$DEPLOY_PATH/dist.previous"
+[ -d "$DEPLOY_PATH/node_modules" ] && mv "$DEPLOY_PATH/node_modules" "$DEPLOY_PATH/node_modules.previous"
+
+for name in package.json package-lock.json .env firebase-applet-config.json; do
+  rm -f "$DEPLOY_PATH/$name.previous"
+  [ -f "$DEPLOY_PATH/$name" ] && cp -a "$DEPLOY_PATH/$name" "$DEPLOY_PATH/$name.previous"
+done
+
+mv "$STAGING_PATH/dist" "$DEPLOY_PATH/dist"
+mv "$STAGING_PATH/node_modules" "$DEPLOY_PATH/node_modules"
+cp -a "$STAGING_PATH/package.json" "$DEPLOY_PATH/package.json"
+[ -f "$STAGING_PATH/package-lock.json" ] && cp -a "$STAGING_PATH/package-lock.json" "$DEPLOY_PATH/package-lock.json"
+[ -f "$STAGING_PATH/.env" ] && cp -a "$STAGING_PATH/.env" "$DEPLOY_PATH/.env"
+[ -f "$STAGING_PATH/firebase-applet-config.json" ] && cp -a "$STAGING_PATH/firebase-applet-config.json" "$DEPLOY_PATH/firebase-applet-config.json"
+rm -rf "$STAGING_PATH"
+
+start_app
+
+HEALTH_OK=0
+for attempt in $(seq 1 20); do
+  if curl -fsS --max-time 2 "http://127.0.0.1:$APP_PORT/api/health" > /tmp/ft-social-health.json; then
+    HEALTH_OK=1
+    break
+  fi
+  sleep 1
+done
+
+if [ "$HEALTH_OK" -ne 1 ]; then
+  echo "Ứng dụng không vượt qua kiểm tra sức khỏe sau 20 giây." >&2
+  tail -n 80 "$LOG_FILE" >&2 || true
+  tail -n 80 "$ERROR_LOG_FILE" >&2 || true
+  restore_previous_release
+  exit 1
+fi
+
+cat /tmp/ft-social-health.json
+rm -f /tmp/ft-social-health.json
+
+rm -rf "$DEPLOY_PATH/dist.previous" "$DEPLOY_PATH/node_modules.previous"
+rm -f "$DEPLOY_PATH/package.json.previous" \
+  "$DEPLOY_PATH/package-lock.json.previous" \
+  "$DEPLOY_PATH/.env.previous" \
+  "$DEPLOY_PATH/firebase-applet-config.json.previous"
+
+if [ "$HAS_PM2" -eq 1 ]; then
+  pm2 save
+fi
+
+echo "Triển khai nội bộ thành công tại 127.0.0.1:$APP_PORT"
+`;
+}
+
+async function checkPublicHealth() {
+  const healthUrl = new URL('/api/health', `${publicUrl}/`).toString();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+
+  try {
+    const response = await fetch(healthUrl, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    if (payload?.status !== 'ok') {
+      throw new Error('Nội dung health check không hợp lệ');
+    }
+
+    return true;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function main() {
+  let conn;
+
+  try {
+    validateConfiguration();
+
+    console.log('\n\x1b[36m[1/6] Đang build dự án ở máy local...\x1b[0m');
+    execSync('npm run build', { stdio: 'inherit' });
+    console.log('\x1b[32m-> Build dự án thành công.\x1b[0m');
+
+    console.log('\n\x1b[36m[2/6] Đang tạo gói triển khai an toàn...\x1b[0m');
+    await createTarball(archivePath);
+    console.log(`\x1b[32m-> Đã tạo ${archivePath}.\x1b[0m`);
+
+    console.log('\n\x1b[36m[3/6] Đang kết nối VPS...\x1b[0m');
+    conn = await connectSsh();
+    console.log('\x1b[32m-> Kết nối SSH thành công.\x1b[0m');
+
+    console.log('\n\x1b[36m[4/6] Đang tải gói triển khai lên VPS...\x1b[0m');
+    const sftp = await getSftp(conn);
+    const deploymentId = Date.now();
+    const remoteArchivePath = `/tmp/ft-social-${deploymentId}.tar.gz`;
+    const stagingPath = `${deployPath}/.deploy-staging-${deploymentId}`;
+    await uploadFile(sftp, archivePath, remoteArchivePath);
+    console.log(`\x1b[32m-> Đã tải lên ${remoteArchivePath}.\x1b[0m`);
+
+    console.log('\n\x1b[36m[5/6] Đang cài đặt, khởi động và kiểm tra sức khỏe...\x1b[0m');
+    const remoteScript = buildRemoteDeploymentScript(remoteArchivePath, stagingPath);
+    await executeRemoteCommand(conn, `bash -lc ${shellQuote(remoteScript)}`);
+
+    console.log('\n\x1b[36m[6/6] Đang kiểm tra tên miền công khai...\x1b[0m');
+    try {
+      await checkPublicHealth();
+      console.log(`\x1b[32m-> Tên miền hoạt động tốt: ${publicUrl}\x1b[0m`);
+    } catch (error) {
+      console.warn(`\x1b[33m[Cảnh báo] Ứng dụng nội bộ đã chạy nhưng health check tên miền chưa thành công: ${error.message}\x1b[0m`);
+      console.warn('\x1b[33mHãy kiểm tra Nginx, DNS hoặc chứng chỉ HTTPS.\x1b[0m');
+    }
+
+    console.log('\n\x1b[32m==================================================\x1b[0m');
+    console.log('\x1b[32mTRIỂN KHAI THÀNH CÔNG\x1b[0m');
+    console.log(`\x1b[32mWebsite: \x1b[1m${publicUrl}\x1b[0m`);
+    console.log(`\x1b[36mDịch vụ nội bộ: 127.0.0.1:${appPort} (Nginx chuyển tiếp tới cổng này)\x1b[0m`);
+    console.log('\x1b[32m==================================================\x1b[0m');
+  } catch (error) {
+    console.error('\n\x1b[31m[Lỗi triển khai]\x1b[0m', error.message);
+    process.exitCode = 1;
+  } finally {
+    if (conn) conn.end();
+    if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
+  }
 }
 
 main();
