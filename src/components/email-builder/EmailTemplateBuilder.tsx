@@ -12,6 +12,7 @@ import {
 
 import { BlockType, EmailBlock, EmailSettings, EmailTemplate, EmailVariable } from '../../types/emailBuilder';
 import { createEmailBlock, getBlockDefinition } from '../../data/emailBlockRegistry';
+import { addEmailBlock, findEmailBlock, moveEmailBlock, removeEmailBlock, updateEmailBlock } from '../../lib/emailBlockTree';
 import { 
   loadTemplates, 
   saveTemplates, 
@@ -162,7 +163,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
     showToast('Đã nhân bản mẫu email.');
   };
 
-  const activeBlock = activeTemplate?.blocks.find(b => b.id === selectedBlockId);
+  const activeBlock = selectedBlockId ? findEmailBlock(activeTemplate?.blocks || [], selectedBlockId) : undefined;
 
   const resizePanel = (side: 'left' | 'right', event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault(); const startX = event.clientX; const startWidth = side === 'left' ? leftPanelWidth : rightPanelWidth;
@@ -223,10 +224,10 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   };
 
   // 4. Canvas Block Operations
-  const handleAddBlock = (type: BlockType) => {
+  const handleAddBlock = (type: BlockType, parentId?: string) => {
     if (!activeTemplate) return;
     const newBlock = createEmailBlock(type);
-    handleUpdateTemplateBlocks([...activeTemplate.blocks, newBlock]);
+    handleUpdateTemplateBlocks(addEmailBlock(activeTemplate.blocks, newBlock, parentId));
     setSelectedBlockId(newBlock.id); setMobileActiveTab('canvas');
   };
 
@@ -269,7 +270,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
 
   const handleDeleteBlock = (id: string) => {
     if (!activeTemplate) return;
-    const blocks = activeTemplate.blocks.filter(b => b.id !== id);
+    const blocks = removeEmailBlock(activeTemplate.blocks, id);
     handleUpdateTemplateBlocks(blocks);
     if (selectedBlockId === id) {
       setSelectedBlockId(null);
@@ -278,28 +279,25 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
 
   const handleToggleVisibility = (id: string) => {
     if (!activeTemplate) return;
-    const blocks = activeTemplate.blocks.map(b => {
-      if (b.id === id) return { ...b, visible: !b.visible };
-      return b;
-    });
+    const blocks = updateEmailBlock(activeTemplate.blocks, id, block => ({ ...block, visible: !block.visible }));
     handleUpdateTemplateBlocks(blocks);
   };
 
   const handleUpdateBlockContent = (id: string, newContent: Record<string, any>) => {
     if (!activeTemplate) return;
-    const blocks = activeTemplate.blocks.map(b => {
-      if (b.id === id) return { ...b, content: newContent };
-      return b;
-    });
+    const blocks = updateEmailBlock(activeTemplate.blocks, id, block => ({ ...block, content: newContent }));
     handleUpdateTemplateBlocks(blocks);
+  };
+
+  const handleDropBlock = (sourceId: string, targetId: string) => {
+    if (!activeTemplate) return;
+    handleUpdateTemplateBlocks(moveEmailBlock(activeTemplate.blocks, sourceId, targetId));
+    setSelectedBlockId(sourceId);
   };
 
   const handleUpdateBlockStyles = (id: string, newStyles: Record<string, any>) => {
     if (!activeTemplate) return;
-    const blocks = activeTemplate.blocks.map(b => {
-      if (b.id === id) return { ...b, styles: newStyles };
-      return b;
-    });
+    const blocks = updateEmailBlock(activeTemplate.blocks, id, block => ({ ...block, styles: newStyles }));
     handleUpdateTemplateBlocks(blocks);
   };
 
@@ -794,6 +792,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
                 onClearInsertedVar={() => setInsertedVar(null)}
                 emailSettings={activeTemplate.settings}
                 onAddBlock={handleAddBlock}
+                onDropBlock={handleDropBlock}
               />
             </div>
           </div>

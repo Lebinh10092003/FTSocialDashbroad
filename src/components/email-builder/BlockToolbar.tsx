@@ -10,7 +10,10 @@ import {
   Tag, 
   Trash2, 
   Palette,
-  Sparkles
+  Sparkles,
+  ImagePlus,
+  List,
+  ListOrdered
 } from 'lucide-react';
 
 interface BlockToolbarProps {
@@ -123,6 +126,9 @@ export default function BlockToolbar({
 
       <div className="w-[1px] h-6 bg-slate-200 mx-1"></div>
 
+      <button onClick={() => exec('insertUnorderedList')} title="Danh sách chấm" className="p-2 hover:bg-slate-200/80 rounded-xl text-slate-650 cursor-pointer"><List className="w-4 h-4" /></button>
+      <button onClick={() => exec('insertOrderedList')} title="Danh sách số" className="p-2 hover:bg-slate-200/80 rounded-xl text-slate-650 cursor-pointer"><ListOrdered className="w-4 h-4" /></button>
+      <button onClick={() => { const url = prompt('Dán URL ảnh:', 'https://'); if (url) exec('insertImage', url); }} title="Chèn ảnh từ URL" className="p-2 hover:bg-slate-200/80 rounded-xl text-slate-650 cursor-pointer"><ImagePlus className="w-4 h-4" /></button>
       {/* Alignment (if callbacks exist) */}
       {onAlignChange && (
         <>

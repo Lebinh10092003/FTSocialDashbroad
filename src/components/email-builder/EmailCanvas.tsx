@@ -7,7 +7,8 @@ import {
   Eye, 
   EyeOff, 
   Tag,
-  Plus
+  Plus,
+  GripVertical
 } from 'lucide-react';
 import { BlockType, EmailBlock, EmailSettings } from '../../types/emailBuilder';
 import { BLOCK_CATEGORIES, EMAIL_BLOCK_REGISTRY } from '../../data/emailBlockRegistry';
@@ -38,7 +39,8 @@ interface EmailCanvasProps {
   insertedVarName: { blockId: string; varName: string } | null;
   onClearInsertedVar: () => void;
   emailSettings: EmailSettings;
-  onAddBlock: (type: BlockType) => void;
+  onAddBlock: (type: BlockType, parentId?: string) => void;
+  onDropBlock: (sourceId: string, targetId: string) => void;
 }
 
 export default function EmailCanvas({
@@ -54,13 +56,20 @@ export default function EmailCanvas({
   insertedVarName,
   onClearInsertedVar,
   emailSettings,
-  onAddBlock
+  onAddBlock,
+  onDropBlock
 }: EmailCanvasProps) {
   
   const contentEditableRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [isInserterOpen, setIsInserterOpen] = React.useState(false);
   const [blockQuery, setBlockQuery] = React.useState('');
-  const [isBlockDragOver, setIsBlockDragOver] = React.useState(false);
+  const [isBlockDragOver, setIsBlockDragOver] = React.useState(false);  const handleDropOnBlock = (event: React.DragEvent, target: EmailBlock) => {
+    event.preventDefault(); event.stopPropagation();
+    const sourceId = event.dataTransfer.getData('application/x-ft-email-block-id');
+    const type = event.dataTransfer.getData('application/x-ft-email-block') as BlockType;
+    if (sourceId) onDropBlock(sourceId, target.id);
+    else if (type && EMAIL_BLOCK_REGISTRY[type]) onAddBlock(type, target.type === 'section' ? target.id : undefined);
+  };
   const addFromInserter = (type: BlockType) => { onAddBlock(type); setIsInserterOpen(false); setBlockQuery(''); };
   const handleBlockDrop = (event: React.DragEvent<HTMLDivElement>) => { event.preventDefault(); setIsBlockDragOver(false); const type = event.dataTransfer.getData('application/x-ft-email-block') as BlockType; if (type && EMAIL_BLOCK_REGISTRY[type]) onAddBlock(type); };
 
@@ -197,6 +206,7 @@ export default function EmailCanvas({
 
                     {/* Actions Controller Box (Top Right Corner) */}
                     <div className="absolute -top-4.5 right-3 z-30 hidden group-hover:flex items-center gap-1 bg-white border border-slate-200 p-1.5 rounded-xl shadow-lg scale-90 origin-right select-none">
+                      <button draggable onDragStart={event => { event.dataTransfer.setData('application/x-ft-email-block-id', block.id); event.dataTransfer.effectAllowed = 'move'; }} title="Kéo để sắp xếp hoặc thả vào Section" className="p-1 hover:bg-slate-100 text-slate-550 rounded-lg cursor-grab active:cursor-grabbing flex items-center justify-center"><GripVertical className="w-3.5 h-3.5" /></button>
                       <button
                         disabled={index === 0}
                         onClick={(e) => {

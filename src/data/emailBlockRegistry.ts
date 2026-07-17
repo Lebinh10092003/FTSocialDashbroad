@@ -38,4 +38,4 @@ export const EMAIL_BLOCK_REGISTRY: Record<BlockType, EmailBlockDefinition> = {
 };
 export const BLOCK_CATEGORIES: { id: BlockCategory; label: string }[] = [{id:'content',label:'Nội dung'},{id:'layout',label:'Bố cục'},{id:'media',label:'Hình ảnh & media'},{id:'cta',label:'Nút & CTA'},{id:'commerce',label:'Sản phẩm'},{id:'brand',label:'Thương hiệu'},{id:'advanced',label:'Nâng cao'}];
 export const getBlockDefinition = (type: BlockType) => EMAIL_BLOCK_REGISTRY[type];
-export function createEmailBlock(type: BlockType, id = `${type}-${Date.now()}`): EmailBlock { const d = getBlockDefinition(type); return {id,type,content:structuredClone(d.defaultContent),styles:{marginTop:12,marginBottom:12,...structuredClone(d.defaultStyles || {})},visible:true}; }
+export function createEmailBlock(type: BlockType, id = `${type}-${Date.now()}`): EmailBlock { const d = getBlockDefinition(type); return {id,type,content:structuredClone(d.defaultContent),styles:{marginTop:12,marginBottom:12,...structuredClone(d.defaultStyles || {})},visible:true, ...(type === 'section' ? { children: [] } : {})}; }

@@ -22,6 +22,8 @@ export interface EmailBlock {
   content: Record<string, any>;
   styles: Record<string, any>;
   visible: boolean;
+  /** Children are only used by layout containers (currently Section). */
+  children?: EmailBlock[];
 }
 
 export interface EmailSettings {
@@ -47,7 +49,7 @@ export interface EmailTemplate {
 }
 
 export interface EmailVariable {
-  key: string;      // e.g. "Tên phụ huynh"
+  key: string;      // e.g. "TÃƒÂªn phÃ¡Â»Â¥ huynh"
   label: string;    // Display label
   defaultValue: string; // Mock data value for preview e.g. "Anh Minh"
 }

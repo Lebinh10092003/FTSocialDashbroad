@@ -68,7 +68,7 @@ export function generateEmailHtml(
   };
 
   // Compile blocks to HTML
-  const blockHtmls = template.blocks.map((block: EmailBlock) => {
+  const renderBlock = (block: EmailBlock): string => {
     if (!block.visible) return '';
 
     const content = block.content;
@@ -367,7 +367,13 @@ export function generateEmailHtml(
         const custom = rep(inlineCustomCss(sanitizeCustomHtml(content.html || '')));
         return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:0">' + custom + '</td></tr></table>';
       }
-      case 'section': case 'columns': case 'image-text': case 'data-table': case 'testimonial': case 'callout': case 'gallery': case 'video': case 'feature-list': case 'product-card': case 'product-grid': case 'pricing-table': case 'header': case 'footer': case 'merge-tag': {
+      case 'section': {
+        const title = rep(content.heading || '');
+        const body = rep(content.body || '');
+        const children = (block.children || []).map(renderBlock).join('');
+        return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:' + (content.padding ?? 24) + 'px;background:' + (content.bg || '#f8fafc') + ';border:1px solid #e2e8f0;font-family:' + fontFamily + ';color:' + textColor + '"><strong style="color:#0F3A72">' + title + '</strong><div style="margin-top:6px;line-height:1.5">' + body + '</div>' + children + '</td></tr></table>';
+      }
+      case 'columns': case 'image-text': case 'data-table': case 'testimonial': case 'callout': case 'gallery': case 'video': case 'feature-list': case 'product-card': case 'product-grid': case 'pricing-table': case 'header': case 'footer': case 'merge-tag': {
         const title = rep(content.heading || content.title || content.name || content.company || content.author || '');
         const body = rep(content.body || content.description || content.text || content.quote || content.price || content.navigation || content.address || '');
         return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:16px;border:1px solid #e2e8f0;font-family:' + fontFamily + ';color:' + textColor + '"><strong style="color:#0F3A72">' + title + '</strong><div style="margin-top:6px;line-height:1.5">' + body + '</div></td></tr></table>';
@@ -375,7 +381,9 @@ export function generateEmailHtml(
       default:
         return '';
     }
-  }).join('\n');
+  };
+
+  const blockHtmls = template.blocks.map(renderBlock).join('\\n');
 
   // Wrapper template
   const html = `<!DOCTYPE html>
