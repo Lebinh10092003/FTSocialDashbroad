@@ -73,7 +73,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
   const [isChannelPickerOpen, setIsChannelPickerOpen] = useState(false);
   const [onlyShowTotal, setOnlyShowTotal] = useState(false);
-  const [trendScale, setTrendScale] = useState<TrendScale>('auto');
+  const [trendScale, setTrendScale] = useState<TrendScale>('2000');
 
   const fetchDashboardData = async () => {
     setLoading(true);

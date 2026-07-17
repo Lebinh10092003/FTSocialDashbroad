@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Runtime database: may contain access tokens and generated analytics data
+server/data/

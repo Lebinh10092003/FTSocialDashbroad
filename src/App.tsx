@@ -11,7 +11,7 @@ import { auth, googleProvider } from './firebase-config';
 import { Channel, UserRole } from './types';
 
 // Components (Lazy Loaded)
-import { ShieldAlert, AlertTriangle, Key, Layers, Lock, Mail, UserPlus, LogIn, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { ShieldAlert, AlertTriangle, Key, Layers, Lock, Mail, UserPlus, LogIn, LogOut, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -444,6 +444,7 @@ export default function App() {
         setActiveTab={setActiveTab} 
         user={user}
         userRole={userRole}
+        idToken={idToken || ''}
         onLogout={handleLogout}
         onBackToWorkspace={() => setViewMode('workspace')}
       />
@@ -512,15 +513,14 @@ export default function App() {
             <form onSubmit={handleCredentialsAuth} className="space-y-5">
               <div className="text-center mb-4 flex flex-col items-center">
                 <img src="/logo.png" alt="FermatTech Logo" className="h-10 object-contain mb-3" />
-                <h1 className="text-xl font-extrabold text-slate-900 leading-tight">Fermat Workspace Dashboard</h1>
-                <p className="text-xs text-slate-500 mt-1">Đăng nhập tài khoản quản trị để chỉnh sửa</p>
+                <h1 className="text-xl font-extrabold text-slate-900 leading-tight">FermatTech Workspace</h1>
               </div>
               
               <div className="space-y-3">
                 <input 
                   value={loginEmail} 
                   onChange={e => setLoginEmail(e.target.value)} 
-                  placeholder="Email hoặc tên tài khoản" 
+                  placeholder="Email"
                   className="w-full rounded-xl border border-slate-200 px-4 py-3.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" 
                   autoComplete="username" 
                 />
