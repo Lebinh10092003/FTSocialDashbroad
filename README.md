@@ -97,16 +97,20 @@ Backend cần được phép truy cập công khai ở tầng HTTP vì frontend 
 
 ## Triển khai lên VPS chỉ bằng 1 câu lệnh (1-Click Deploy)
 
-Hệ thống hỗ trợ cơ chế deploy tự động cực kỳ nhanh chóng từ máy local lên VPS thông qua giao thức SSH & SFTP bảo mật. Toàn bộ quy trình từ build, đóng gói, upload, giải nén, cài đặt dependency và khởi chạy PM2 trên VPS sẽ được thực thi qua **1 câu lệnh duy nhất**.
+Hệ thống hỗ trợ cơ chế deploy tự động cực kỳ nhanh chóng từ máy local lên VPS thông qua giao thức SSH & SFTP bảo mật. Toàn bộ quy trình từ build, đóng gói, upload, giải nén, cài đặt dependency và khởi chạy PM2 trên VPS sẽ được thực thi qua **1 câu lệnh duy nhất**: `npm run deploy`.
 
-Đặc biệt, hệ thống được tích hợp **cơ chế tự động phát hiện và chuyển cổng khi bị chiếm**. Nếu cổng mặc định (như 3000 hoặc 5174) đang có dự án khác trên VPS sử dụng, server sẽ tự động tìm kiếm và lắng nghe ở cổng trống tiếp theo (ví dụ: 5175, 5176...), đảm bảo không ảnh hưởng đến các dự án khác. Sau khi deploy thành công, terminal local sẽ in ra chính xác địa chỉ IP và cổng đang hoạt động của ứng dụng.
-
-### Bước 1: Cấu hình thông tin VPS
-Mở file `.env` ở thư mục gốc và điền các thông tin VPS của bạn ở cuối file:
+### Bước 1: Cấu hình thông tin VPS trong file `.env`
+Mở file `.env` ở thư mục gốc máy local của bạn và thiết lập các thông số sau (Lưu ý quan trọng: thiết lập `PORT=5500` để đồng bộ với cấu hình chuyển tiếp Nginx trên máy chủ):
 
 ```env
+# ==========================================
+# CẤU HÌNH TRIỂN KHAI VPS (1-CLICK DEPLOY)
+# ==========================================
+# Cổng chạy ứng dụng trên VPS (Phải là 5500 để khớp với Nginx Proxy)
+PORT=5500
+
 # IP hoặc domain của VPS
-DEPLOY_HOST="123.45.67.89"
+DEPLOY_HOST="103.142.27.69"
 # Cổng SSH của VPS (mặc định là 22)
 DEPLOY_PORT="22"
 # Tài khoản SSH (thường là root)
@@ -119,26 +123,24 @@ DEPLOY_KEY_PATH=""
 DEPLOY_PATH="/var/www/ft-social-dashboard"
 ```
 
-### Bước 2: Thực thi Deploy
+### Bước 2: Thực thi Deploy tự động
+Bạn chỉ cần mở terminal tại máy local và chạy đúng 1 câu lệnh duy nhất:
 
-Bạn có thể chạy deploy trực tiếp bằng 1 câu lệnh tùy theo hệ điều hành:
+```bash
+npm run deploy
+```
 
-- **Trên Windows**: 
-  Chỉ cần click đúp chuột vào file [deploy.bat](deploy.bat) ở thư mục gốc (hoặc mở CMD/PowerShell gõ `deploy.bat`).
-  
-- **Trên Linux / macOS**:
-  Mở terminal tại thư mục gốc và chạy:
-  ```bash
-  chmod +x deploy.sh
-  ./deploy.sh
-  ```
-  
-- **Hoặc sử dụng npm**:
-  ```bash
-  npm run deploy
-  ```
+> [!TIP]
+> **Các hành động tự động được thực hiện bởi lệnh này:**
+> 1. Tự động biên dịch mã nguồn Client và Server ở local (`npm run build`).
+> 2. Đóng gói các thư mục `/dist`, `package.json`, `.env` thành file nén `deploy.tar.gz`.
+> 3. Tự động kết nối SSH SFTP đến VPS và upload file lên.
+> 4. Giải nén file vào thư mục `/var/www/ft-social-dashboard`.
+> 5. Cài đặt các thư viện sản xuất từ xa (`npm install --omit=dev`).
+> 6. Giải phóng cổng 5500 trên VPS để tránh xung đột cổng.
+> 7. Khởi động lại ứng dụng PM2 và tự động lưu trạng thái (`pm2 save`).
 
-Sau khi chạy, ứng dụng sẽ được build và tự động tải lên VPS. Script sẽ tự động quét log khởi động trên VPS và hiển thị đường dẫn URL truy cập chứa cổng rảnh thực tế cho bạn trên màn hình máy local.
+Ứng dụng sẽ hoạt động đồng bộ ngay lập tức mà không cần bất kỳ thao tác thủ công nào trên server.
 
 ## Kết nối GitHub Pages với backend
 
