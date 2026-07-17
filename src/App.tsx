@@ -321,13 +321,11 @@ export default function App() {
         
         {/* Header */}
         <header className="w-full max-w-6xl mx-auto px-6 py-6 flex justify-between items-center z-10">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-600 flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-amber-500/20">
-              FT
-            </div>
-            <div>
-              <h1 className="font-extrabold text-slate-950 text-base leading-tight tracking-tight">FT Workspace</h1>
-              <p className="text-[9px] uppercase font-bold text-amber-600 tracking-wider">Workspace</p>
+          <div className="flex items-center gap-4">
+            <img src="/logo.png" alt="FermatTech Logo" className="h-9 object-contain" />
+            <div className="border-l border-slate-200 pl-4">
+              <h1 className="font-extrabold text-slate-950 text-base leading-none tracking-tight">Fermat Workspace Dashboard</h1>
+              <p className="text-[9px] uppercase font-bold text-amber-600 tracking-wider mt-1">Workspace</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -512,9 +510,9 @@ export default function App() {
             </button>
             
             <form onSubmit={handleCredentialsAuth} className="space-y-5">
-              <div className="text-center mb-2">
-                <div className="mx-auto w-14 h-14 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-extrabold text-lg shadow-md shadow-blue-200">FT</div>
-                <h1 className="mt-4 text-2xl font-extrabold text-slate-900">FermatTech Workspace</h1>
+              <div className="text-center mb-4 flex flex-col items-center">
+                <img src="/logo.png" alt="FermatTech Logo" className="h-10 object-contain mb-3" />
+                <h1 className="text-xl font-extrabold text-slate-900 leading-tight">Fermat Workspace Dashboard</h1>
                 <p className="text-xs text-slate-500 mt-1">Đăng nhập tài khoản quản trị để chỉnh sửa</p>
               </div>
               

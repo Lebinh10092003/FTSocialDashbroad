@@ -36,12 +36,10 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, onLog
     <div className="w-64 bg-white text-slate-800 flex flex-col h-screen sticky top-0 border-r border-slate-200/80 shadow-[1px_0_10px_rgba(0,0,0,0.015)]">
       {/* Brand logo & title */}
       <div className="p-6 border-b border-slate-100 flex items-center gap-3">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center font-bold text-white text-lg shadow-md shadow-blue-500/20">
-          FT
-        </div>
-        <div>
-          <h1 className="font-extrabold text-slate-900 text-sm leading-tight tracking-tight">FT Social</h1>
-          <p className="text-[9px] uppercase font-extrabold text-blue-600 tracking-widest mt-0.5">Analytics Suite</p>
+        <img src="/logo.png" alt="FermatTech Logo" className="h-8 object-contain" />
+        <div className="border-l border-slate-200 pl-3">
+          <h1 className="font-extrabold text-slate-900 text-sm leading-none tracking-tight">Fermat Workspace</h1>
+          <p className="text-[9px] uppercase font-extrabold text-blue-600 tracking-widest mt-1">Dashboard</p>
         </div>
       </div>
 
