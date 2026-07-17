@@ -96,6 +96,11 @@ async function main() {
     console.log('- Đang cài đặt dependencies trên VPS (npm install --omit=dev)...');
     await executeRemoteCommand(conn, `cd ${deployPath} && npm install --omit=dev`);
 
+    // Giải phóng cổng cấu hình trên VPS trước khi khởi động để tránh xung đột
+    const appPort = process.env.PORT || '3000';
+    console.log(`- Đang giải phóng cổng ${appPort} trên VPS...`);
+    await executeRemoteCommand(conn, `fuser -k ${appPort}/tcp || true`);
+
     // Kiểm tra xem PM2 có được cài đặt hay không
     console.log('- Đang kiểm tra trạng thái PM2 trên VPS...');
     let hasPm2 = false;
