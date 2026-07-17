@@ -99,7 +99,7 @@ async function main() {
     // Giải phóng cổng cấu hình trên VPS trước khi khởi động để tránh xung đột
     const appPort = process.env.PORT || '3000';
     console.log(`- Đang giải phóng cổng ${appPort} trên VPS...`);
-    await executeRemoteCommand(conn, `fuser -k ${appPort}/tcp || true`);
+    await executeRemoteCommand(conn, `sudo kill -9 $(ss -lptn 'sport = :${appPort}' | grep -oE 'pid=[0-9]+' | cut -d= -f2) || true`);
 
     // Kiểm tra xem PM2 có được cài đặt hay không
     console.log('- Đang kiểm tra trạng thái PM2 trên VPS...');
