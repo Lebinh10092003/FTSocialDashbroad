@@ -24,6 +24,7 @@ jobs:
 
       - name: Create .env file from Secrets
         run: |
+          echo "NODE_ENV=\"production\"" >> .env
           echo "GEMINI_API_KEY=\"${{ secrets.GEMINI_API_KEY }}\"" >> .env
           echo "APP_URL=\"${{ secrets.APP_URL }}\"" >> .env
           echo "META_PAGE_TOKENS_JSON='${{ secrets.META_PAGE_TOKENS_JSON }}'" >> .env
