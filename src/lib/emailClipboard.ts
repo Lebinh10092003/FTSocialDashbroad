@@ -18,100 +18,80 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-async function inlineClipboardImages(htmlContent: string) {
-  const container = document.createElement('div');
-  container.innerHTML = htmlContent;
-  const images = Array.from(container.querySelectorAll('img'));
-  let embeddedCount = 0;
-
-  await Promise.all(images.map(async (image) => {
-    const src = image.getAttribute('src') || '';
-    if (!isSameOriginOrLocalAsset(src)) return;
-
-    try {
-      const response = await fetch(src);
-      if (!response.ok) return;
-      const blob = await response.blob();
-      if (!blob.type.startsWith('image/')) return;
-      image.setAttribute('src', await blobToDataUrl(blob));
-      embeddedCount += 1;
-    } catch (error) {
-      console.warn('Không thể nhúng ảnh vào clipboard:', src, error);
-    }
-  }));
-
-  return {
-    html: container.innerHTML,
-    embeddedCount,
-  };
-}
-
 /**
  * Copies rich HTML and plain text simultaneously to the clipboard.
- * Same-origin uploaded/blob images are converted to data URIs first so Gmail can
- * paste them like an inline screenshot instead of a broken localhost URL.
+ * Same-origin uploaded/blob images are converted to data URIs first.
+ * Uses selection contents copying which is the gold standard for pasting into Gmail/Outlook.
  */
 export async function copyEmailToClipboard(htmlContent: string, plainTextContent: string): Promise<boolean> {
   try {
-    const prepared = await inlineClipboardImages(htmlContent);
-    const normalizedHtml = prepared.html;
+    // 1. Create a temporary hidden container in the DOM
+    const tempDiv = document.createElement('div');
+    tempDiv.style.position = 'fixed';
+    tempDiv.style.left = '-9999px';
+    tempDiv.style.top = '0';
+    tempDiv.style.width = '650px';
+    tempDiv.style.overflow = 'hidden';
+    tempDiv.innerHTML = htmlContent;
+    document.body.appendChild(tempDiv);
 
+    // 2. Inline local/blob images inside this DOM structure
+    const images = Array.from(tempDiv.querySelectorAll('img'));
+    await Promise.all(images.map(async (image) => {
+      const src = image.getAttribute('src') || '';
+      if (!isSameOriginOrLocalAsset(src)) return;
+
+      try {
+        const response = await fetch(src);
+        if (!response.ok) return;
+        const blob = await response.blob();
+        if (!blob.type.startsWith('image/')) return;
+        const dataUrl = await blobToDataUrl(blob);
+        image.setAttribute('src', dataUrl);
+      } catch (error) {
+        console.warn('Không thể nhúng ảnh vào clipboard:', src, error);
+      }
+    }));
+
+    // 3. Perform selection and copy using the Selection API (the gold standard for rich HTML pasting)
+    const range = document.createRange();
+    range.selectNodeContents(tempDiv);
+    
+    const selection = window.getSelection();
+    if (!selection) {
+      document.body.removeChild(tempDiv);
+      return false;
+    }
+    
+    selection.removeAllRanges();
+    selection.addRange(range);
+    
+    const successful = document.execCommand('copy');
+    selection.removeAllRanges();
+    
+    if (successful) {
+      document.body.removeChild(tempDiv);
+      return true;
+    }
+
+    // 4. Fallback to Clipboard API if execCommand fails
     if (navigator.clipboard && window.ClipboardItem) {
-      // Modern Clipboard API
-      const htmlBlob = new Blob([normalizedHtml], { type: 'text/html' });
+      const htmlBlob = new Blob([tempDiv.innerHTML], { type: 'text/html' });
       const textBlob = new Blob([plainTextContent], { type: 'text/plain' });
-      
       const clipboardItem = new ClipboardItem({
         'text/html': htmlBlob,
         'text/plain': textBlob
       });
-      
       await navigator.clipboard.write([clipboardItem]);
+      document.body.removeChild(tempDiv);
       return true;
-    } else {
-      // Fallback: execCommand with clean node
-      const div = document.createElement('div');
-      div.style.position = 'absolute';
-      div.style.left = '-9999px';
-      div.style.top = '-9999px';
-      // Put the HTML contents inside
-      div.innerHTML = normalizedHtml;
-      document.body.appendChild(div);
-      
-      const range = document.createRange();
-      range.selectNode(div);
-      
-      const selection = window.getSelection();
-      if (selection) {
-        selection.removeAllRanges();
-        selection.addRange(range);
-        const successful = document.execCommand('copy');
-        selection.removeAllRanges();
-        document.body.removeChild(div);
-        return successful;
-      }
-      
-      document.body.removeChild(div);
-      return false;
     }
+    
+    document.body.removeChild(tempDiv);
+    return false;
   } catch (error) {
     console.error('Lỗi khi sao chép email:', error);
-    
-    // Last resort fallback: try plain text only
-    try {
-      const textarea = document.createElement('textarea');
-      textarea.value = plainTextContent;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      const success = document.execCommand('copy');
-      document.body.removeChild(textarea);
-      return success;
-    } catch (fallbackError) {
-      console.error('Lỗi khi chạy fallback copy plain text:', fallbackError);
-      return false;
-    }
+    return false;
   }
 }
 

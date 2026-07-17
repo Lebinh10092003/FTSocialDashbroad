@@ -484,9 +484,14 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   };
 
   const handleImportTemplate = (imported: EmailTemplate) => {
-    const newList = [...templates, imported];
+    const cleanImported: EmailTemplate = {
+      ...imported,
+      id: `imported-${Date.now()}`,
+      lastUpdated: Date.now()
+    };
+    const newList = [...templates, cleanImported];
     updateTemplatesList(newList);
-    handleEditTemplate(imported.id);
+    handleEditTemplate(cleanImported.id);
   };
 
   // 7. Copying to Clipboard

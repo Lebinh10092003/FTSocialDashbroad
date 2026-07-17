@@ -21,43 +21,63 @@ export default function EmailPreview({
   const { html, subject, warnings } = generateEmailHtml(template, variables, useMock);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const lastHeightRef = useRef<number>(0);
+  const animationFrameRef = useRef<number | null>(null);
 
   const updateIframeHeight = () => {
-    const iframe = iframeRef.current;
-    if (iframe && iframe.contentWindow && iframe.contentDocument) {
-      try {
-        const doc = iframe.contentDocument;
-        const height = doc.documentElement.scrollHeight || doc.body.scrollHeight;
-        iframe.style.height = `${height}px`;
-      } catch (e) {
-        // Ignored
-      }
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
     }
+
+    animationFrameRef.current = requestAnimationFrame(() => {
+      const iframe = iframeRef.current;
+      if (iframe && iframe.contentWindow && iframe.contentDocument) {
+        try {
+          const doc = iframe.contentDocument;
+          const height = doc.documentElement.scrollHeight || doc.body.scrollHeight;
+          if (height !== lastHeightRef.current && height > 0) {
+            lastHeightRef.current = height;
+            iframe.style.height = `${height}px`;
+          }
+        } catch (e) {
+          // Ignored
+        }
+      }
+    });
   };
 
   useEffect(() => {
     const iframe = iframeRef.current;
-    if (iframe) {
-      const handleLoad = () => {
-        updateIframeHeight();
-        const doc = iframe.contentDocument || iframe.contentWindow?.document;
-        if (doc && doc.body) {
-          const observer = new ResizeObserver(() => {
-            updateIframeHeight();
-          });
-          observer.observe(doc.body);
-          return () => observer.disconnect();
+    if (!iframe) return;
+
+    let observer: ResizeObserver | null = null;
+
+    const setupObserver = () => {
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (doc && doc.body) {
+        if (observer) {
+          observer.disconnect();
         }
-      };
-      
-      iframe.addEventListener('load', handleLoad);
-      // Run once immediately in case it's already loaded
-      handleLoad();
-      
-      return () => {
-        iframe.removeEventListener('load', handleLoad);
-      };
-    }
+        observer = new ResizeObserver(() => {
+          updateIframeHeight();
+        });
+        observer.observe(doc.body);
+        updateIframeHeight();
+      }
+    };
+
+    iframe.addEventListener('load', setupObserver);
+    setupObserver();
+
+    return () => {
+      iframe.removeEventListener('load', setupObserver);
+      if (observer) {
+        observer.disconnect();
+      }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
   }, [html]);
 
   return (
