@@ -114,7 +114,7 @@ async function main() {
       const appName = 'ft-social-dashboard';
       await executeRemoteCommand(
         conn, 
-        `cd ${deployPath} && (pm2 delete ${appName} || true) && pm2 start dist/server.cjs --name "${appName}" --output "server.log" --error "server.log"`
+        `cd ${deployPath} && (pm2 delete ${appName} || true) && NODE_ENV=production pm2 start dist/server.cjs --name "${appName}" --output "server.log" --error "server.log"`
       );
       // Tự động lưu cấu hình pm2
       await executeRemoteCommand(conn, 'pm2 save');
@@ -128,7 +128,7 @@ async function main() {
       await executeRemoteCommand(conn, `pkill -f "dist/server.cjs" || true`);
       await executeRemoteCommand(
         conn,
-        `cd ${deployPath} && nohup node dist/server.cjs > server.log 2>&1 &`
+        `cd ${deployPath} && nohup env NODE_ENV=production node dist/server.cjs > server.log 2>&1 &`
       );
       console.log('\x1b[32m-> Đã khởi chạy Node background thông qua nohup. Xem log tại server.log trên VPS.\x1b[0m');
     }
