@@ -12,23 +12,26 @@ import {
   LogIn
 } from 'lucide-react';
 import { UserRole } from '../types';
+import TokenNotifications from './TokenNotifications';
 
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   user: any;
   userRole: UserRole;
+  idToken: string;
   onLogout: () => void;
   onBackToWorkspace: () => void;
 }
 
-export default function Sidebar({ activeTab, setActiveTab, user, userRole, onLogout, onBackToWorkspace }: SidebarProps) {
+export default function Sidebar({ activeTab, setActiveTab, user, userRole, idToken, onLogout, onBackToWorkspace }: SidebarProps) {
+  const isGuest = user?.email === 'guest@ftsocial.com';
   const menuItems = [
     { id: 'dashboard', label: 'Biểu đồ tổng quan', icon: LayoutDashboard },
     { id: 'media', label: 'Tổng hợp truyền thông', icon: Radio },
     { id: 'posts', label: 'Bài đăng', icon: FileText },
     { id: 'sync', label: 'Đồng bộ dữ liệu', icon: RefreshCw },
-    { id: 'config', label: 'Cấu hình hệ thống', icon: Settings },
+    ...(isGuest ? [] : [{ id: 'config', label: 'Cấu hình hệ thống', icon: Settings }]),
     ...(userRole === 'ADMIN' || userRole === 'MANAGER' ? [{ id: 'accounts', label: 'Quản lý tài khoản', icon: UserCog }] : []),
   ];
 
@@ -78,6 +81,7 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, onLog
 
       {/* User profile section */}
       <div className="p-4 border-t border-slate-100 bg-slate-50/60">
+        <div className="mb-2 flex justify-end"><TokenNotifications idToken={idToken} userRole={userRole} /></div>
         <div className="flex items-center gap-3 mb-3 bg-white p-2.5 rounded-xl border border-slate-200/40">
           {user?.photoURL ? (
             <img src={user.photoURL} alt={user.displayName} className="w-8.5 h-8.5 rounded-xl border border-slate-100 object-cover" />

@@ -5,6 +5,7 @@ import { SheetsService, getGoogleSheetsAuth } from './sheets';
 import { Channel, Post, DailySnapshot, ApiLog, UserProfile, UserRole } from '../src/types';
 import { v4 as uuidv4 } from 'uuid';
 import * as XLSX from 'xlsx';
+import { buildTokenRegistry, getDueTokenNotifications, getSharedTokenGroups, ManagedTokenInput, TokenLifecycleRecord } from './tokenLifecycle';
 
 export const apiRouter = Router();
 
@@ -39,6 +40,22 @@ function resolveReportingPeriod(input: { startDate?: unknown; endDate?: unknown 
   }
 
   return { periodStart, periodEnd };
+}
+
+function asManagedTokens(value: unknown): ManagedTokenInput[] {
+  return Array.isArray(value) ? value.filter(item => item && item.pageId && item.accessToken) : [];
+}
+
+function publicTokenNotification(record: ReturnType<typeof getDueTokenNotifications>[number]) {
+  return {
+    platform: record.platform,
+    affectedPages: record.pageNames,
+    issuedAt: record.issuedAt,
+    expiresAt: record.expiresAt,
+    daysRemaining: record.daysRemaining,
+    ageDays: record.ageDays,
+    firstReminderAt: record.firstReminderAt || null,
+  };
 }
 // Extend Express Request interface to include user info
 interface AuthenticatedRequest extends Request {
@@ -339,7 +356,27 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
       trendMap.set(dateStr, curr);
     });
 
-    const trends = Array.from(trendMap.values()).map(point => {
+    // Fill dates without posts so the chart uses the requested calendar range, not only posting dates.
+    const trendCursor = new Date(`${periodStart}T00:00:00.000Z`);
+    const trendEnd = new Date(`${periodEnd}T00:00:00.000Z`);
+    while (trendCursor <= trendEnd) {
+      const date = trendCursor.toISOString().slice(0, 10);
+      if (!trendMap.has(date)) {
+        trendMap.set(date, {
+          date,
+          engagement: 0,
+          postsCount: 0,
+          likes: 0,
+          comments: 0,
+          shares: 0,
+          views: 0,
+          reach: 0,
+        });
+      }
+      trendCursor.setUTCDate(trendCursor.getUTCDate() + 1);
+    }
+
+    const trends = Array.from(trendMap.values()).sort((a, b) => a.date.localeCompare(b.date)).map(point => {
       channels.forEach(c => {
         const metrics = ['engagement', 'postsCount', 'likes', 'comments', 'shares', 'views', 'reach', 'engagementRate'];
         metrics.forEach(m => {
@@ -476,16 +513,23 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
  */
 apiRouter.get('/followers/trend', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const rawDays = Number(req.query.days || 30);
-    if (!Number.isInteger(rawDays) || rawDays < 1 || rawDays > 365) {
-      return res.status(400).json({ error: 'Tham số days phải nằm trong khoảng từ 1 đến 365.' });
-    }
-
     const requestedChannelId = typeof req.query.channelId === 'string' && req.query.channelId !== 'all'
       ? req.query.channelId
       : null;
-    const periodStart = getRecentStartDate(rawDays);
-    const periodEnd = getTodayDate();
+    const hasExplicitPeriod = isDateString(req.query.startDate) || isDateString(req.query.endDate);
+    let periodStart: string;
+    let periodEnd: string;
+
+    if (hasExplicitPeriod) {
+      ({ periodStart, periodEnd } = resolveReportingPeriod(req.query));
+    } else {
+      const rawDays = Number(req.query.days || 30);
+      if (!Number.isInteger(rawDays) || rawDays < 1 || rawDays > 365) {
+        return res.status(400).json({ error: 'Khoảng ngày không hợp lệ.' });
+      }
+      periodStart = getRecentStartDate(rawDays);
+      periodEnd = getTodayDate();
+    }
     const snapshotsSnap = await adminDb.collection('followerSnapshots')
       .where('snapshotDate', '>=', periodStart)
       .where('snapshotDate', '<=', periodEnd)
@@ -1200,50 +1244,40 @@ apiRouter.get('/admin/config', authenticateUser, async (req: AuthenticatedReques
       // Tự động khởi tạo dữ liệu ban đầu (seed) từ biến môi trường
       const metaTokens = process.env.META_PAGE_TOKENS_JSON || '';
       const zaloTokens = process.env.ZALO_OA_TOKENS_JSON || '';
-      const cronSecret = process.env.CRON_SECRET || 'default_cron_secret_12345';
-      const adminEmails = process.env.ADMIN_EMAILS || '09.levanbinh2003@gmail.com';
-      
-      const detailedTokensList: any[] = [];
+      const cronSecret = process.env.CRON_SECRET || '';
+      const adminEmails = process.env.ADMIN_EMAILS || 'admin@ftsocial.com';
+      const issuedAt = new Date().toISOString();
+      const detailedTokensList: ManagedTokenInput[] = [];
+
       try {
         if (metaTokens.trim()) {
           const metaObj = JSON.parse(metaTokens);
-          Object.entries(metaObj).forEach(([pageId, token]) => {
-            detailedTokensList.push({
-              platform: 'facebook',
-              pageId,
-              accessToken: token,
-              pageName: `Trang Facebook ${pageId}`,
-              status: 'active'
-            });
-          });
+          Object.entries(metaObj).forEach(([pageId, token]) => detailedTokensList.push({
+            platform: 'facebook', pageId, accessToken: String(token), pageName: `Trang Facebook ${pageId}`,
+          }));
         }
         if (zaloTokens.trim()) {
           const zaloObj = JSON.parse(zaloTokens);
-          Object.entries(zaloObj).forEach(([pageId, token]) => {
-            detailedTokensList.push({
-              platform: 'zalo',
-              pageId,
-              accessToken: token,
-              pageName: `Zalo OA ${pageId}`,
-              status: 'active'
-            });
-          });
+          Object.entries(zaloObj).forEach(([pageId, token]) => detailedTokensList.push({
+            platform: 'zalo', pageId, accessToken: String(token), pageName: `Zalo OA ${pageId}`,
+          }));
         }
       } catch (parseErr) {
-        console.error('[AutoSeed] Lỗi phân tích cú pháp JSON token từ ENV:', parseErr);
+        console.error('[AutoSeed] Không thể phân tích JSON token:', parseErr);
       }
 
       const seedConfig = {
         metaPageTokensJson: metaTokens,
         zaloOaTokensJson: zaloTokens,
         detailedTokensList,
+        tokenRegistry: buildTokenRegistry(detailedTokensList, [], issuedAt),
         cronSecret,
         adminEmails,
+        autoSyncEnabled: true,
         spreadsheetId: '',
         googleServiceAccountJson: '',
-        updatedAt: new Date().toISOString()
+        updatedAt: issuedAt,
       };
-
       // Lưu xuống Database (sẽ tự động ghi file local và sync Firestore)
       await adminDb.collection('systemConfig').doc('main').set(seedConfig);
       console.log('[AutoSeed] Đã tự động tạo dữ liệu cấu hình hệ thống ban đầu thành công.');
@@ -1261,13 +1295,22 @@ apiRouter.get('/admin/config', authenticateUser, async (req: AuthenticatedReques
 apiRouter.post('/admin/config', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { metaPageTokensJson, zaloOaTokensJson, detailedTokensList, cronSecret, adminEmails, autoSyncEnabled, googleServiceAccountJson } = req.body;
+    const currentConfigSnap = await adminDb.collection('systemConfig').doc('main').get();
+    const currentConfig = currentConfigSnap.exists ? currentConfigSnap.data() || {} : {};
+    const tokenInputs = asManagedTokens(detailedTokensList);
+    const tokenRegistry = buildTokenRegistry(
+      tokenInputs,
+      Array.isArray(currentConfig.tokenRegistry) ? currentConfig.tokenRegistry : [],
+      new Date().toISOString(),
+    );
     
     await adminDb.collection('systemConfig').doc('main').set({
       metaPageTokensJson: metaPageTokensJson || '',
       zaloOaTokensJson: zaloOaTokensJson || '',
       detailedTokensList: detailedTokensList || [],
+      tokenRegistry,
       cronSecret: cronSecret || '',
-      adminEmails: adminEmails || '09.levanbinh2003@gmail.com',
+      adminEmails: adminEmails || 'admin@ftsocial.com',
       autoSyncEnabled: autoSyncEnabled !== undefined ? autoSyncEnabled : true,
       googleServiceAccountJson: googleServiceAccountJson || '',
       updatedAt: new Date().toISOString()
@@ -1330,7 +1373,8 @@ apiRouter.post('/admin/config', authenticateUser, requireAdmin, async (req: Auth
       }
     }
 
-    res.json({ success: true, message: 'Đã lưu cấu hình hệ thống và đồng bộ hóa các kênh thành công!' });
+    const sharedTokenGroups = getSharedTokenGroups(tokenRegistry).map(record => ({ platform: record.platform, affectedPages: record.pageNames }));
+    res.json({ success: true, message: 'Đã lưu cấu hình hệ thống và đồng bộ hóa các kênh thành công!', sharedTokenGroups });
   } catch (error: any) {
     console.error('Lỗi cập nhật cấu hình hệ thống:', error);
     res.status(500).json({ error: 'Không thể cập nhật cấu hình hệ thống: ' + error.message });
@@ -1340,6 +1384,40 @@ apiRouter.post('/admin/config', authenticateUser, requireAdmin, async (req: Auth
 /**
  * GET /api/admin/users - Lấy danh sách tài khoản thành viên trong hệ thống
  */
+/**
+ * GET /api/admin/token-notifications - Cảnh báo token sắp hết hạn cho Quản lý/Admin.
+ */
+apiRouter.get('/admin/token-notifications', authenticateUser, requireManagerOrAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const configRef = adminDb.collection('systemConfig').doc('main');
+    const configSnap = await configRef.get();
+    const config = configSnap.exists ? configSnap.data() || {} : {};
+    const now = new Date();
+    const registry = Array.isArray(config.tokenRegistry)
+      ? config.tokenRegistry as TokenLifecycleRecord[]
+      : buildTokenRegistry(asManagedTokens(config.detailedTokensList), [], config.updatedAt || now.toISOString());
+    const dueNotifications = getDueTokenNotifications(registry, now);
+    const tokenRegistry = registry.map(record => {
+      const due = dueNotifications.some(notification => notification.fingerprint === record.fingerprint);
+      return due && !record.firstReminderAt ? { ...record, firstReminderAt: now.toISOString() } : record;
+    });
+
+    if (!Array.isArray(config.tokenRegistry) || tokenRegistry.some((record, index) => record.firstReminderAt !== registry[index]?.firstReminderAt)) {
+      await configRef.set({ tokenRegistry }, { merge: true });
+    }
+
+    res.json({
+      notifications: dueNotifications.map(publicTokenNotification),
+      sharedTokenGroups: getSharedTokenGroups(tokenRegistry).map(record => ({
+        platform: record.platform,
+        affectedPages: record.pageNames,
+      })),
+    });
+  } catch (error: any) {
+    console.error('Không thể tải thông báo token:', error);
+    res.status(500).json({ error: 'Không thể tải thông báo token: ' + error.message });
+  }
+});
 apiRouter.get('/admin/users', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const usersSnap = await adminDb.collection('users').get();

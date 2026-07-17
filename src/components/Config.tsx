@@ -21,9 +21,9 @@ const FERMAT_PRESETS = [
   { pageId: '1024612590731278', pageName: 'ICO - Kỳ thi Olympic Lập trình Quốc tế' },
   { pageId: '1023438644179980', pageName: 'International Artificial Intelligence Olympiad - IAIO Việt Nam' },
   { pageId: '1004405742767396', pageName: 'IMO - Kỳ thi Olympic Quốc tế về Toán học' },
-  { pageId: '645856108614288', pageName: 'V+ STEAM LAB' },
   { pageId: '111290387234174', pageName: 'FermatTech' },
-  { pageId: '108899684851269', pageName: 'Mê Setup' }
+  { pageId: '1164029276789521', pageName: 'International Finance Knowledge Olympiad - IFKO Việt Nam' },
+  { pageId: '1166180133241854', pageName: 'International Entrepreneurship & Innovation Olympiad - IEIO Việt Nam' }
 ];
 
 interface ConfigProps {
@@ -68,7 +68,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
   const [metaPageTokensJson, setMetaPageTokensJson] = useState('');
   const [zaloOaTokensJson, setZaloOaTokensJson] = useState('');
   const [cronSecret, setCronSecret] = useState('');
-  const [adminEmails, setAdminEmails] = useState('09.levanbinh2003@gmail.com');
+  const [adminEmails, setAdminEmails] = useState('admin@ftsocial.com');
   const [secretsSaveLoading, setSecretsSaveLoading] = useState(false);
   const [secretsSaveStatus, setSecretsSaveStatus] = useState<{ status: 'success' | 'failed' | 'idle'; message: string }>({ status: 'idle', message: '' });
 
@@ -131,7 +131,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
         setMetaPageTokensJson(metaJson);
         setZaloOaTokensJson(zaloJson);
         setCronSecret(data.cronSecret || '');
-        setAdminEmails(data.adminEmails || '09.levanbinh2003@gmail.com');
+        setAdminEmails(data.adminEmails || 'admin@ftsocial.com');
         setAutoSyncEnabled(data.autoSyncEnabled !== undefined ? data.autoSyncEnabled : true);
 
         // Load or bootstrap visual tokensList
@@ -231,9 +231,13 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
         throw new Error(errData.error || 'Lỗi lưu cấu hình.');
       }
 
+      const responseData = await res.json();
+      const duplicateNotice = responseData.sharedTokenGroups?.length
+        ? ` ${responseData.sharedTokenGroups.length} token đang dùng chung cho nhiều page và được theo dõi cùng hạn.`
+        : '';
       setMetaPageTokensJson(serializedMeta);
       setZaloOaTokensJson(serializedZalo);
-      setSecretsSaveStatus({ status: 'success', message: 'Lưu bảng quản lý mã Tokens và cấu hình bảo mật thành công!' });
+      setSecretsSaveStatus({ status: 'success', message: `Lưu bảng quản lý mã Tokens và cấu hình bảo mật thành công!${duplicateNotice}` });
     } catch (err: any) {
       setSecretsSaveStatus({ status: 'failed', message: err.message || 'Lỗi lưu cấu hình bảo mật.' });
     } finally {
@@ -1152,7 +1156,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
                   Mục tiêu Email Admin (ngăn cách bằng dấu phẩy)
                 </label>
                 <textarea
-                  placeholder="admin@ftsocial.com, 09.levanbinh2003@gmail.com"
+                  placeholder="admin@ftsocial.com"
                   value={adminEmails}
                   onChange={(e) => setAdminEmails(e.target.value)}
                   disabled={!isAdmin}

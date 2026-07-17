@@ -26,7 +26,9 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [idToken, setIdToken] = useState<string | null>(null);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<UserRole>('EMPLOYEE');  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [userRole, setUserRole] = useState<UserRole>('EMPLOYEE');
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const isGuest = user?.email === 'guest@ftsocial.com';
   const [viewMode, setViewModeState] = useState<'workspace' | 'social-dashboard' | 'email-builder'>('workspace');
   const [channels, setChannels] = useState<Channel[]>([]);
 
@@ -263,6 +265,10 @@ export default function App() {
       return false;
     }
   };
+
+  useEffect(() => {
+    if (isGuest && activeTab === 'config') setActiveTab('dashboard');
+  }, [activeTab, isGuest]);
 
   const handleLogout = async () => {
     if (user?.email === 'guest@ftsocial.com') {
@@ -511,6 +517,7 @@ export default function App() {
         setActiveTab={setActiveTab} 
         user={user}
         userRole={userRole}
+        idToken={idToken || ''}
         onLogout={handleLogout}
         onBackToWorkspace={() => setViewMode('workspace')}
       />
@@ -554,7 +561,7 @@ export default function App() {
                   onConnectGoogle={handleConnectGoogle}
                 />
               )}
-              {activeTab === 'config' && (
+              {activeTab === 'config' && !isGuest && (
                 <Config idToken={idToken || ''} googleAccessToken={googleAccessToken} userRole={userRole} onConnectGoogle={handleConnectGoogle} showUserManagement={false} />
               )}
               {activeTab === 'accounts' && <AccountManagement idToken={idToken || ''} userRole={userRole} />}
@@ -579,15 +586,14 @@ export default function App() {
             <form onSubmit={handleCredentialsAuth} className="space-y-5">
               <div className="text-center mb-4 flex flex-col items-center">
                 <img src="/logo.png" alt="FermatTech Logo" className="h-10 object-contain mb-3" />
-                <h1 className="text-xl font-extrabold text-slate-900 leading-tight">Fermat Workspace Dashboard</h1>
-                <p className="text-xs text-slate-500 mt-1">Đăng nhập tài khoản quản trị để chỉnh sửa</p>
+                <h1 className="text-xl font-extrabold text-slate-900 leading-tight">FermatTech Workspace</h1>
               </div>
               
               <div className="space-y-3">
                 <input 
                   value={loginEmail} 
                   onChange={e => setLoginEmail(e.target.value)} 
-                  placeholder="Email hoặc tên tài khoản" 
+                  placeholder="Email"
                   className="w-full rounded-xl border border-slate-200 px-4 py-3.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" 
                   autoComplete="username" 
                 />
