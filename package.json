@@ -9,7 +9,7 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "deploy": "node scripts/deploy.js"
+    "deploy": "node scripts/deploy-safe.js"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
