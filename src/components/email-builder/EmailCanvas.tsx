@@ -9,8 +9,21 @@ import {
   Tag,
   Plus
 } from 'lucide-react';
-import { EmailBlock, EmailSettings } from '../../types/emailBuilder';
+import { BlockType, EmailBlock, EmailSettings } from '../../types/emailBuilder';
+import { BLOCK_CATEGORIES, EMAIL_BLOCK_REGISTRY } from '../../data/emailBlockRegistry';
 import BlockToolbar from './BlockToolbar';
+import { sanitizeCustomHtml } from '../../lib/emailSanitizer';
+
+function NewBlockPreview({ block }: { block: EmailBlock }) {
+  const c = block.content;
+  if (block.type === 'custom-html') return <iframe title="Custom HTML preview" sandbox="" srcDoc={`<!doctype html><html><body style="margin:0">${sanitizeCustomHtml(c.html || '')}</body></html>`} className="min-h-[100px] w-full rounded border border-slate-200 bg-white" />;
+  if (block.type === 'gallery') return <div className="grid grid-cols-2 gap-2">{(c.images || ['', '']).map((url: string, i: number) => url ? <img key={i} src={url} alt="" className="h-24 w-full rounded object-cover" /> : <div key={i} className="flex h-24 items-center justify-center rounded bg-slate-100 text-[10px] text-slate-400">\u1ea2nh {i + 1}</div>)}</div>;
+  if (['columns', 'feature-list', 'product-grid', 'pricing-table', 'data-table'].includes(block.type)) { const items = c.items || c.products || c.plans || c.rows || []; return <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${c.variant === 'three' ? 3 : c.variant === 'four' ? 4 : 2}, minmax(0, 1fr))` }}>{items.map((item: any, i: number) => <div key={i} className="rounded border border-slate-200 bg-white p-2 text-xs"><strong>{Array.isArray(item) ? item[0] : item.title || item.name}</strong><p className="mt-1 text-slate-500">{Array.isArray(item) ? item.slice(1).join(' \u2014 ') : item.body || item.price || item.features}</p></div>)}</div>; }
+  if (block.type === 'image-text' || block.type === 'product-card' || block.type === 'video') return <div className="grid grid-cols-2 gap-3 rounded bg-slate-50 p-3"><div className="flex min-h-24 items-center justify-center rounded bg-slate-200 text-slate-400">{c.imageUrl ? <img src={c.imageUrl} alt="" className="max-h-32 max-w-full object-cover" /> : '\u1ea2nh'}</div><div><strong className="text-[#0F3A72]">{c.heading || c.name || c.title}</strong><p className="mt-1 text-xs text-slate-600">{c.body || c.description || c.price}</p></div></div>;
+  if (block.type === 'callout' || block.type === 'section' || block.type === 'testimonial' || block.type === 'merge-tag') return <div className="rounded border-l-4 border-[#0F3A72] bg-blue-50 p-3 text-sm"><strong>{c.heading || c.title || c.author}</strong><p className="mt-1">{c.body || c.quote || c.text}</p></div>;
+  if (block.type === 'header' || block.type === 'footer') return <div className="rounded bg-slate-100 p-3 text-center text-xs text-slate-600">{block.type === 'header' ? c.navigation : `${c.company} \u00b7 ${c.address}`}</div>;
+  return null;
+}
 
 interface EmailCanvasProps {
   blocks: EmailBlock[];
@@ -25,6 +38,7 @@ interface EmailCanvasProps {
   insertedVarName: { blockId: string; varName: string } | null;
   onClearInsertedVar: () => void;
   emailSettings: EmailSettings;
+  onAddBlock: (type: BlockType) => void;
 }
 
 export default function EmailCanvas({
@@ -39,10 +53,16 @@ export default function EmailCanvas({
   onOpenVariablePicker,
   insertedVarName,
   onClearInsertedVar,
-  emailSettings
+  emailSettings,
+  onAddBlock
 }: EmailCanvasProps) {
   
   const contentEditableRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [isInserterOpen, setIsInserterOpen] = React.useState(false);
+  const [blockQuery, setBlockQuery] = React.useState('');
+  const [isBlockDragOver, setIsBlockDragOver] = React.useState(false);
+  const addFromInserter = (type: BlockType) => { onAddBlock(type); setIsInserterOpen(false); setBlockQuery(''); };
+  const handleBlockDrop = (event: React.DragEvent<HTMLDivElement>) => { event.preventDefault(); setIsBlockDragOver(false); const type = event.dataTransfer.getData('application/x-ft-email-block') as BlockType; if (type && EMAIL_BLOCK_REGISTRY[type]) onAddBlock(type); };
 
   // Insert variable at cursor inside the contenteditable
   useEffect(() => {
@@ -131,7 +151,8 @@ export default function EmailCanvas({
         </div>
 
         {/* Email content viewport frame */}
-        <div className="flex min-h-[520px] w-full justify-center bg-[#f5f6f8] p-5 md:p-8">
+        <div onDragOver={event => { if (event.dataTransfer.types.includes('application/x-ft-email-block')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setIsBlockDragOver(true); } }} onDragLeave={event => { if (event.currentTarget === event.target) setIsBlockDragOver(false); }} onDrop={handleBlockDrop} className="relative flex min-h-[520px] w-full justify-center bg-[#f5f6f8] p-5 md:p-8">
+          {isBlockDragOver && <div className="pointer-events-none absolute inset-5 z-30 flex items-center justify-center rounded-xl border-2 border-dashed border-blue-500 bg-blue-50/90 text-sm font-black text-[#0F3A72] shadow-sm">Drop block here</div>}
           <div 
             className="relative w-full border border-slate-200/70 bg-white shadow-[0_6px_24px_rgba(15,23,42,0.05)] transition-all duration-300"
             style={{
@@ -354,31 +375,8 @@ export default function EmailCanvas({
                         </div>
                       )}
 
-                      {/* BUTTON GROUP BLOCK */}
-                      {block.type === 'button-group' && (
-                        <div className={`flex justify-${content.align === 'center' ? 'center' : content.align === 'right' ? 'end' : 'start'} gap-4`}>
-                          <div 
-                            style={{
-                              backgroundColor: content.btn1?.bg || '#1473d1',
-                              color: content.btn1?.color || '#ffffff',
-                              borderRadius: `${content.btn1?.radius ?? 8}px`
-                            }}
-                            className="px-5 py-2 text-center font-extrabold text-xs shadow-sm select-none"
-                          >
-                            {content.btn1?.text || 'Nút 1'}
-                          </div>
-                          <div 
-                            style={{
-                              backgroundColor: content.btn2?.bg || '#f1f5f9',
-                              color: content.btn2?.color || '#0f3a72',
-                              borderRadius: `${content.btn2?.radius ?? 8}px`
-                            }}
-                            className="px-5 py-2 text-center font-extrabold text-xs shadow-sm border border-slate-200 select-none"
-                          >
-                            {content.btn2?.text || 'Nút 2'}
-                          </div>
-                        </div>
-                      )}
+                      {/* ACTION BUTTON GROUP */}
+                      {block.type === 'button-group' && (() => { const buttons = content.buttons || [content.btn1, content.btn2].filter(Boolean); return <div className={`flex flex-wrap justify-${content.align === 'left' ? 'start' : content.align === 'right' ? 'end' : 'center'}`} style={{ gap: `${content.gap ?? 12}px` }}>{buttons.map((button: any, i: number) => <div key={i} style={{ backgroundColor: button.bg || '#0F3A72', color: button.color || '#ffffff', borderRadius: `${button.radius ?? 8}px` }} className="px-5 py-2 text-center text-xs font-extrabold shadow-sm">{button.text || `H\u00e0nh \u0111\u1ed9ng ${i + 1}`}</div>)}</div>; })()}
 
                       {/* HIGHLIGHT BOX BLOCK */}
                       {block.type === 'highlight-box' && (
@@ -458,10 +456,20 @@ export default function EmailCanvas({
                         </div>
                       )}
 
+                      {['section', 'columns', 'image-text', 'data-table', 'testimonial', 'callout', 'gallery', 'video', 'feature-list', 'product-card', 'product-grid', 'pricing-table', 'header', 'footer', 'merge-tag', 'custom-html'].includes(block.type) && <NewBlockPreview block={block} />}
+
                     </div>
                   </div>
                 );
               })}
+
+              <div className="relative mt-5 flex justify-center border-t border-dashed border-slate-200 pt-5">
+                <button type="button" onClick={() => setIsInserterOpen(open => !open)} className="flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-[#0F3A72] shadow-sm transition hover:bg-blue-50"><Plus className="h-4 w-4" /> Thêm khối nội dung</button>
+                {isInserterOpen && <div className="absolute bottom-12 z-40 w-[min(520px,calc(100vw-48px))] rounded-xl border border-slate-200 bg-white p-3 shadow-2xl">
+                  <div className="mb-3 flex items-center gap-2"><Plus className="h-4 w-4 text-[#0F3A72]" /><input autoFocus value={blockQuery} onChange={e => setBlockQuery(e.target.value)} placeholder="Tìm block..." className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-500" /></div>
+                  <div className="max-h-72 space-y-3 overflow-y-auto pr-1">{BLOCK_CATEGORIES.map(category => { const items = Object.values(EMAIL_BLOCK_REGISTRY).filter(item => item.category === category.id && (item.label + item.description).toLowerCase().includes(blockQuery.toLowerCase())); return items.length ? <div key={category.id}><p className="mb-1 text-[9px] font-black uppercase tracking-widest text-slate-400">{category.label}</p><div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">{items.map(item => <button key={item.id} type="button" onClick={() => addFromInserter(item.id)} className="rounded-lg border border-slate-200 px-2 py-2 text-left text-[10px] font-bold text-slate-700 hover:border-blue-300 hover:bg-blue-50">{item.label}</button>)}</div></div> : null; })}</div>
+                </div>}
+              </div>
 
             </div>
           </div>

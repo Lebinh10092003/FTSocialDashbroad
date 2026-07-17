@@ -104,3 +104,34 @@ export function sanitizeHtml(html: string): string {
   container.appendChild(cleanFragment);
   return container.innerHTML;
 }
+
+/** Sanitizes Custom HTML while preserving email-safe tables and inline/style CSS. */
+export function sanitizeCustomHtml(html: string): string {
+  if (typeof window === 'undefined') return html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\son\w+\s*=\s*(['"]).*?\1/gi, '');
+  const doc = new DOMParser().parseFromString(html || '', 'text/html');
+  doc.querySelectorAll('script, iframe, object, embed, link, form, input, video, audio').forEach(node => node.remove());
+  doc.querySelectorAll('*').forEach(el => {
+    [...el.attributes].forEach(attr => {
+      const name = attr.name.toLowerCase(); const value = attr.value.trim().toLowerCase();
+      if (name.startsWith('on') || (name === 'src' && value.startsWith('javascript:')) || (name === 'href' && value.startsWith('javascript:'))) el.removeAttribute(attr.name);
+    });
+  });
+  return doc.body.innerHTML;
+}
+
+/** Small dependency-free CSS inliner for Custom HTML export (tag, .class and #id rules). */
+export function inlineCustomCss(html: string): string {
+  if (typeof window === 'undefined') return html.replace(/<style[\s\S]*?<\/style>/gi, '');
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('style').forEach(style => {
+    style.textContent?.split('}').forEach(rule => {
+      const [selectors, declarations] = rule.split('{');
+      if (!selectors || !declarations) return;
+      selectors.split(',').forEach(selector => {
+        try { doc.querySelectorAll(selector.trim()).forEach(el => el.setAttribute('style', `${el.getAttribute('style') || ''};${declarations.trim()}`)); } catch { /* ignore unsupported selectors */ }
+      });
+    });
+    style.remove();
+  });
+  return doc.body.innerHTML;
+}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlignLeft, AlignCenter, AlignRight, Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import { EmailBlock } from '../../types/emailBuilder';
+import { getBlockDefinition } from '../../data/emailBlockRegistry';
 import ColorField from './ColorField';
 
 interface BlockSettingsProps {
@@ -16,6 +17,8 @@ export default function BlockSettings({
 }: BlockSettingsProps) {
   const content = block.content;
   const styles = block.styles;
+  const isSchemaBlock = ['section','columns','image-text','data-table','testimonial','callout','gallery','video','feature-list','product-card','product-grid','pricing-table','header','footer','merge-tag','custom-html'].includes(block.type);
+  const definition = getBlockDefinition(block.type);
 
   const [isUploading, setIsUploading] = React.useState(false);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
@@ -206,6 +209,10 @@ export default function BlockSettings({
     updateContent('items', items);
   };
 
+
+  const groupButtons = () => content.buttons || [content.btn1, content.btn2].filter(Boolean);
+  const updateGroupButton = (index: number, patch: Record<string, any>) => { const buttons = groupButtons(); buttons[index] = { ...buttons[index], ...patch }; onUpdateBlockContent({ ...content, buttons }); };
+
   const handleUpdateSocialLink = (index: number, key: string, val: any) => {
     const links = [...(content.links || [])];
     links[index] = {
@@ -222,6 +229,14 @@ export default function BlockSettings({
         <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Thuộc tính Khối</h3>
         <p className="text-[10px] text-slate-400 font-extrabold mt-1">Phân loại: <span className="text-blue-650 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase">{block.type}</span></p>
       </div>
+
+      {isSchemaBlock && (
+        <div className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-3.5">
+          <div><label className="mb-1 block text-[10px] font-bold text-slate-600">Bi?n th? giao di?n</label><select value={content.variant || definition.variants[0]?.value} onChange={e => updateContent('variant', e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500">{definition.variants.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}</select></div>
+          {Object.entries(content).filter(([key, value]) => key !== 'variant' && (typeof value === 'string' || typeof value === 'number')).map(([key, value]) => <div key={key}><label className="mb-1 block text-[10px] font-bold capitalize text-slate-600">{key}</label>{key === 'html' ? <textarea value={String(value)} onChange={e => updateContent(key, e.target.value)} spellCheck={false} className="min-h-40 w-full rounded-xl border border-slate-200 bg-slate-950 p-3 font-mono text-[11px] text-emerald-200 outline-none focus:border-blue-500" /> : <input type={key.toLowerCase().includes('url') || key === 'link' ? 'url' : 'text'} value={String(value)} onChange={e => updateContent(key, e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500" />}</div>)}
+          {block.type === 'custom-html' && <p className="rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-[10px] leading-relaxed text-amber-800">Email client h\u1ed7 tr\u1ee3 CSS h\u1ea1n ch\u1ebf. \u01afu ti\u00ean table v\u00e0 style inline; script, event handler v\u00e0 iframe s\u1ebd t\u1ef1 \u0111\u1ed9ng b\u1ecb lo\u1ea1i b\u1ecf.</p>}
+        </div>
+      )}
 
       {/* Common margins */}
       {block.type !== 'spacer' && (
@@ -621,99 +636,14 @@ export default function BlockSettings({
         </div>
       )}
 
-      {/* BUTTON GROUP PROPERTIES */}
+      {/* ACTION BUTTON GROUP PROPERTIES */}
       {block.type === 'button-group' && (
         <div className="space-y-4">
-          <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/50 space-y-3">
-            <h4 className="text-[10px] font-black text-slate-650 uppercase tracking-wider">Cấu hình nhóm</h4>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[9px] text-slate-500 font-bold mb-1">Mép giãn 2 nút</label>
-                <input
-                  type="number"
-                  value={content.gap ?? 15}
-                  onChange={e => updateContent('gap', parseInt(e.target.value) || 0)}
-                  className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 bg-white"
-                />
-              </div>
-              <div>
-                <label className="block text-[9px] text-slate-500 font-bold mb-1">Căn lề cụm nút</label>
-                <div className="flex bg-slate-100 border border-slate-200 rounded-lg p-0.5">
-                  {(['left', 'center', 'right'] as const).map(align => (
-                    <button
-                      key={align}
-                      onClick={() => updateContent('align', align)}
-                      className={`flex-1 flex justify-center py-1 rounded cursor-pointer ${content.align === align ? 'bg-white text-slate-800 shadow-sm font-bold' : 'text-slate-500'}`}
-                    >
-                      {align === 'left' && <AlignLeft className="w-4 h-4" />}
-                      {align === 'center' && <AlignCenter className="w-4 h-4" />}
-                      {align === 'right' && <AlignRight className="w-4 h-4" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+          <div className="rounded-2xl border border-slate-200/50 bg-slate-50 p-3.5">
+            <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-650">Nh\u00f3m n\u00fat h\u00e0nh \u0111\u1ed9ng</h4>
+            <div className="mt-3 grid grid-cols-2 gap-3"><div><label className="mb-1 block text-[9px] font-bold text-slate-500">S\u1ed1 n\u00fat</label><select value={groupButtons().length} onChange={e => { const count = Number(e.target.value); const buttons = groupButtons(); while (buttons.length < count) buttons.push({ text: 'H\u00e0nh \u0111\u1ed9ng m\u1edbi', link: 'https://www.fermat.vn', bg: '#0F3A72', color: '#ffffff', radius: 8 }); onUpdateBlockContent({ ...content, buttons: buttons.slice(0, count) }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500"><option value="2">2 n\u00fat</option><option value="3">3 n?t</option><option value="4">4 n?t</option></select></div><div><label className="mb-1 block text-[9px] font-bold text-slate-500">Kho\u1ea3ng c\u00e1ch (px)</label><input type="number" value={content.gap ?? 12} onChange={e => updateContent('gap', parseInt(e.target.value) || 0)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500" /></div></div>
           </div>
-
-          <div className="space-y-3 border-t border-slate-100 pt-3">
-            <h4 className="text-[10px] font-black text-slate-700 uppercase">Cài đặt Nút 1 (Trái)</h4>
-            <input
-              type="text"
-              placeholder="Chữ nút 1"
-              value={content.btn1?.text || ''}
-              onChange={e => updateContent('btn1', { ...content.btn1, text: e.target.value })}
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm bg-white"
-            />
-            <input
-              type="text"
-              placeholder="URL đích nút 1"
-              value={content.btn1?.link || ''}
-              onChange={e => updateContent('btn1', { ...content.btn1, link: e.target.value })}
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm bg-white"
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <ColorField
-                label="Nền Nút 1"
-                value={content.btn1?.bg || '#1473d1'}
-                onChange={color => updateContent('btn1', { ...content.btn1, bg: color })}
-              />
-              <ColorField
-                label="Chữ Nút 1"
-                value={content.btn1?.color || '#ffffff'}
-                onChange={color => updateContent('btn1', { ...content.btn1, color: color })}
-              />
-            </div>
-          </div>
-
-          <div className="space-y-3 border-t border-slate-100 pt-3">
-            <h4 className="text-[10px] font-black text-slate-700 uppercase">Cài đặt Nút 2 (Phải)</h4>
-            <input
-              type="text"
-              placeholder="Chữ nút 2"
-              value={content.btn2?.text || ''}
-              onChange={e => updateContent('btn2', { ...content.btn2, text: e.target.value })}
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm bg-white"
-            />
-            <input
-              type="text"
-              placeholder="URL đích nút 2"
-              value={content.btn2?.link || ''}
-              onChange={e => updateContent('btn2', { ...content.btn2, link: e.target.value })}
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm bg-white"
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <ColorField
-                label="Nền Nút 2"
-                value={content.btn2?.bg || '#f1f5f9'}
-                onChange={color => updateContent('btn2', { ...content.btn2, bg: color })}
-              />
-              <ColorField
-                label="Chữ Nút 2"
-                value={content.btn2?.color || '#0f3a72'}
-                onChange={color => updateContent('btn2', { ...content.btn2, color: color })}
-              />
-            </div>
-          </div>
+          {groupButtons().map((button: any, index: number) => <div key={index} className="space-y-2 rounded-2xl border border-slate-200 bg-white p-3"><h4 className="text-[10px] font-black uppercase text-slate-700">N\u00fat h\u00e0nh \u0111\u1ed9ng {index + 1}</h4><input value={button.text || ''} onChange={e => updateGroupButton(index, { text: e.target.value })} placeholder="Nh?n n?t" className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-500" /><input value={button.link || ''} onChange={e => updateGroupButton(index, { link: e.target.value })} placeholder="https://..." className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-500" /><div className="grid grid-cols-2 gap-2"><ColorField label="M\u00e0u n\u1ec1n" value={button.bg || '#0F3A72'} onChange={color => updateGroupButton(index, { bg: color })} /><ColorField label="M\u00e0u ch\u1eef" value={button.color || '#ffffff'} onChange={color => updateGroupButton(index, { color })} /></div></div>)}
         </div>
       )}
 

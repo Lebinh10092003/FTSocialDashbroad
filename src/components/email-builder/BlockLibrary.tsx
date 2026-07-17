@@ -1,194 +1,53 @@
-import React from 'react';
-import { 
-  Image, 
-  Type, 
-  Heading, 
-  List, 
-  ListOrdered, 
-  Link2, 
-  Columns, 
-  AlertCircle, 
-  Minus, 
-  Move, 
-  PenTool, 
-  Share2, 
-  Tag
-} from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import * as Icons from 'lucide-react';
 import { BlockType } from '../../types/emailBuilder';
+import { BLOCK_CATEGORIES, EMAIL_BLOCK_REGISTRY } from '../../data/emailBlockRegistry';
 
-interface BlockLibraryProps {
-  onAddBlock: (type: BlockType) => void;
-}
+interface BlockLibraryProps { onAddBlock: (type: BlockType) => void; width: number; }
+interface TooltipState { id: string; label: string; description: string; x: number; y: number; }
 
-export default function BlockLibrary({ onAddBlock }: BlockLibraryProps) {
-  
-  const categories = [
-    {
-      title: 'Cơ bản & Chữ',
-      color: 'from-blue-500 to-indigo-650',
-      items: [
-        {
-          type: 'heading' as BlockType,
-          label: 'Tiêu đề chính phụ',
-          desc: 'Thẻ H1, H2, H3 với kích thước và màu sắc tự chọn',
-          icon: Heading,
-          iconColor: 'text-indigo-600 bg-indigo-50 border-indigo-100'
-        },
-        {
-          type: 'paragraph' as BlockType,
-          label: 'Đoạn văn bản',
-          desc: 'Đoạn mô tả, hỗ trợ định dạng in đậm, nghiêng, chèn biến',
-          icon: Type,
-          iconColor: 'text-blue-600 bg-blue-50 border-blue-100'
-        },
-        {
-          type: 'bullet-list' as BlockType,
-          label: 'Danh sách gạch đầu dòng',
-          desc: 'Danh sách các mục liệt kê không đánh số',
-          icon: List,
-          iconColor: 'text-violet-600 bg-violet-50 border-violet-100'
-        },
-        {
-          type: 'number-list' as BlockType,
-          label: 'Danh sách số',
-          desc: 'Danh sách đếm số thứ tự các bước',
-          icon: ListOrdered,
-          iconColor: 'text-purple-600 bg-purple-50 border-purple-100'
-        }
-      ]
-    },
-    {
-      title: 'Hình ảnh & Thương hiệu',
-      color: 'from-emerald-500 to-teal-650',
-      items: [
-        {
-          type: 'logo' as BlockType,
-          label: 'Logo đại diện',
-          desc: 'Logo của Fermat hoặc đối tác đặt ở đầu email',
-          icon: PenTool,
-          iconColor: 'text-emerald-600 bg-emerald-50 border-emerald-100'
-        },
-        {
-          type: 'image' as BlockType,
-          label: 'Ảnh / Banner quảng cáo',
-          desc: 'Hình ảnh HTTPS hoặc banner nổi bật giữa email',
-          icon: Image,
-          iconColor: 'text-teal-600 bg-teal-50 border-teal-100'
-        }
-      ]
-    },
-    {
-      title: 'Nút hành động & Bố cục',
-      color: 'from-amber-500 to-orange-650',
-      items: [
-        {
-          type: 'button' as BlockType,
-          label: 'Nút bấm kêu gọi (CTA)',
-          desc: 'Nút bấm thu hút lượt click đăng ký, xem chi tiết',
-          icon: Link2,
-          iconColor: 'text-amber-600 bg-amber-50 border-amber-100'
-        },
-        {
-          type: 'button-group' as BlockType,
-          label: 'Hai nút cùng hàng',
-          desc: 'Bố cục 2 nút bấm song song cho nhiều lựa chọn',
-          icon: Columns,
-          iconColor: 'text-orange-600 bg-orange-50 border-orange-100'
-        },
-        {
-          type: 'divider' as BlockType,
-          label: 'Đường phân cách',
-          desc: 'Đường kẻ mỏng chia bố cục rõ ràng',
-          icon: Minus,
-          iconColor: 'text-slate-500 bg-slate-550/10 border-slate-200'
-        },
-        {
-          type: 'spacer' as BlockType,
-          label: 'Khoảng trắng giãn cách',
-          desc: 'Tạo khoảng thở dọc giữa các phần nội dung',
-          icon: Move,
-          iconColor: 'text-slate-500 bg-slate-550/10 border-slate-200'
-        }
-      ]
-    },
-    {
-      title: 'Thông tin liên hệ & Hộp chú thích',
-      color: 'from-rose-500 to-pink-650',
-      items: [
-        {
-          type: 'highlight-box' as BlockType,
-          label: 'Hộp thông tin nổi bật',
-          desc: 'Hộp nền màu có viền trái để ghi ngày thi, ghi chú',
-          icon: AlertCircle,
-          iconColor: 'text-pink-600 bg-pink-50 border-pink-100'
-        },
-        {
-          type: 'signature' as BlockType,
-          label: 'Chữ ký Ban tổ chức',
-          desc: 'Thông tin liên hệ, hotline, email FermatTech',
-          icon: PenTool,
-          iconColor: 'text-rose-600 bg-rose-50 border-rose-100'
-        },
-        {
-          type: 'social-links' as BlockType,
-          label: 'Mạng xã hội',
-          desc: 'Các nút liên kết Facebook, Zalo, YouTube, Website',
-          icon: Share2,
-          iconColor: 'text-red-600 bg-red-50 border-red-100'
-        }
-      ]
-    }
-  ];
+export default function BlockLibrary({ onAddBlock, width }: BlockLibraryProps) {
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const [draggingBlock, setDraggingBlock] = useState<string | null>(null);
+  const pressTimer = useRef<number | null>(null);
+  const longPress = useRef(false);
+  const columns = width >= 290 ? 4 : width >= 220 ? 3 : width >= 145 ? 2 : 1;
 
-  return (
-    <div className="flex h-full w-[320px] shrink-0 select-text flex-col border-r border-slate-200/80 bg-white">
-      
-      {/* Title Header */}
-      <div className="border-b border-slate-200 bg-white p-4 shadow-[0_1px_5px_rgba(0,0,0,0.005)]">
-        <h2 className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-800">
-          <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse"></span>
-          Nội dung
-        </h2>
-        <p className="mt-1 text-[10px] leading-relaxed text-slate-450">Chọn khối để thêm vào canvas, sau đó chỉnh chi tiết ở bảng bên phải.</p>
-      </div>
+  const showTooltip = (id: string, label: string, description: string, target: HTMLElement) => {
+    const rect = target.getBoundingClientRect();
+    const tooltipWidth = 220;
+    const canPlaceRight = rect.right + 12 + tooltipWidth < window.innerWidth;
+    setTooltip({ id, label, description, x: canPlaceRight ? rect.right + 10 : Math.max(8, rect.left - tooltipWidth - 10), y: Math.max(8, rect.top) });
+  };
+  const hideTooltip = () => setTooltip(null);
+  const startPress = (id: string, label: string, description: string, event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType !== 'mouse') pressTimer.current = window.setTimeout(() => { longPress.current = true; showTooltip(id, label, description, event.currentTarget); }, 450);
+  };
+  const endPress = () => { if (pressTimer.current) window.clearTimeout(pressTimer.current); pressTimer.current = null; };
 
-      {/* Grouped scrollable area */}
-      <div className="flex-1 space-y-4 overflow-y-auto p-3.5">
-        {categories.map((cat, idx) => (
-          <div key={idx} className="space-y-2">
-            
-            {/* Category title */}
-            <div className="flex items-center gap-2 px-1">
-              <span className={`w-1 h-3 rounded-full bg-gradient-to-b ${cat.color}`}></span>
-              <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">{cat.title}</h4>
-            </div>
-
-            {/* Blocks in Category */}
-            <div className="space-y-1.5">
-              {cat.items.map(item => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    key={item.type}
-                    onClick={() => onAddBlock(item.type)}
-                  className="group flex w-full cursor-pointer items-center gap-3 rounded-lg border border-slate-200/80 bg-white p-2.5 text-left transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50/20 hover:shadow-[0_4px_12px_rgba(15,115,209,0.04)] active:scale-[0.98]"
-                  >
-                    <div className={`w-8.5 h-8.5 flex shrink-0 items-center justify-center rounded-lg border transition-all ${item.iconColor} shadow-sm group-hover:scale-105`}>
-                      <Icon className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h5 className="text-[11px] font-bold text-slate-800 group-hover:text-blue-900 leading-tight">{item.label}</h5>
-                      <p className="text-[9px] text-slate-400 truncate mt-0.5 leading-tight">{item.desc}</p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-          </div>
-        ))}
-      </div>
-      
+  return <aside className="flex h-full min-w-[96px] flex-col border-r border-slate-200/80 bg-white" style={{ width }}>
+    <div className="flex h-11 shrink-0 items-center gap-2 border-b border-slate-200 px-3">
+      <Icons.Layers3 className="h-4 w-4 text-[#0F3A72]" aria-hidden="true" />
+      <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">Khối nội dung</span>
     </div>
-  );
+    <div className="flex-1 overflow-y-auto px-2 py-3">
+      {BLOCK_CATEGORIES.map(category => {
+        const blocks = Object.values(EMAIL_BLOCK_REGISTRY).filter(item => item.category === category.id);
+        return <section key={category.id} className="mb-4">
+          <h3 className="mb-2 px-1 text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">{category.label}</h3>
+          <div className="grid justify-center gap-2" style={{ gridTemplateColumns: `repeat(${columns}, minmax(52px, 64px))` }}>
+            {blocks.map(item => {
+              const Icon = (Icons as any)[item.icon] || Icons.Square;
+              return <button key={item.id} type="button" draggable aria-label={item.label} onDragStart={e => { e.dataTransfer.setData('application/x-ft-email-block', item.id); e.dataTransfer.effectAllowed = 'copy'; setDraggingBlock(item.id); hideTooltip(); }} onDragEnd={() => setDraggingBlock(null)} onPointerEnter={e => showTooltip(item.id, item.label, item.description, e.currentTarget)} onPointerLeave={hideTooltip} onFocus={e => showTooltip(item.id, item.label, item.description, e.currentTarget)} onBlur={hideTooltip} onPointerDown={e => startPress(item.id, item.label, item.description, e)} onPointerUp={endPress} onPointerCancel={endPress} onClick={() => { if (longPress.current) { longPress.current = false; return; } onAddBlock(item.id); }} className={"group flex h-[62px] flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-1 text-center transition hover:-translate-y-px hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-400 " + (draggingBlock === item.id ? "scale-95 cursor-grabbing opacity-45" : "cursor-grab")}>
+                <Icon className="h-4 w-4 shrink-0 text-[#0F3A72]" aria-hidden="true" />
+                <span className="line-clamp-2 text-[8px] font-bold leading-[11px] text-slate-600 group-hover:text-[#0F3A72]">{item.label}</span>
+              </button>;
+            })}
+          </div>
+        </section>;
+      })}
+    </div>
+    {tooltip && typeof document !== 'undefined' && createPortal(<div role="tooltip" className="pointer-events-none fixed z-[100] w-[220px] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white shadow-xl" style={{ left: tooltip.x, top: tooltip.y }}><p className="text-[11px] font-bold">{tooltip.label}</p><p className="mt-0.5 text-[10px] leading-snug text-slate-300">{tooltip.description}</p></div>, document.body)}
+  </aside>;
 }

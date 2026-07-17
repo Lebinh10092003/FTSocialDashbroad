@@ -1,5 +1,5 @@
 import { EmailTemplate, EmailVariable, EmailBlock } from '../types/emailBuilder';
-import { sanitizeHtml } from './emailSanitizer';
+import { inlineCustomCss, sanitizeCustomHtml, sanitizeHtml } from './emailSanitizer';
 import { getVariablesInText, detectVariableWarnings, replaceVariables } from './emailVariables';
 
 interface GeneratedEmail {
@@ -262,38 +262,11 @@ export function generateEmailHtml(
       }
 
       case 'button-group': {
-        const align = content.align || 'center';
-        const gap = content.gap ?? 15;
-        const btn1 = content.btn1 || {};
-        const btn2 = content.btn2 || {};
-
-        checkLinkUrl(btn1.link, 'Nút nhóm 1');
-        checkLinkUrl(btn2.link, 'Nút nhóm 2');
-
-        return `
-<!-- Button Group Block -->
-<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
-  <tr>
-    <td align="${align}" style="padding: 0;">
-      <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="border-collapse: collapse; display: inline-block; margin: 0 auto;">
-        <tr>
-          <td align="center" bgcolor="${btn1.bg || '#1473d1'}" style="border-radius: ${btn1.radius ?? 8}px; padding: 11px 22px; background-color: ${btn1.bg || '#1473d1'};" valign="middle">
-            <a href="${rep(btn1.link || '')}" target="_blank" style="display: inline-block; font-family: ${fontFamily}; color: ${btn1.color || '#ffffff'}; font-size: 14px; font-weight: bold; text-decoration: none;">
-              ${rep(btn1.text || '')}
-            </a>
-          </td>
-          <td width="${gap}" style="width: ${gap}px; font-size: 1px; line-height: 1px;">&nbsp;</td>
-          <td align="center" bgcolor="${btn2.bg || '#f1f5f9'}" style="border-radius: ${btn2.radius ?? 8}px; padding: 11px 22px; background-color: ${btn2.bg || '#f1f5f9'};" valign="middle">
-            <a href="${rep(btn2.link || '')}" target="_blank" style="display: inline-block; font-family: ${fontFamily}; color: ${btn2.color || '#0f3a72'}; font-size: 14px; font-weight: bold; text-decoration: none;">
-              ${rep(btn2.text || '')}
-            </a>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
-</table>
-`;
+        const align = content.align || 'center'; const gap = content.gap ?? 12;
+        const buttons = content.buttons || [content.btn1, content.btn2].filter(Boolean);
+        buttons.forEach((button: any, index: number) => checkLinkUrl(button.link, `N\u00fat h\u00e0nh \u0111\u1ed9ng ${index + 1}`));
+        const cells = buttons.map((button: any, index: number) => `<td align="center" bgcolor="${button.bg || '#0F3A72'}" style="border-radius:${button.radius ?? 8}px;padding:11px 18px;background-color:${button.bg || '#0F3A72'};"><a href="${rep(button.link || '')}" target="_blank" style="display:inline-block;font-family:${fontFamily};color:${button.color || '#ffffff'};font-size:14px;font-weight:bold;text-decoration:none;">${rep(button.text || '')}</a></td>${index < buttons.length - 1 ? `<td width="${gap}" style="width:${gap}px;font-size:1px;line-height:1px;">&nbsp;</td>` : ''}`).join('');
+        return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr><td align="${align}" style="padding:0;"><table role="presentation" border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;display:inline-table;"><tr>${cells}</tr></table></td></tr></table>`;
       }
 
       case 'highlight-box': {
@@ -390,6 +363,15 @@ export function generateEmailHtml(
 `;
       }
 
+      case 'custom-html': {
+        const custom = rep(inlineCustomCss(sanitizeCustomHtml(content.html || '')));
+        return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:0">' + custom + '</td></tr></table>';
+      }
+      case 'section': case 'columns': case 'image-text': case 'data-table': case 'testimonial': case 'callout': case 'gallery': case 'video': case 'feature-list': case 'product-card': case 'product-grid': case 'pricing-table': case 'header': case 'footer': case 'merge-tag': {
+        const title = rep(content.heading || content.title || content.name || content.company || content.author || '');
+        const body = rep(content.body || content.description || content.text || content.quote || content.price || content.navigation || content.address || '');
+        return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:16px;border:1px solid #e2e8f0;font-family:' + fontFamily + ';color:' + textColor + '"><strong style="color:#0F3A72">' + title + '</strong><div style="margin-top:6px;line-height:1.5">' + body + '</div></td></tr></table>';
+      }
       default:
         return '';
     }
@@ -465,8 +447,7 @@ export function generateEmailHtml(
         plainTextLines.push(`\n>>> ${rep(content.text)}: ${rep(content.link)} <<<`);
         break;
       case 'button-group':
-        plainTextLines.push(`\n>>> ${rep(content.btn1?.text || '')}: ${rep(content.btn1?.link || '')} <<<`);
-        plainTextLines.push(`>>> ${rep(content.btn2?.text || '')}: ${rep(content.btn2?.link || '')} <<<`);
+        (content.buttons || [content.btn1, content.btn2].filter(Boolean)).forEach((button: any) => plainTextLines.push(`>>> ${rep(button.text || '')}: ${rep(button.link || '')} <<<`));
         break;
       case 'highlight-box': {
         const text = (content.html || '').replace(/<[^>]+>/g, '\n').trim();

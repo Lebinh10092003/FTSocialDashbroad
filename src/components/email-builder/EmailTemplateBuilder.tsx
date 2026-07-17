@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 
 import { BlockType, EmailBlock, EmailSettings, EmailTemplate, EmailVariable } from '../../types/emailBuilder';
+import { createEmailBlock, getBlockDefinition } from '../../data/emailBlockRegistry';
 import { 
   loadTemplates, 
   saveTemplates, 
@@ -52,6 +53,8 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   // UI Tabs
   const [activeRightTab, setActiveRightTab] = useState<'block' | 'email'>('email');
   const [mobileActiveTab, setMobileActiveTab] = useState<'library' | 'canvas' | 'settings'>('canvas');
+  const [leftPanelWidth, setLeftPanelWidth] = useState(() => { const max = Math.max(152, Math.floor(window.innerWidth * 0.25)); return Math.max(96, Math.min(max, Number(localStorage.getItem('ft_email_left_panel_width')) || 152)); });
+  const [rightPanelWidth, setRightPanelWidth] = useState(() => Number(localStorage.getItem('ft_email_right_panel_width')) || 300);
   
   // Toast notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -95,7 +98,14 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
     const storedVars = localStorage.getItem('ft_email_variables');
     if (storedVars) {
       try {
-        setVariables(JSON.parse(storedVars));
+        const savedVariables: EmailVariable[] = JSON.parse(storedVars);
+        const savedByKey = new Map(savedVariables.map(variable => [variable.key, variable]));
+        const mergedVariables = [
+          ...DEFAULT_EMAIL_VARIABLES.map(variable => savedByKey.get(variable.key) || variable),
+          ...savedVariables.filter(variable => !DEFAULT_EMAIL_VARIABLES.some(defaultVariable => defaultVariable.key === variable.key))
+        ];
+        setVariables(mergedVariables);
+        localStorage.setItem('ft_email_variables', JSON.stringify(mergedVariables));
       } catch (e) {
         setVariables(DEFAULT_EMAIL_VARIABLES);
       }
@@ -154,6 +164,15 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
 
   const activeBlock = activeTemplate?.blocks.find(b => b.id === selectedBlockId);
 
+  const resizePanel = (side: 'left' | 'right', event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault(); const startX = event.clientX; const startWidth = side === 'left' ? leftPanelWidth : rightPanelWidth;
+    const move = (e: PointerEvent) => { const max = Math.floor(window.innerWidth * 0.25); const next = Math.max(side === 'left' ? 96 : 56, Math.min(max, startWidth + (side === 'left' ? e.clientX - startX : startX - e.clientX))); if (side === 'left') setLeftPanelWidth(next); else setRightPanelWidth(next); };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
+  useEffect(() => { localStorage.setItem('ft_email_left_panel_width', String(leftPanelWidth)); }, [leftPanelWidth]);
+  useEffect(() => { localStorage.setItem('ft_email_right_panel_width', String(rightPanelWidth)); }, [rightPanelWidth]);
+
   const getBlockLabel = (type?: BlockType) => {
     switch (type) {
       case 'logo': return 'Logo';
@@ -206,130 +225,9 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   // 4. Canvas Block Operations
   const handleAddBlock = (type: BlockType) => {
     if (!activeTemplate) return;
-    const newBlockId = `block-${Date.now()}`;
-    let defaultContent: Record<string, any> = {};
-    let defaultStyles: Record<string, any> = {
-      marginTop: 12,
-      marginBottom: 12
-    };
-
-    switch (type) {
-      case 'logo':
-        defaultContent = {
-          url: 'https://fermat.vn/UploadFile/Images/2025/8/18/Hinh_anh_638911101534359159.png',
-          alt: 'Logo',
-          width: 120,
-          align: 'center',
-          link: 'https://www.fermat.vn'
-        };
-        break;
-      case 'heading':
-        defaultContent = {
-          text: 'Nhấp để sửa tiêu đề mới',
-          level: 'h2',
-          fontSize: 20,
-          color: '#0f3a72',
-          bold: true,
-          align: 'left'
-        };
-        break;
-      case 'paragraph':
-        defaultContent = {
-          html: '<p>Nội dung đoạn văn mới. Nhấp vào đây để chỉnh sửa văn bản trực quan.</p>',
-          align: 'left'
-        };
-        break;
-      case 'image':
-        defaultContent = {
-          url: 'https://fermat.vn/UploadFile/Images/2025/8/18/Hinh_anh_638911101534359159.png',
-          alt: 'Banner hình ảnh',
-          width: 600,
-          align: 'center',
-          borderRadius: 8,
-          link: ''
-        };
-        break;
-      case 'bullet-list':
-      case 'number-list':
-        defaultContent = {
-          items: ['Mục danh sách thứ nhất', 'Mục danh sách thứ hai']
-        };
-        break;
-      case 'button':
-        defaultContent = {
-          text: 'Bấm nút đăng ký',
-          link: 'https://www.fermat.vn',
-          bg: '#1473d1',
-          color: '#ffffff',
-          radius: 8,
-          align: 'center',
-          width: 'auto'
-        };
-        break;
-      case 'button-group':
-        defaultContent = {
-          align: 'center',
-          gap: 15,
-          btn1: {
-            text: 'Nút bên trái',
-            link: 'https://www.fermat.vn',
-            bg: '#1473d1',
-            color: '#ffffff',
-            radius: 8
-          },
-          btn2: {
-            text: 'Nút bên phải',
-            link: 'https://www.fermat.vn',
-            bg: '#f1f5f9',
-            color: '#0f3a72',
-            radius: 8
-          }
-        };
-        break;
-      case 'highlight-box':
-        defaultContent = {
-          html: '<p><strong>Lưu ý đặc biệt:</strong> Đây là hộp thông tin chứa các chi tiết quan trọng cần thu hút sự chú ý.</p>',
-          bg: '#eef6ff',
-          borderColor: '#1473d1',
-          padding: 16
-        };
-        break;
-      case 'divider':
-        defaultStyles.thickness = 1;
-        defaultStyles.color = '#e2e8f0';
-        defaultStyles.borderStyle = 'solid';
-        break;
-      case 'spacer':
-        defaultStyles.height = 20;
-        break;
-      case 'signature':
-        defaultContent = {
-          html: '<p><strong>BAN TỔ CHỨC AYSBC VIỆT NAM</strong><br/>Công ty Cổ phần Công nghệ Giáo dục Fermat (FermatTech)</p>'
-        };
-        break;
-      case 'social-links':
-        defaultContent = {
-          align: 'center',
-          links: [
-            { label: 'Facebook', url: 'https://facebook.com', visible: true },
-            { label: 'Website', url: 'https://www.fermat.vn', visible: true }
-          ]
-        };
-        break;
-    }
-
-    const newBlock: EmailBlock = {
-      id: newBlockId,
-      type,
-      content: defaultContent,
-      styles: defaultStyles,
-      visible: true
-    };
-
-    const updatedBlocks = [...activeTemplate.blocks, newBlock];
-    handleUpdateTemplateBlocks(updatedBlocks);
-    setSelectedBlockId(newBlockId);
-    setMobileActiveTab('canvas'); // Switch view on mobile
+    const newBlock = createEmailBlock(type);
+    handleUpdateTemplateBlocks([...activeTemplate.blocks, newBlock]);
+    setSelectedBlockId(newBlock.id); setMobileActiveTab('canvas');
   };
 
   const handleMoveBlock = (id: string, direction: 'up' | 'down') => {
@@ -843,8 +741,9 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
         <div className="flex flex-1 overflow-hidden">
           
           {/* Left Block Selection Library */}
-          <div className={`hidden md:block ${mobileActiveTab === 'library' ? '!block absolute inset-0 z-40 bg-white md:relative md:inset-auto md:z-auto' : ''}`}>
-            <BlockLibrary onAddBlock={handleAddBlock} />
+          <div className={`hidden md:flex ${mobileActiveTab === 'library' ? '!block absolute inset-0 z-40 bg-white md:relative md:inset-auto md:z-auto' : ''}`}>
+            <BlockLibrary onAddBlock={handleAddBlock} width={leftPanelWidth} />
+             <div onPointerDown={(e) => resizePanel('left', e)} className="hidden md:block w-1.5 cursor-col-resize bg-transparent hover:bg-blue-400/50 active:bg-blue-500" aria-label={'K\u00e9o \u0111\u1ec3 \u0111\u1ed5i \u0111\u1ed9 r\u1ed9ng th\u01b0 vi\u1ec7n'} />
           </div>
 
           {/* Middle Email Design Canvas */}
@@ -894,12 +793,14 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
                 insertedVarName={insertedVar}
                 onClearInsertedVar={() => setInsertedVar(null)}
                 emailSettings={activeTemplate.settings}
+                onAddBlock={handleAddBlock}
               />
             </div>
           </div>
 
           {/* Right Parameters Settings Sidebar */}
-          <div className={`flex w-[380px] shrink-0 flex-col border-l border-slate-200/80 bg-white ${mobileActiveTab === 'settings' ? 'absolute inset-0 z-40 block md:relative md:inset-auto md:z-auto' : 'hidden md:flex'}`}>
+          <div onPointerDown={(e) => resizePanel('right', e)} className="hidden md:block w-1.5 shrink-0 cursor-col-resize bg-transparent hover:bg-blue-400/50 active:bg-blue-500" aria-label={'K\u00e9o \u0111\u1ec3 \u0111\u1ed5i \u0111\u1ed9 r\u1ed9ng b\u1ea3ng c\u00e0i \u0111\u1eb7t'} />
+           <div style={{ width: rightPanelWidth, maxWidth: '25vw', minWidth: 56 }} className={`flex shrink-0 flex-col border-l border-slate-200/80 bg-white ${mobileActiveTab === 'settings' ? 'absolute inset-0 z-40 block md:relative md:inset-auto md:z-auto' : 'hidden md:flex'}`}>
             <div className="border-b border-slate-200 bg-white p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">

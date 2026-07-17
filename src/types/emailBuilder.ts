@@ -11,7 +11,10 @@ export type BlockType =
   | 'divider'
   | 'spacer'
   | 'signature'
-  | 'social-links';
+  | 'social-links'
+  | 'section' | 'columns' | 'image-text' | 'data-table' | 'testimonial' | 'callout'
+  | 'gallery' | 'video' | 'feature-list' | 'product-card' | 'product-grid' | 'pricing-table'
+  | 'header' | 'footer' | 'merge-tag' | 'custom-html';
 
 export interface EmailBlock {
   id: string;
@@ -48,3 +51,7 @@ export interface EmailVariable {
   label: string;    // Display label
   defaultValue: string; // Mock data value for preview e.g. "Anh Minh"
 }
+
+export type BlockCategory = 'layout' | 'content' | 'media' | 'cta' | 'commerce' | 'brand' | 'advanced';
+export interface BlockProperty { key: string; type: 'text' | 'textarea' | 'url' | 'number' | 'color' | 'select'; label: string; options?: { value: string; label: string }[]; }
+export interface EmailBlockDefinition { id: BlockType; category: BlockCategory; label: string; description: string; icon: string; variants: { value: string; label: string }[]; defaultContent: Record<string, any>; defaultStyles?: Record<string, any>; propertiesSchema?: BlockProperty[]; }

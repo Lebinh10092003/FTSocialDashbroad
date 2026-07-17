@@ -1,9 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif;
-  --font-display: "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-sans: "Be Vietnam Pro", system-ui, -apple-system, sans-serif;
+  --font-display: "Be Vietnam Pro", system-ui, -apple-system, sans-serif;
 }
 
 /* Custom premium scrollbars */
@@ -24,6 +24,12 @@
 }
 
 /* Base Body background pattern */
+html, body, #root {
+  font-family: "Be Vietnam Pro", system-ui, -apple-system, sans-serif;
+}
+
+button, input, select, textarea { font: inherit; }
+
 body {
   background-color: #f8fafc;
   color: #0f172a;
