@@ -11,7 +11,7 @@ import { auth, googleProvider } from './firebase-config';
 import { Channel, UserRole } from './types';
 
 // Components (Lazy Loaded)
-import { ShieldAlert, AlertTriangle, Key, Layers, Lock, Mail, UserPlus, LogIn, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { ShieldAlert, AlertTriangle, Key, Layers, Lock, Mail, UserPlus, LogIn, LogOut, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -20,13 +20,14 @@ const Posts = lazy(() => import('./components/Posts'));
 const Sync = lazy(() => import('./components/Sync'));
 const Config = lazy(() => import('./components/Config'));
 const AccountManagement = lazy(() => import('./components/AccountManagement'));
+const EmailTemplateBuilder = lazy(() => import('./components/email-builder/EmailTemplateBuilder'));
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [idToken, setIdToken] = useState<string | null>(null);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<UserRole>('EMPLOYEE');  const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const [viewMode, setViewMode] = useState<'workspace' | 'app'>('workspace');
+  const [viewMode, setViewMode] = useState<'workspace' | 'social-dashboard' | 'email-builder'>('workspace');
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [authChecking, setAuthChecking] = useState<boolean>(true);
@@ -371,7 +372,7 @@ export default function App() {
             {/* Card 1: Active Social Analytics app */}
             <div 
               onClick={() => {
-                setViewMode('app');
+                setViewMode('social-dashboard');
                 setActiveTab('dashboard');
               }}
               className="glass-card p-6.5 rounded-3xl cursor-pointer group flex flex-col justify-between min-h-[220px]"
@@ -396,6 +397,33 @@ export default function App() {
                 Truy cập ứng dụng &rarr;
               </div>
             </div>
+
+            {/* Card 2: Active Email Builder app */}
+            <div 
+              onClick={() => {
+                setViewMode('email-builder');
+              }}
+              className="glass-card p-6.5 rounded-3xl cursor-pointer group flex flex-col justify-between min-h-[220px]"
+            >
+              <div className="space-y-4">
+                <div className="w-12 h-12 bg-gradient-to-tr from-blue-600 to-indigo-650 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">
+                  <Mail className="w-6 h-6" />
+                </div>
+                <div className="space-y-1.5">
+                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                    Trình tạo Email
+                    <span className="text-[9px] bg-emerald-50 text-emerald-700 font-extrabold px-1.5 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wide">Đang hoạt động</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Thiết kế email có hình ảnh, nội dung cá nhân hóa và copy trực tiếp vào Gmail.
+                  </p>
+                </div>
+              </div>
+              <div className="pt-4 flex items-center text-xs font-bold text-amber-600 group-hover:translate-x-1 transition-transform">
+                Truy cập ứng dụng &rarr;
+              </div>
+            </div>
+
 
 
             {/* Card 5: Assessment (Coming Soon) */}
@@ -432,6 +460,19 @@ export default function App() {
           Copyright &copy; 2026 FermatTech Workspace. Powered by Cloud Run containers & VPS PM2 engines.
         </footer>
       </div>
+    );
+  }
+
+  if (viewMode === 'email-builder') {
+    return (
+      <Suspense fallback={
+        <div className="flex flex-col items-center justify-center h-screen bg-slate-50 space-y-3">
+          <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-sm font-semibold text-slate-500">Đang nạp Trình tạo Email...</p>
+        </div>
+      }>
+        <EmailTemplateBuilder onBackToWorkspace={() => setViewMode('workspace')} />
+      </Suspense>
     );
   }
 
