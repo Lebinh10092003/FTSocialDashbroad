@@ -8,7 +8,8 @@ import {
   LogOut,
   UserCheck,
   UserCog,
-  ArrowLeft
+  ArrowLeft,
+  LogIn
 } from 'lucide-react';
 import { UserRole } from '../types';
 
@@ -95,13 +96,23 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, onLog
             </div>
           </div>
         </div>
-        <button
-          onClick={onLogout}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-slate-500 hover:text-rose-600 bg-slate-150 hover:bg-rose-50 border border-slate-200/30 hover:border-rose-100 rounded-xl transition-all cursor-pointer"
-        >
-          <LogOut className="w-3.5 h-3.5" />
-          Đăng xuất
-        </button>
+        {user?.email === 'guest@ftsocial.com' ? (
+          <button
+            onClick={onLogout}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all cursor-pointer shadow-sm active:scale-[0.99]"
+          >
+            <LogIn className="w-3.5 h-3.5" />
+            Đăng nhập Quản trị
+          </button>
+        ) : (
+          <button
+            onClick={onLogout}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-slate-500 hover:text-rose-600 bg-slate-150 hover:bg-rose-50 border border-slate-200/30 hover:border-rose-100 rounded-xl transition-all cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            Đăng xuất
+          </button>
+        )}
       </div>
     </div>
   );

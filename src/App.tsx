@@ -30,6 +30,7 @@ export default function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [authChecking, setAuthChecking] = useState<boolean>(true);
+  const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
 
   // Custom Auth state
   const [loginEmail, setLoginEmail] = useState('');
@@ -47,18 +48,30 @@ export default function App() {
       setGoogleAccessToken(cachedToken);
     }
 
-    // Tự động gán tài khoản Admin ảo để chạy ở chế độ Public hoàn toàn
-    const mockUser = {
-      email: 'admin@ftsocial.com',
-      displayName: 'FermatTech Workspace',
-      uid: 'mock-uid-admin',
-      photoURL: ''
-    } as any;
-    
-    setUser(mockUser);
-    setIdToken('mock-dev-token-admin@ftsocial.com');
-    setUserRole('ADMIN');
-    setAuthChecking(false);
+    // Đăng ký lắng nghe Firebase Auth để tự động phân quyền Admin nếu đã đăng nhập
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+        const token = await currentUser.getIdToken();
+        setIdToken(token);
+        try {
+          const profile = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+          if (profile.role) setUserRole(profile.role);
+        } catch (error) { console.error('Không thể tải vai trò:', error); }
+      } else {
+        // Mặc định nạp tài khoản Guest (Chỉ xem)
+        setUser({
+          email: 'guest@ftsocial.com',
+          displayName: 'Khách (Chỉ xem)',
+          uid: 'mock-uid-guest',
+          photoURL: ''
+        } as any);
+        setIdToken('mock-dev-token-guest@ftsocial.com');
+        setUserRole('EMPLOYEE');
+      }
+      setAuthChecking(false);
+    });
+    return unsubscribe;
   }, []);
 
   const handleCredentialsAuth = async (e: React.FormEvent) => {
@@ -105,6 +118,7 @@ export default function App() {
       setGoogleAccessToken('mock-google-access-token');
       setUserRole('ADMIN');
       setAuthLoading(false);
+      setShowLoginModal(false);
       return;
     }
 
@@ -125,6 +139,7 @@ export default function App() {
         // Login mode
         try {
           await signInWithEmailAndPassword(auth, emailToUse, loginPassword);
+          setShowLoginModal(false);
         } catch (signInErr: any) {
           // If the account is admin@ftsocial.com and password is Admin123 and they don't exist yet, auto seed it
           if (
@@ -183,6 +198,7 @@ export default function App() {
             'X-Google-OAuth-Token': token
           }
         }).catch(err => console.error('Lỗi lưu Google Access Token dự phòng lên server:', err));
+        setShowLoginModal(false);
       }
     } catch (err: any) {
       console.error('Lỗi đăng nhập Google:', err);
@@ -221,9 +237,28 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
-    // Không cho phép đăng xuất trong chế độ Public, chỉ reload lại trang
-    window.location.reload();
+  const handleLogout = async () => {
+    if (user?.email === 'guest@ftsocial.com') {
+      setShowLoginModal(true);
+      return;
+    }
+    
+    setAuthChecking(true);
+    try {
+      await auth.signOut();
+    } catch (err) {
+      console.error('Đăng xuất thất bại:', err);
+    }
+    // Khôi phục Guest mặc định
+    setUser({
+      email: 'guest@ftsocial.com',
+      displayName: 'Khách (Chỉ xem)',
+      uid: 'mock-uid-guest',
+      photoURL: ''
+    } as any);
+    setIdToken('mock-dev-token-guest@ftsocial.com');
+    setUserRole('EMPLOYEE');
+    setAuthChecking(false);
   };
 
   // Fetch all channels
@@ -277,23 +312,6 @@ export default function App() {
     );
   }
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-        <form onSubmit={handleCredentialsAuth} className="w-full max-w-lg bg-white rounded-3xl border border-slate-200 shadow-lg shadow-slate-200/60 p-9 md:p-10 space-y-5">
-          <div className="text-center mb-2">
-            <div className="mx-auto w-14 h-14 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-extrabold text-lg shadow-md shadow-blue-200">FT</div>
-            <h1 className="mt-4 text-2xl font-extrabold text-slate-900">FermatTech Workspace</h1>
-          </div>
-          <input value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="Email" className="w-full rounded-xl border border-slate-200 px-4 py-3.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" autoComplete="username" />
-          <input value={loginPassword} onChange={e => setLoginPassword(e.target.value)} type="password" placeholder="Mật khẩu" className="w-full rounded-xl border border-slate-200 px-4 py-3.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" autoComplete="current-password" />
-          {authError && <p className="text-xs text-rose-600">{authError}</p>}
-          <button disabled={authLoading} className="w-full rounded-xl bg-blue-600 py-3.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50">{authLoading ? 'Đang đăng nhập...' : 'Đăng nhập'}</button>
-          <button type="button" onClick={handleGoogleSignIn} disabled={authLoading} className="w-full rounded-xl border border-slate-200 py-3.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Đăng nhập bằng Google</button>
-        </form>
-      </div>
-    );
-  }
   // Render Workspace Portal
   if (viewMode === 'workspace') {
     return (
@@ -312,11 +330,32 @@ export default function App() {
               <p className="text-[9px] uppercase font-bold text-amber-600 tracking-wider">Workspace</p>
             </div>
           </div>
-          <div className="flex items-center gap-4 bg-white/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-slate-200/80 shadow-sm">
-            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
-            <span className="text-[11px] font-bold text-slate-600">Hệ thống đang hoạt động</span>
-          </div>
-        </header>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4 bg-white/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-slate-200/80 shadow-sm">
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+              <span className="text-[11px] font-bold text-slate-600">
+                {user?.email === 'guest@ftsocial.com' ? 'Chế độ xem' : 'Quản trị viên'}
+              </span>
+            </div>
+            {user?.email === 'guest@ftsocial.com' ? (
+              <button 
+                onClick={() => setShowLoginModal(true)} 
+                className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-650 text-white font-bold text-xs px-4 py-2 rounded-2xl shadow-md cursor-pointer hover:from-blue-700 hover:to-indigo-700 active:scale-[0.98] transition-all"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                Đăng nhập
+              </button>
+            ) : (
+              <button 
+                onClick={handleLogout} 
+                className="flex items-center gap-2 bg-slate-100 hover:bg-rose-50 text-slate-650 hover:text-rose-600 font-bold text-xs px-4 py-2 rounded-2xl border border-slate-200/60 hover:border-rose-100 cursor-pointer active:scale-[0.98] transition-all"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Đăng xuất
+              </button>
+            )}
+      </div>
+    </header>
 
         {/* Main Portal View */}
         <main className="flex-1 w-full max-w-6xl mx-auto px-6 py-10 flex flex-col justify-center z-10">
@@ -526,6 +565,65 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* Popup Login Modal */}
+      {showLoginModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-6">
+          <div className="relative w-full max-w-lg bg-white rounded-3xl border border-slate-200 shadow-2xl p-9 md:p-10 space-y-5 animate-fade-in">
+            {/* Nút đóng */}
+            <button 
+              onClick={() => setShowLoginModal(false)} 
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-xl transition-all cursor-pointer"
+              aria-label="Đóng cửa sổ"
+            >
+              ✕
+            </button>
+            
+            <form onSubmit={handleCredentialsAuth} className="space-y-5">
+              <div className="text-center mb-2">
+                <div className="mx-auto w-14 h-14 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-extrabold text-lg shadow-md shadow-blue-200">FT</div>
+                <h1 className="mt-4 text-2xl font-extrabold text-slate-900">FermatTech Workspace</h1>
+                <p className="text-xs text-slate-500 mt-1">Đăng nhập tài khoản quản trị để chỉnh sửa</p>
+              </div>
+              
+              <div className="space-y-3">
+                <input 
+                  value={loginEmail} 
+                  onChange={e => setLoginEmail(e.target.value)} 
+                  placeholder="Email hoặc tên tài khoản" 
+                  className="w-full rounded-xl border border-slate-200 px-4 py-3.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" 
+                  autoComplete="username" 
+                />
+                <input 
+                  value={loginPassword} 
+                  onChange={e => setLoginPassword(e.target.value)} 
+                  type="password" 
+                  placeholder="Mật khẩu" 
+                  className="w-full rounded-xl border border-slate-200 px-4 py-3.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" 
+                  autoComplete="current-password" 
+                />
+              </div>
+              
+              {authError && <p className="text-xs text-rose-600 font-semibold">{authError}</p>}
+              
+              <button 
+                disabled={authLoading} 
+                className="w-full rounded-xl bg-blue-600 py-3.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50 transition-all cursor-pointer"
+              >
+                {authLoading ? 'Đang đăng nhập...' : 'Đăng nhập'}
+              </button>
+              <button 
+                type="button" 
+                onClick={handleGoogleSignIn} 
+                disabled={authLoading} 
+                className="w-full rounded-xl border border-slate-200 py-3.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-all cursor-pointer"
+              >
+                Đăng nhập bằng Google
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
