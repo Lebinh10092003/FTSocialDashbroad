@@ -314,34 +314,34 @@ export default function App() {
   // Render Workspace Portal
   if (viewMode === 'workspace') {
     return (
-      <div className="min-h-screen liquid-bg flex flex-col justify-between text-stone-200 font-sans relative">
+      <div className="min-h-screen liquid-bg flex flex-col justify-between text-slate-700 font-sans relative">
         <div className="glow-sphere-1"></div>
         <div className="glow-sphere-2"></div>
         
         {/* Header */}
         <header className="w-full max-w-6xl mx-auto px-6 py-6 flex justify-between items-center z-10">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-600 flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-amber-950/40">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-600 flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-amber-500/20">
               FT
             </div>
             <div>
-              <h1 className="font-extrabold text-white text-base leading-tight tracking-tight">FT Workspace</h1>
-              <p className="text-[9px] uppercase font-bold text-amber-500 tracking-wider">Workspace</p>
+              <h1 className="font-extrabold text-slate-950 text-base leading-tight tracking-tight">FT Workspace</h1>
+              <p className="text-[9px] uppercase font-bold text-amber-600 tracking-wider">Workspace</p>
             </div>
           </div>
-          <div className="flex items-center gap-4 bg-stone-900/40 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/5">
+          <div className="flex items-center gap-4 bg-white/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-slate-200/80 shadow-sm">
             <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
-            <span className="text-[11px] font-bold text-stone-300">Hệ thống đang hoạt động</span>
+            <span className="text-[11px] font-bold text-slate-600">Hệ thống đang hoạt động</span>
           </div>
         </header>
 
         {/* Main Portal View */}
         <main className="flex-1 w-full max-w-6xl mx-auto px-6 py-10 flex flex-col justify-center z-10">
           <div className="text-center max-w-2xl mx-auto mb-12 space-y-3">
-            <h2 className="text-3xl md:text-4xl font-extrabold text-white tracking-tight leading-none">
+            <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight leading-none">
               Không gian làm việc <span className="text-gold-gradient">FT Workspace</span>
             </h2>
-            <p className="text-xs text-stone-400 max-w-md mx-auto">
+            <p className="text-xs text-slate-500 max-w-md mx-auto">
               Cổng quản trị hợp nhất các công cụ đồng bộ dữ liệu, phân tích mạng xã hội và tự động hóa quy trình chăm sóc khách hàng.
             </p>
           </div>
@@ -357,22 +357,22 @@ export default function App() {
               className="glass-card p-6.5 rounded-3xl cursor-pointer group flex flex-col justify-between min-h-[220px]"
             >
               <div className="space-y-4">
-                <div className="w-12 h-12 bg-gradient-to-tr from-blue-500 to-indigo-650 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-900/30 group-hover:scale-110 transition-transform">
+                <div className="w-12 h-12 bg-gradient-to-tr from-blue-500 to-indigo-650 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2" />
                   </svg>
                 </div>
                 <div className="space-y-1.5">
-                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
                     Social Analytics Dashboard
-                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-extrabold px-1.5 py-0.5 rounded-full border border-emerald-500/30 uppercase tracking-wide">Đang chạy</span>
+                    <span className="text-[9px] bg-emerald-50 text-emerald-700 font-extrabold px-1.5 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wide">Đang chạy</span>
                   </h3>
-                  <p className="text-xs text-stone-400 leading-relaxed">
+                  <p className="text-xs text-slate-500 leading-relaxed">
                     Hệ thống tích hợp dữ liệu, theo dõi tương tác thời gian thực từ Facebook Page, Zalo OA và đồng bộ tự động báo cáo Google Sheets.
                   </p>
                 </div>
               </div>
-              <div className="pt-4 flex items-center text-xs font-bold text-amber-500 group-hover:translate-x-1 transition-transform">
+              <div className="pt-4 flex items-center text-xs font-bold text-amber-600 group-hover:translate-x-1 transition-transform">
                 Truy cập ứng dụng &rarr;
               </div>
             </div>
@@ -380,22 +380,22 @@ export default function App() {
             {/* Card 2: Zalo Broadcast (Coming Soon) */}
             <div className="glass-card p-6.5 rounded-3xl opacity-80 relative group flex flex-col justify-between min-h-[220px]">
               <div className="space-y-4">
-                <div className="w-12 h-12 bg-gradient-to-tr from-sky-400 to-blue-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-sky-950/20">
+                <div className="w-12 h-12 bg-gradient-to-tr from-sky-400 to-blue-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-sky-500/10">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                   </svg>
                 </div>
                 <div className="space-y-1.5">
-                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
                     Zalo Broadcast Hub
-                    <span className="text-[9px] bg-stone-700/30 text-stone-400 font-extrabold px-1.5 py-0.5 rounded-full border border-stone-600/30 uppercase tracking-wide">Sắp ra mắt</span>
+                    <span className="text-[9px] bg-slate-100 text-slate-500 font-extrabold px-1.5 py-0.5 rounded-full border border-slate-200 uppercase tracking-wide">Sắp ra mắt</span>
                   </h3>
-                  <p className="text-xs text-stone-400 leading-relaxed">
+                  <p className="text-xs text-slate-500 leading-relaxed">
                     Module gửi tin nhắn chăm sóc khách hàng hàng loạt, tối ưu hóa tiếp thị và hỗ trợ quản trị hội thoại tự động đa kênh.
                   </p>
                 </div>
               </div>
-              <div className="pt-4 text-xs font-bold text-stone-500">
+              <div className="pt-4 text-xs font-bold text-slate-400">
                 Đang phát triển
               </div>
             </div>
@@ -403,22 +403,22 @@ export default function App() {
             {/* Card 3: AI Chatbot (Coming Soon) */}
             <div className="glass-card p-6.5 rounded-3xl opacity-80 relative group flex flex-col justify-between min-h-[220px]">
               <div className="space-y-4">
-                <div className="w-12 h-12 bg-gradient-to-tr from-purple-500 to-pink-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-purple-950/20">
+                <div className="w-12 h-12 bg-gradient-to-tr from-purple-500 to-pink-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-purple-500/10">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                   </svg>
                 </div>
                 <div className="space-y-1.5">
-                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
                     AI Auto-Responder Bot
-                    <span className="text-[9px] bg-stone-700/30 text-stone-400 font-extrabold px-1.5 py-0.5 rounded-full border border-stone-600/30 uppercase tracking-wide">Sắp ra mắt</span>
+                    <span className="text-[9px] bg-slate-100 text-slate-500 font-extrabold px-1.5 py-0.5 rounded-full border border-slate-200 uppercase tracking-wide">Sắp ra mắt</span>
                   </h3>
-                  <p className="text-xs text-stone-400 leading-relaxed">
+                  <p className="text-xs text-slate-500 leading-relaxed">
                     Tự động phản hồi bình luận, tin nhắn của khách hàng trên Facebook Page bằng công nghệ xử lý ngôn ngữ tự nhiên Google Gemini AI.
                   </p>
                 </div>
               </div>
-              <div className="pt-4 text-xs font-bold text-stone-500">
+              <div className="pt-4 text-xs font-bold text-slate-400">
                 Đang phát triển
               </div>
             </div>
@@ -426,22 +426,22 @@ export default function App() {
             {/* Card 4: System Administration (Coming Soon) */}
             <div className="glass-card p-6.5 rounded-3xl opacity-80 relative group flex flex-col justify-between min-h-[220px]">
               <div className="space-y-4">
-                <div className="w-12 h-12 bg-gradient-to-tr from-amber-500 to-orange-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-amber-950/20">
+                <div className="w-12 h-12 bg-gradient-to-tr from-amber-500 to-orange-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-amber-500/10">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                   </svg>
                 </div>
                 <div className="space-y-1.5">
-                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
                     System Administration
-                    <span className="text-[9px] bg-stone-700/30 text-stone-400 font-extrabold px-1.5 py-0.5 rounded-full border border-stone-600/30 uppercase tracking-wide">Sắp ra mắt</span>
+                    <span className="text-[9px] bg-slate-100 text-slate-500 font-extrabold px-1.5 py-0.5 rounded-full border border-slate-200 uppercase tracking-wide">Sắp ra mắt</span>
                   </h3>
-                  <p className="text-xs text-stone-400 leading-relaxed">
+                  <p className="text-xs text-slate-500 leading-relaxed">
                     Cổng giám sát cấu hình phần cứng VPS, sao lưu cơ sở dữ liệu Firebase/JSON DB và quản lý phân quyền thành viên chi tiết.
                   </p>
                 </div>
               </div>
-              <div className="pt-4 text-xs font-bold text-stone-500">
+              <div className="pt-4 text-xs font-bold text-slate-400">
                 Đang phát triển
               </div>
             </div>
@@ -449,34 +449,34 @@ export default function App() {
             {/* Card 5: Assessment (Coming Soon) */}
             <div className="glass-card p-6.5 rounded-3xl opacity-80 relative group flex flex-col justify-between min-h-[220px]">
               <div className="space-y-4">
-                <div className="w-12 h-12 bg-gradient-to-tr from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-950/20">
+                <div className="w-12 h-12 bg-gradient-to-tr from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-500/10">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 </div>
                 <div className="space-y-1.5">
-                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">Khảo thí <span className="text-[9px] bg-stone-700/30 text-stone-400 font-extrabold px-1.5 py-0.5 rounded-full border border-stone-600/30 uppercase tracking-wide">Sắp ra mắt</span></h3>
-                  <p className="text-xs text-stone-400 leading-relaxed">Quản lý các cuộc thi tại FermatTech.</p>
+                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">Khảo thí <span className="text-[9px] bg-slate-100 text-slate-500 font-extrabold px-1.5 py-0.5 rounded-full border border-slate-200 uppercase tracking-wide">Sắp ra mắt</span></h3>
+                  <p className="text-xs text-slate-500 leading-relaxed">Quản lý các cuộc thi tại FermatTech.</p>
                 </div>
               </div>
-              <div className="pt-4 text-xs font-bold text-stone-500">Đang phát triển</div>
+              <div className="pt-4 text-xs font-bold text-slate-400">Đang phát triển</div>
             </div>
 
             {/* Card 6: Digital Training (Coming Soon) */}
             <div className="glass-card p-6.5 rounded-3xl opacity-80 relative group flex flex-col justify-between min-h-[220px]">
               <div className="space-y-4">
-                <div className="w-12 h-12 bg-gradient-to-tr from-cyan-500 to-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-cyan-950/20">
+                <div className="w-12 h-12 bg-gradient-to-tr from-cyan-500 to-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-cyan-500/10">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v11.494m-9-5.747h18M4.5 8.5h15M4.5 15.5h15M12 3a9 9 0 100 18 9 9 0 000-18z" /></svg>
                 </div>
                 <div className="space-y-1.5">
-                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">Đào tạo số <span className="text-[9px] bg-stone-700/30 text-stone-400 font-extrabold px-1.5 py-0.5 rounded-full border border-stone-600/30 uppercase tracking-wide">Sắp ra mắt</span></h3>
-                  <p className="text-xs text-stone-400 leading-relaxed">Công tác đào tạo Chuyển đổi số, Đào tạo Ứng dụng AI trong công việc.</p>
+                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">Đào tạo số <span className="text-[9px] bg-slate-100 text-slate-500 font-extrabold px-1.5 py-0.5 rounded-full border border-slate-200 uppercase tracking-wide">Sắp ra mắt</span></h3>
+                  <p className="text-xs text-slate-500 leading-relaxed">Công tác đào tạo Chuyển đổi số, Đào tạo Ứng dụng AI trong công việc.</p>
                 </div>
               </div>
-              <div className="pt-4 text-xs font-bold text-stone-500">Đang phát triển</div>
+              <div className="pt-4 text-xs font-bold text-slate-400">Đang phát triển</div>
             </div>          </div>
         </main>
 
         {/* Footer */}
-        <footer className="w-full text-center py-6 text-[10px] text-stone-500 z-10 border-t border-white/5">
+        <footer className="w-full text-center py-6 text-[10px] text-slate-400 z-10 border-t border-slate-200">
           Copyright &copy; 2026 FermatTech Workspace. Powered by Cloud Run containers & VPS PM2 engines.
         </footer>
       </div>
