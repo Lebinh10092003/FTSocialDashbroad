@@ -1,9 +1,9 @@
 export function sanitizeHtml(html: string): string {
   if (typeof window === 'undefined') return html;
   
-  // Safe HTML tags list
+  // Safe HTML tags list (including img tags for inline images)
   const allowedTags = new Set([
-    'p', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 'br', 'a', 'ul', 'ol', 'li'
+    'p', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 'br', 'a', 'ul', 'ol', 'li', 'img'
   ]);
   
   const parser = new DOMParser();
@@ -43,6 +43,20 @@ export function sanitizeHtml(html: string): string {
           newEl.setAttribute('href', href);
           newEl.setAttribute('target', '_blank');
         }
+      }
+      
+      if (tagName === 'img') {
+        const src = el.getAttribute('src') || '';
+        // Block javascript: URLs in image sources
+        if (src && !src.trim().toLowerCase().startsWith('javascript:')) {
+          newEl.setAttribute('src', src);
+        }
+        const alt = el.getAttribute('alt');
+        if (alt) newEl.setAttribute('alt', alt);
+        const width = el.getAttribute('width');
+        if (width) newEl.setAttribute('width', width);
+        const height = el.getAttribute('height');
+        if (height) newEl.setAttribute('height', height);
       }
       
       // Safe attributes
