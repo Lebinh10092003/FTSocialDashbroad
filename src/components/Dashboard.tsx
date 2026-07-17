@@ -31,6 +31,7 @@ import {
 import { Channel, DashboardData } from '../types';
 
 const COLORS = ['#2563eb', '#0f766e', '#f59e0b', '#ef4444', '#7c3aed', '#ec4899', '#0891b2', '#ea580c'];
+const DEFAULT_AUTO_SCALE_STEPS = 8;
 
 interface DashboardProps {
   idToken: string;
@@ -40,7 +41,6 @@ interface DashboardProps {
 
 type TrendMetric = 'views' | 'engagement' | 'postsCount' | 'engagementRate' | 'followers';
 type DatePreset = 'custom' | '7days' | '30days' | '3months';
-type TrendScale = '2000' | '5000' | '10000' | 'auto';
 
 interface FollowerTrendPoint {
   date: string;
@@ -84,33 +84,29 @@ const getDateAxisTicks = (startDate: string, endDate: string): string[] => {
   return ticks;
 };
 
-const getNiceStep = (value: number) => {
-  const magnitude = 10 ** Math.floor(Math.log10(Math.max(value, 1)));
-  const normalized = value / magnitude;
-  const multiplier = [1, 2, 5, 10].find(candidate => normalized <= candidate) || 10;
-  return multiplier * magnitude;
+const roundUpScaleStep = (value: number) => {
+  const increment = value >= 10_000 ? 1_000 : value >= 1_000 ? 100 : value >= 100 ? 10 : 1;
+  return Math.max(increment, Math.ceil(value / increment) * increment);
 };
 
-const getYAxisScale = (values: number[], trendScale: TrendScale, includeZero = true): YAxisScale => {
+const getYAxisScale = (values: number[], divisions: number, includeZero = true): YAxisScale => {
   const validValues = values.filter(value => Number.isFinite(value));
   const minValue = validValues.length ? Math.min(...validValues) : 0;
   const maxValue = validValues.length ? Math.max(...validValues) : 0;
 
   if (!includeZero) {
     const range = Math.max(maxValue - minValue, Math.max(maxValue * 0.02, 1));
-    const step = getNiceStep(range / 8);
+    const step = roundUpScaleStep(range / divisions);
     const domainMin = Math.max(0, Math.floor((minValue - range * 0.15) / step) * step);
     const domainMax = Math.ceil((maxValue + range * 0.15) / step) * step;
-    const ticks = Array.from({ length: Math.min(11, Math.round((domainMax - domainMin) / step) + 1) }, (_, index) => domainMin + index * step);
+    const ticks = Array.from({ length: Math.min(12, Math.round((domainMax - domainMin) / step) + 1) }, (_, index) => domainMin + index * step);
     return { domain: [domainMin, domainMax || step], ticks };
   }
 
-  const baseStep = trendScale === 'auto' ? getNiceStep(Math.max(maxValue, 1) / 10) : Number(trendScale);
-  const minimumDomain = baseStep * 5;
-  const requiredDomain = Math.max(maxValue, minimumDomain);
-  const step = Math.ceil(requiredDomain / 10 / baseStep) * baseStep;
-  const domainMax = Math.ceil(requiredDomain / step) * step;
-  const ticks = Array.from({ length: Math.round(domainMax / step) + 1 }, (_, index) => index * step);
+  const requiredDomain = Math.max(maxValue, 1);
+  const step = roundUpScaleStep(requiredDomain / divisions);
+  const domainMax = step * divisions;
+  const ticks = Array.from({ length: divisions + 1 }, (_, index) => index * step);
   return { domain: [0, domainMax], ticks };
 };
 
@@ -140,7 +136,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
   const [isChannelPickerOpen, setIsChannelPickerOpen] = useState(false);
   const [onlyShowTotal, setOnlyShowTotal] = useState(false);
-  const [trendScale, setTrendScale] = useState<TrendScale>('2000');
+  const [manualScaleSteps, setManualScaleSteps] = useState<number | null>(null);
 
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -318,6 +314,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
       idle: 'bg-emerald-50 text-emerald-700',
     },
     {
+      metric: 'followers',
       title: 'Lượt follow',
       value: data.kpis.followersAvailable ? data.kpis.followers.toLocaleString('vi-VN') : 'Chưa có dữ liệu',
       description: channelFilter === 'all' ? 'Tổng follower hiện tại của các trang đã chọn' : 'Follower hiện tại của trang đã chọn',
@@ -338,7 +335,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
     ]);
   const yAxisScale = getYAxisScale(
     isFollowerMetric ? followerTrend.map(point => point.followersCount) : contentTrendValues,
-    trendScale,
+    manualScaleSteps || DEFAULT_AUTO_SCALE_STEPS,
     !isFollowerMetric,
   );
   const xAxisTicks = getDateAxisTicks(startDate, endDate);
@@ -457,6 +454,21 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                 <p className="text-sm text-slate-500 mt-1">{isFollowerMetric ? 'Chọn trang để xem biến động người theo dõi trong khoảng thời gian đang lọc.' : 'Chọn KPI phía trên để đổi chỉ số hiển thị trên biểu đồ.'}</p>
               </div>
               <div className="flex items-start gap-2">
+                <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm">
+                  <span className="text-xs font-bold text-slate-600 whitespace-nowrap">Thay đổi thang đo</span>
+                  <input
+                    type="range"
+                    min="5"
+                    max="10"
+                    step="1"
+                    value={manualScaleSteps || DEFAULT_AUTO_SCALE_STEPS}
+                    onChange={event => setManualScaleSteps(Number(event.target.value))}
+                    className="w-20 accent-blue-600"
+                    aria-label="Thay đổi thang đo biểu đồ"
+                  />
+                  <span className="min-w-14 text-right text-xs font-extrabold text-slate-700">{manualScaleSteps ? `${manualScaleSteps} nấc` : 'Tự động'}</span>
+                  {manualScaleSteps && <button type="button" onClick={() => setManualScaleSteps(null)} className="text-[11px] font-bold text-blue-700 hover:text-blue-900">Tự động</button>}
+                </div>
                 {isFollowerMetric ? (
                   <select
                     value={followerTrendChannelId}
@@ -470,12 +482,6 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                   </select>
                 ) : (
                   <>
-                    <select value={trendScale} onChange={event => setTrendScale(event.target.value as TrendScale)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm">
-                      <option value="2000">Mốc 2.000</option>
-                      <option value="5000">Mốc 5.000</option>
-                      <option value="10000">Mốc 10.000</option>
-                      <option value="auto">Tự động</option>
-                    </select>
                     <div className="relative">
                       <button onClick={() => setIsChannelPickerOpen(open => !open)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm">
                         Chọn kênh hiển thị ({selectedChannels.size}) ▾
@@ -513,7 +519,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={followerChartData} margin={{ top: 16, right: 18, left: 0, bottom: 12 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                      <XAxis dataKey="date" ticks={xAxisTicks} interval={0} minTickGap={12} tickFormatter={(value: string) => value.slice(5).replace('-', '/')} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
+                      <XAxis dataKey="date" ticks={xAxisTicks} interval={0} minTickGap={12} tickFormatter={(value: string) => value.slice(5).split('-').reverse().join('/')} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
                       <YAxis domain={yAxisScale.domain} ticks={yAxisScale.ticks} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
                       <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: 10, color: '#fff', fontSize: 12 }} itemStyle={{ color: '#fff' }} labelStyle={{ color: '#fff', fontWeight: 700 }} formatter={(value: number) => [Number(value).toLocaleString('vi-VN'), 'Người theo dõi']} />
                       <Line type="monotone" dataKey="followersCount" name="Người theo dõi" stroke="#7c3aed" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
@@ -530,7 +536,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                       {data.channelStats.map((stat, index) => <linearGradient key={stat.channelName} id={`channel-${index}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={COLORS[index % COLORS.length]} stopOpacity={0.18} /><stop offset="95%" stopColor={COLORS[index % COLORS.length]} stopOpacity={0} /></linearGradient>)}
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="date" ticks={xAxisTicks} interval={0} minTickGap={12} tickFormatter={(value: string) => value.slice(5).replace('-', '/')} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="date" ticks={xAxisTicks} interval={0} minTickGap={12} tickFormatter={(value: string) => value.slice(5).split('-').reverse().join('/')} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
                     <YAxis domain={yAxisScale.domain} ticks={yAxisScale.ticks} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
                     <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: 10, color: '#fff', fontSize: 12 }} itemStyle={{ color: '#fff' }} labelStyle={{ color: '#fff', fontWeight: 700 }} wrapperStyle={{ zIndex: 30, outline: 'none', pointerEvents: 'none' }} formatter={(value: number, name: string) => [Number(value).toLocaleString('vi-VN'), name]} />
                     <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" />
