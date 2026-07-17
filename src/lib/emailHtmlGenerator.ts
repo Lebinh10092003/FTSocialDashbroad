@@ -36,13 +36,24 @@ export function generateEmailHtml(
   processedSubject = replaceVariables(processedSubject, variables, useMock);
 
   // Helper to check HTTPS image URLs
+  // Helper to check HTTPS image URLs
   const checkImageUrl = (url: string, blockName: string) => {
     if (!url) return;
     if (url.startsWith('data:image/')) return;
+    
+    const lowerUrl = url.toLowerCase();
+    
     if (url.startsWith('blob:')) {
-      warnings.push(`[${blockName}] Ảnh blob sẽ được cố gắng nhúng khi copy, nhưng nên dùng ảnh đã upload hoặc URL HTTPS.`);
-    } else if (!url.toLowerCase().startsWith('https://')) {
-      warnings.push(`[${blockName}] URL ảnh "${url}" không sử dụng HTTPS bảo mật.`);
+      warnings.push(`[${blockName}] Ảnh blob ("${url}") chỉ có hiệu lực trên trình duyệt hiện tại và người nhận thư sẽ không thể tải được. Tuy nhiên, ảnh blob sẽ được tự động biên dịch nhúng (Base64) khi thực hiện copy để tạo email hoàn chỉnh.`);
+    } else if (
+      lowerUrl.includes('localhost') || 
+      lowerUrl.includes('127.0.0.1') || 
+      lowerUrl.startsWith('/') || 
+      (!lowerUrl.startsWith('http://') && !lowerUrl.startsWith('https://') && !lowerUrl.startsWith('data:'))
+    ) {
+      warnings.push(`[${blockName}] URL ảnh chỉ khả dụng cục bộ ("${url}") và người nhận thư sẽ không thể tải được. Tuy nhiên, ảnh nội bộ sẽ được tự động biên dịch nhúng (Base64) khi thực hiện copy để tạo email hoàn chỉnh.`);
+    } else if (lowerUrl.startsWith('http://')) {
+      warnings.push(`[${blockName}] URL ảnh "${url}" không sử dụng HTTPS bảo mật. Hãy chuyển sang link HTTPS để đảm bảo hình ảnh không bị chặn.`);
     }
   };
 
@@ -392,11 +403,11 @@ export function generateEmailHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${processedSubject}</title>
 </head>
-<body style="margin: 0; padding: 0; background-color: ${settings.externalBg}; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;">
-  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; background-color: ${settings.externalBg};">
+<body style="margin: 0; padding: 0; background-color: #ffffff; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;">
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; background-color: #ffffff;">
     <tr>
-      <td align="center" style="padding: 24px 8px;">
-        <table role="presentation" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; background-color: ${settings.contentBg}; border-radius: ${settings.borderRadius}px; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);">
+      <td align="center" style="padding: 0;">
+        <table role="presentation" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
           <tr>
             <td style="padding: ${settings.contentPadding}px;">
               ${blockHtmls}
@@ -410,10 +421,10 @@ export function generateEmailHtml(
 </html>`;
 
   // Clean wrapper snippet for safe Gmail copying
-  const copyHtml = `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; background-color: ${settings.externalBg};">
+  const copyHtml = `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; background-color: #ffffff;">
   <tr>
-    <td align="center" style="padding: 24px 8px;">
-      <table role="presentation" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; background-color: ${settings.contentBg}; border-radius: ${settings.borderRadius}px; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);">
+    <td align="center" style="padding: 0;">
+      <table role="presentation" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
         <tr>
           <td style="padding: ${settings.contentPadding}px;">
             ${blockHtmls}

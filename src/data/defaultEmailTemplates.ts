@@ -9,7 +9,7 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplate[] = [
       maxWidth: 650,
       externalBg: '#f8fafc',
       contentBg: '#ffffff',
-      fontFamily: 'Arial',
+      fontFamily: 'Arial, Helvetica, sans-serif',
       textColor: '#1e293b',
       contentPadding: 24,
       borderRadius: 16,
@@ -41,22 +41,31 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplate[] = [
         visible: true,
         styles: {
           marginTop: 10,
-          marginBottom: 10
+          marginBottom: 15
         },
         content: {
-          html: '<p>Kính gửi {{Danh xưng}} {{Tên phụ huynh}},</p>'
+          html: `<p>Kính gửi Quý phụ huynh,</p>
+<p>Khi tìm hiểu về một sân chơi học thuật cho con, điều đầu tiên bố mẹ quan tâm thường không phải là giải thưởng, mà là: <em>"Liệu cuộc thi này có thực sự mang lại giá trị thực chất và trải nghiệm bổ ích cho con mình?"</em></p>
+<p>Nếu con đã từng thử sức ở các kỳ thi Toán, Khoa học hay Tiếng Anh truyền thống, Ban tổ chức FermatTech trân trọng giới thiệu một hành trình trải nghiệm rất khác biệt:</p>
+<p style="font-weight: bold; text-align: center; color: #0f3a72; font-size: 16px; margin: 15px 0;">Cuộc thi Huy hiệu Nhà khoa học Trẻ Châu Á 2026 (AYSBC 2026).</p>
+<p>Đây là chương trình giáo dục STEM uy tín được phát triển bởi <strong>Science Centre Singapore Global</strong> (cơ quan trực thuộc Bộ Giáo dục Singapore) với lịch sử hơn 40 năm và hơn 1 triệu huy hiệu đã được trao cho học sinh xuất sắc trong khu vực.</p>`
         }
       },
       {
         id: 'block-3',
-        type: 'paragraph',
+        type: 'image',
         visible: true,
         styles: {
-          marginTop: 10,
-          marginBottom: 15
+          marginTop: 15,
+          marginBottom: 20
         },
         content: {
-          html: '<p>FermatTech xin gửi tới phụ huynh thông tin cuộc thi và chương trình trải nghiệm khoa học AYSBC 2026 dành cho học sinh.</p>'
+          url: 'https://fermat.vn/UploadFile/Images/2025/8/18/Hinh_anh_638911101534359159.png',
+          alt: 'AYSBC 2026 Banner',
+          width: 600,
+          align: 'center',
+          borderRadius: 8,
+          link: 'https://www.fermat.vn'
         }
       },
       {
@@ -68,12 +77,12 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplate[] = [
           marginBottom: 10
         },
         content: {
-          text: 'Đấu trường Khoa học Châu Á AYSBC 2026',
+          text: 'Phương pháp học qua Huy hiệu được UNESCO và OECD khuyến nghị',
           level: 'h2',
           bold: true,
           color: '#0f3a72',
-          fontSize: 20,
-          align: 'center'
+          fontSize: 18,
+          align: 'left'
         }
       },
       {
@@ -85,70 +94,68 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplate[] = [
           marginBottom: 15
         },
         content: {
-          html: '<p>Kỳ thi Đấu trường Khoa học Châu Á (Asian Youth Science Badge Competition - AYSBC) được tổ chức bởi Science Centre Singapore. Đây là cơ hội để học sinh thể hiện niềm đam mê khoa học, làm quen với phương pháp thực hành, quan sát thực tế.</p>'
+          html: `<p>Thay vì bắt đầu bằng việc luyện đề căng thẳng, AYSBC áp dụng phương pháp tiếp cận tiên tiến: <strong>Học trước khi thi, khám phá trước khi đánh giá</strong>.</p>
+<p>Học sinh sẽ từng bước hoàn thành các nhiệm vụ thực hành thực tế để tích lũy 15 ngôi sao (Stars) trên hệ thống trực tuyến trước khi bước vào bài thi chính thức. Phương pháp học tập thông qua khám phá và giải quyết vấn đề này đã được cả UNESCO và OECD khuyến nghị áp dụng nhằm bồi dưỡng năng lực tự học, tư duy chủ động cho học sinh thế kỷ 21.</p>`
         }
       },
       {
         id: 'block-6',
-        type: 'image',
+        type: 'heading',
         visible: true,
         styles: {
-          marginTop: 15,
-          marginBottom: 15
+          marginTop: 20,
+          marginBottom: 10
         },
         content: {
-          url: 'https://fermat.vn/UploadFile/Images/2025/8/18/Hinh_anh_638911101534359159.png',
-          alt: 'AYSBC Banner',
-          width: 600,
-          align: 'center',
-          borderRadius: 8,
-          link: 'https://www.fermat.vn'
+          text: 'Đưa khoa học ra khỏi phòng kính – Phù hợp với từng độ tuổi của con',
+          level: 'h2',
+          bold: true,
+          color: '#0f3a72',
+          fontSize: 18,
+          align: 'left'
         }
       },
       {
         id: 'block-7',
-        type: 'heading',
-        visible: true,
-        styles: {
-          marginTop: 20,
-          marginBottom: 10
-        },
-        content: {
-          text: 'Phương pháp học khoa học qua hệ thống Huy hiệu (Badge system)',
-          level: 'h3',
-          bold: true,
-          color: '#1473d1',
-          fontSize: 16,
-          align: 'left'
-        }
-      },
-      {
-        id: 'block-8',
         type: 'paragraph',
         visible: true,
         styles: {
           marginTop: 10,
+          marginBottom: 10
+        },
+        content: {
+          html: `<p>Chương trình được thiết kế cá nhân hóa để đồng hành cùng con từ Lớp 1 đến Lớp 12 thông qua những chủ đề trực quan, gần gũi:</p>
+<p><strong>Bảng A - C (Khối Lớp 1 - 6): Khơi mở giác quan và thế giới tự nhiên</strong><br/>
+Con tự tay thực hiện các dự án nhỏ ngay tại nhà để chinh phục các huy hiệu danh giá:</p>`
+        }
+      },
+      {
+        id: 'block-8',
+        type: 'bullet-list',
+        visible: true,
+        styles: {
+          marginTop: 5,
           marginBottom: 15
         },
         content: {
-          html: '<p>Học sinh tham gia sẽ thực hiện các thử thách thực hành khoa học ngay tại nhà (trong căn bếp hoặc khu vườn) và quay video báo cáo để tích lũy huy hiệu từ Science Centre Singapore.</p>'
+          items: [
+            '<strong>Young Entomologist</strong> (Nhà côn trùng học trẻ - quan sát vòng đời côn trùng quanh nhà)',
+            '<strong>Young Botanist</strong> (Nhà thực vật học trẻ - khám phá sự kỳ diệu của thực vật)',
+            '<strong>Young Food Scientist</strong> (Nhà khoa học thực phẩm trẻ - tìm hiểu phản ứng hóa sinh ngay trong bếp ăn gia đình)'
+          ]
         }
       },
       {
         id: 'block-9',
-        type: 'heading',
+        type: 'paragraph',
         visible: true,
         styles: {
-          marginTop: 20,
+          marginTop: 10,
           marginBottom: 10
         },
         content: {
-          text: 'Chương trình thử thách theo khối lớp',
-          level: 'h3',
-          bold: true,
-          color: '#1473d1',
-          fontSize: 16,
-          align: 'left'
+          html: `<p><strong>Bảng D - E (Khối Lớp 7 - 12): Tư duy toàn cầu và Kiến tạo hồ sơ học thuật</strong><br/>
+Con thử thách bản thân với các bài toán mang tính giải quyết vấn đề (Problem-solving) qua các chủ đề:</p>`
         }
       },
       {
@@ -156,29 +163,26 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplate[] = [
         type: 'bullet-list',
         visible: true,
         styles: {
-          marginTop: 10,
+          marginTop: 5,
           marginBottom: 10
         },
         content: {
           items: [
-            'Thử thách "Kitchen Scientist" (Lớp 1–3)',
-            'Thử thách "Young Botanist" (Lớp 4–6)'
+            '<strong>Young Mathematician</strong> (Toán học ứng dụng)',
+            '<strong>Young Sustainability Champion</strong> (Nhà phát triển bền vững trẻ - nghiên cứu về biến đổi khí hậu, lối sống xanh)'
           ]
         }
       },
       {
         id: 'block-11',
-        type: 'bullet-list',
+        type: 'paragraph',
         visible: true,
         styles: {
           marginTop: 10,
           marginBottom: 15
         },
         content: {
-          items: [
-            'Thử thách "Eco Explorer" (Lớp 7–9)',
-            'Thử thách "Physics Investigator" (Lớp 10–12)'
-          ]
+          html: `<p>Đây là chủ đề "vàng" rất được ưu ái trong các hồ sơ xét tuyển và săn học bổng du học quốc tế hiện nay.</p>`
         }
       },
       {
@@ -187,11 +191,11 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplate[] = [
         visible: true,
         styles: {
           marginTop: 15,
-          marginBottom: 15
+          marginBottom: 20
         },
         content: {
           url: 'https://fermat.vn/UploadFile/Images/2025/8/18/Hinh_anh_638911101534359159.png',
-          alt: 'Exam Info Banner',
+          alt: 'AYSBC 25-26/07/2026 Exam Info',
           width: 600,
           align: 'center',
           borderRadius: 8,
@@ -200,17 +204,19 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplate[] = [
       },
       {
         id: 'block-13',
-        type: 'highlight-box',
+        type: 'heading',
         visible: true,
         styles: {
-          marginTop: 15,
-          marginBottom: 15
+          marginTop: 20,
+          marginBottom: 10
         },
         content: {
-          html: '<p><strong>Thông tin kỳ thi cần lưu ý:</strong><br/>• Ngày thi chính thức: {{Ngày thi}}<br/>• Hạn đăng ký: 15/10/2026<br/>• Lệ phí thi: Miễn phí cho học sinh trường đối tác</p>',
-          bg: '#eef6ff',
-          borderColor: '#1473d1',
-          padding: 16
+          text: 'Hành trình chinh phục AYSBC 2026 diễn ra như thế nào?',
+          level: 'h2',
+          bold: true,
+          color: '#0f3a72',
+          fontSize: 18,
+          align: 'left'
         }
       },
       {
@@ -219,14 +225,72 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplate[] = [
         visible: true,
         styles: {
           marginTop: 10,
-          marginBottom: 20
+          marginBottom: 5
         },
         content: {
-          html: '<p><strong>Phần thưởng ý nghĩa:</strong> Chứng nhận quốc tế từ Science Centre Singapore và cơ hội nhận học bổng tham gia trại hè Khoa học tại Singapore dành cho các thí sinh xuất sắc.</p>'
+          html: `<p><strong>Vòng Quốc gia (Thi trực tuyến):</strong></p>`
         }
       },
       {
         id: 'block-15',
+        type: 'bullet-list',
+        visible: true,
+        styles: {
+          marginTop: 5,
+          marginBottom: 15
+        },
+        content: {
+          items: [
+            '<strong>20% số điểm:</strong> Hoàn thành các nhiệm vụ thực hành thực tế để tích lũy 15 Stars trên hệ thống Young Scientist Badge.',
+            '<strong>80% số điểm:</strong> Bài thi trắc nghiệm trực tuyến đánh giá tư duy khoa học (60 phút, 20 câu hỏi) diễn ra vào ngày <strong>25–26/07/2026</strong>.'
+          ]
+        }
+      },
+      {
+        id: 'block-16',
+        type: 'paragraph',
+        visible: true,
+        styles: {
+          marginTop: 10,
+          marginBottom: 5
+        },
+        content: {
+          html: `<p><strong>Phần thưởng & Cơ hội giao lưu quốc tế:</strong></p>`
+        }
+      },
+      {
+        id: 'block-17',
+        type: 'bullet-list',
+        visible: true,
+        styles: {
+          marginTop: 5,
+          marginBottom: 15
+        },
+        content: {
+          items: [
+            '<strong>100%</strong> học sinh hoàn thành thử thách thực hành đạt chuẩn đều nhận được Chứng chỉ quốc tế cấp bởi Singapore Science Centre Global.',
+            'Những học sinh đạt thành tích xuất sắc tại Vòng Quốc gia sẽ nhận được cơ hội tham dự Vòng Khu vực trực tiếp tại Singapore vào tháng <strong>10/2026</strong> (tham gia các workshop STEM chuyên sâu, làm bài thi trực tiếp và giao lưu với bạn bè quốc tế).'
+          ]
+        }
+      },
+      {
+        id: 'block-18',
+        type: 'highlight-box',
+        visible: true,
+        styles: {
+          marginTop: 15,
+          marginBottom: 20
+        },
+        content: {
+          html: `<p><strong>Hạn đăng ký Vòng thi quốc gia Đợt 2: Trước ngày 22/07/2026</strong><br/>
+Nếu Quý phụ huynh đang tìm kiếm một hoạt động hè vừa bổ ích, vừa giúp con phát triển tư duy khoa học và kỹ năng thực hành một cách tự nhiên, AYSBC là một sân chơi rất đáng để trải nghiệm.</p>`,
+          bg: '#eef6ff',
+          borderColor: '#1473d1',
+          padding: 16
+        }
+      },
+      {
+        id: 'block-19',
         type: 'button-group',
         visible: true,
         styles: {
@@ -244,8 +308,8 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplate[] = [
             radius: 8
           },
           btn2: {
-            text: 'Tải tài liệu hướng dẫn',
-            link: 'https://www.fermat.vn',
+            text: 'Follow page AYSBC Việt Nam',
+            link: 'https://facebook.com/aysbcvietnam',
             bg: '#f1f5f9',
             color: '#0f3a72',
             radius: 8
@@ -253,7 +317,7 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplate[] = [
         }
       },
       {
-        id: 'block-16',
+        id: 'block-20',
         type: 'signature',
         visible: true,
         styles: {
@@ -261,11 +325,11 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplate[] = [
           marginBottom: 10
         },
         content: {
-          html: '<p><strong>BAN TỔ CHỨC AYSBC VIỆT NAM</strong><br/>' +
-                'Công ty Cổ phần Công nghệ Giáo dục Fermat (FermatTech)<br/>' +
-                'Hotline: 0969 627 162<br/>' +
-                'Email: contact@fermat.vn<br/>' +
-                'Website: <a href="http://www.fermat.vn" target="_blank" style="color: #1473d1; text-decoration: underline;">www.fermat.vn</a></p>'
+          html: `<p>Trân trọng.<br/>
+<strong>BAN TỔ CHỨC AYSBC VIỆT NAM</strong><br/>
+Công ty Cổ phần Công nghệ Giáo dục Fermat (FermatTech)<br/>
+Hotline: 0969 627 162<br/>
+Email: <a href="mailto:contact@fermat.vn" style="color: #1473d1; text-decoration: underline;">contact@fermat.vn</a></p>`
         }
       }
     ]

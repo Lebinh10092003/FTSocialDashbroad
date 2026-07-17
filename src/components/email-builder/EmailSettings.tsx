@@ -93,12 +93,6 @@ export default function EmailSettingsComponent({
           <h4 className="text-[10px] font-black text-slate-700 uppercase tracking-wider">Hệ màu khung nền</h4>
           
           <ColorField
-            label="Màu nền ngoài (External Background)"
-            value={settings.externalBg || '#f8fafc'}
-            onChange={color => updateSetting('externalBg', color)}
-          />
-
-          <ColorField
             label="Màu nền nội dung (Content Background)"
             value={settings.contentBg || '#ffffff'}
             onChange={color => updateSetting('contentBg', color)}

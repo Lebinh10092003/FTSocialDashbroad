@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Monitor, Smartphone, AlertTriangle, HelpCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Monitor, Smartphone, AlertTriangle } from 'lucide-react';
 import { EmailTemplate, EmailVariable } from '../../types/emailBuilder';
 import { generateEmailHtml } from '../../lib/emailHtmlGenerator';
 
@@ -18,7 +18,47 @@ export default function EmailPreview({
   const [useMock, setUseMock] = useState(false);
 
   // Compile layout
-  const { html, warnings } = generateEmailHtml(template, variables, useMock);
+  const { html, subject, warnings } = generateEmailHtml(template, variables, useMock);
+
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const updateIframeHeight = () => {
+    const iframe = iframeRef.current;
+    if (iframe && iframe.contentWindow && iframe.contentDocument) {
+      try {
+        const doc = iframe.contentDocument;
+        const height = doc.documentElement.scrollHeight || doc.body.scrollHeight;
+        iframe.style.height = `${height}px`;
+      } catch (e) {
+        // Ignored
+      }
+    }
+  };
+
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (iframe) {
+      const handleLoad = () => {
+        updateIframeHeight();
+        const doc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (doc && doc.body) {
+          const observer = new ResizeObserver(() => {
+            updateIframeHeight();
+          });
+          observer.observe(doc.body);
+          return () => observer.disconnect();
+        }
+      };
+      
+      iframe.addEventListener('load', handleLoad);
+      // Run once immediately in case it's already loaded
+      handleLoad();
+      
+      return () => {
+        iframe.removeEventListener('load', handleLoad);
+      };
+    }
+  }, [html]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4">
@@ -73,7 +113,7 @@ export default function EmailPreview({
             <div className="flex items-start gap-2.5">
               <AlertTriangle className="w-4.5 h-4.5 text-amber-600 mt-0.5 shrink-0" />
               <div>
-                <h4 className="text-xs font-bold text-amber-900 leading-tight">Cảnh báo cú pháp ({warnings.length})</h4>
+                <h4 className="text-xs font-bold text-amber-900 leading-tight">Cảnh báo chất lượng hiển thị ({warnings.length})</h4>
                 <ul className="list-disc pl-4 mt-1 space-y-1">
                   {warnings.map((w, i) => (
                     <li key={i} className="text-[10px] text-amber-700 font-semibold">{w}</li>
@@ -85,9 +125,9 @@ export default function EmailPreview({
         )}
 
         {/* Dynamic Frame container */}
-        <div className="flex-1 overflow-auto p-6 flex justify-center items-start">
+        <div className="flex-1 overflow-y-auto p-6 bg-slate-200/40 flex justify-center items-start">
           <div
-            className="transition-all duration-300 bg-white border border-slate-300/80 shadow-md overflow-hidden rounded-2xl h-full flex flex-col"
+            className="transition-all duration-300 bg-white border border-slate-200 w-full flex flex-col shrink-0"
             style={{
               width: viewMode === 'mobile' ? '375px' : '100%',
               maxWidth: viewMode === 'mobile' ? '375px' : `${template.settings.maxWidth}px`
@@ -95,16 +135,18 @@ export default function EmailPreview({
           >
             {/* Subject preview */}
             <div className="bg-slate-50 border-b border-slate-200 px-4 py-3 text-xs text-slate-500 font-medium select-none flex gap-2 shrink-0">
-              <span className="font-bold text-slate-700">Tiêu đề:</span>
-              <span className="truncate text-slate-900 font-semibold">{template.subject ? (useMock ? generateEmailHtml(template, variables, true).subject : template.subject) : '[Trống]'}</span>
+              <span className="font-bold text-slate-750">Tiêu đề:</span>
+              <span className="truncate text-slate-900 font-semibold">{subject || '[Trống]'}</span>
             </div>
 
-            {/* Iframe to render compiled HTML cleanly in isolation */}
-            <div className="flex-1 w-full bg-white relative">
+            {/* Iframe container with no scrollbar */}
+            <div className="w-full bg-white relative">
               <iframe
+                ref={iframeRef}
                 title="Email Preview Frame"
                 srcDoc={html}
-                className="w-full h-full border-0 absolute inset-0"
+                scrolling="no"
+                className="w-full border-0 block min-h-[300px]"
               />
             </div>
           </div>
