@@ -50,30 +50,34 @@ export default function EmailPreview({
     const iframe = iframeRef.current;
     if (!iframe) return;
 
-    let observer: ResizeObserver | null = null;
+    let timers: NodeJS.Timeout[] = [];
 
-    const setupObserver = () => {
-      const doc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (doc && doc.body) {
-        if (observer) {
-          observer.disconnect();
-        }
-        observer = new ResizeObserver(() => {
-          updateIframeHeight();
-        });
-        observer.observe(doc.body);
-        updateIframeHeight();
-      }
+    const triggerHeightUpdate = () => {
+      updateIframeHeight();
     };
 
-    iframe.addEventListener('load', setupObserver);
-    setupObserver();
+    const handleLoad = () => {
+      triggerHeightUpdate();
+      
+      // Schedule sequential updates to ensure late-loading content (like images) is accounted for
+      const t1 = setTimeout(triggerHeightUpdate, 100);
+      const t2 = setTimeout(triggerHeightUpdate, 400);
+      const t3 = setTimeout(triggerHeightUpdate, 1000);
+      const t4 = setTimeout(triggerHeightUpdate, 2000);
+      
+      timers.push(t1, t2, t3, t4);
+    };
+
+    iframe.addEventListener('load', handleLoad);
+    
+    // Trigger immediately
+    triggerHeightUpdate();
+    const tStart = setTimeout(triggerHeightUpdate, 250);
+    timers.push(tStart);
 
     return () => {
-      iframe.removeEventListener('load', setupObserver);
-      if (observer) {
-        observer.disconnect();
-      }
+      iframe.removeEventListener('load', handleLoad);
+      timers.forEach(t => clearTimeout(t));
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
