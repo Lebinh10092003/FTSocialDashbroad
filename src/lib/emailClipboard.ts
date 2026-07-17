@@ -1,12 +1,64 @@
+function isSameOriginOrLocalAsset(src: string) {
+  if (!src || src.startsWith('data:')) return false;
+  if (src.startsWith('blob:') || src.startsWith('/')) return true;
+  try {
+    const url = new URL(src, window.location.href);
+    return url.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function inlineClipboardImages(htmlContent: string) {
+  const container = document.createElement('div');
+  container.innerHTML = htmlContent;
+  const images = Array.from(container.querySelectorAll('img'));
+  let embeddedCount = 0;
+
+  await Promise.all(images.map(async (image) => {
+    const src = image.getAttribute('src') || '';
+    if (!isSameOriginOrLocalAsset(src)) return;
+
+    try {
+      const response = await fetch(src);
+      if (!response.ok) return;
+      const blob = await response.blob();
+      if (!blob.type.startsWith('image/')) return;
+      image.setAttribute('src', await blobToDataUrl(blob));
+      embeddedCount += 1;
+    } catch (error) {
+      console.warn('Không thể nhúng ảnh vào clipboard:', src, error);
+    }
+  }));
+
+  return {
+    html: container.innerHTML,
+    embeddedCount,
+  };
+}
+
 /**
  * Copies rich HTML and plain text simultaneously to the clipboard.
- * Highly optimized for Gmail compatibility when pasted.
+ * Same-origin uploaded/blob images are converted to data URIs first so Gmail can
+ * paste them like an inline screenshot instead of a broken localhost URL.
  */
 export async function copyEmailToClipboard(htmlContent: string, plainTextContent: string): Promise<boolean> {
   try {
+    const prepared = await inlineClipboardImages(htmlContent);
+    const normalizedHtml = prepared.html;
+
     if (navigator.clipboard && window.ClipboardItem) {
       // Modern Clipboard API
-      const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
+      const htmlBlob = new Blob([normalizedHtml], { type: 'text/html' });
       const textBlob = new Blob([plainTextContent], { type: 'text/plain' });
       
       const clipboardItem = new ClipboardItem({
@@ -23,7 +75,7 @@ export async function copyEmailToClipboard(htmlContent: string, plainTextContent
       div.style.left = '-9999px';
       div.style.top = '-9999px';
       // Put the HTML contents inside
-      div.innerHTML = htmlContent;
+      div.innerHTML = normalizedHtml;
       document.body.appendChild(div);
       
       const range = document.createRange();

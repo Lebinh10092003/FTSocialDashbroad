@@ -154,6 +154,25 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
 
   const activeBlock = activeTemplate?.blocks.find(b => b.id === selectedBlockId);
 
+  const getBlockLabel = (type?: BlockType) => {
+    switch (type) {
+      case 'logo': return 'Logo';
+      case 'heading': return 'Tiêu đề';
+      case 'paragraph': return 'Đoạn văn';
+      case 'image': return 'Hình ảnh';
+      case 'button': return 'Nút CTA';
+      case 'button-group': return 'Nhóm nút';
+      case 'bullet-list': return 'Danh sách';
+      case 'number-list': return 'Danh sách số';
+      case 'highlight-box': return 'Hộp nổi bật';
+      case 'divider': return 'Đường kẻ';
+      case 'spacer': return 'Khoảng trắng';
+      case 'signature': return 'Chữ ký';
+      case 'social-links': return 'Mạng xã hội';
+      default: return 'Email';
+    }
+  };
+
   // 3. Active Template Operations
   const handleSelectTemplate = (id: string) => {
     setActiveTemplateIdState(id);
@@ -784,7 +803,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   }
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-slate-50 font-sans relative">
+    <div className="relative flex h-screen flex-col overflow-hidden bg-[#f5f6f8] font-sans">
       
       {/* Toast Notification */}
       {toastMessage && (
@@ -813,10 +832,10 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
       />
 
       {/* Editor Layout Frame */}
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className="relative flex flex-1 overflow-hidden">
         
         {/* DESKTOP / TABLET view panels */}
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex flex-1 overflow-hidden">
           
           {/* Left Block Selection Library */}
           <div className={`hidden md:block ${mobileActiveTab === 'library' ? '!block absolute inset-0 z-40 bg-white md:relative md:inset-auto md:z-auto' : ''}`}>
@@ -824,10 +843,10 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
           </div>
 
           {/* Middle Email Design Canvas */}
-          <div className={`flex-1 flex flex-col min-w-0 min-h-0 ${mobileActiveTab === 'canvas' ? 'flex flex-col' : 'hidden md:flex'}`}>
+          <div className={`flex min-h-0 min-w-0 flex-1 flex-col ${mobileActiveTab === 'canvas' ? 'flex flex-col' : 'hidden md:flex'}`}>
             
             {/* Subject field editor */}
-            <div className="bg-white border-b border-slate-200/80 px-6 py-3 shrink-0 flex items-center gap-3">
+            <div className="flex shrink-0 items-center gap-3 border-b border-slate-200/80 bg-white px-5 py-3">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider shrink-0">Dòng tiêu đề:</label>
               <input
                 type="text"
@@ -856,7 +875,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
             </div>
 
             {/* Scrollable design layout */}
-            <div className="flex-1 overflow-y-auto relative bg-slate-100 flex flex-col">
+            <div className="relative flex flex-1 flex-col overflow-y-auto bg-[#f5f6f8]">
               <EmailCanvas
                 blocks={activeTemplate.blocks}
                 selectedBlockId={selectedBlockId}
@@ -875,30 +894,45 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
           </div>
 
           {/* Right Parameters Settings Sidebar */}
-          <div className={`w-[360px] border-l border-slate-200/80 bg-white shrink-0 flex flex-col ${mobileActiveTab === 'settings' ? 'block absolute inset-0 z-40 md:relative md:inset-auto md:z-auto' : 'hidden md:flex'}`}>
-            {/* Right sidebar tab selector */}
-            <div className="flex border-b border-slate-100 bg-slate-50/50 p-1">
-              <button
-                onClick={() => setActiveRightTab('block')}
-                disabled={!selectedBlockId}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                  activeRightTab === 'block' 
-                    ? 'bg-white text-blue-650 shadow-sm border border-slate-200/50' 
-                    : 'text-slate-500 hover:bg-white/40 disabled:opacity-40'
-                }`}
-              >
-                Cài đặt khối
-              </button>
-              <button
-                onClick={() => setActiveRightTab('email')}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                  activeRightTab === 'email' 
-                    ? 'bg-white text-blue-650 shadow-sm border border-slate-200/50' 
-                    : 'text-slate-500 hover:bg-white/40'
-                }`}
-              >
-                Cài đặt email
-              </button>
+          <div className={`flex w-[380px] shrink-0 flex-col border-l border-slate-200/80 bg-white ${mobileActiveTab === 'settings' ? 'absolute inset-0 z-40 block md:relative md:inset-auto md:z-auto' : 'hidden md:flex'}`}>
+            <div className="border-b border-slate-200 bg-white p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Properties</p>
+                  <h3 className="mt-1 truncate text-sm font-black text-slate-900">
+                    {activeBlock ? getBlockLabel(activeBlock.type) : 'Cài đặt email'}
+                  </h3>
+                  <p className="mt-1 text-[10px] font-semibold text-slate-500">
+                    {activeBlock ? 'Chỉnh nội dung và style của khối đang chọn.' : 'Chọn một khối trên canvas hoặc chỉnh giao diện toàn email.'}
+                  </p>
+                </div>
+                <span className="shrink-0 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-slate-500">
+                  {activeBlock ? 'Block' : 'Email'}
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1">
+                <button
+                  onClick={() => setActiveRightTab('block')}
+                  disabled={!selectedBlockId}
+                  className={`flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md text-xs font-bold transition-all disabled:cursor-not-allowed disabled:opacity-40 ${
+                    activeRightTab === 'block'
+                      ? 'border border-slate-200/70 bg-white text-blue-650 shadow-sm'
+                      : 'text-slate-500 hover:bg-white/50'
+                  }`}
+                >
+                  Khối
+                </button>
+                <button
+                  onClick={() => setActiveRightTab('email')}
+                  className={`flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md text-xs font-bold transition-all ${
+                    activeRightTab === 'email'
+                      ? 'border border-slate-200/70 bg-white text-blue-650 shadow-sm'
+                      : 'text-slate-500 hover:bg-white/50'
+                  }`}
+                >
+                  Email
+                </button>
+              </div>
             </div>
 
             {/* Sidebar content render */}
@@ -928,18 +962,10 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
                 />
               )}
             </div>
-            
-            {/* Collapse guide Widget */}
-            <div className="border-t border-slate-100 p-4.5 bg-slate-50/80">
-              <h4 className="text-[10px] font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
-                Hướng dẫn nhanh
-              </h4>
-              <ol className="text-[10px] text-slate-500 space-y-1.5 list-decimal list-inside leading-relaxed mt-2.5 font-medium">
-                <li>Bấm <strong>Copy tiêu đề</strong> và dán vào Gmail.</li>
-                <li>Bấm <strong>Copy nội dung</strong> và dán (Ctrl+V) vào soạn thư.</li>
-                <li>Các biến <code className="text-blue-600 font-extrabold">{"{{"}Biến{"}}"}</code> tự động đồng bộ qua YAMM.</li>
-              </ol>
+            <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
+              <p className="text-[10px] font-semibold leading-relaxed text-slate-500">
+                Copy nội dung sẽ nhúng ảnh local/upload vào HTML clipboard để dán vào Gmail ổn định hơn.
+              </p>
             </div>
 
           </div>

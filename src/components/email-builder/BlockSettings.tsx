@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlignLeft, AlignCenter, AlignRight, Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import { EmailBlock } from '../../types/emailBuilder';
+import ColorField from './ColorField';
 
 interface BlockSettingsProps {
   block: EmailBlock;
@@ -36,26 +37,33 @@ export default function BlockSettings({
       const reader = new FileReader();
       reader.onload = async () => {
         const base64 = reader.result as string;
-        
-        const response = await fetch('/api/upload', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            filename: file.name,
-            base64: base64
-          })
-        });
 
-        const data = await response.json();
-        if (data.success && data.url) {
-          const absoluteUrl = `${window.location.origin}${data.url}`;
-          updateContent('url', absoluteUrl);
-        } else {
-          setUploadError(data.error || 'Lỗi tải ảnh lên máy chủ.');
+        try {
+          const response = await fetch('/api/upload', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              filename: file.name,
+              base64: base64
+            })
+          });
+
+          const data = await response.json();
+          if (data.success && data.url) {
+            const absoluteUrl = `${window.location.origin}${data.url}`;
+            updateContent('url', absoluteUrl);
+          } else {
+            updateContent('url', base64);
+            setUploadError(data.error || 'Không upload được, đã dùng ảnh nhúng để copy sang Gmail.');
+          }
+        } catch (error: any) {
+          updateContent('url', base64);
+          setUploadError(error?.message ? `Không upload được, đã dùng ảnh nhúng: ${error.message}` : 'Không upload được, đã dùng ảnh nhúng để copy sang Gmail.');
+        } finally {
+          setIsUploading(false);
         }
-        setIsUploading(false);
       };
       
       reader.onerror = () => {
@@ -146,24 +154,12 @@ export default function BlockSettings({
 
         {isLocalhost && content.url && content.url.includes('localhost') && (
           <div className="text-[9px] text-amber-600 bg-amber-50 border border-amber-100 p-2.5 rounded-xl leading-relaxed font-semibold">
-            ⚠️ <strong>Lưu ý localhost</strong>: Bạn đang sử dụng ảnh tải lên từ máy cá nhân (localhost). Gmail và người nhận sẽ không nhìn thấy ảnh này. Để hiển thị đúng, hãy deploy ứng dụng hoặc sử dụng ảnh có link public (HTTPS).
+            <strong>Lưu ý local</strong>: Khi bấm Copy nội dung, ảnh local sẽ được nhúng vào clipboard để dán Gmail. Nếu gửi bằng link ảnh trực tiếp, hãy dùng URL public HTTPS.
           </div>
         )}
       </div>
     );
   };
-
-  // Premium corporate colors swatch list
-  const swatches = [
-    { value: '#0f3a72', name: 'Fermat Deep' },
-    { value: '#1473d1', name: 'Fermat Blue' },
-    { value: '#16a34a', name: 'Emerald' },
-    { value: '#ea580c', name: 'Orange' },
-    { value: '#e11d48', name: 'Rose Red' },
-    { value: '#f1f5f9', name: 'Light Slate' },
-    { value: '#1e293b', name: 'Dark Slate' },
-    { value: '#ffffff', name: 'White' }
-  ];
 
   const updateContent = (key: string, value: any) => {
     onUpdateBlockContent({
@@ -218,40 +214,6 @@ export default function BlockSettings({
     };
     updateContent('links', links);
   };
-
-  // Helper render to show swatch buttons
-  const ColorSwatchPicker = ({ label, value, onChange }: { label: string, value: string, onChange: (color: string) => void }) => (
-    <div className="space-y-2">
-      <label className="block text-[10px] font-bold text-slate-500">{label}</label>
-      <div className="flex gap-2">
-        <input
-          type="color"
-          value={value || '#ffffff'}
-          onChange={e => onChange(e.target.value)}
-          className="w-9 h-9 rounded-xl cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0 shadow-sm"
-        />
-        <input
-          type="text"
-          value={value || ''}
-          onChange={e => onChange(e.target.value)}
-          className="w-full text-xs rounded-xl border border-slate-200 px-3 outline-none focus:border-blue-500 shadow-sm bg-white"
-        />
-      </div>
-      {/* Swatch grids */}
-      <div className="grid grid-cols-8 gap-1.5 pt-1">
-        {swatches.map(s => (
-          <button
-            key={s.value}
-            type="button"
-            onClick={() => onChange(s.value)}
-            title={s.name}
-            className={`w-6 h-6 rounded-lg cursor-pointer border transition-all ${value === s.value ? 'ring-2 ring-blue-550 border-white scale-105' : 'border-slate-250/30 hover:scale-105'}`}
-            style={{ backgroundColor: s.value }}
-          />
-        ))}
-      </div>
-    </div>
-  );
 
   return (
     <div className="space-y-5 p-5 bg-white overflow-y-auto h-full select-text">
@@ -393,7 +355,7 @@ export default function BlockSettings({
             </div>
           </div>
           
-          <ColorSwatchPicker
+          <ColorField
             label="Màu chữ tiêu đề"
             value={content.color || '#0f3a72'}
             onChange={color => updateContent('color', color)}
@@ -606,13 +568,13 @@ export default function BlockSettings({
             />
           </div>
           
-          <ColorSwatchPicker
+          <ColorField
             label="Màu nền nút"
             value={content.bg || '#1473d1'}
             onChange={color => updateContent('bg', color)}
           />
 
-          <ColorSwatchPicker
+          <ColorField
             label="Màu chữ trên nút"
             value={content.color || '#ffffff'}
             onChange={color => updateContent('color', color)}
@@ -710,12 +672,12 @@ export default function BlockSettings({
               className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm bg-white"
             />
             <div className="grid grid-cols-2 gap-2">
-              <ColorSwatchPicker
+              <ColorField
                 label="Nền Nút 1"
                 value={content.btn1?.bg || '#1473d1'}
                 onChange={color => updateContent('btn1', { ...content.btn1, bg: color })}
               />
-              <ColorSwatchPicker
+              <ColorField
                 label="Chữ Nút 1"
                 value={content.btn1?.color || '#ffffff'}
                 onChange={color => updateContent('btn1', { ...content.btn1, color: color })}
@@ -740,12 +702,12 @@ export default function BlockSettings({
               className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm bg-white"
             />
             <div className="grid grid-cols-2 gap-2">
-              <ColorSwatchPicker
+              <ColorField
                 label="Nền Nút 2"
                 value={content.btn2?.bg || '#f1f5f9'}
                 onChange={color => updateContent('btn2', { ...content.btn2, bg: color })}
               />
-              <ColorSwatchPicker
+              <ColorField
                 label="Chữ Nút 2"
                 value={content.btn2?.color || '#0f3a72'}
                 onChange={color => updateContent('btn2', { ...content.btn2, color: color })}
@@ -762,13 +724,13 @@ export default function BlockSettings({
             * Sửa nội dung hộp và chèn biến trực quan trên canvas ở giữa.
           </p>
           
-          <ColorSwatchPicker
+          <ColorField
             label="Màu nền hộp thông tin"
             value={content.bg || '#eef6ff'}
             onChange={color => updateContent('bg', color)}
           />
 
-          <ColorSwatchPicker
+          <ColorField
             label="Màu đường viền trái"
             value={content.borderColor || '#1473d1'}
             onChange={color => updateContent('borderColor', color)}
@@ -815,7 +777,7 @@ export default function BlockSettings({
             </div>
           </div>
           
-          <ColorSwatchPicker
+          <ColorField
             label="Màu nét đường kẻ"
             value={styles.color || '#e2e8f0'}
             onChange={color => updateStyles('color', color)}

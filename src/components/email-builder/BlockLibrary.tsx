@@ -141,19 +141,19 @@ export default function BlockLibrary({ onAddBlock }: BlockLibraryProps) {
   ];
 
   return (
-    <div className="flex flex-col h-full bg-slate-50/50 border-r border-slate-200/80 w-[360px] shrink-0 select-text">
+    <div className="flex h-full w-[320px] shrink-0 select-text flex-col border-r border-slate-200/80 bg-white">
       
       {/* Title Header */}
-      <div className="p-5 border-b border-slate-200 bg-white shadow-[0_1px_5px_rgba(0,0,0,0.005)]">
-        <h2 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+      <div className="border-b border-slate-200 bg-white p-4 shadow-[0_1px_5px_rgba(0,0,0,0.005)]">
+        <h2 className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-800">
           <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse"></span>
-          Thành phần Email
+          Nội dung
         </h2>
-        <p className="text-[10px] text-slate-450 mt-1 leading-relaxed">Nhấp để thêm nhanh khối tương ứng vào cuối email đang thiết kế.</p>
+        <p className="mt-1 text-[10px] leading-relaxed text-slate-450">Chọn khối để thêm vào canvas, sau đó chỉnh chi tiết ở bảng bên phải.</p>
       </div>
 
       {/* Grouped scrollable area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-5">
+      <div className="flex-1 space-y-4 overflow-y-auto p-3.5">
         {categories.map((cat, idx) => (
           <div key={idx} className="space-y-2">
             
@@ -171,9 +171,9 @@ export default function BlockLibrary({ onAddBlock }: BlockLibraryProps) {
                   <button
                     key={item.type}
                     onClick={() => onAddBlock(item.type)}
-                    className="w-full text-left p-2.5 bg-white hover:bg-blue-50/20 border border-slate-200/80 hover:border-blue-200 rounded-xl flex gap-3 items-center cursor-pointer transition-all hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(15,115,209,0.04)] active:scale-[0.98] group"
+                  className="group flex w-full cursor-pointer items-center gap-3 rounded-lg border border-slate-200/80 bg-white p-2.5 text-left transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50/20 hover:shadow-[0_4px_12px_rgba(15,115,209,0.04)] active:scale-[0.98]"
                   >
-                    <div className={`w-8.5 h-8.5 rounded-lg border flex items-center justify-center shrink-0 transition-all ${item.iconColor} shadow-sm group-hover:scale-105`}>
+                    <div className={`w-8.5 h-8.5 flex shrink-0 items-center justify-center rounded-lg border transition-all ${item.iconColor} shadow-sm group-hover:scale-105`}>
                       <Icon className="w-4 h-4" />
                     </div>
                     <div className="min-w-0 flex-1">

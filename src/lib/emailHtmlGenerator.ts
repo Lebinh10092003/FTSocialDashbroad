@@ -38,8 +38,9 @@ export function generateEmailHtml(
   // Helper to check HTTPS image URLs
   const checkImageUrl = (url: string, blockName: string) => {
     if (!url) return;
-    if (url.startsWith('blob:') || url.startsWith('data:')) {
-      warnings.push(`[${blockName}] Ảnh sử dụng định dạng blob/base64 không được hỗ trợ trong email.`);
+    if (url.startsWith('data:image/')) return;
+    if (url.startsWith('blob:')) {
+      warnings.push(`[${blockName}] Ảnh blob sẽ được cố gắng nhúng khi copy, nhưng nên dùng ảnh đã upload hoặc URL HTTPS.`);
     } else if (!url.toLowerCase().startsWith('https://')) {
       warnings.push(`[${blockName}] URL ảnh "${url}" không sử dụng HTTPS bảo mật.`);
     }

@@ -1,5 +1,6 @@
 import React from 'react';
 import { EmailSettings } from '../../types/emailBuilder';
+import ColorField from './ColorField';
 
 interface EmailSettingsComponentProps {
   settings: EmailSettings;
@@ -10,18 +11,6 @@ export default function EmailSettingsComponent({
   settings,
   onUpdateSettings
 }: EmailSettingsComponentProps) {
-
-  // Premium corporate colors swatch list
-  const swatches = [
-    { value: '#0f3a72', name: 'Fermat Deep' },
-    { value: '#1473d1', name: 'Fermat Blue' },
-    { value: '#16a34a', name: 'Emerald' },
-    { value: '#ea580c', name: 'Orange' },
-    { value: '#e11d48', name: 'Rose Red' },
-    { value: '#f8fafc', name: 'Soft Slate' },
-    { value: '#1e293b', name: 'Dark Slate' },
-    { value: '#ffffff', name: 'White' }
-  ];
 
   const updateSetting = (key: keyof EmailSettings, value: any) => {
     onUpdateSettings({
@@ -37,38 +26,6 @@ export default function EmailSettingsComponent({
     { value: 'Verdana, Geneva, sans-serif', label: 'Verdana' },
     { value: 'Tahoma, Geneva, sans-serif', label: 'Tahoma' }
   ];
-
-  const ColorSwatchPicker = ({ label, value, onChange }: { label: string, value: string, onChange: (color: string) => void }) => (
-    <div className="space-y-1.5">
-      <label className="block text-[10px] font-bold text-slate-500">{label}</label>
-      <div className="flex gap-2">
-        <input
-          type="color"
-          value={value || '#ffffff'}
-          onChange={e => onChange(e.target.value)}
-          className="w-9 h-9 rounded-xl cursor-pointer border border-slate-200 p-0.5 bg-white shrink-0 shadow-sm"
-        />
-        <input
-          type="text"
-          value={value || ''}
-          onChange={e => onChange(e.target.value)}
-          className="w-full text-xs rounded-xl border border-slate-200 px-3 outline-none focus:border-blue-500 shadow-sm bg-white"
-        />
-      </div>
-      <div className="grid grid-cols-8 gap-1.5 pt-0.5">
-        {swatches.map(s => (
-          <button
-            key={s.value}
-            type="button"
-            onClick={() => onChange(s.value)}
-            title={s.name}
-            className={`w-6 h-6 rounded-lg cursor-pointer border transition-all ${value === s.value ? 'ring-2 ring-blue-550 border-white scale-105' : 'border-slate-250/30 hover:scale-105'}`}
-            style={{ backgroundColor: s.value }}
-          />
-        ))}
-      </div>
-    </div>
-  );
 
   return (
     <div className="space-y-5 p-5 bg-white overflow-y-auto h-full select-text">
@@ -135,13 +92,13 @@ export default function EmailSettingsComponent({
         <div className="border-t border-slate-100 pt-4 space-y-4">
           <h4 className="text-[10px] font-black text-slate-700 uppercase tracking-wider">Hệ màu khung nền</h4>
           
-          <ColorSwatchPicker
+          <ColorField
             label="Màu nền ngoài (External Background)"
             value={settings.externalBg || '#f8fafc'}
             onChange={color => updateSetting('externalBg', color)}
           />
 
-          <ColorSwatchPicker
+          <ColorField
             label="Màu nền nội dung (Content Background)"
             value={settings.contentBg || '#ffffff'}
             onChange={color => updateSetting('contentBg', color)}
@@ -153,12 +110,12 @@ export default function EmailSettingsComponent({
           <h4 className="text-[10px] font-black text-slate-700 uppercase tracking-wider">Màu chữ & Liên kết</h4>
 
           <div className="grid grid-cols-2 gap-3">
-            <ColorSwatchPicker
+            <ColorField
               label="Màu chữ chính"
               value={settings.textColor || '#1e293b'}
               onChange={color => updateSetting('textColor', color)}
             />
-            <ColorSwatchPicker
+            <ColorField
               label="Màu liên kết (Link)"
               value={settings.linkColor || '#1473d1'}
               onChange={color => updateSetting('linkColor', color)}
@@ -171,12 +128,12 @@ export default function EmailSettingsComponent({
           <h4 className="text-[10px] font-black text-slate-700 uppercase tracking-wider">Màu nút bấm mặc định</h4>
 
           <div className="grid grid-cols-2 gap-3">
-            <ColorSwatchPicker
+            <ColorField
               label="Nền nút mặc định"
               value={settings.btnDefaultBg || '#1473d1'}
               onChange={color => updateSetting('btnDefaultBg', color)}
             />
-            <ColorSwatchPicker
+            <ColorField
               label="Chữ nút mặc định"
               value={settings.btnDefaultTextColor || '#ffffff'}
               onChange={color => updateSetting('btnDefaultTextColor', color)}
