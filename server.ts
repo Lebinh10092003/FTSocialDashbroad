@@ -3,6 +3,7 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { apiRouter } from './server/routes';
+import { uploadErrorHandler, uploadRouter } from './server/uploadRoutes';
 import { SyncEngine } from './server/sync';
 import { adminDb } from './server/firebase';
 import net from 'net';
@@ -91,10 +92,7 @@ async function startServer() {
   const allowAllOrigins = configuredOrigins.length === 0 || configuredOrigins.includes('*');
   app.set('trust proxy', 1);
 
-  // Middleware for parsing JSON requests
-  app.use(express.json());
-
-  // CORS headers
+  // CORS headers must be applied before body parsers so upload errors also return usable responses.
   app.use((req, res, next) => {
     const requestOrigin = req.headers.origin;
     if (allowAllOrigins) {
@@ -115,8 +113,12 @@ async function startServer() {
     next();
   });
 
-  // Mount API routes BEFORE Vite middleware
-  app.use('/api', apiRouter);
+  // Email images are sent as Base64. A 3MB image expands to roughly 4MB in JSON,
+  // therefore this endpoint needs a larger, isolated body limit.
+  app.use('/api/upload', express.json({ limit: '5mb' }), uploadRouter, uploadErrorHandler);
+
+  // Keep the remaining API payload limit conservative.
+  app.use('/api', express.json({ limit: '1mb' }), apiRouter);
 
   // Serve uploaded email builder images statically
   app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));

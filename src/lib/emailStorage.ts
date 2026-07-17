@@ -5,6 +5,35 @@ const TEMPLATES_KEY = 'ft_email_templates';
 const ACTIVE_TEMPLATE_ID_KEY = 'ft_active_email_template_id';
 
 /**
+ * Base64 images can make localStorage exceed its quota and force React to repeatedly
+ * serialize several megabytes on every edit. Uploaded images must be stored as URLs.
+ */
+function removeEmbeddedDataImages(templates: EmailTemplate[]): { templates: EmailTemplate[]; changed: boolean } {
+  let changed = false;
+
+  const cleanedTemplates = templates.map(template => ({
+    ...template,
+    blocks: template.blocks.map(block => {
+      const imageUrl = block.content?.url;
+      if (typeof imageUrl !== 'string' || !imageUrl.startsWith('data:image/')) {
+        return block;
+      }
+
+      changed = true;
+      return {
+        ...block,
+        content: {
+          ...block.content,
+          url: '',
+        },
+      };
+    }),
+  }));
+
+  return { templates: cleanedTemplates, changed };
+}
+
+/**
  * Loads all templates from localStorage, seeding with default if empty
  */
 export function loadTemplates(): EmailTemplate[] {
@@ -19,7 +48,14 @@ export function loadTemplates(): EmailTemplate[] {
       saveTemplates(DEFAULT_EMAIL_TEMPLATES);
       return DEFAULT_EMAIL_TEMPLATES;
     }
-    return parsed;
+
+    const cleaned = removeEmbeddedDataImages(parsed);
+    if (cleaned.changed) {
+      localStorage.setItem(TEMPLATES_KEY, JSON.stringify(cleaned.templates));
+      console.warn('Đã loại bỏ ảnh Base64 cũ khỏi mẫu email để tránh treo trình duyệt. Vui lòng tải lại ảnh.');
+    }
+
+    return cleaned.templates;
   } catch (error) {
     console.error('Lỗi khi load templates từ localStorage:', error);
     return DEFAULT_EMAIL_TEMPLATES;
@@ -31,7 +67,8 @@ export function loadTemplates(): EmailTemplate[] {
  */
 export function saveTemplates(templates: EmailTemplate[]): void {
   try {
-    localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates));
+    const cleaned = removeEmbeddedDataImages(templates);
+    localStorage.setItem(TEMPLATES_KEY, JSON.stringify(cleaned.templates));
   } catch (error) {
     console.error('Lỗi khi lưu templates vào localStorage:', error);
   }
