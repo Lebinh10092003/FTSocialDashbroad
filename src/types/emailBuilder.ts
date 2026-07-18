@@ -17,6 +17,28 @@ export type BlockType =
   | 'gallery' | 'video' | 'feature-list' | 'product-card' | 'product-grid' | 'pricing-table'
   | 'header' | 'footer' | 'merge-tag' | 'custom-html';
 
+export type EmailLayoutVerticalAlign = 'top' | 'middle' | 'bottom';
+
+export interface EmailLayoutCell {
+  id: string;
+  background: string;
+  color: string;
+  padding: number;
+  minHeight: number;
+  borderColor: string;
+  borderWidth: number;
+  borderRadius: number;
+  verticalAlign: EmailLayoutVerticalAlign;
+}
+
+export interface EmailLayoutColumn {
+  id: string;
+  /** Relative width weight from 1 to 6. */
+  width: number;
+  /** A column can be divided vertically into up to four independent drop cells. */
+  cells: EmailLayoutCell[];
+}
+
 export interface EmailBlock {
   id: string;
   type: BlockType;
@@ -25,7 +47,7 @@ export interface EmailBlock {
   visible: boolean;
   /** Linear child blocks used by Section containers. */
   children?: EmailBlock[];
-  /** Independent child slots used by Columns containers. */
+  /** Flattened child slots used by every cell in a flexible layout. */
   columns?: EmailBlock[][];
 }
 

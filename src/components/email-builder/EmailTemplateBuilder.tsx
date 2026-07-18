@@ -276,6 +276,11 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
     const blocks = updateEmailBlock(activeTemplate.blocks, id, block => ({ ...block, styles: newStyles }));
     handleUpdateTemplateBlocks(blocks);
   };
+  const handleUpdateWholeBlock = (id: string, nextBlock: EmailBlock) => {
+    if (!activeTemplate) return;
+    const blocks = updateEmailBlock(activeTemplate.blocks, id, () => ({ ...nextBlock, id }));
+    handleUpdateTemplateBlocks(blocks);
+  };
 
   // 5. Variables Operations
   const updateVariablesList = (newList: EmailVariable[]) => {
@@ -769,6 +774,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
                 emailSettings={activeTemplate.settings}
                 onAddBlock={handleAddBlock}
                 onDropBlock={handleDropBlock}
+                onUpdateBlock={handleUpdateWholeBlock}
               />
             </div>
           </div>
@@ -823,6 +829,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
                   block={activeBlock}
                   onUpdateBlockContent={(content) => selectedBlockId && handleUpdateBlockContent(selectedBlockId, content)}
                   onUpdateBlockStyles={(styles) => selectedBlockId && handleUpdateBlockStyles(selectedBlockId, styles)}
+                  onUpdateBlock={(nextBlock) => selectedBlockId && handleUpdateWholeBlock(selectedBlockId, nextBlock)}
                   onUpdateBlockColumns={(columns) => {
                     if (!selectedBlockId || !activeTemplate) return;
                     handleUpdateTemplateBlocks(updateEmailBlock(activeTemplate.blocks, selectedBlockId, block => ({ ...block, columns })));

@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlignCenter, AlignLeft, AlignRight, Link2, Lock, LockOpen, Plus, Trash2 } from 'lucide-react';
 import { EmailBlock } from '../../types/emailBuilder';
+import { addEmailLayoutCell, getLayoutSlotIndex, normalizeEmailLayout, removeEmailLayoutCell, resizeEmailLayout, updateEmailLayoutCell, updateEmailLayoutColumn } from '../../lib/emailLayout';
 import { getBlockDefinition } from '../../data/emailBlockRegistry';
 import ColorField from './ColorField';
 
@@ -9,6 +10,7 @@ interface BlockSettingsProps {
   onUpdateBlockContent: (content: Record<string, any>) => void;
   onUpdateBlockStyles: (styles: Record<string, any>) => void;
   onUpdateBlockColumns?: (columns: EmailBlock[][]) => void;
+  onUpdateBlock?: (block: EmailBlock) => void;
 }
 
 const fieldClass = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none shadow-sm focus:border-blue-500';
@@ -34,7 +36,7 @@ function NumberDraft({ value, min = 0, max = 2000, onCommit, label }: { value: n
   return <div><label className="mb-1 block text-[10px] font-bold text-slate-500">{label}</label><input type="number" min={min} max={max} value={draft} onChange={event => { setDraft(event.target.value); if (event.target.value !== '') commit(event.target.value); }} onBlur={() => commit(draft)} className={fieldClass} /></div>;
 }
 
-export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlockStyles, onUpdateBlockColumns }: BlockSettingsProps) {
+export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlockStyles, onUpdateBlockColumns, onUpdateBlock }: BlockSettingsProps) {
   const content = block.content;
   const styles = block.styles;
   const definition = getBlockDefinition(block.type);
@@ -99,7 +101,7 @@ export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlo
   const primitiveEntries = Object.entries(content).filter(([key, value]) => !['variant', 'url', 'alt', 'width', 'height', 'aspectLocked', 'naturalRatio', 'align', 'borderRadius', 'items', 'rows', 'html', 'fontSize', 'lineHeight'].includes(key) && (typeof value === 'string' || typeof value === 'number'));
   const isButtonGroup = block.type === 'button-group' || block.type === 'button-group-3';
   const showGenericFields = !['logo', 'heading', 'paragraph', 'image', 'columns', 'data-table', 'bullet-list', 'number-list', 'spacer', 'button', 'button-group', 'button-group-3'].includes(block.type);
-  const collectionEntries = Object.entries(content).filter(([key, value]) => Array.isArray(value) && key !== 'rows' && !(isButtonGroup && key === 'buttons') && !(key === 'items' && ['bullet-list', 'number-list', 'columns'].includes(block.type)));
+  const collectionEntries = Object.entries(content).filter(([key, value]) => Array.isArray(value) && key !== 'rows' && key !== 'layoutColumns' && !(isButtonGroup && key === 'buttons') && !(key === 'items' && ['bullet-list', 'number-list', 'columns'].includes(block.type)));
   const updateCollectionItem = (key: string, index: number, value: any) => {
     const next = [...(content[key] || [])]; next[index] = value; updateContent(key, next);
   };
@@ -119,6 +121,28 @@ export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlo
     if (buttons.length >= 3) return;
     onUpdateBlockContent({ ...content, buttons: [...buttons, { text: `Nút thứ ${buttons.length + 1}`, link: 'https://www.fermat.vn', bg: '#1473d1', color: '#ffffff', radius: 8, fontSize: 13, paddingX: 14, paddingY: 10, minWidth: 0 }] });
   };
+  const layoutState = block.type === 'columns' ? normalizeEmailLayout(block) : null;
+  const commitLayout = (nextBlock: EmailBlock) => {
+    if (onUpdateBlock) onUpdateBlock(nextBlock);
+    else {
+      onUpdateBlockContent(nextBlock.content);
+      onUpdateBlockColumns?.(nextBlock.columns || []);
+    }
+  };
+  const setLayoutCount = (count: number) => {
+    if (!layoutState) return;
+    if (count < layoutState.layout.length) {
+      const keepSlots = layoutState.layout.slice(0, count).reduce((total, column) => total + column.cells.length, 0);
+      if (layoutState.slots.slice(keepSlots).some(slot => slot.length) && !confirm('Các ô bị xóa đang chứa nội dung. Bạn có chắc muốn giảm số cột?')) return;
+    }
+    commitLayout(resizeEmailLayout(block, count));
+  };
+  const removeLayoutCellSafely = (columnIndex: number, cellIndex: number) => {
+    if (!layoutState) return;
+    const slotIndex = getLayoutSlotIndex(layoutState.layout, columnIndex, cellIndex);
+    if (layoutState.slots[slotIndex]?.length && !confirm('Ô này đang chứa nội dung. Bạn có chắc muốn xóa ô?')) return;
+    commitLayout(removeEmailLayoutCell(block, columnIndex, cellIndex));
+  };
 
   return <div className="h-full space-y-5 overflow-y-auto bg-white p-5 text-slate-800">
     <div className="border-b border-slate-100 pb-3"><h3 className="text-xs font-black uppercase tracking-widest">Thuộc tính khối</h3><p className="mt-1 text-[10px] font-bold text-slate-400">Phân loại: <span className="rounded border border-blue-100 bg-blue-50 px-2 py-0.5 uppercase text-blue-700">{block.type}</span></p></div>
@@ -133,7 +157,24 @@ export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlo
 
     {['paragraph', 'signature', 'highlight-box'].includes(block.type) && <section className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/40 p-3.5"><h4 className="text-[10px] font-black uppercase">Định dạng mặc định email-safe</h4><div className="grid grid-cols-2 gap-3"><NumberDraft label="Cỡ chữ (px)" value={content.fontSize ?? 15} min={10} max={48} onCommit={value => updateContent('fontSize', value === '' ? 15 : value)} /><NumberDraft label="Giãn dòng" value={content.lineHeight ?? 1.6} min={1} max={2.4} onCommit={value => updateContent('lineHeight', value === '' ? 1.6 : value)} /></div>{alignControl}<p className="text-[9px] text-slate-500">Bôi đen văn bản trên canvas để đổi riêng cỡ chữ cho vùng đã chọn.</p></section>}
 
-    {block.type === 'columns' && <section className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/40 p-3.5"><div><label className="mb-1 block text-[10px] font-bold text-slate-600">Số cột bằng nhau</label><select value={content.variant || 'two'} onChange={event => { const variant = event.target.value; const count = variant === 'four' ? 4 : variant === 'three' ? 3 : 2; const columns = Array.from({ length: count }, (_, index) => block.columns?.[index] || []); onUpdateBlockContent({ ...content, variant }); onUpdateBlockColumns?.(columns); }} className={fieldClass}><option value="two">2 cột</option><option value="three">3 cột</option><option value="four">4 cột</option></select></div><p className="text-[9px] leading-relaxed text-slate-500">Kéo bất kỳ block nào vào đúng cột trên canvas. Mỗi cột có thể chứa nhiều block và xuất ra HTML dạng bảng tương thích email.</p></section>}
+    {block.type === 'columns' && layoutState && <section className="space-y-4 rounded-xl border border-blue-100 bg-blue-50/40 p-3.5">
+      <div>
+        <div className="mb-2 flex items-center justify-between"><h4 className="text-[10px] font-black uppercase">Bố cục ô linh hoạt</h4><span className="text-[9px] font-bold text-slate-400">Tối đa 4 × 4</span></div>
+        <div className="grid grid-cols-4 gap-1 rounded-xl bg-slate-100 p-1">{[1, 2, 3, 4].map(count => <button key={count} type="button" onClick={() => setLayoutCount(count)} className={`rounded-lg py-2 text-[10px] font-black ${layoutState.layout.length === count ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:bg-white/60'}`}>{count} cột</button>)}</div>
+      </div>
+      <div className="grid grid-cols-2 gap-2"><NumberDraft label="Cách cột (px)" value={content.horizontalGap ?? 12} max={48} onCommit={value => commitLayout({ ...block, content: { ...content, horizontalGap: value === '' ? 0 : value } })} /><NumberDraft label="Cách ô dọc (px)" value={content.verticalGap ?? 12} max={48} onCommit={value => commitLayout({ ...block, content: { ...content, verticalGap: value === '' ? 0 : value } })} /></div>
+      <p className="text-[9px] leading-relaxed text-slate-500">Mỗi cột có tỷ lệ rộng riêng và có thể chia thành tối đa bốn ô trên–dưới. Kéo bất kỳ block nào vào từng ô trên canvas.</p>
+      {layoutState.layout.map((column, columnIndex) => <div key={column.id} className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+        <div className="flex items-end justify-between gap-2"><div className="min-w-0 flex-1"><NumberDraft label={`Tỷ lệ rộng cột ${columnIndex + 1}`} value={column.width} min={1} max={6} onCommit={value => commitLayout(updateEmailLayoutColumn(block, columnIndex, { width: value === '' ? 1 : value }))} /></div><button type="button" disabled={column.cells.length >= 4} onClick={() => commitLayout(addEmailLayoutCell(block, columnIndex))} className="mb-0.5 inline-flex h-9 items-center gap-1 rounded-lg border border-blue-200 px-2 text-[9px] font-bold text-blue-700 disabled:opacity-40"><Plus className="h-3.5 w-3.5" />Thêm ô</button></div>
+        {column.cells.map((cell, cellIndex) => <div key={cell.id} className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+          <div className="flex items-center justify-between"><p className="text-[9px] font-black uppercase text-slate-600">Ô {columnIndex + 1}.{cellIndex + 1}</p>{column.cells.length > 1 && <button type="button" onClick={() => removeLayoutCellSafely(columnIndex, cellIndex)} className="rounded p-1 text-rose-500 hover:bg-rose-50" title="Xóa ô"><Trash2 className="h-3.5 w-3.5" /></button>}</div>
+          <div className="grid grid-cols-2 gap-2"><ColorField label="Màu nền ô" value={cell.background} onChange={value => commitLayout(updateEmailLayoutCell(block, columnIndex, cellIndex, { background: value }))} /><ColorField label="Màu chữ ô" value={cell.color || '#1e293b'} onChange={value => commitLayout(updateEmailLayoutCell(block, columnIndex, cellIndex, { color: value }))} /></div>
+          <div className="grid grid-cols-2 gap-2"><NumberDraft label="Đệm trong (px)" value={cell.padding} max={64} onCommit={value => commitLayout(updateEmailLayoutCell(block, columnIndex, cellIndex, { padding: value === '' ? 0 : value }))} /><NumberDraft label="Cao tối thiểu (px)" value={cell.minHeight} min={32} max={600} onCommit={value => commitLayout(updateEmailLayoutCell(block, columnIndex, cellIndex, { minHeight: value === '' ? 32 : value }))} /><NumberDraft label="Độ dày viền (px)" value={cell.borderWidth} max={12} onCommit={value => commitLayout(updateEmailLayoutCell(block, columnIndex, cellIndex, { borderWidth: value === '' ? 0 : value }))} /><NumberDraft label="Bo góc (px)" value={cell.borderRadius} max={80} onCommit={value => commitLayout(updateEmailLayoutCell(block, columnIndex, cellIndex, { borderRadius: value === '' ? 0 : value }))} /></div>
+          <ColorField label="Màu viền ô" value={cell.borderColor} onChange={value => commitLayout(updateEmailLayoutCell(block, columnIndex, cellIndex, { borderColor: value }))} />
+          <div><label className="mb-1 block text-[10px] font-bold text-slate-500">Căn nội dung theo chiều dọc</label><select value={cell.verticalAlign} onChange={event => commitLayout(updateEmailLayoutCell(block, columnIndex, cellIndex, { verticalAlign: event.target.value as any }))} className={fieldClass}><option value="top">Trên</option><option value="middle">Giữa</option><option value="bottom">Dưới</option></select></div>
+        </div>)}
+      </div>)}
+    </section>}
 
     {block.type === 'data-table' && <div className="space-y-3"><div><label className="mb-1 block text-[10px] font-bold text-slate-500">Tiêu đề bảng</label><input value={content.heading || ''} onChange={event => updateContent('heading', event.target.value)} className={fieldClass} /></div><div className="space-y-2">{rows.map((row, rowIndex) => <div key={rowIndex} className="flex gap-1.5 rounded-xl border border-slate-200 bg-slate-50 p-2">{row.map((cell, columnIndex) => <input key={columnIndex} value={cell} onChange={event => updateTableCell(rowIndex, columnIndex, event.target.value)} className={`${fieldClass} min-w-0`} />)}<button type="button" onClick={() => updateContent('rows', rows.filter((_, index) => index !== rowIndex))} className="rounded-lg p-2 text-rose-500 hover:bg-rose-50" title="Xóa dòng"><Trash2 className="h-4 w-4" /></button></div>)}</div><div className="flex gap-2"><button type="button" onClick={() => updateContent('rows', [...rows, Array.from({ length: Math.max(2, rows[0]?.length || 2) }, () => '')])} className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[10px] font-bold text-blue-700"><Plus className="h-3.5 w-3.5" />Thêm dòng</button><button type="button" onClick={() => updateContent('rows', rows.map(row => [...row, '']))} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-[10px] font-bold text-slate-600"><Plus className="h-3.5 w-3.5" />Thêm cột</button></div><p className="text-[9px] text-slate-500">Dòng đầu tiên được xuất dưới dạng hàng tiêu đề của bảng.</p></div>}
 

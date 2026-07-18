@@ -1,6 +1,7 @@
 import { EmailTemplate, EmailVariable, EmailBlock } from '../types/emailBuilder';
 import { inlineCustomCss, sanitizeCustomHtml, sanitizeHtml } from './emailSanitizer';
 import { getVariablesInText, detectVariableWarnings, replaceVariables } from './emailVariables';
+import { getLayoutSlotIndex, normalizeEmailLayout } from './emailLayout';
 
 interface GeneratedEmail {
   subject: string;
@@ -68,10 +69,11 @@ export function generateEmailHtml(
   };
 
   // Compile blocks to HTML
-  const renderBlock = (block: EmailBlock): string => {
+  const renderBlock = (block: EmailBlock, inheritedTextColor?: string): string => {
     if (!block.visible) return '';
 
     const content = block.content;
+    const blockTextColor = inheritedTextColor || textColor;
     const styles = block.styles;
     const marginTop = styles.marginTop ?? 10;
     const marginBottom = styles.marginBottom ?? 10;
@@ -176,7 +178,7 @@ export function generateEmailHtml(
 <!-- Paragraph Block -->
 <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
-    <td align="${align}" style="padding: 0; font-family: ${fontFamily}; color: ${textColor}; font-size: ${fontSize}px; line-height: ${lineHeight}; text-align: ${align}; word-break: break-word;">
+    <td align="${align}" style="padding: 0; font-family: ${fontFamily}; color: ${blockTextColor}; font-size: ${fontSize}px; line-height: ${lineHeight}; text-align: ${align}; word-break: break-word;">
       ${replaced}
     </td>
   </tr>
@@ -222,10 +224,10 @@ export function generateEmailHtml(
 <!-- List Block -->
 <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
-    <td style="padding: 0; font-family: ${fontFamily}; color: ${textColor}; font-size: ${fontSize}px; line-height: ${lineHeight};">
-      <${listTag} style="margin: 0; padding-left: 20px; font-family: ${fontFamily}; color: ${textColor}; font-size: ${fontSize}px; line-height: ${lineHeight};">
+    <td style="padding: 0; font-family: ${fontFamily}; color: ${blockTextColor}; font-size: ${fontSize}px; line-height: ${lineHeight};">
+      <${listTag} style="margin: 0; padding-left: 20px; font-family: ${fontFamily}; color: ${blockTextColor}; font-size: ${fontSize}px; line-height: ${lineHeight};">
         ${items.map((item: string) => `
-          <li style="margin-bottom: 6px; font-family: ${fontFamily}; color: ${textColor}; font-size: ${fontSize}px; line-height: ${lineHeight};">
+          <li style="margin-bottom: 6px; font-family: ${fontFamily}; color: ${blockTextColor}; font-size: ${fontSize}px; line-height: ${lineHeight};">
             ${rep(sanitizeHtml(item))}
           </li>
         `).join('')}
@@ -300,7 +302,7 @@ export function generateEmailHtml(
 <!-- Highlight Box Block -->
 <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
-    <td style="background-color: ${bg}; border-left: 4px solid ${borderColor}; padding: ${padding}px; border-radius: 4px; font-family: ${fontFamily}; color: ${textColor}; font-size: ${fontSize}px; line-height: ${lineHeight}; text-align: left; background-color: ${bg};">
+    <td style="background-color: ${bg}; border-left: 4px solid ${borderColor}; padding: ${padding}px; border-radius: 4px; font-family: ${fontFamily}; color: ${blockTextColor}; font-size: ${fontSize}px; line-height: ${lineHeight}; text-align: left; background-color: ${bg};">
       ${replaced}
     </td>
   </tr>
@@ -347,7 +349,7 @@ export function generateEmailHtml(
 <!-- Signature Block -->
 <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
-    <td style="padding: 0; font-family: ${fontFamily}; color: ${textColor}; font-size: ${fontSize}px; line-height: ${lineHeight}; text-align: left; word-break: break-word;">
+    <td style="padding: 0; font-family: ${fontFamily}; color: ${blockTextColor}; font-size: ${fontSize}px; line-height: ${lineHeight}; text-align: left; word-break: break-word;">
       ${replaced}
     </td>
   </tr>
@@ -389,36 +391,50 @@ export function generateEmailHtml(
         return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:0">' + custom + '</td></tr></table>';
       }
       case 'columns': {
-        const count = content.variant === 'four' ? 4 : content.variant === 'three' ? 3 : 2;
-        const columns = Array.from({ length: count }, (_, index) => block.columns?.[index] || []);
-        const cells = columns.map((column, index) => `<td width="${Math.floor(100 / count)}%" valign="top" style="width:${Math.floor(100 / count)}%;padding:${index === 0 ? '0' : '0 0 0 12px'};vertical-align:top;">${column.map(renderBlock).join('')}</td>`).join('');
-        return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr>${cells}</tr></table>`;
-      }
-      case 'data-table': {
+        const { layout, slots } = normalizeEmailLayout(block);
+        const horizontalGap = Math.max(0, Number(content.horizontalGap) || 0);
+        const verticalGap = Math.max(0, Number(content.verticalGap) || 0);
+        const totalWeight = layout.reduce((total, column) => total + Math.max(1, Number(column.width) || 1), 0);
+        const targetHeight = Math.max(...layout.map(column => column.cells.reduce((total, cell) => total + cell.minHeight, 0) + Math.max(0, column.cells.length - 1) * verticalGap));
+        const columnCells = layout.map((column, columnIndex) => {
+          const baseHeight = column.cells.reduce((total, cell) => total + cell.minHeight, 0) + Math.max(0, column.cells.length - 1) * verticalGap;
+          const extraPerCell = Math.max(0, targetHeight - baseHeight) / column.cells.length;
+          const rows = column.cells.map((cell, cellIndex) => {
+            const slotIndex = getLayoutSlotIndex(layout, columnIndex, cellIndex);
+            const inner = (slots[slotIndex] || []).map(child => renderBlock(child, cell.color || blockTextColor)).join('') || '&nbsp;';
+            const height = Math.round(cell.minHeight + extraPerCell);
+            const cellHtml = `<tr><td height="${height}" valign="${cell.verticalAlign}" bgcolor="${cell.background}" style="height:${height}px;padding:${cell.padding}px;background-color:${cell.background};color:${cell.color || blockTextColor};border:${cell.borderWidth}px solid ${cell.borderColor};border-radius:${cell.borderRadius}px;vertical-align:${cell.verticalAlign};font-family:${fontFamily};">${inner}</td></tr>`;
+            return cellHtml + (cellIndex < column.cells.length - 1 ? `<tr><td height="${verticalGap}" style="height:${verticalGap}px;font-size:1px;line-height:1px;padding:0;">&nbsp;</td></tr>` : '');
+          }).join('');
+          const width = Math.max(1, Number(column.width) || 1) / totalWeight * 100;
+          return `<td width="${width.toFixed(2)}%" valign="top" style="width:${width.toFixed(2)}%;padding:0;vertical-align:top;"><table role="presentation" width="100%" height="${targetHeight}" border="0" cellspacing="0" cellpadding="0" style="width:100%;height:${targetHeight}px;border-collapse:separate;">${rows}</table></td>${columnIndex < layout.length - 1 ? `<td width="${horizontalGap}" style="width:${horizontalGap}px;font-size:1px;line-height:1px;padding:0;">&nbsp;</td>` : ''}`;
+        }).join('');
+        return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr>${columnCells}</tr></table>`;
+      }      case 'data-table': {
         const rows: string[][] = Array.isArray(content.rows) ? content.rows : [];
         const heading = content.heading ? `<div style="margin:0 0 10px;font-family:${fontFamily};font-size:18px;line-height:1.3;font-weight:bold;color:#0F3A72;">${rep(content.heading)}</div>` : '';
         const tableRows = rows.map((row, rowIndex) => `<tr>${row.map(cell => rowIndex === 0
-          ? `<th align="left" style="padding:10px;border:1px solid #cbd5e1;background:#f1f5f9;font-family:${fontFamily};font-size:13px;line-height:1.4;font-weight:bold;color:${textColor};">${rep(cell)}</th>`
-          : `<td align="left" style="padding:10px;border:1px solid #cbd5e1;font-family:${fontFamily};font-size:13px;line-height:1.4;color:${textColor};">${rep(cell)}</td>`).join('')}</tr>`).join('');
+          ? `<th align="left" style="padding:10px;border:1px solid #cbd5e1;background:#f1f5f9;font-family:${fontFamily};font-size:13px;line-height:1.4;font-weight:bold;color:${blockTextColor};">${rep(cell)}</th>`
+          : `<td align="left" style="padding:10px;border:1px solid #cbd5e1;font-family:${fontFamily};font-size:13px;line-height:1.4;color:${blockTextColor};">${rep(cell)}</td>`).join('')}</tr>`).join('');
         return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr><td style="padding:0;">${heading}<table role="table" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;table-layout:fixed;">${tableRows}</table></td></tr></table>`;
       }
       case 'section': {
         const title = rep(content.heading || '');
         const body = rep(content.body || '');
-        const children = (block.children || []).map(renderBlock).join('');
-        return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:' + (content.padding ?? 24) + 'px;background:' + (content.bg || '#f8fafc') + ';border:1px solid #e2e8f0;font-family:' + fontFamily + ';color:' + textColor + '"><strong style="color:#0F3A72">' + title + '</strong><div style="margin-top:6px;line-height:1.5">' + body + '</div>' + children + '</td></tr></table>';
+        const children = (block.children || []).map(child => renderBlock(child, blockTextColor)).join('');
+        return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:' + (content.padding ?? 24) + 'px;background:' + (content.bg || '#f8fafc') + ';border:1px solid #e2e8f0;font-family:' + fontFamily + ';color:' + blockTextColor + '"><strong style="color:#0F3A72">' + title + '</strong><div style="margin-top:6px;line-height:1.5">' + body + '</div>' + children + '</td></tr></table>';
       }
       case 'image-text': case 'testimonial': case 'callout': case 'gallery': case 'video': case 'feature-list': case 'product-card': case 'product-grid': case 'pricing-table': case 'header': case 'footer': case 'merge-tag': {
         const title = rep(content.heading || content.title || content.name || content.company || content.author || '');
         const body = rep(content.body || content.description || content.text || content.quote || content.price || content.navigation || content.address || '');
-        return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:16px;border:1px solid #e2e8f0;font-family:' + fontFamily + ';color:' + textColor + '"><strong style="color:#0F3A72">' + title + '</strong><div style="margin-top:6px;line-height:1.5">' + body + '</div></td></tr></table>';
+        return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:16px;border:1px solid #e2e8f0;font-family:' + fontFamily + ';color:' + blockTextColor + '"><strong style="color:#0F3A72">' + title + '</strong><div style="margin-top:6px;line-height:1.5">' + body + '</div></td></tr></table>';
       }
       default:
         return '';
     }
   };
 
-  const blockHtmls = template.blocks.map(renderBlock).join('\n');
+  const blockHtmls = template.blocks.map(block => renderBlock(block)).join('\n');
 
   // Wrapper template
   const html = `<!DOCTYPE html>

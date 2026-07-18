@@ -1,4 +1,5 @@
 import { BlockCategory, BlockType, EmailBlock, EmailBlockDefinition } from '../types/emailBuilder';
+import { createLayoutColumn } from '../lib/emailLayout';
 
 const V = (a = 'Style 1', b = 'Style 2') => [{ value: 'style-1', label: a }, { value: 'style-2', label: b }];
 const CTA = { text: 'Tìm hiểu thêm', link: 'https://www.fermat.vn', bg: '#0F3A72', color: '#ffffff' };
@@ -28,7 +29,7 @@ export const EMAIL_BLOCK_REGISTRY: Record<BlockType, EmailBlockDefinition> = {
   signature: block('signature','brand','Chữ ký','PenLine',{html:'<p><strong>BAN TỔ CHỨC</strong><br/>Công ty Cổ phần Công nghệ Giáo dục Fermat</p>'},'Thông tin đơn vị gửi'),
   'social-links': block('social-links','brand','Mạng xã hội','Share2',{align:'center',links:[{label:'Facebook',url:'https://facebook.com',visible:true},{label:'Website',url:'https://www.fermat.vn',visible:true}]},'Các liên kết mạng xã hội'),
   section: block('section','layout','Section / Container','SquareDashed',{variant:'style-1',heading:'Nội dung section',body:'Gom phần nội dung có cùng ngữ cảnh.',bg:'#f8fafc',padding:24},'Nền, viền và khoảng đệm'),
-  columns: block('columns','layout','Cột linh hoạt','Columns3',{variant:'two',items:[{title:'Cột 1',body:'Nội dung cột thứ nhất'},{title:'Cột 2',body:'Nội dung cột thứ hai'}]},'Bố cục 2–4 cột',[{value:'two',label:'2 cột'},{value:'three',label:'3 cột'},{value:'four',label:'4 cột'}]),
+  columns: block('columns','layout','Bố cục ô linh hoạt','Columns3',{variant:'two',horizontalGap:12,verticalGap:12,layoutColumns:[]},'Tối đa 4 cột, mỗi cột 4 ô xếp dọc',[{value:'two',label:'2 cột'},{value:'three',label:'3 cột'},{value:'four',label:'4 cột'}]),
   'image-text': block('image-text','media','Ảnh + Chữ','PanelLeft',{variant:'image-left',imageUrl:'',heading:'Tiêu đề nổi bật',body:'Mô tả ngắn cho hình ảnh.',...CTA},'Ảnh và nội dung hai cột',[{value:'image-left',label:'Ảnh trái'},{value:'image-right',label:'Ảnh phải'}]),
   'data-table': block('data-table','content','Bảng dữ liệu','Table2',{variant:'style-1',heading:'Thông tin chi tiết',rows:[['Hạng mục','Nội dung'],['Thời gian','08:00 - 10:00'],['Địa điểm','Fermat Workspace']]},'Lịch học, điểm số hoặc thông tin'),
   testimonial: block('testimonial','content','Trích dẫn','Quote',{variant:'style-1',quote:'Một trải nghiệm học tập hữu ích và đầy cảm hứng.',author:'Nguyễn Minh Anh',role:'Phụ huynh'},'Nhận xét kèm người chia sẻ'),
@@ -56,6 +57,9 @@ export function createEmailBlock(type: BlockType, id = `${type}-${Date.now()}`):
     visible: true
   };
   if (type === 'section') block.children = [];
-  if (type === 'columns') block.columns = [[], []];
+  if (type === 'columns') {
+    block.content.layoutColumns = [createLayoutColumn(0), createLayoutColumn(1)];
+    block.columns = [[], []];
+  }
   return block;
 }

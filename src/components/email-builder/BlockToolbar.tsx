@@ -4,6 +4,7 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
+  ChevronDown,
   ImagePlus,
   Italic,
   Link,
@@ -18,6 +19,7 @@ interface BlockToolbarProps {
   onInsertVariableClick: () => void;
   onAlignChange?: (align: 'left' | 'center' | 'right') => void;
   onFontSizeChange?: (size: number) => void;
+  activeFontSize?: number;
   activeAlign?: 'left' | 'center' | 'right';
 }
 
@@ -25,10 +27,13 @@ export default function BlockToolbar({
   onInsertVariableClick,
   onAlignChange,
   onFontSizeChange,
+  activeFontSize = 15,
   activeAlign = 'left'
 }: BlockToolbarProps) {
   const [showColors, setShowColors] = useState(false);
-  const [fontSize, setFontSize] = useState(15);
+  const [fontSize, setFontSize] = useState(activeFontSize);
+  React.useEffect(() => setFontSize(activeFontSize), [activeFontSize]);
+  const [showFontSizes, setShowFontSizes] = useState(false);
   const colors = ['#1e293b', '#0f3a72', '#1473d1', '#e11d48', '#16a34a', '#ea580c', '#4f46e5'];
   const exec = (command: string, value = '') => document.execCommand(command, false, value);
   const keepSelection = (event: React.MouseEvent) => {
@@ -46,12 +51,12 @@ export default function BlockToolbar({
       <button type="button" onClick={() => exec('italic')} title="In nghiêng" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Italic className="h-4 w-4" /></button>
       <button type="button" onClick={() => exec('underline')} title="Gạch chân" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Underline className="h-4 w-4" /></button>
       <div className="mx-1 h-6 w-px bg-slate-200" />
-      {onFontSizeChange && <label className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600" onMouseDown={event => event.stopPropagation()}>
-        Cỡ chữ
-        <select value={fontSize} onChange={event => { const size = Number(event.target.value); setFontSize(size); onFontSizeChange(size); }} className="bg-transparent text-xs outline-none">
-          {[10, 12, 14, 15, 16, 18, 20, 24, 28, 32, 36, 40, 48].map(size => <option key={size} value={size}>{size}px</option>)}
-        </select>
-      </label>}
+      {onFontSizeChange && <div className="relative">
+        <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => setShowFontSizes(open => !open)} className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[10px] font-bold text-slate-600" aria-haspopup="listbox" aria-expanded={showFontSizes}>Cỡ chữ <span className="text-xs text-slate-800">{fontSize}px</span><ChevronDown className="h-3 w-3" /></button>
+        {showFontSizes && <div role="listbox" className="absolute left-0 top-9 z-50 grid max-h-60 min-w-28 grid-cols-2 gap-1 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+          {[10, 12, 14, 15, 16, 18, 20, 24, 28, 32, 36, 40, 48].map(size => <button key={size} type="button" role="option" aria-selected={fontSize === size} onMouseDown={event => event.preventDefault()} onClick={() => { setFontSize(size); setShowFontSizes(false); onFontSizeChange(size); }} className={`rounded-lg px-2 py-1.5 text-[10px] font-bold ${fontSize === size ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-blue-50 hover:text-blue-700'}`}>{size}px</button>)}
+        </div>}
+      </div>}
       <div className="relative">
         <button type="button" onClick={() => setShowColors(open => !open)} title="Màu chữ" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Palette className="h-4 w-4" /></button>
         {showColors && <div className="absolute left-0 top-10 z-50 grid grid-cols-4 gap-1.5 rounded-xl border border-slate-200 bg-white p-2.5 shadow-xl">
