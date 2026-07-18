@@ -47,7 +47,8 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   const [showVarPicker, setShowVarPicker] = useState(false);
   const [insertedVar, setInsertedVar] = useState<{ blockId: string; varName: string } | null>(null);
   const canvasRef = useRef<EmailCanvasHandle>(null);
-  const editorHistory = useRef<Record<string, { past: EmailTemplate[]; future: EmailTemplate[] }>>({});
+  const templatesRef = useRef<EmailTemplate[]>([]);
+  const editorHistory = useRef<Record<string, { past: EmailTemplate[]; future: EmailTemplate[]; lastCommitAt: number; lastSignature: string }>>({});
 
   // Routing modes
   const [editorMode, setEditorMode] = useState<'list' | 'edit'>('list');
@@ -68,6 +69,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   useEffect(() => {
     // Templates
     const loaded = loadTemplates();
+    templatesRef.current = loaded;
     setTemplates(loaded);
     
     // Read route from URL search params
@@ -122,6 +124,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
 
   // Save templates list automatically on changes
   const updateTemplatesList = (newList: EmailTemplate[]) => {
+    templatesRef.current = newList;
     setTemplates(newList);
     saveTemplates(newList);
   };
@@ -130,42 +133,78 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   const activeTemplate = templates.find(t => t.id === activeTemplateId);
 
   const getTemplateHistory = (templateId: string) => {
-    if (!editorHistory.current[templateId]) editorHistory.current[templateId] = { past: [], future: [] };
+    if (!editorHistory.current[templateId]) editorHistory.current[templateId] = { past: [], future: [], lastCommitAt: 0, lastSignature: '' };
     return editorHistory.current[templateId];
   };
 
+  const getHistorySignature = (current: EmailTemplate, next: EmailTemplate) => {
+    if (current.subject !== next.subject) return 'subject';
+    if (current.name !== next.name) return 'name';
+    if (JSON.stringify(current.settings) !== JSON.stringify(next.settings)) return 'email-settings';
+    const flatten = (blocks: EmailBlock[], result = new Map<string, string>()) => {
+      blocks.forEach(block => {
+        result.set(block.id, JSON.stringify({ type: block.type, content: block.content, styles: block.styles, visible: block.visible }));
+        flatten(block.children || [], result);
+        (block.columns || []).forEach(column => flatten(column, result));
+      });
+      return result;
+    };
+    const before = flatten(current.blocks);
+    const after = flatten(next.blocks);
+    const beforeIds = [...before.keys()].sort().join('|');
+    const afterIds = [...after.keys()].sort().join('|');
+    if (beforeIds !== afterIds) return 'block-structure';
+    const changedIds = [...after.keys()].filter(id => before.get(id) !== after.get(id)).sort();
+    return changedIds.length ? `blocks:${changedIds.join('|')}` : 'template';
+  };
+
   const commitActiveTemplate = (nextTemplate: EmailTemplate) => {
-    const current = templates.find(template => template.id === activeTemplateId);
+    const currentTemplates = templatesRef.current;
+    const current = currentTemplates.find(template => template.id === activeTemplateId);
     if (!current || current.id !== nextTemplate.id) return;
     const comparableCurrent = { ...current, lastUpdated: 0 };
     const comparableNext = { ...nextTemplate, lastUpdated: 0 };
     if (JSON.stringify(comparableCurrent) === JSON.stringify(comparableNext)) return;
     const history = getTemplateHistory(activeTemplateId);
-    history.past.push(structuredClone(current));
-    if (history.past.length > 100) history.past.shift();
+    const now = Date.now();
+    const signature = getHistorySignature(current, nextTemplate);
+    const shouldGroup = history.lastSignature === signature && now - history.lastCommitAt < 750;
+    if (!shouldGroup) {
+      history.past.push(structuredClone(current));
+      if (history.past.length > 100) history.past.shift();
+    }
+    history.lastCommitAt = now;
+    history.lastSignature = signature;
     history.future = [];
-    const updated = templates.map(template => template.id === activeTemplateId ? { ...nextTemplate, lastUpdated: Date.now() } : template);
+    const updated = currentTemplates.map(template => template.id === activeTemplateId ? { ...nextTemplate, lastUpdated: Date.now() } : template);
     updateTemplatesList(updated);
   };
 
   const handleUndo = () => {
-    const current = templates.find(template => template.id === activeTemplateId);
+    canvasRef.current?.flushPendingChanges();
+    const currentTemplates = templatesRef.current;
+    const current = currentTemplates.find(template => template.id === activeTemplateId);
     const history = getTemplateHistory(activeTemplateId);
     const previous = history.past.pop();
     if (!current || !previous) return;
     history.future.push(structuredClone(current));
-    updateTemplatesList(templates.map(template => template.id === activeTemplateId ? { ...previous, lastUpdated: Date.now() } : template));
+    history.lastCommitAt = 0;
+    history.lastSignature = '';
+    updateTemplatesList(currentTemplates.map(template => template.id === activeTemplateId ? { ...previous, lastUpdated: Date.now() } : template));
     setSelectedBlockId(selected => selected && findEmailBlock(previous.blocks, selected) ? selected : null);
     showToast('Đã hoàn tác thay đổi.');
   };
 
   const handleRedo = () => {
-    const current = templates.find(template => template.id === activeTemplateId);
+    const currentTemplates = templatesRef.current;
+    const current = currentTemplates.find(template => template.id === activeTemplateId);
     const history = getTemplateHistory(activeTemplateId);
     const next = history.future.pop();
     if (!current || !next) return;
     history.past.push(structuredClone(current));
-    updateTemplatesList(templates.map(template => template.id === activeTemplateId ? { ...next, lastUpdated: Date.now() } : template));
+    history.lastCommitAt = 0;
+    history.lastSignature = '';
+    updateTemplatesList(currentTemplates.map(template => template.id === activeTemplateId ? { ...next, lastUpdated: Date.now() } : template));
     setSelectedBlockId(selected => selected && findEmailBlock(next.blocks, selected) ? selected : null);
     showToast('Đã làm lại thay đổi.');
   };
@@ -388,6 +427,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
 
   const handleRestoreDefaults = () => {
     const restored = restoreDefaultTemplates();
+    templatesRef.current = restored;
     setTemplates(restored);
     setActiveTemplateIdState(restored[0].id);
     setActiveTemplateId(restored[0].id);
@@ -439,8 +479,6 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
     if (editorMode !== 'edit') return;
     const handleHistoryShortcut = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey)) return;
-      const target = event.target as HTMLElement | null;
-      if (target?.isContentEditable) return;
       const key = event.key.toLowerCase();
       if (key === 'z' && !event.shiftKey) { event.preventDefault(); handleUndo(); }
       else if (key === 'y' || (key === 'z' && event.shiftKey)) { event.preventDefault(); handleRedo(); }
@@ -762,7 +800,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
         copySubjectSuccess={copySubjectSuccess}
         onUndo={handleUndo}
         onRedo={handleRedo}
-        canUndo={canUndo}
+        canUndo={canUndo || Boolean(selectedBlockId)}
         canRedo={canRedo}
       />
 

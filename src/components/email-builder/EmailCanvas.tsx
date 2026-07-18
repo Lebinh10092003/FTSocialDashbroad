@@ -11,6 +11,7 @@ export interface EmailCanvasHandle {
   hasTextSelection: (blockId: string) => boolean;
   applySelectionFontSize: (blockId: string, size: number) => boolean;
   applySelectionTextColor: (blockId: string, color: string) => boolean;
+  flushPendingChanges: () => boolean;
 }
 
 interface SelectionBookmark { start: number; end: number; }
@@ -49,11 +50,13 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
   const [isInserterOpen, setIsInserterOpen] = React.useState(false);
   const [blockQuery, setBlockQuery] = React.useState('');
   const [rootDragOver, setRootDragOver] = React.useState(false);
+  const [selectionOverlayRects, setSelectionOverlayRects] = React.useState<Array<{ top: number; left: number; width: number; height: number }>>([]);
 
   const updateHtml = (block: EmailBlock, element: HTMLElement) => onUpdateBlockContent(block.id, { ...block.content, html: element.innerHTML });
   const clearSelectionHighlight = () => {
     const highlights = (globalThis.CSS as any)?.highlights;
     highlights?.delete('ft-email-selection');
+    setSelectionOverlayRects([]);
   };
   const rangeToBookmark = (editable: HTMLElement, range: Range): SelectionBookmark => {
     const before = range.cloneRange();
@@ -86,10 +89,13 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     return range;
   };
   const showSelectionHighlight = (range: Range | null) => {
+    if (!range || range.collapsed) { clearSelectionHighlight(); return; }
     const highlights = (globalThis.CSS as any)?.highlights;
     const HighlightConstructor = (globalThis as any).Highlight;
-    if (!highlights || !HighlightConstructor || !range || range.collapsed) { clearSelectionHighlight(); return; }
-    highlights.set('ft-email-selection', new HighlightConstructor(range));
+    if (highlights && HighlightConstructor) highlights.set('ft-email-selection', new HighlightConstructor(range));
+    setSelectionOverlayRects(Array.from(range.getClientRects())
+      .filter(rect => rect.width > 0 && rect.height > 0)
+      .map(rect => ({ top: rect.top, left: rect.left, width: rect.width, height: rect.height })));
   };
   const getSavedRange = (blockId: string) => {
     const editable = editableRefs.current[blockId];
@@ -230,12 +236,35 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
       if (applied && previousFocus?.focus) requestAnimationFrame(() => previousFocus.focus({ preventScroll: true }));
       return applied;
     },
+    flushPendingChanges: () => {
+      let changed = false;
+      Object.entries(editableRefs.current).forEach(([blockId, editableValue]) => {
+        const editable = editableValue as HTMLDivElement | null;
+        const block = editable ? findBlock(blocks, blockId) : undefined;
+        if (!editable || !block || editable.innerHTML === (block.content.html || '<p><br></p>')) return;
+        onUpdateBlockContent(block.id, { ...block.content, html: editable.innerHTML });
+        changed = true;
+      });
+      return changed;
+    },
   }));
 
   React.useLayoutEffect(() => {
     if (!selectedBlockId) { clearSelectionHighlight(); return; }
     showSelectionHighlight(getSavedRange(selectedBlockId));
   }, [blocks, selectedBlockId]);
+
+  useEffect(() => {
+    const refreshOverlay = () => {
+      if (selectedBlockId) showSelectionHighlight(getSavedRange(selectedBlockId));
+    };
+    window.addEventListener('scroll', refreshOverlay, true);
+    window.addEventListener('resize', refreshOverlay);
+    return () => {
+      window.removeEventListener('scroll', refreshOverlay, true);
+      window.removeEventListener('resize', refreshOverlay);
+    };
+  }, [selectedBlockId, blocks]);
 
   useEffect(() => {
     if (!insertedVarName) return;
@@ -377,7 +406,9 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
   };
   const filteredDefinitions = BLOCK_CATEGORIES.map(category => ({ ...category, items: Object.values(EMAIL_BLOCK_REGISTRY).filter(item => item.category === category.id && `${item.label} ${item.description}`.toLowerCase().includes(blockQuery.toLowerCase())) })).filter(category => category.items.length);
 
-  return <div className="flex w-full flex-col items-center px-4 py-6 md:px-8"><style>{'::highlight(ft-email-selection){background:#2563eb;color:#ffffff;}'}</style>
+  return <div className="flex w-full flex-col items-center px-4 py-6 md:px-8">
+    <style>{'::highlight(ft-email-selection){background:#2563eb;color:#ffffff;}'}</style>
+    {selectionOverlayRects.map((rect, index) => <span key={`${rect.top}-${rect.left}-${index}`} aria-hidden="true" className="pointer-events-none fixed z-[9999] rounded-[2px] bg-blue-600/55 ring-1 ring-blue-700/20" style={{ top: rect.top, left: rect.left, width: rect.width, height: rect.height }} />)}
     <div className="flex w-full max-w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg" style={{ maxWidth: emailSettings.maxWidth + 72 }}>
       <div className="flex items-center justify-between border-b px-4 py-3"><div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Email canvas</p><p className="mt-0.5 text-xs font-bold text-slate-700">Kéo block từ trái hoặc thả trực tiếp vào từng Section/ô</p></div><span className="rounded border bg-slate-50 px-2.5 py-1 text-[10px] font-black text-slate-500">{emailSettings.maxWidth}px</span></div>
       <div onClick={() => onSelectBlock('')} onDragOver={event => { if (event.dataTransfer.types.includes('application/x-ft-email-block')) { event.preventDefault(); setRootDragOver(true); } }} onDragLeave={event => { if (event.currentTarget === event.target) setRootDragOver(false); }} onDrop={rootDrop} className="relative flex min-h-[520px] justify-center bg-[#f5f6f8] p-5 md:p-8">
