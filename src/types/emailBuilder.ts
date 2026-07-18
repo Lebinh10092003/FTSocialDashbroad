@@ -5,6 +5,7 @@ export type BlockType =
   | 'image'
   | 'button'
   | 'button-group'
+  | 'button-group-3'
   | 'bullet-list'
   | 'number-list'
   | 'highlight-box'
@@ -22,8 +23,10 @@ export interface EmailBlock {
   content: Record<string, any>;
   styles: Record<string, any>;
   visible: boolean;
-  /** Children are only used by layout containers (currently Section). */
+  /** Linear child blocks used by Section containers. */
   children?: EmailBlock[];
+  /** Independent child slots used by Columns containers. */
+  columns?: EmailBlock[][];
 }
 
 export interface EmailSettings {
@@ -49,7 +52,7 @@ export interface EmailTemplate {
 }
 
 export interface EmailVariable {
-  key: string;      // e.g. "TÃƒÂªn phÃ¡Â»Â¥ huynh"
+  key: string;      // e.g. "Tên phụ huynh"
   label: string;    // Display label
   defaultValue: string; // Mock data value for preview e.g. "Anh Minh"
 }

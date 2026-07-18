@@ -1,170 +1,74 @@
 import React, { useState } from 'react';
-import { 
-  Bold, 
-  Italic, 
-  Underline, 
-  Link, 
-  AlignLeft, 
-  AlignCenter, 
-  AlignRight, 
-  Tag, 
-  Trash2, 
-  Palette,
-  Sparkles,
+import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  Bold,
   ImagePlus,
+  Italic,
+  Link,
   List,
-  ListOrdered
+  ListOrdered,
+  Palette,
+  Tag,
+  Underline
 } from 'lucide-react';
 
 interface BlockToolbarProps {
   onInsertVariableClick: () => void;
   onAlignChange?: (align: 'left' | 'center' | 'right') => void;
+  onFontSizeChange?: (size: number) => void;
   activeAlign?: 'left' | 'center' | 'right';
 }
 
 export default function BlockToolbar({
   onInsertVariableClick,
   onAlignChange,
+  onFontSizeChange,
   activeAlign = 'left'
 }: BlockToolbarProps) {
   const [showColors, setShowColors] = useState(false);
-
-  const colors = [
-    { value: '#1e293b', name: 'Slate' },
-    { value: '#0f3a72', name: 'Fermat Deep' },
-    { value: '#1473d1', name: 'Fermat Blue' },
-    { value: '#e11d48', name: 'Rose Red' },
-    { value: '#16a34a', name: 'Emerald' },
-    { value: '#ea580c', name: 'Orange' },
-    { value: '#4f46e5', name: 'Indigo' }
-  ];
-
-  const exec = (cmd: string, value: string = '') => {
-    document.execCommand(cmd, false, value);
+  const [fontSize, setFontSize] = useState(15);
+  const colors = ['#1e293b', '#0f3a72', '#1473d1', '#e11d48', '#16a34a', '#ea580c', '#4f46e5'];
+  const exec = (command: string, value = '') => document.execCommand(command, false, value);
+  const keepSelection = (event: React.MouseEvent) => {
+    if (!(event.target instanceof HTMLSelectElement) && !(event.target instanceof HTMLOptionElement)) event.preventDefault();
   };
 
-  const handleLink = () => {
+  const createLink = () => {
     const url = prompt('Nhập địa chỉ liên kết (URL):', 'https://');
-    if (url) {
-      exec('createLink', url);
-    }
+    if (url) exec('createLink', url);
   };
 
   return (
-    <div className="flex items-center flex-wrap gap-1 p-2 bg-slate-50 border border-slate-200/80 rounded-2xl shadow-sm mb-3">
-      {/* Basic Text Formats */}
-      <button
-        onClick={() => exec('bold')}
-        title="In đậm (Ctrl+B)"
-        className="p-2 hover:bg-slate-200/80 rounded-xl text-slate-650 cursor-pointer flex items-center justify-center"
-      >
-        <Bold className="w-4 h-4" />
-      </button>
-      <button
-        onClick={() => exec('italic')}
-        title="In nghiêng (Ctrl+I)"
-        className="p-2 hover:bg-slate-200/80 rounded-xl text-slate-650 cursor-pointer flex items-center justify-center"
-      >
-        <Italic className="w-4 h-4" />
-      </button>
-      <button
-        onClick={() => exec('underline')}
-        title="Gạch chân (Ctrl+U)"
-        className="p-2 hover:bg-slate-200/80 rounded-xl text-slate-650 cursor-pointer flex items-center justify-center"
-      >
-        <Underline className="w-4 h-4" />
-      </button>
-
-      <div className="w-[1px] h-6 bg-slate-200 mx-1"></div>
-
-      {/* Colors */}
+    <div className="mb-3 flex flex-wrap items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-2 shadow-sm" onMouseDown={keepSelection}>
+      <button type="button" onClick={() => exec('bold')} title="In đậm" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Bold className="h-4 w-4" /></button>
+      <button type="button" onClick={() => exec('italic')} title="In nghiêng" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Italic className="h-4 w-4" /></button>
+      <button type="button" onClick={() => exec('underline')} title="Gạch chân" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Underline className="h-4 w-4" /></button>
+      <div className="mx-1 h-6 w-px bg-slate-200" />
+      {onFontSizeChange && <label className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600" onMouseDown={event => event.stopPropagation()}>
+        Cỡ chữ
+        <select value={fontSize} onChange={event => { const size = Number(event.target.value); setFontSize(size); onFontSizeChange(size); }} className="bg-transparent text-xs outline-none">
+          {[10, 12, 14, 15, 16, 18, 20, 24, 28, 32, 36, 40, 48].map(size => <option key={size} value={size}>{size}px</option>)}
+        </select>
+      </label>}
       <div className="relative">
-        <button
-          onClick={() => setShowColors(!showColors)}
-          title="Màu chữ"
-          className="p-2 hover:bg-slate-200/80 rounded-xl text-slate-650 cursor-pointer flex items-center justify-center gap-1.5"
-        >
-          <Palette className="w-4 h-4" />
-        </button>
-
-        {showColors && (
-          <div className="absolute top-10 left-0 z-50 bg-white border border-slate-200 rounded-xl shadow-xl p-2.5 grid grid-cols-4 gap-1.5 min-w-[120px]">
-            {colors.map(c => (
-              <button
-                key={c.value}
-                onClick={() => {
-                  exec('foreColor', c.value);
-                  setShowColors(false);
-                }}
-                className="w-6 h-6 rounded-md cursor-pointer border border-slate-250/20"
-                style={{ backgroundColor: c.value }}
-                title={c.name}
-              />
-            ))}
-            <button
-              onClick={() => {
-                exec('removeFormat');
-                setShowColors(false);
-              }}
-              title="Xóa định dạng màu"
-              className="col-span-4 text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 py-1.5 rounded-lg text-center cursor-pointer border border-rose-200/30"
-            >
-              Xóa định dạng
-            </button>
-          </div>
-        )}
+        <button type="button" onClick={() => setShowColors(open => !open)} title="Màu chữ" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Palette className="h-4 w-4" /></button>
+        {showColors && <div className="absolute left-0 top-10 z-50 grid grid-cols-4 gap-1.5 rounded-xl border border-slate-200 bg-white p-2.5 shadow-xl">
+          {colors.map(color => <button key={color} type="button" onClick={() => { exec('foreColor', color); setShowColors(false); }} className="h-6 w-6 rounded-md border" style={{ backgroundColor: color }} />)}
+          <button type="button" onClick={() => { exec('removeFormat'); setShowColors(false); }} className="col-span-4 rounded bg-rose-50 py-1 text-[10px] font-bold text-rose-600">Xóa định dạng</button>
+        </div>}
       </div>
-
-      {/* Links */}
-      <button
-        onClick={handleLink}
-        title="Chèn liên kết"
-        className="p-2 hover:bg-slate-200/80 rounded-xl text-slate-650 cursor-pointer flex items-center justify-center"
-      >
-        <Link className="w-4 h-4" />
-      </button>
-
-      <div className="w-[1px] h-6 bg-slate-200 mx-1"></div>
-
-      <button onClick={() => exec('insertUnorderedList')} title="Danh sách chấm" className="p-2 hover:bg-slate-200/80 rounded-xl text-slate-650 cursor-pointer"><List className="w-4 h-4" /></button>
-      <button onClick={() => exec('insertOrderedList')} title="Danh sách số" className="p-2 hover:bg-slate-200/80 rounded-xl text-slate-650 cursor-pointer"><ListOrdered className="w-4 h-4" /></button>
-      <button onClick={() => { const url = prompt('Dán URL ảnh:', 'https://'); if (url) exec('insertImage', url); }} title="Chèn ảnh từ URL" className="p-2 hover:bg-slate-200/80 rounded-xl text-slate-650 cursor-pointer"><ImagePlus className="w-4 h-4" /></button>
-      {/* Alignment (if callbacks exist) */}
-      {onAlignChange && (
-        <>
-          <button
-            onClick={() => onAlignChange('left')}
-            title="Căn trái"
-            className={`p-2 rounded-xl cursor-pointer flex items-center justify-center ${activeAlign === 'left' ? 'bg-blue-100 text-blue-700' : 'hover:bg-slate-200/80 text-slate-650'}`}
-          >
-            <AlignLeft className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => onAlignChange('center')}
-            title="Căn giữa"
-            className={`p-2 rounded-xl cursor-pointer flex items-center justify-center ${activeAlign === 'center' ? 'bg-blue-100 text-blue-700' : 'hover:bg-slate-200/80 text-slate-650'}`}
-          >
-            <AlignCenter className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => onAlignChange('right')}
-            title="Căn phải"
-            className={`p-2 rounded-xl cursor-pointer flex items-center justify-center ${activeAlign === 'right' ? 'bg-blue-100 text-blue-700' : 'hover:bg-slate-200/80 text-slate-650'}`}
-          >
-            <AlignRight className="w-4 h-4" />
-          </button>
-          <div className="w-[1px] h-6 bg-slate-200 mx-1"></div>
-        </>
-      )}
-
-      {/* Personalization Variables Insert */}
-      <button
-        onClick={onInsertVariableClick}
-        className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-650 text-white rounded-xl text-xs font-bold shadow-sm hover:from-blue-700 hover:to-indigo-700 transition-all cursor-pointer select-none"
-      >
-        <Tag className="w-3.5 h-3.5" />
-        Chèn biến
-      </button>
+      <button type="button" onClick={createLink} title="Chèn liên kết" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Link className="h-4 w-4" /></button>
+      <button type="button" onClick={() => exec('insertUnorderedList')} title="Danh sách gạch đầu dòng" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><List className="h-4 w-4" /></button>
+      <button type="button" onClick={() => exec('insertOrderedList')} title="Danh sách số" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><ListOrdered className="h-4 w-4" /></button>
+      <button type="button" onClick={() => { const url = prompt('Dán URL ảnh:', 'https://'); if (url) exec('insertImage', url); }} title="Chèn ảnh từ URL" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><ImagePlus className="h-4 w-4" /></button>
+      {onAlignChange && <>
+        {(['left', 'center', 'right'] as const).map(align => <button key={align} type="button" onClick={() => onAlignChange(align)} className={`rounded-lg p-2 ${activeAlign === align ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:bg-slate-200'}`} title={`Căn ${align === 'left' ? 'trái' : align === 'center' ? 'giữa' : 'phải'}`}>
+          {align === 'left' ? <AlignLeft className="h-4 w-4" /> : align === 'center' ? <AlignCenter className="h-4 w-4" /> : <AlignRight className="h-4 w-4" />}
+        </button>)}
+      </>}
+      <button type="button" onClick={onInsertVariableClick} className="ml-auto flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white"><Tag className="h-3.5 w-3.5" />Chèn biến</button>
     </div>
   );
 }

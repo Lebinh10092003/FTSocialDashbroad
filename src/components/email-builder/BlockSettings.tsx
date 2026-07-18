@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlignLeft, AlignCenter, AlignRight, Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
+import { AlignCenter, AlignLeft, AlignRight, Link2, Lock, LockOpen, Plus, Trash2 } from 'lucide-react';
 import { EmailBlock } from '../../types/emailBuilder';
 import { getBlockDefinition } from '../../data/emailBlockRegistry';
 import ColorField from './ColorField';
@@ -8,807 +8,163 @@ interface BlockSettingsProps {
   block: EmailBlock;
   onUpdateBlockContent: (content: Record<string, any>) => void;
   onUpdateBlockStyles: (styles: Record<string, any>) => void;
+  onUpdateBlockColumns?: (columns: EmailBlock[][]) => void;
 }
 
-export default function BlockSettings({
-  block,
-  onUpdateBlockContent,
-  onUpdateBlockStyles
-}: BlockSettingsProps) {
+const fieldClass = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none shadow-sm focus:border-blue-500';
+const LABELS: Record<string, string> = {
+  heading: 'Tiêu đề', title: 'Tiêu đề', body: 'Nội dung', text: 'Nội dung', name: 'Tên', company: 'Đơn vị',
+  author: 'Tác giả', role: 'Vai trò', quote: 'Nội dung trích dẫn', description: 'Mô tả', price: 'Giá',
+  navigation: 'Điều hướng', address: 'Địa chỉ', link: 'Liên kết', url: 'Đường dẫn', label: 'Nhãn',
+  imageUrl: 'Đường dẫn ảnh', logoUrl: 'Đường dẫn logo', borderColor: 'Màu đường viền',
+  unsubscribeUrl: 'Liên kết hủy đăng ký', bg: 'Màu nền', padding: 'Khoảng đệm (px)', gap: 'Khoảng cách giữa các nút (px)',
+  fontSize: 'Cỡ chữ (px)', paddingX: 'Đệm ngang (px)', paddingY: 'Đệm dọc (px)', minWidth: 'Rộng tối thiểu (px)',
+  radius: 'Bo góc (px)', color: 'Màu chữ', features: 'Tính năng', items: 'Các mục',
+  images: 'Danh sách ảnh', products: 'Danh sách sản phẩm', plans: 'Các gói giá', links: 'Các liên kết'
+};
+
+function NumberDraft({ value, min = 0, max = 2000, onCommit, label }: { value: number | string | null | undefined; min?: number; max?: number; onCommit: (value: number | '') => void; label: string }) {
+  const [draft, setDraft] = React.useState(value === null || value === undefined ? '' : String(value));
+  React.useEffect(() => setDraft(value === null || value === undefined ? '' : String(value)), [value]);
+  const commit = (raw: string) => {
+    if (raw.trim() === '') { onCommit(''); return; }
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) onCommit(Math.max(min, Math.min(max, parsed)));
+  };
+  return <div><label className="mb-1 block text-[10px] font-bold text-slate-500">{label}</label><input type="number" min={min} max={max} value={draft} onChange={event => { setDraft(event.target.value); if (event.target.value !== '') commit(event.target.value); }} onBlur={() => commit(draft)} className={fieldClass} /></div>;
+}
+
+export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlockStyles, onUpdateBlockColumns }: BlockSettingsProps) {
   const content = block.content;
   const styles = block.styles;
-  const isSchemaBlock = ['section','columns','image-text','data-table','testimonial','callout','gallery','video','feature-list','product-card','product-grid','pricing-table','header','footer','merge-tag','custom-html'].includes(block.type);
   const definition = getBlockDefinition(block.type);
+  const [uploading, setUploading] = React.useState(false);
+  const [uploadError, setUploadError] = React.useState('');
+  const updateContent = (key: string, value: any) => onUpdateBlockContent({ ...content, [key]: value });
+  const updateStyles = (key: string, value: any) => onUpdateBlockStyles({ ...styles, [key]: value });
 
-  const [isUploading, setIsUploading] = React.useState(false);
-  const [uploadError, setUploadError] = React.useState<string | null>(null);
-
-  const handleFileUpload = async (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      setUploadError('Vui lòng chọn tệp hình ảnh hợp lệ.');
-      return;
-    }
-    if (file.size > 3 * 1024 * 1024) {
-      setUploadError('Tệp quá lớn. Vui lòng chọn tệp nhỏ hơn 3MB.');
-      return;
-    }
-
-    setIsUploading(true);
-    setUploadError(null);
-
-    try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64 = reader.result as string;
-
-        try {
-          const response = await fetch('/api/upload', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              filename: file.name,
-              base64: base64
-            })
-          });
-
-          const data = await response.json();
-          if (data.success && data.url) {
-            const absoluteUrl = `${window.location.origin}${data.url}`;
-            updateContent('url', absoluteUrl);
-          } else {
-            updateContent('url', base64);
-            setUploadError(data.error || 'Không upload được, đã dùng ảnh nhúng để copy sang Gmail.');
-          }
-        } catch (error: any) {
-          updateContent('url', base64);
-          setUploadError(error?.message ? `Không upload được, đã dùng ảnh nhúng: ${error.message}` : 'Không upload được, đã dùng ảnh nhúng để copy sang Gmail.');
-        } finally {
-          setIsUploading(false);
-        }
-      };
-      
-      reader.onerror = () => {
-        setUploadError('Không thể đọc dữ liệu tệp.');
-        setIsUploading(false);
-      };
-
-      reader.readAsDataURL(file);
-    } catch (err: any) {
-      setUploadError(err.message || 'Lỗi kết nối máy chủ.');
-      setIsUploading(false);
-    }
-  };
-
-  const handlePasteEvent = async (e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (items) {
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.startsWith('image/')) {
-          const file = items[i].getAsFile();
-          if (file) {
-            e.preventDefault();
-            await handleFileUpload(file);
-            break;
-          }
-        }
-      }
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      await handleFileUpload(file);
-    }
-  };
-
-  const ImageUploader = () => {
-    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    
-    return (
-      <div className="space-y-2.5">
-        <label className="block text-[10px] font-bold text-slate-500 mb-1">Tải ảnh hoặc Dán ảnh (Ctrl+V)</label>
-        
-        <div
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-          onPaste={handlePasteEvent}
-          className="border-2 border-dashed border-slate-200 hover:border-blue-400 bg-slate-50/50 hover:bg-blue-50/10 rounded-2xl p-4 text-center cursor-pointer transition-all relative group flex flex-col items-center justify-center min-h-[100px] outline-none"
-          tabIndex={0}
-        >
-          {isUploading ? (
-            <div className="flex flex-col items-center gap-1">
-              <div className="w-6 h-6 border-2 border-blue-650 border-t-transparent rounded-full animate-spin"></div>
-              <span className="text-[10px] text-slate-400 font-bold">Đang tải lên...</span>
-            </div>
-          ) : (
-            <label className="cursor-pointer w-full h-full block">
-              <input
-                type="file"
-                accept="image/*"
-                onChange={e => {
-                  const file = e.target.files?.[0];
-                  if (file) handleFileUpload(file);
-                }}
-                className="hidden"
-              />
-              <div className="space-y-1.5 pointer-events-none">
-                <div className="text-xs text-slate-650 font-black">
-                  Kéo thả, Click chọn hoặc <span className="text-blue-600 underline">Paste (Ctrl+V)</span> ảnh
-                </div>
-                <div className="text-[9px] text-slate-400">Hỗ trợ JPG, PNG, GIF, tối đa 3MB</div>
-              </div>
-            </label>
-          )}
-        </div>
-
-        {uploadError && (
-          <div className="text-[9px] text-rose-500 bg-rose-50 border border-rose-100 p-2 rounded-xl font-bold">
-            {uploadError}
-          </div>
-        )}
-
-        {isLocalhost && content.url && content.url.includes('localhost') && (
-          <div className="text-[9px] text-amber-600 bg-amber-50 border border-amber-100 p-2.5 rounded-xl leading-relaxed font-semibold">
-            <strong>Lưu ý local</strong>: Khi bấm Copy nội dung, ảnh local sẽ được nhúng vào clipboard để dán Gmail. Nếu gửi bằng link ảnh trực tiếp, hãy dùng URL public HTTPS.
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const updateContent = (key: string, value: any) => {
-    onUpdateBlockContent({
-      ...content,
-      [key]: value
-    });
-  };
-
-  const updateStyles = (key: string, value: any) => {
-    onUpdateBlockStyles({
-      ...styles,
-      [key]: value
-    });
-  };
-
-  const handleAddListItem = () => {
-    const items = content.items || [];
-    updateContent('items', [...items, 'Mục mới']);
-  };
-
-  const handleUpdateListItem = (index: number, val: string) => {
-    const items = [...(content.items || [])];
-    items[index] = val;
-    updateContent('items', items);
-  };
-
-  const handleRemoveListItem = (index: number) => {
-    const items = [...(content.items || [])];
-    items.splice(index, 1);
-    updateContent('items', items);
-  };
-
-  const handleMoveListItem = (index: number, direction: 'up' | 'down') => {
-    const items = [...(content.items || [])];
-    if (direction === 'up' && index > 0) {
-      const temp = items[index];
-      items[index] = items[index - 1];
-      items[index - 1] = temp;
-    } else if (direction === 'down' && index < items.length - 1) {
-      const temp = items[index];
-      items[index] = items[index + 1];
-      items[index + 1] = temp;
-    }
-    updateContent('items', items);
-  };
-
-
-  const groupButtons = () => content.buttons || [content.btn1, content.btn2].filter(Boolean);
-  const updateGroupButton = (index: number, patch: Record<string, any>) => { const buttons = groupButtons(); buttons[index] = { ...buttons[index], ...patch }; onUpdateBlockContent({ ...content, buttons }); };
-
-  const handleUpdateSocialLink = (index: number, key: string, val: any) => {
-    const links = [...(content.links || [])];
-    links[index] = {
-      ...links[index],
-      [key]: val
+  const applyImageMetadata = (url: string) => {
+    const image = new Image();
+    image.onload = () => {
+      const ratio = image.naturalWidth / Math.max(1, image.naturalHeight);
+      const width = Number(content.width) || Math.min(image.naturalWidth, 600);
+      onUpdateBlockContent({ ...content, url, width, height: content.height || Math.round(width / ratio), naturalRatio: ratio, aspectLocked: content.aspectLocked !== false });
     };
-    updateContent('links', links);
+    image.src = url;
   };
 
-  return (
-    <div className="space-y-5 p-5 bg-white overflow-y-auto h-full select-text">
-      
-      <div className="border-b border-slate-100 pb-3">
-        <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Thuộc tính Khối</h3>
-        <p className="text-[10px] text-slate-400 font-extrabold mt-1">Phân loại: <span className="text-blue-650 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase">{block.type}</span></p>
-      </div>
+  const uploadImage = async (file: File) => {
+    if (!file.type.startsWith('image/')) { setUploadError('Vui lòng chọn tệp hình ảnh hợp lệ.'); return; }
+    if (file.size > 3 * 1024 * 1024) { setUploadError('Tệp quá lớn. Kích thước tối đa là 3MB.'); return; }
+    setUploading(true); setUploadError('');
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = String(reader.result);
+      try {
+        const response = await fetch('/api/upload', { method: 'POST', headers: { 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name) }, body: file });
+        const result = await response.json();
+        applyImageMetadata(result.success && result.url ? `${window.location.origin}${result.url}` : dataUrl);
+      } catch { applyImageMetadata(dataUrl); }
+      setUploading(false);
+    };
+    reader.onerror = () => { setUploadError('Không thể đọc dữ liệu tệp.'); setUploading(false); };
+    reader.readAsDataURL(file);
+  };
 
-      {isSchemaBlock && (
-        <div className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-3.5">
-          <div><label className="mb-1 block text-[10px] font-bold text-slate-600">Bi?n th? giao di?n</label><select value={content.variant || definition.variants[0]?.value} onChange={e => updateContent('variant', e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500">{definition.variants.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}</select></div>
-          {Object.entries(content).filter(([key, value]) => key !== 'variant' && (typeof value === 'string' || typeof value === 'number')).map(([key, value]) => <div key={key}><label className="mb-1 block text-[10px] font-bold capitalize text-slate-600">{key}</label>{key === 'html' ? <textarea value={String(value)} onChange={e => updateContent(key, e.target.value)} spellCheck={false} className="min-h-40 w-full rounded-xl border border-slate-200 bg-slate-950 p-3 font-mono text-[11px] text-emerald-200 outline-none focus:border-blue-500" /> : <input type={key.toLowerCase().includes('url') || key === 'link' ? 'url' : 'text'} value={String(value)} onChange={e => updateContent(key, e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500" />}</div>)}
-          {block.type === 'custom-html' && <p className="rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-[10px] leading-relaxed text-amber-800">Email client h\u1ed7 tr\u1ee3 CSS h\u1ea1n ch\u1ebf. \u01afu ti\u00ean table v\u00e0 style inline; script, event handler v\u00e0 iframe s\u1ebd t\u1ef1 \u0111\u1ed9ng b\u1ecb lo\u1ea1i b\u1ecf.</p>}
-        </div>
-      )}
+  const ImageUploader = () => <div className="space-y-2">
+    <label className="block text-[10px] font-bold text-slate-500">Tải ảnh hoặc dán ảnh (Ctrl+V)</label>
+    <label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const file = event.dataTransfer.files?.[0]; if (file) uploadImage(file); }} onPaste={event => { const file = [...event.clipboardData.items].find(item => item.type.startsWith('image/'))?.getAsFile(); if (file) { event.preventDefault(); uploadImage(file); } }} className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-4 text-center hover:border-blue-400" tabIndex={0}>
+      <input type="file" accept="image/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) uploadImage(file); event.currentTarget.value = ''; }} />
+      <span className="text-xs font-bold text-slate-700">{uploading ? 'Đang tải ảnh…' : 'Kéo thả, bấm chọn hoặc dán ảnh'}</span>
+      <span className="mt-1 text-[9px] text-slate-400">JPG, PNG, GIF, WebP — tối đa 3MB</span>
+    </label>
+    {uploadError && <p className="rounded-lg bg-rose-50 p-2 text-[10px] font-bold text-rose-600">{uploadError}</p>}
+  </div>;
 
-      {/* Common margins */}
-      {block.type !== 'spacer' && (
-        <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/50 space-y-2.5">
-          <h4 className="text-[10px] font-black text-slate-650 uppercase tracking-wider">Mép khoảng cách lề (px)</h4>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[9px] text-slate-500 font-bold mb-1">Căn lề trên</label>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={styles.marginTop ?? 10}
-                onChange={e => updateStyles('marginTop', parseInt(e.target.value) || 0)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none bg-white focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-[9px] text-slate-500 font-bold mb-1">Căn lề dưới</label>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={styles.marginBottom ?? 10}
-                onChange={e => updateStyles('marginBottom', parseInt(e.target.value) || 0)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none bg-white focus:border-blue-500"
-              />
-            </div>
-          </div>
-        </div>
-      )}
+  const alignControl = <div><label className="mb-1 block text-[10px] font-bold text-slate-500">Căn ngang</label><div className="flex rounded-xl border border-slate-200 bg-slate-100 p-0.5">{(['left', 'center', 'right'] as const).map(align => <button key={align} type="button" onClick={() => updateContent('align', align)} className={`flex-1 rounded-lg py-1.5 ${content.align === align ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>{align === 'left' ? <AlignLeft className="mx-auto h-4 w-4" /> : align === 'center' ? <AlignCenter className="mx-auto h-4 w-4" /> : <AlignRight className="mx-auto h-4 w-4" />}</button>)}</div></div>;
 
-      {['paragraph', 'signature', 'highlight-box', 'bullet-list', 'number-list', 'button'].includes(block.type) && (
-        <div className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-3.5">
-          <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-650">Kích thước nội dung (email-safe)</h4>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-[9px] font-bold text-slate-500">Cỡ chữ (px)</label>
-              <input type="number" min="10" max="48" value={content.fontSize ?? (block.type === 'button' ? 15 : block.type === 'signature' ? 14 : 15)} onChange={event => updateContent('fontSize', Math.max(10, Math.min(48, parseInt(event.target.value) || 15)))} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500" />
-            </div>
-            {block.type !== 'button' && <div>
-              <label className="mb-1 block text-[9px] font-bold text-slate-500">Giãn dòng</label>
-              <input type="number" min="1" max="2.4" step="0.1" value={content.lineHeight ?? 1.6} onChange={event => updateContent('lineHeight', Math.max(1, Math.min(2.4, parseFloat(event.target.value) || 1.6)))} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500" />
-            </div>}
-          </div>
-          <p className="text-[9px] leading-relaxed text-slate-500">Dùng font-size và line-height inline để giữ định dạng khi copy vào email.</p>
-        </div>
-      )}
-      {/* LOGO PROPERTIES */}
-      {block.type === 'logo' && (
-        <div className="space-y-4">
-          <ImageUploader />
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">URL ảnh Logo</label>
-            <input
-              type="text"
-              value={content.url || ''}
-              onChange={e => updateContent('url', e.target.value)}
-              placeholder="https://example.com/logo.png"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Alt Text (Mô tả ảnh)</label>
-            <input
-              type="text"
-              value={content.alt || ''}
-              onChange={e => updateContent('alt', e.target.value)}
-              placeholder="Logo FermatTech"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Chiều rộng Logo (px)</label>
-              <input
-                type="number"
-                value={content.width || 120}
-                onChange={e => updateContent('width', parseInt(e.target.value) || 120)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề</label>
-              <div className="flex bg-slate-100 border border-slate-200/80 rounded-xl p-0.5 shadow-sm">
-                {(['left', 'center', 'right'] as const).map(align => (
-                  <button
-                    key={align}
-                    onClick={() => updateContent('align', align)}
-                    className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer transition-all ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500 hover:text-slate-700'}`}
-                  >
-                    {align === 'left' && <AlignLeft className="w-4.5 h-4.5" />}
-                    {align === 'center' && <AlignCenter className="w-4.5 h-4.5" />}
-                    {align === 'right' && <AlignRight className="w-4.5 h-4.5" />}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Đường dẫn liên kết khi nhấp</label>
-            <input
-              type="text"
-              value={content.link || ''}
-              onChange={e => updateContent('link', e.target.value)}
-              placeholder="https://www.fermat.vn"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-            />
-          </div>
-        </div>
-      )}
+  const changeImageDimension = (key: 'width' | 'height', value: number | '') => {
+    if (value === '') { updateContent(key, ''); return; }
+    const ratio = Number(content.naturalRatio) || (Number(content.width) && Number(content.height) ? Number(content.width) / Number(content.height) : 1);
+    if (content.aspectLocked !== false && ratio > 0) {
+      onUpdateBlockContent({ ...content, [key]: value, [key === 'width' ? 'height' : 'width']: Math.round(key === 'width' ? value / ratio : value * ratio) });
+    } else updateContent(key, value);
+  };
 
-      {/* HEADING PROPERTIES */}
-      {block.type === 'heading' && (
-        <div className="space-y-4">
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Nội dung Tiêu đề</label>
-            <input
-              type="text"
-              value={content.text || ''}
-              onChange={e => updateContent('text', e.target.value)}
-              placeholder="Nhập tiêu đề..."
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Thẻ cấu trúc</label>
-              <select
-                value={content.level || 'h2'}
-                onChange={e => updateContent('level', e.target.value)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 bg-white shadow-sm"
-              >
-                <option value="h1">H1 (Tiêu đề chính)</option>
-                <option value="h2">H2 (Tiêu đề phụ)</option>
-                <option value="h3">H3 (Mục nhỏ)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Cỡ chữ (px)</label>
-              <input
-                type="number"
-                value={content.fontSize || 18}
-                onChange={e => updateContent('fontSize', parseInt(e.target.value) || 18)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-              />
-            </div>
-          </div>
-          
-          <ColorField
-            label="Màu chữ tiêu đề"
-            value={content.color || '#0f3a72'}
-            onChange={color => updateContent('color', color)}
-          />
+  const rows: string[][] = Array.isArray(content.rows) ? content.rows : [];
+  const updateTableCell = (rowIndex: number, columnIndex: number, value: string) => {
+    const next = rows.map(row => [...row]); next[rowIndex][columnIndex] = value; updateContent('rows', next);
+  };
 
-          <div className="grid grid-cols-2 gap-3 pt-1">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Định dạng nét</label>
-              <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-650 font-bold select-none pt-1.5">
-                <input
-                  type="checkbox"
-                  checked={content.bold !== false}
-                  onChange={e => updateContent('bold', e.target.checked)}
-                  className="w-4.5 h-4.5 text-blue-600 border-slate-350 rounded focus:ring-blue-500"
-                />
-                In đậm (Bold)
-              </label>
-            </div>
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề chữ</label>
-              <div className="flex bg-slate-100 border border-slate-200/80 rounded-xl p-0.5 shadow-sm">
-                {(['left', 'center', 'right'] as const).map(align => (
-                  <button
-                    key={align}
-                    onClick={() => updateContent('align', align)}
-                    className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer transition-all ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500 hover:text-slate-700'}`}
-                  >
-                    {align === 'left' && <AlignLeft className="w-4.5 h-4.5" />}
-                    {align === 'center' && <AlignCenter className="w-4.5 h-4.5" />}
-                    {align === 'right' && <AlignRight className="w-4.5 h-4.5" />}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+  const primitiveEntries = Object.entries(content).filter(([key, value]) => !['variant', 'url', 'alt', 'width', 'height', 'aspectLocked', 'naturalRatio', 'align', 'borderRadius', 'items', 'rows', 'html', 'fontSize', 'lineHeight'].includes(key) && (typeof value === 'string' || typeof value === 'number'));
+  const isButtonGroup = block.type === 'button-group' || block.type === 'button-group-3';
+  const showGenericFields = !['logo', 'heading', 'paragraph', 'image', 'columns', 'data-table', 'bullet-list', 'number-list', 'spacer', 'button', 'button-group', 'button-group-3'].includes(block.type);
+  const collectionEntries = Object.entries(content).filter(([key, value]) => Array.isArray(value) && key !== 'rows' && !(isButtonGroup && key === 'buttons') && !(key === 'items' && ['bullet-list', 'number-list', 'columns'].includes(block.type)));
+  const updateCollectionItem = (key: string, index: number, value: any) => {
+    const next = [...(content[key] || [])]; next[index] = value; updateContent(key, next);
+  };
+  const addCollectionItem = (key: string, items: any[]) => {
+    const sample = items[0];
+    const next = typeof sample === 'string' ? '' : sample && typeof sample === 'object' ? Object.fromEntries(Object.keys(sample).map(field => [field, ''])) : '';
+    updateContent(key, [...items, next]);
+  };
+  const groupButtons = (): any[] => content.buttons || [content.btn1, content.btn2].filter(Boolean);
+  const updateGroupButton = (index: number, patch: Record<string, any>) => {
+    const buttons = groupButtons().map(button => ({ ...button }));
+    buttons[index] = { ...buttons[index], ...patch };
+    onUpdateBlockContent({ ...content, buttons });
+  };
+  const addGroupButton = () => {
+    const buttons = groupButtons();
+    if (buttons.length >= 3) return;
+    onUpdateBlockContent({ ...content, buttons: [...buttons, { text: `Nút thứ ${buttons.length + 1}`, link: 'https://www.fermat.vn', bg: '#1473d1', color: '#ffffff', radius: 8, fontSize: 13, paddingX: 14, paddingY: 10, minWidth: 0 }] });
+  };
 
-      {/* PARAGRAPH PROPERTIES */}
-      {block.type === 'paragraph' && (
-        <div className="space-y-4">
-          <p className="text-[11px] text-slate-450 leading-normal italic bg-slate-50 p-3.5 rounded-2xl border border-slate-200/50">
-            * Nhấp đúp vào khối Đoạn văn trên canvas để sửa nội dung và chèn biến.
-          </p>
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề chữ mặc định</label>
-            <div className="flex bg-slate-100 border border-slate-200/80 rounded-xl p-0.5 shadow-sm">
-              {(['left', 'center', 'right'] as const).map(align => (
-                <button
-                  key={align}
-                  onClick={() => updateContent('align', align)}
-                  className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer transition-all ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                  {align === 'left' && <AlignLeft className="w-4.5 h-4.5" />}
-                  {align === 'center' && <AlignCenter className="w-4.5 h-4.5" />}
-                  {align === 'right' && <AlignRight className="w-4.5 h-4.5" />}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+  return <div className="h-full space-y-5 overflow-y-auto bg-white p-5 text-slate-800">
+    <div className="border-b border-slate-100 pb-3"><h3 className="text-xs font-black uppercase tracking-widest">Thuộc tính khối</h3><p className="mt-1 text-[10px] font-bold text-slate-400">Phân loại: <span className="rounded border border-blue-100 bg-blue-50 px-2 py-0.5 uppercase text-blue-700">{block.type}</span></p></div>
 
-      {/* IMAGE PROPERTIES */}
-      {block.type === 'image' && (
-        <div className="space-y-4">
-          <ImageUploader />
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Đường dẫn ảnh HTTPS</label>
-            <input
-              type="text"
-              value={content.url || ''}
-              onChange={e => updateContent('url', e.target.value)}
-              placeholder="https://example.com/banner.png"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Alt Text (Mô tả ảnh)</label>
-            <input
-              type="text"
-              value={content.alt || ''}
-              onChange={e => updateContent('alt', e.target.value)}
-              placeholder="Banner tuyển sinh AYSBC"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Rộng tối đa (px)</label>
-              <input
-                type="number"
-                value={content.width || 600}
-                onChange={e => updateContent('width', parseInt(e.target.value) || 600)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Bo góc ảnh (px)</label>
-              <input
-                type="number"
-                value={content.borderRadius || 0}
-                onChange={e => updateContent('borderRadius', parseInt(e.target.value) || 0)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 gap-3">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề ngang</label>
-              <div className="flex bg-slate-100 border border-slate-200/80 rounded-xl p-0.5 shadow-sm">
-                {(['left', 'center', 'right'] as const).map(align => (
-                  <button
-                    key={align}
-                    onClick={() => updateContent('align', align)}
-                    className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer transition-all ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500 hover:text-slate-700'}`}
-                  >
-                    {align === 'left' && <AlignLeft className="w-4.5 h-4.5" />}
-                    {align === 'center' && <AlignCenter className="w-4.5 h-4.5" />}
-                    {align === 'right' && <AlignRight className="w-4.5 h-4.5" />}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Liên kết khi bấm vào hình</label>
-            <input
-              type="text"
-              value={content.link || ''}
-              onChange={e => updateContent('link', e.target.value)}
-              placeholder="https://www.fermat.vn"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-            />
-          </div>
-        </div>
-      )}
+    {block.type !== 'spacer' && <section className="rounded-xl border border-slate-200 bg-slate-50 p-3.5"><h4 className="mb-2 text-[10px] font-black uppercase tracking-wider">Khoảng cách lề (px)</h4><div className="grid grid-cols-2 gap-3"><NumberDraft label="Lề trên" value={styles.marginTop ?? 10} max={100} onCommit={value => updateStyles('marginTop', value === '' ? 0 : value)} /><NumberDraft label="Lề dưới" value={styles.marginBottom ?? 10} max={100} onCommit={value => updateStyles('marginBottom', value === '' ? 0 : value)} /></div></section>}
 
-      {/* LIST PROPERTIES */}
-      {(block.type === 'bullet-list' || block.type === 'number-list') && (
-        <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <label className="block text-[10px] font-bold text-slate-550">Danh sách dòng</label>
-            <button
-              onClick={handleAddListItem}
-              className="flex items-center gap-1 text-[10px] font-bold text-blue-650 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200/80 px-2 py-1 rounded-lg cursor-pointer transition-all"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Thêm dòng
-            </button>
-          </div>
-          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-            {(content.items || []).map((item: string, index: number) => (
-              <div key={index} className="flex items-center gap-1.5 p-2 bg-slate-50 border border-slate-200 rounded-xl">
-                <input
-                  type="text"
-                  value={item}
-                  onChange={e => handleUpdateListItem(index, e.target.value)}
-                  className="flex-1 text-xs rounded-lg border border-slate-200 px-2 py-1.5 outline-none bg-white focus:border-blue-500 shadow-sm"
-                />
-                <div className="flex shrink-0">
-                  <button
-                    disabled={index === 0}
-                    onClick={() => handleMoveListItem(index, 'up')}
-                    className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-20 cursor-pointer"
-                  >
-                    <ArrowUp className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    disabled={index === (content.items || []).length - 1}
-                    onClick={() => handleMoveListItem(index, 'down')}
-                    className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-20 cursor-pointer"
-                  >
-                    <ArrowDown className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => handleRemoveListItem(index)}
-                    className="p-1 text-rose-500 hover:text-rose-700 cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+    {(block.type === 'image' || block.type === 'logo') && <div className="space-y-4"><ImageUploader /><div><label className="mb-1 block text-[10px] font-bold text-slate-500">Đường dẫn ảnh HTTPS</label><input value={content.url || ''} onChange={event => updateContent('url', event.target.value)} onBlur={() => content.url && applyImageMetadata(content.url)} placeholder="https://example.com/image.png" className={fieldClass} /></div><div><label className="mb-1 block text-[10px] font-bold text-slate-500">Mô tả ảnh (Alt text)</label><input value={content.alt || ''} onChange={event => updateContent('alt', event.target.value)} className={fieldClass} /></div>
+      <section className="rounded-xl border border-blue-100 bg-blue-50/40 p-3"><div className="mb-2 flex items-center justify-between"><h4 className="text-[10px] font-black uppercase">Kích thước ảnh</h4><button type="button" onClick={() => updateContent('aspectLocked', content.aspectLocked === false)} className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-bold ${content.aspectLocked !== false ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-500'}`} title="Khóa tỉ lệ chiều rộng và chiều cao">{content.aspectLocked !== false ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />}{content.aspectLocked !== false ? 'Đang khóa tỉ lệ' : 'Tự do'}</button></div><div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2"><NumberDraft label="Chiều rộng (px)" value={content.width} min={1} max={2000} onCommit={value => changeImageDimension('width', value)} /><Link2 className={`mb-2 h-4 w-4 ${content.aspectLocked !== false ? 'text-blue-600' : 'text-slate-300'}`} /><NumberDraft label="Chiều cao (px)" value={content.height} min={1} max={2000} onCommit={value => changeImageDimension('height', value)} /></div><p className="mt-2 text-[9px] leading-relaxed text-slate-500">Có thể xóa trắng hoàn toàn một ô rồi nhập số mới. Khi khóa tỉ lệ, thay đổi một chiều sẽ tự cập nhật chiều còn lại.</p></section>
+      {block.type === 'image' && <NumberDraft label="Bo góc ảnh (px)" value={content.borderRadius ?? 0} max={100} onCommit={value => updateContent('borderRadius', value === '' ? 0 : value)} />}{alignControl}<div><label className="mb-1 block text-[10px] font-bold text-slate-500">Liên kết khi bấm vào ảnh</label><input value={content.link || ''} onChange={event => updateContent('link', event.target.value)} className={fieldClass} /></div></div>}
 
-      {/* CTA BUTTON PROPERTIES */}
-      {block.type === 'button' && (
-        <div className="space-y-4">
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Chữ hiển thị trên nút</label>
-            <input
-              type="text"
-              value={content.text || ''}
-              onChange={e => updateContent('text', e.target.value)}
-              placeholder="Đăng ký ngay"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Liên kết nút (URL)</label>
-            <input
-              type="text"
-              value={content.link || ''}
-              onChange={e => updateContent('link', e.target.value)}
-              placeholder="https://example.com"
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-            />
-          </div>
-          
-          <ColorField
-            label="Màu nền nút"
-            value={content.bg || '#1473d1'}
-            onChange={color => updateContent('bg', color)}
-          />
+    {block.type === 'heading' && <div className="space-y-4"><div><label className="mb-1 block text-[10px] font-bold text-slate-500">Nội dung tiêu đề</label><input value={content.text || ''} onChange={event => updateContent('text', event.target.value)} className={fieldClass} /></div><div className="grid grid-cols-2 gap-3"><div><label className="mb-1 block text-[10px] font-bold text-slate-500">Cấp tiêu đề</label><select value={content.level || 'h2'} onChange={event => updateContent('level', event.target.value)} className={fieldClass}><option value="h1">H1 — Chính</option><option value="h2">H2 — Phụ</option><option value="h3">H3 — Mục nhỏ</option></select></div><NumberDraft label="Cỡ chữ (px)" value={content.fontSize ?? 20} min={10} max={72} onCommit={value => updateContent('fontSize', value === '' ? 20 : value)} /></div><ColorField label="Màu chữ" value={content.color || '#0F3A72'} onChange={value => updateContent('color', value)} />{alignControl}</div>}
 
-          <ColorField
-            label="Màu chữ trên nút"
-            value={content.color || '#ffffff'}
-            onChange={color => updateContent('color', color)}
-          />
+    {['paragraph', 'signature', 'highlight-box'].includes(block.type) && <section className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/40 p-3.5"><h4 className="text-[10px] font-black uppercase">Định dạng mặc định email-safe</h4><div className="grid grid-cols-2 gap-3"><NumberDraft label="Cỡ chữ (px)" value={content.fontSize ?? 15} min={10} max={48} onCommit={value => updateContent('fontSize', value === '' ? 15 : value)} /><NumberDraft label="Giãn dòng" value={content.lineHeight ?? 1.6} min={1} max={2.4} onCommit={value => updateContent('lineHeight', value === '' ? 1.6 : value)} /></div>{alignControl}<p className="text-[9px] text-slate-500">Bôi đen văn bản trên canvas để đổi riêng cỡ chữ cho vùng đã chọn.</p></section>}
 
-          <div className="grid grid-cols-2 gap-3 pt-1">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Bo góc nút (px)</label>
-              <input
-                type="number"
-                value={content.radius ?? 8}
-                onChange={e => updateContent('radius', parseInt(e.target.value) || 0)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Độ rộng nút</label>
-              <select
-                value={content.width || 'auto'}
-                onChange={e => updateContent('width', e.target.value)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 bg-white shadow-sm"
-              >
-                <option value="auto">Vừa khít chữ</option>
-                <option value="full">100% hàng ngang</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề nút</label>
-            <div className="flex bg-slate-100 border border-slate-200/80 rounded-xl p-0.5 shadow-sm">
-              {(['left', 'center', 'right'] as const).map(align => (
-                <button
-                  key={align}
-                  onClick={() => updateContent('align', align)}
-                  className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer transition-all ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                  {align === 'left' && <AlignLeft className="w-4.5 h-4.5" />}
-                  {align === 'center' && <AlignCenter className="w-4.5 h-4.5" />}
-                  {align === 'right' && <AlignRight className="w-4.5 h-4.5" />}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+    {block.type === 'columns' && <section className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/40 p-3.5"><div><label className="mb-1 block text-[10px] font-bold text-slate-600">Số cột bằng nhau</label><select value={content.variant || 'two'} onChange={event => { const variant = event.target.value; const count = variant === 'four' ? 4 : variant === 'three' ? 3 : 2; const columns = Array.from({ length: count }, (_, index) => block.columns?.[index] || []); onUpdateBlockContent({ ...content, variant }); onUpdateBlockColumns?.(columns); }} className={fieldClass}><option value="two">2 cột</option><option value="three">3 cột</option><option value="four">4 cột</option></select></div><p className="text-[9px] leading-relaxed text-slate-500">Kéo bất kỳ block nào vào đúng cột trên canvas. Mỗi cột có thể chứa nhiều block và xuất ra HTML dạng bảng tương thích email.</p></section>}
 
-      {/* ACTION BUTTON GROUP PROPERTIES */}
-      {block.type === 'button-group' && (
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-slate-200/50 bg-slate-50 p-3.5">
-            <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-650">Nh\u00f3m n\u00fat h\u00e0nh \u0111\u1ed9ng</h4>
-            <div className="mt-3 grid grid-cols-2 gap-3"><div><label className="mb-1 block text-[9px] font-bold text-slate-500">S\u1ed1 n\u00fat</label><select value={groupButtons().length} onChange={e => { const count = Number(e.target.value); const buttons = groupButtons(); while (buttons.length < count) buttons.push({ text: 'H\u00e0nh \u0111\u1ed9ng m\u1edbi', link: 'https://www.fermat.vn', bg: '#0F3A72', color: '#ffffff', radius: 8 }); onUpdateBlockContent({ ...content, buttons: buttons.slice(0, count) }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500"><option value="2">2 n\u00fat</option><option value="3">3 n?t</option><option value="4">4 n?t</option></select></div><div><label className="mb-1 block text-[9px] font-bold text-slate-500">Kho\u1ea3ng c\u00e1ch (px)</label><input type="number" value={content.gap ?? 12} onChange={e => updateContent('gap', parseInt(e.target.value) || 0)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500" /></div></div>
-          </div>
-          {groupButtons().map((button: any, index: number) => <div key={index} className="space-y-2 rounded-2xl border border-slate-200 bg-white p-3"><h4 className="text-[10px] font-black uppercase text-slate-700">N\u00fat h\u00e0nh \u0111\u1ed9ng {index + 1}</h4><input value={button.text || ''} onChange={e => updateGroupButton(index, { text: e.target.value })} placeholder="Nh?n n?t" className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-500" /><input value={button.link || ''} onChange={e => updateGroupButton(index, { link: e.target.value })} placeholder="https://..." className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-500" /><div className="grid grid-cols-2 gap-2"><ColorField label="M\u00e0u n\u1ec1n" value={button.bg || '#0F3A72'} onChange={color => updateGroupButton(index, { bg: color })} /><ColorField label="M\u00e0u ch\u1eef" value={button.color || '#ffffff'} onChange={color => updateGroupButton(index, { color })} /></div></div>)}
-        </div>
-      )}
+    {block.type === 'data-table' && <div className="space-y-3"><div><label className="mb-1 block text-[10px] font-bold text-slate-500">Tiêu đề bảng</label><input value={content.heading || ''} onChange={event => updateContent('heading', event.target.value)} className={fieldClass} /></div><div className="space-y-2">{rows.map((row, rowIndex) => <div key={rowIndex} className="flex gap-1.5 rounded-xl border border-slate-200 bg-slate-50 p-2">{row.map((cell, columnIndex) => <input key={columnIndex} value={cell} onChange={event => updateTableCell(rowIndex, columnIndex, event.target.value)} className={`${fieldClass} min-w-0`} />)}<button type="button" onClick={() => updateContent('rows', rows.filter((_, index) => index !== rowIndex))} className="rounded-lg p-2 text-rose-500 hover:bg-rose-50" title="Xóa dòng"><Trash2 className="h-4 w-4" /></button></div>)}</div><div className="flex gap-2"><button type="button" onClick={() => updateContent('rows', [...rows, Array.from({ length: Math.max(2, rows[0]?.length || 2) }, () => '')])} className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[10px] font-bold text-blue-700"><Plus className="h-3.5 w-3.5" />Thêm dòng</button><button type="button" onClick={() => updateContent('rows', rows.map(row => [...row, '']))} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-[10px] font-bold text-slate-600"><Plus className="h-3.5 w-3.5" />Thêm cột</button></div><p className="text-[9px] text-slate-500">Dòng đầu tiên được xuất dưới dạng hàng tiêu đề của bảng.</p></div>}
 
-      {/* HIGHLIGHT BOX PROPERTIES */}
-      {block.type === 'highlight-box' && (
-        <div className="space-y-4">
-          <p className="text-[11px] text-slate-450 leading-normal italic bg-slate-50 p-3.5 rounded-2xl border border-slate-200/50">
-            * Sửa nội dung hộp và chèn biến trực quan trên canvas ở giữa.
-          </p>
-          
-          <ColorField
-            label="Màu nền hộp thông tin"
-            value={content.bg || '#eef6ff'}
-            onChange={color => updateContent('bg', color)}
-          />
+    {(block.type === 'bullet-list' || block.type === 'number-list') && <div className="space-y-2"><div className="flex items-center justify-between"><label className="text-[10px] font-bold text-slate-500">Các mục danh sách</label><button type="button" onClick={() => updateContent('items', [...(content.items || []), 'Mục mới'])} className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700"><Plus className="h-3.5 w-3.5" />Thêm mục</button></div>{(content.items || []).map((item: string, index: number) => <div key={index} className="flex gap-2"><input value={item} onChange={event => { const next = [...content.items]; next[index] = event.target.value; updateContent('items', next); }} className={fieldClass} /><button type="button" onClick={() => updateContent('items', content.items.filter((_: string, itemIndex: number) => itemIndex !== index))} className="p-2 text-rose-500"><Trash2 className="h-4 w-4" /></button></div>)}</div>}
 
-          <ColorField
-            label="Màu đường viền trái"
-            value={content.borderColor || '#1473d1'}
-            onChange={color => updateContent('borderColor', color)}
-          />
+    {block.type === 'spacer' && <NumberDraft label="Chiều cao khoảng trắng (px)" value={styles.height ?? 20} min={5} max={150} onCommit={value => updateStyles('height', value === '' ? 20 : value)} />}
 
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Khoảng cách đệm bên trong (px)</label>
-            <input
-              type="number"
-              value={content.padding ?? 16}
-              onChange={e => updateContent('padding', parseInt(e.target.value) || 0)}
-              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-            />
-          </div>
-        </div>
-      )}
+    {definition.variants.length > 1 && !['columns'].includes(block.type) && <div><label className="mb-1 block text-[10px] font-bold text-slate-500">Biến thể giao diện</label><select value={content.variant || definition.variants[0].value} onChange={event => updateContent('variant', event.target.value)} className={fieldClass}>{definition.variants.map(variant => <option key={variant.value} value={variant.value}>{variant.label}</option>)}</select></div>}
 
-      {/* DIVIDER PROPERTIES */}
-      {block.type === 'divider' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Độ dày nét kẻ (px)</label>
-              <input
-                type="number"
-                min="1"
-                max="10"
-                value={styles.thickness ?? 1}
-                onChange={e => updateStyles('thickness', parseInt(e.target.value) || 1)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 shadow-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">Kiểu nét</label>
-              <select
-                value={styles.borderStyle || 'solid'}
-                onChange={e => updateStyles('borderStyle', e.target.value)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-blue-500 bg-white shadow-sm"
-              >
-                <option value="solid">Nét liền (Solid)</option>
-                <option value="dashed">Nét đứt rời (Dashed)</option>
-                <option value="dotted">Nét chấm tròn (Dotted)</option>
-              </select>
-            </div>
-          </div>
-          
-          <ColorField
-            label="Màu nét đường kẻ"
-            value={styles.color || '#e2e8f0'}
-            onChange={color => updateStyles('color', color)}
-          />
-        </div>
-      )}
+    {block.type === 'button' && <section className="space-y-3">
+      <h4 className="text-[10px] font-black uppercase">Nút CTA</h4>
+      <div><label className="mb-1 block text-[10px] font-bold text-slate-500">Nhãn nút</label><input value={content.text || ''} onChange={event => updateContent('text', event.target.value)} className={fieldClass} /></div>
+      <div><label className="mb-1 block text-[10px] font-bold text-slate-500">Liên kết</label><input value={content.link || ''} onChange={event => updateContent('link', event.target.value)} className={fieldClass} /></div>
+      <div className="grid grid-cols-2 gap-2"><NumberDraft label="Cỡ chữ (px)" value={content.fontSize ?? 15} min={10} max={30} onCommit={value => updateContent('fontSize', value === '' ? 15 : value)} /><NumberDraft label="Rộng tối thiểu (px)" value={content.minWidth ?? 0} max={600} onCommit={value => updateContent('minWidth', value === '' ? 0 : value)} /><NumberDraft label="Đệm ngang (px)" value={content.paddingX ?? 24} max={100} onCommit={value => updateContent('paddingX', value === '' ? 24 : value)} /><NumberDraft label="Đệm dọc (px)" value={content.paddingY ?? 12} max={60} onCommit={value => updateContent('paddingY', value === '' ? 12 : value)} /><NumberDraft label="Bo góc (px)" value={content.radius ?? 8} max={80} onCommit={value => updateContent('radius', value === '' ? 8 : value)} /></div>
+      <div><label className="mb-1 block text-[10px] font-bold text-slate-500">Độ rộng nút</label><select value={content.width || 'auto'} onChange={event => updateContent('width', event.target.value)} className={fieldClass}><option value="auto">Theo nội dung</option><option value="full">Toàn chiều rộng</option></select></div>
+      {alignControl}
+      <div className="grid grid-cols-2 gap-2"><ColorField label="Màu nền" value={content.bg || '#1473d1'} onChange={value => updateContent('bg', value)} /><ColorField label="Màu chữ" value={content.color || '#ffffff'} onChange={value => updateContent('color', value)} /></div>
+    </section>}
+    {showGenericFields && primitiveEntries.map(([key, value]) => <div key={key}><label className="mb-1 block text-[10px] font-bold text-slate-500">{LABELS[key] || key}</label>{key === 'body' || key === 'description' || key === 'quote' ? <textarea value={String(value)} onChange={event => updateContent(key, event.target.value)} className={`${fieldClass} min-h-24`} /> : key === 'bg' ? <ColorField label={LABELS[key]} value={String(value)} onChange={next => updateContent(key, next)} /> : <input value={String(value)} onChange={event => updateContent(key, event.target.value)} className={fieldClass} />}</div>)}
+    {isButtonGroup && <section className="space-y-3">
+      <div className="flex items-center justify-between"><h4 className="text-[10px] font-black uppercase">Các nút hành động</h4>{groupButtons().length < 3 && <button type="button" onClick={addGroupButton} className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700"><Plus className="h-3.5 w-3.5" />Thêm nút</button>}</div>
+      <div className="grid grid-cols-2 gap-3"><NumberDraft label="Khoảng cách (px)" value={content.gap ?? 12} max={60} onCommit={value => updateContent('gap', value === '' ? 12 : value)} />{alignControl}</div>
+      {groupButtons().map((button: any, index: number) => <div key={index} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div className="flex items-center justify-between"><p className="text-[10px] font-black uppercase">Nút {index + 1}</p>{groupButtons().length > 2 && <button type="button" onClick={() => onUpdateBlockContent({ ...content, buttons: groupButtons().filter((_, buttonIndex) => buttonIndex !== index) })} className="rounded p-1 text-rose-500" title="Xóa nút"><Trash2 className="h-4 w-4" /></button>}</div>
+        <input value={button.text || ''} onChange={event => updateGroupButton(index, { text: event.target.value })} placeholder="Nhãn nút" className={fieldClass} />
+        <input value={button.link || ''} onChange={event => updateGroupButton(index, { link: event.target.value })} placeholder="https://..." className={fieldClass} />
+        <div className="grid grid-cols-2 gap-2"><NumberDraft label="Cỡ chữ (px)" value={button.fontSize ?? 14} min={10} max={30} onCommit={value => updateGroupButton(index, { fontSize: value === '' ? 14 : value })} /><NumberDraft label="Rộng tối thiểu (px)" value={button.minWidth ?? 0} max={400} onCommit={value => updateGroupButton(index, { minWidth: value === '' ? 0 : value })} /><NumberDraft label="Đệm ngang (px)" value={button.paddingX ?? 18} max={80} onCommit={value => updateGroupButton(index, { paddingX: value === '' ? 18 : value })} /><NumberDraft label="Đệm dọc (px)" value={button.paddingY ?? 11} max={50} onCommit={value => updateGroupButton(index, { paddingY: value === '' ? 11 : value })} /><NumberDraft label="Bo góc (px)" value={button.radius ?? 8} max={80} onCommit={value => updateGroupButton(index, { radius: value === '' ? 8 : value })} /></div>
+        <div className="grid grid-cols-2 gap-2"><ColorField label="Màu nền" value={button.bg || '#0F3A72'} onChange={value => updateGroupButton(index, { bg: value })} /><ColorField label="Màu chữ" value={button.color || '#ffffff'} onChange={value => updateGroupButton(index, { color: value })} /></div>
+      </div>)}
+    </section>}
 
-      {/* SPACER PROPERTIES */}
-      {block.type === 'spacer' && (
-        <div className="space-y-3">
-          <label className="block text-[10px] font-bold text-slate-500 mb-1">Chiều cao khoảng trống (px)</label>
-          <div className="flex items-center gap-3">
-            <input
-              type="range"
-              min="5"
-              max="150"
-              value={styles.height ?? 20}
-              onChange={e => updateStyles('height', parseInt(e.target.value) || 5)}
-              className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer"
-            />
-            <input
-              type="number"
-              min="5"
-              max="150"
-              value={styles.height ?? 20}
-              onChange={e => updateStyles('height', parseInt(e.target.value) || 5)}
-              className="w-16 text-xs rounded-xl border border-slate-200 px-2.5 py-1.5 outline-none focus:border-blue-500 shadow-sm bg-white"
-            />
-          </div>
-        </div>
-      )}
-
-      {/* SOCIAL LINKS PROPERTIES */}
-      {block.type === 'social-links' && (
-        <div className="space-y-4">
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-1">Căn lề ngang</label>
-            <div className="flex bg-slate-100 border border-slate-200/80 rounded-xl p-0.5 shadow-sm">
-              {(['left', 'center', 'right'] as const).map(align => (
-                <button
-                  key={align}
-                  onClick={() => updateContent('align', align)}
-                  className={`flex-1 flex justify-center py-1.5 rounded-lg cursor-pointer transition-all ${content.align === align ? 'bg-white text-blue-650 shadow-sm font-bold' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                  {align === 'left' && <AlignLeft className="w-4.5 h-4.5" />}
-                  {align === 'center' && <AlignCenter className="w-4.5 h-4.5" />}
-                  {align === 'right' && <AlignRight className="w-4.5 h-4.5" />}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-[10px] font-bold text-slate-500 mb-2">Các tài khoản liên kết</label>
-            <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
-              {(content.links || []).map((link: any, index: number) => (
-                <div key={index} className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800">{link.label}</span>
-                    <label className="flex items-center gap-1.5 cursor-pointer text-[10px] text-slate-500 select-none">
-                      <input
-                        type="checkbox"
-                        checked={link.visible !== false}
-                        onChange={e => handleUpdateSocialLink(index, 'visible', e.target.checked)}
-                        className="w-3.5 h-3.5 text-blue-650 border-slate-350 rounded focus:ring-blue-500"
-                      />
-                      Hiển thị
-                    </label>
-                  </div>
-                  <div>
-                    <input
-                      type="text"
-                      placeholder="URL của bạn..."
-                      value={link.url || ''}
-                      onChange={e => handleUpdateSocialLink(index, 'url', e.target.value)}
-                      className="w-full text-xs rounded-xl border border-slate-200 px-2.5 py-1.5 outline-none bg-white focus:border-blue-500 shadow-sm"
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-    </div>
-  );
+    {collectionEntries.map(([key, rawItems]) => { const items = rawItems as any[]; return <section key={key} className="space-y-2"><div className="flex items-center justify-between"><h4 className="text-[10px] font-black uppercase">{LABELS[key] || key}</h4><button type="button" onClick={() => addCollectionItem(key, items)} className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700"><Plus className="h-3.5 w-3.5" />Thêm</button></div>{items.map((item, index) => <div key={index} className="flex gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">{typeof item === 'string' ? <input value={item} onChange={event => updateCollectionItem(key, index, event.target.value)} className={fieldClass} /> : <div className="grid min-w-0 flex-1 gap-2">{Object.entries(item || {}).filter(([, value]) => typeof value === 'string' || typeof value === 'number').map(([field, value]) => <label key={field} className="text-[9px] font-bold text-slate-500">{LABELS[field] || field}<input value={String(value)} onChange={event => updateCollectionItem(key, index, { ...item, [field]: event.target.value })} className={`${fieldClass} mt-1`} /></label>)}</div>}<button type="button" onClick={() => updateContent(key, items.filter((_, itemIndex) => itemIndex !== index))} className="h-fit rounded-lg p-2 text-rose-500 hover:bg-rose-50"><Trash2 className="h-4 w-4" /></button></div>)}</section>; })}
+  </div>;
 }

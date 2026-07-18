@@ -1,4 +1,4 @@
-﻿import { BlockCategory, BlockType, EmailBlock, EmailBlockDefinition } from '../types/emailBuilder';
+import { BlockCategory, BlockType, EmailBlock, EmailBlockDefinition } from '../types/emailBuilder';
 
 const V = (a = 'Style 1', b = 'Style 2') => [{ value: 'style-1', label: a }, { value: 'style-2', label: b }];
 const CTA = { text: 'Tìm hiểu thêm', link: 'https://www.fermat.vn', bg: '#0F3A72', color: '#ffffff' };
@@ -9,9 +9,17 @@ export const EMAIL_BLOCK_REGISTRY: Record<BlockType, EmailBlockDefinition> = {
   logo: block('logo','brand','Logo','PenTool',{url:'https://fermat.vn/UploadFile/Images/2025/8/18/Hinh_anh_638911101534359159.png',alt:'Logo',width:120,align:'center',link:'https://www.fermat.vn'},'Logo nhận diện'),
   heading: block('heading','content','Tiêu đề','Heading',{text:'Nhấp để sửa tiêu đề mới',level:'h2',fontSize:20,color:'#0F3A72',bold:true,align:'left'},'Tiêu đề chính hoặc phụ'),
   paragraph: block('paragraph','content','Đoạn văn','Type',{html:'<p>Nội dung đoạn văn mới. Nhấp để chỉnh sửa trực quan.</p>',align:'left'},'Nội dung văn bản'),
-  image: block('image','media','Ảnh / Banner','Image',{url:'',alt:'Banner hình ảnh',width:600,align:'center',borderRadius:8,link:''},'Ảnh HTTPS hoặc banner nổi bật'),
-  button: block('button','cta','Nút CTA','MousePointerClick',{...CTA,radius:8,align:'center',width:'auto'},'Nút kêu gọi hành động'),
-  'button-group': block('button-group','cta','Hai nút cùng hàng','Columns2',{align:'center',gap:15,btn1:{...CTA,text:'Nút bên trái'},btn2:{...CTA,text:'Nút bên phải',bg:'#f1f5f9',color:'#0F3A72'}},'Hai lựa chọn cạnh nhau'),
+  image: block('image','media','Ảnh / Banner','Image',{url:'',alt:'Banner hình ảnh',width:600,height:'',aspectLocked:true,naturalRatio:null,align:'center',borderRadius:8,link:''},'Ảnh HTTPS hoặc banner nổi bật'),
+  button: block('button','cta','Nút CTA','MousePointerClick',{...CTA,radius:8,align:'center',width:'auto',fontSize:15,paddingX:24,paddingY:12,minWidth:0},'Nút kêu gọi hành động'),
+  'button-group': block('button-group','cta','Hai nút cùng hàng','Columns2',{align:'center',gap:12,buttons:[
+    {...CTA,text:'Nút bên trái',radius:8,fontSize:14,paddingX:18,paddingY:11,minWidth:0},
+    {...CTA,text:'Nút bên phải',bg:'#f1f5f9',color:'#0F3A72',radius:8,fontSize:14,paddingX:18,paddingY:11,minWidth:0}
+  ]},'Hai nút có thể chỉnh kích thước độc lập'),
+  'button-group-3': block('button-group-3','cta','Ba nút cùng hàng','Columns3',{align:'center',gap:10,buttons:[
+    {...CTA,text:'Nút thứ nhất',radius:8,fontSize:13,paddingX:14,paddingY:10,minWidth:0},
+    {...CTA,text:'Nút thứ hai',bg:'#1473d1',radius:8,fontSize:13,paddingX:14,paddingY:10,minWidth:0},
+    {...CTA,text:'Nút thứ ba',bg:'#f1f5f9',color:'#0F3A72',radius:8,fontSize:13,paddingX:14,paddingY:10,minWidth:0}
+  ]},'Ba lựa chọn trên cùng một hàng'),
   'bullet-list': block('bullet-list','content','Danh sách gạch đầu dòng','List',{items:['Mục danh sách thứ nhất','Mục danh sách thứ hai']},'Danh sách không đánh số'),
   'number-list': block('number-list','content','Danh sách số','ListOrdered',{items:['Bước thứ nhất','Bước thứ hai']},'Danh sách theo thứ tự'),
   'highlight-box': block('highlight-box','content','Hộp thông tin','Info',{html:'<p><strong>Lưu ý đặc biệt:</strong> Đây là thông tin quan trọng.</p>',bg:'#eef6ff',borderColor:'#1473d1',padding:16},'Thông tin cần chú ý'),
@@ -38,4 +46,16 @@ export const EMAIL_BLOCK_REGISTRY: Record<BlockType, EmailBlockDefinition> = {
 };
 export const BLOCK_CATEGORIES: { id: BlockCategory; label: string }[] = [{id:'content',label:'Nội dung'},{id:'layout',label:'Bố cục'},{id:'media',label:'Hình ảnh & media'},{id:'cta',label:'Nút & CTA'},{id:'commerce',label:'Sản phẩm'},{id:'brand',label:'Thương hiệu'},{id:'advanced',label:'Nâng cao'}];
 export const getBlockDefinition = (type: BlockType) => EMAIL_BLOCK_REGISTRY[type];
-export function createEmailBlock(type: BlockType, id = `${type}-${Date.now()}`): EmailBlock { const d = getBlockDefinition(type); return {id,type,content:structuredClone(d.defaultContent),styles:{marginTop:12,marginBottom:12,...structuredClone(d.defaultStyles || {})},visible:true, ...(type === 'section' ? { children: [] } : {})}; }
+export function createEmailBlock(type: BlockType, id = `${type}-${Date.now()}`): EmailBlock {
+  const definition = getBlockDefinition(type);
+  const block: EmailBlock = {
+    id,
+    type,
+    content: structuredClone(definition.defaultContent),
+    styles: { marginTop: 12, marginBottom: 12, ...structuredClone(definition.defaultStyles || {}) },
+    visible: true
+  };
+  if (type === 'section') block.children = [];
+  if (type === 'columns') block.columns = [[], []];
+  return block;
+}

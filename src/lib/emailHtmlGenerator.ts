@@ -120,7 +120,8 @@ export function generateEmailHtml(
       case 'logo': {
         const url = content.url || '';
         const alt = content.alt || '';
-        const width = content.width || 120;
+        const width = Number(content.width) || 120;
+        const height = Number(content.height) || 0;
         const align = content.align || 'center';
         const link = content.link || '';
 
@@ -133,7 +134,7 @@ export function generateEmailHtml(
   <tr>
     <td align="${align}" style="padding: 0;">
       ${link ? `<a href="${rep(link)}" target="_blank" style="text-decoration: none; border: none; outline: none;">` : ''}
-        <img src="${rep(url)}" alt="${rep(alt)}" width="${width}" style="display: block; border: 0; outline: none; text-decoration: none; width: ${width}px; max-width: 100%; height: auto; margin: ${align === 'center' ? '0 auto' : align === 'right' ? '0 0 0 auto' : '0'};" />
+        <img src="${rep(url)}" alt="${rep(alt)}" width="${width}"${height ? ` height="${height}"` : ''} style="display: block; border: 0; outline: none; text-decoration: none; width: ${width}px; max-width: 100%; height: ${height ? `${height}px` : 'auto'}; object-fit: contain; margin: ${align === 'center' ? '0 auto' : align === 'right' ? '0 0 0 auto' : '0'};" />
       ${link ? `</a>` : ''}
     </td>
   </tr>
@@ -186,7 +187,8 @@ export function generateEmailHtml(
       case 'image': {
         const url = content.url || '';
         const alt = content.alt || '';
-        const width = content.width || 600;
+        const width = Number(content.width) || 600;
+        const height = Number(content.height) || 0;
         const align = content.align || 'center';
         const borderRadius = content.borderRadius || 0;
         const link = content.link || '';
@@ -200,7 +202,7 @@ export function generateEmailHtml(
   <tr>
     <td align="${align}" style="padding: 0;">
       ${link ? `<a href="${rep(link)}" target="_blank" style="text-decoration: none; border: none; outline: none;">` : ''}
-        <img src="${rep(url)}" alt="${rep(alt)}" width="${width}" style="display: block; border: 0; outline: none; text-decoration: none; width: ${width}px; max-width: 100%; height: auto; border-radius: ${borderRadius}px; margin: ${align === 'center' ? '0 auto' : align === 'right' ? '0 0 0 auto' : '0'};" />
+        <img src="${rep(url)}" alt="${rep(alt)}" width="${width}"${height ? ` height="${height}"` : ''} style="display: block; border: 0; outline: none; text-decoration: none; width: ${width}px; max-width: 100%; height: ${height ? `${height}px` : 'auto'}; object-fit: ${height ? 'cover' : 'contain'}; border-radius: ${borderRadius}px; margin: ${align === 'center' ? '0 auto' : align === 'right' ? '0 0 0 auto' : '0'};" />
       ${link ? `</a>` : ''}
     </td>
   </tr>
@@ -243,6 +245,9 @@ export function generateEmailHtml(
         const align = content.align || 'center';
         const width = content.width || 'auto';
         const fontSize = content.fontSize || 15;
+        const paddingX = Number(content.paddingX) || 24;
+        const paddingY = Number(content.paddingY) || 12;
+        const minWidth = Math.max(0, Number(content.minWidth) || 0);
 
         checkLinkUrl(link, 'Nút bấm');
 
@@ -251,9 +256,9 @@ export function generateEmailHtml(
 <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
     <td align="${align}" style="padding: 0;">
-      <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="width: ${width === 'full' ? '100%' : 'auto'}; border-collapse: collapse;">
+      <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="width: ${width === 'full' ? '100%' : 'auto'};${minWidth ? `min-width:${minWidth}px;` : ''} border-collapse: collapse;">
         <tr>
-          <td align="center" bgcolor="${bg}" style="border-radius: ${radius}px; padding: 12px 24px; text-align: center; background-color: ${bg};" valign="middle">
+          <td align="center" bgcolor="${bg}" style="border-radius: ${radius}px; padding: ${paddingY}px ${paddingX}px;${minWidth ? `min-width:${minWidth}px;` : ''} text-align: center; background-color: ${bg};" valign="middle">
             <a href="${rep(link)}" target="_blank" style="display: ${width === 'full' ? 'block' : 'inline-block'}; font-family: ${fontFamily}; color: ${color}; font-size: ${fontSize}px; font-weight: bold; text-decoration: none; border-radius: ${radius}px; background-color: ${bg}; width: 100%; box-sizing: border-box;">
               ${rep(text)}
             </a>
@@ -266,11 +271,18 @@ export function generateEmailHtml(
 `;
       }
 
-      case 'button-group': {
+      case 'button-group':
+      case 'button-group-3': {
         const align = content.align || 'center'; const gap = content.gap ?? 12;
         const buttons = content.buttons || [content.btn1, content.btn2].filter(Boolean);
-        buttons.forEach((button: any, index: number) => checkLinkUrl(button.link, `N\u00fat h\u00e0nh \u0111\u1ed9ng ${index + 1}`));
-        const cells = buttons.map((button: any, index: number) => `<td align="center" bgcolor="${button.bg || '#0F3A72'}" style="border-radius:${button.radius ?? 8}px;padding:11px 18px;background-color:${button.bg || '#0F3A72'};"><a href="${rep(button.link || '')}" target="_blank" style="display:inline-block;font-family:${fontFamily};color:${button.color || '#ffffff'};font-size:14px;font-weight:bold;text-decoration:none;">${rep(button.text || '')}</a></td>${index < buttons.length - 1 ? `<td width="${gap}" style="width:${gap}px;font-size:1px;line-height:1px;">&nbsp;</td>` : ''}`).join('');
+        buttons.forEach((button: any, index: number) => checkLinkUrl(button.link, `Nút hành động ${index + 1}`));
+        const cells = buttons.map((button: any, index: number) => {
+          const paddingX = Number(button.paddingX) || 18;
+          const paddingY = Number(button.paddingY) || 11;
+          const minWidth = Math.max(0, Number(button.minWidth) || 0);
+          const fontSize = Number(button.fontSize) || 14;
+          return `<td align="center" bgcolor="${button.bg || '#0F3A72'}"${minWidth ? ` width="${minWidth}"` : ''} style="border-radius:${button.radius ?? 8}px;padding:${paddingY}px ${paddingX}px;background-color:${button.bg || '#0F3A72'};${minWidth ? `min-width:${minWidth}px;` : ''}"><a href="${rep(button.link || '')}" target="_blank" style="display:inline-block;font-family:${fontFamily};color:${button.color || '#ffffff'};font-size:${fontSize}px;line-height:1.2;font-weight:bold;text-decoration:none;white-space:nowrap;">${rep(button.text || '')}</a></td>${index < buttons.length - 1 ? `<td width="${gap}" style="width:${gap}px;font-size:1px;line-height:1px;">&nbsp;</td>` : ''}`;
+        }).join('');
         return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr><td align="${align}" style="padding:0;"><table role="presentation" border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;display:inline-table;"><tr>${cells}</tr></table></td></tr></table>`;
       }
 
@@ -376,13 +388,27 @@ export function generateEmailHtml(
         const custom = rep(inlineCustomCss(sanitizeCustomHtml(content.html || '')));
         return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:0">' + custom + '</td></tr></table>';
       }
+      case 'columns': {
+        const count = content.variant === 'four' ? 4 : content.variant === 'three' ? 3 : 2;
+        const columns = Array.from({ length: count }, (_, index) => block.columns?.[index] || []);
+        const cells = columns.map((column, index) => `<td width="${Math.floor(100 / count)}%" valign="top" style="width:${Math.floor(100 / count)}%;padding:${index === 0 ? '0' : '0 0 0 12px'};vertical-align:top;">${column.map(renderBlock).join('')}</td>`).join('');
+        return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr>${cells}</tr></table>`;
+      }
+      case 'data-table': {
+        const rows: string[][] = Array.isArray(content.rows) ? content.rows : [];
+        const heading = content.heading ? `<div style="margin:0 0 10px;font-family:${fontFamily};font-size:18px;line-height:1.3;font-weight:bold;color:#0F3A72;">${rep(content.heading)}</div>` : '';
+        const tableRows = rows.map((row, rowIndex) => `<tr>${row.map(cell => rowIndex === 0
+          ? `<th align="left" style="padding:10px;border:1px solid #cbd5e1;background:#f1f5f9;font-family:${fontFamily};font-size:13px;line-height:1.4;font-weight:bold;color:${textColor};">${rep(cell)}</th>`
+          : `<td align="left" style="padding:10px;border:1px solid #cbd5e1;font-family:${fontFamily};font-size:13px;line-height:1.4;color:${textColor};">${rep(cell)}</td>`).join('')}</tr>`).join('');
+        return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr><td style="padding:0;">${heading}<table role="table" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;table-layout:fixed;">${tableRows}</table></td></tr></table>`;
+      }
       case 'section': {
         const title = rep(content.heading || '');
         const body = rep(content.body || '');
         const children = (block.children || []).map(renderBlock).join('');
         return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:' + (content.padding ?? 24) + 'px;background:' + (content.bg || '#f8fafc') + ';border:1px solid #e2e8f0;font-family:' + fontFamily + ';color:' + textColor + '"><strong style="color:#0F3A72">' + title + '</strong><div style="margin-top:6px;line-height:1.5">' + body + '</div>' + children + '</td></tr></table>';
       }
-      case 'columns': case 'image-text': case 'data-table': case 'testimonial': case 'callout': case 'gallery': case 'video': case 'feature-list': case 'product-card': case 'product-grid': case 'pricing-table': case 'header': case 'footer': case 'merge-tag': {
+      case 'image-text': case 'testimonial': case 'callout': case 'gallery': case 'video': case 'feature-list': case 'product-card': case 'product-grid': case 'pricing-table': case 'header': case 'footer': case 'merge-tag': {
         const title = rep(content.heading || content.title || content.name || content.company || content.author || '');
         const body = rep(content.body || content.description || content.text || content.quote || content.price || content.navigation || content.address || '');
         return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:16px;border:1px solid #e2e8f0;font-family:' + fontFamily + ';color:' + textColor + '"><strong style="color:#0F3A72">' + title + '</strong><div style="margin-top:6px;line-height:1.5">' + body + '</div></td></tr></table>';
@@ -392,7 +418,7 @@ export function generateEmailHtml(
     }
   };
 
-  const blockHtmls = template.blocks.map(renderBlock).join('\\n');
+  const blockHtmls = template.blocks.map(renderBlock).join('\n');
 
   // Wrapper template
   const html = `<!DOCTYPE html>
@@ -464,6 +490,7 @@ export function generateEmailHtml(
         plainTextLines.push(`\n>>> ${rep(content.text)}: ${rep(content.link)} <<<`);
         break;
       case 'button-group':
+      case 'button-group-3':
         (content.buttons || [content.btn1, content.btn2].filter(Boolean)).forEach((button: any) => plainTextLines.push(`>>> ${rep(button.text || '')}: ${rep(button.link || '')} <<<`));
         break;
       case 'highlight-box': {

@@ -12,7 +12,7 @@ import {
 
 import { BlockType, EmailBlock, EmailSettings, EmailTemplate, EmailVariable } from '../../types/emailBuilder';
 import { createEmailBlock, getBlockDefinition } from '../../data/emailBlockRegistry';
-import { addEmailBlock, findEmailBlock, moveEmailBlock, removeEmailBlock, updateEmailBlock } from '../../lib/emailBlockTree';
+import { addEmailBlock, duplicateEmailBlock, findEmailBlock, moveEmailBlock, moveEmailBlockByDirection, removeEmailBlock, updateEmailBlock } from '../../lib/emailBlockTree';
 import { 
   loadTemplates, 
   saveTemplates, 
@@ -181,7 +181,8 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
       case 'paragraph': return 'Đoạn văn';
       case 'image': return 'Hình ảnh';
       case 'button': return 'Nút CTA';
-      case 'button-group': return 'Nhóm nút';
+      case 'button-group': return 'Nhóm 2 nút';
+      case 'button-group-3': return 'Nhóm 3 nút';
       case 'bullet-list': return 'Danh sách';
       case 'number-list': return 'Danh sách số';
       case 'highlight-box': return 'Hộp nổi bật';
@@ -224,48 +225,23 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   };
 
   // 4. Canvas Block Operations
-  const handleAddBlock = (type: BlockType, parentId?: string) => {
+  const handleAddBlock = (type: BlockType, parentId?: string, slotIndex?: number) => {
     if (!activeTemplate) return;
     const newBlock = createEmailBlock(type);
-    handleUpdateTemplateBlocks(addEmailBlock(activeTemplate.blocks, newBlock, parentId));
+    handleUpdateTemplateBlocks(addEmailBlock(activeTemplate.blocks, newBlock, parentId, slotIndex));
     setSelectedBlockId(newBlock.id); setMobileActiveTab('canvas');
   };
 
   const handleMoveBlock = (id: string, direction: 'up' | 'down') => {
     if (!activeTemplate) return;
-    const blocks = [...activeTemplate.blocks];
-    const index = blocks.findIndex(b => b.id === id);
-    if (index === -1) return;
-
-    if (direction === 'up' && index > 0) {
-      const temp = blocks[index];
-      blocks[index] = blocks[index - 1];
-      blocks[index - 1] = temp;
-    } else if (direction === 'down' && index < blocks.length - 1) {
-      const temp = blocks[index];
-      blocks[index] = blocks[index + 1];
-      blocks[index + 1] = temp;
-    }
-    handleUpdateTemplateBlocks(blocks);
+    handleUpdateTemplateBlocks(moveEmailBlockByDirection(activeTemplate.blocks, id, direction));
   };
 
   const handleDuplicateBlock = (id: string) => {
     if (!activeTemplate) return;
-    const blocks = [...activeTemplate.blocks];
-    const index = blocks.findIndex(b => b.id === id);
-    if (index === -1) return;
-
-    const original = blocks[index];
-    const clone: EmailBlock = {
-      ...original,
-      id: `${original.type}-${Date.now()}`,
-      content: JSON.parse(JSON.stringify(original.content)),
-      styles: JSON.parse(JSON.stringify(original.styles))
-    };
-
-    blocks.splice(index + 1, 0, clone);
-    handleUpdateTemplateBlocks(blocks);
-    setSelectedBlockId(clone.id);
+    const result = duplicateEmailBlock(activeTemplate.blocks, id);
+    handleUpdateTemplateBlocks(result.blocks);
+    if (result.cloneId) setSelectedBlockId(result.cloneId);
   };
 
   const handleDeleteBlock = (id: string) => {
@@ -289,9 +265,9 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
     handleUpdateTemplateBlocks(blocks);
   };
 
-  const handleDropBlock = (sourceId: string, targetId: string) => {
+  const handleDropBlock = (sourceId: string, targetId: string, slotIndex?: number) => {
     if (!activeTemplate) return;
-    handleUpdateTemplateBlocks(moveEmailBlock(activeTemplate.blocks, sourceId, targetId));
+    handleUpdateTemplateBlocks(moveEmailBlock(activeTemplate.blocks, sourceId, targetId, slotIndex));
     setSelectedBlockId(sourceId);
   };
 
@@ -741,7 +717,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
           {/* Left Block Selection Library */}
           <div className={`hidden md:flex ${mobileActiveTab === 'library' ? '!block absolute inset-0 z-40 bg-white md:relative md:inset-auto md:z-auto' : ''}`}>
             <BlockLibrary onAddBlock={handleAddBlock} width={leftPanelWidth} />
-             <div onPointerDown={(e) => resizePanel('left', e)} className="hidden md:block w-1.5 cursor-col-resize bg-transparent hover:bg-blue-400/50 active:bg-blue-500" aria-label={'K\u00e9o \u0111\u1ec3 \u0111\u1ed5i \u0111\u1ed9 r\u1ed9ng th\u01b0 vi\u1ec7n'} />
+             <div onPointerDown={(e) => resizePanel('left', e)} className="hidden md:block w-1.5 cursor-col-resize bg-transparent hover:bg-blue-400/50 active:bg-blue-500" aria-label="Kéo để đổi độ rộng thư viện" />
           </div>
 
           {/* Middle Email Design Canvas */}
@@ -798,7 +774,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
           </div>
 
           {/* Right Parameters Settings Sidebar */}
-          <div onPointerDown={(e) => resizePanel('right', e)} className="hidden md:block w-1.5 shrink-0 cursor-col-resize bg-transparent hover:bg-blue-400/50 active:bg-blue-500" aria-label={'K\u00e9o \u0111\u1ec3 \u0111\u1ed5i \u0111\u1ed9 r\u1ed9ng b\u1ea3ng c\u00e0i \u0111\u1eb7t'} />
+          <div onPointerDown={(e) => resizePanel('right', e)} className="hidden md:block w-1.5 shrink-0 cursor-col-resize bg-transparent hover:bg-blue-400/50 active:bg-blue-500" aria-label="Kéo để đổi độ rộng bảng cài đặt" />
            <div style={{ width: rightPanelWidth, maxWidth: '25vw', minWidth: 56 }} className={`flex shrink-0 flex-col border-l border-slate-200/80 bg-white ${mobileActiveTab === 'settings' ? 'absolute inset-0 z-40 block md:relative md:inset-auto md:z-auto' : 'hidden md:flex'}`}>
             <div className="border-b border-slate-200 bg-white p-4">
               <div className="flex items-start justify-between gap-3">
@@ -845,19 +821,11 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
               {activeRightTab === 'block' && activeBlock ? (
                 <BlockSettings
                   block={activeBlock}
-                  onUpdateBlockContent={(content) => {
-                    const blocks = activeTemplate.blocks.map(b => {
-                      if (b.id === selectedBlockId) return { ...b, content };
-                      return b;
-                    });
-                    handleUpdateTemplateBlocks(blocks);
-                  }}
-                  onUpdateBlockStyles={(styles) => {
-                    const blocks = activeTemplate.blocks.map(b => {
-                      if (b.id === selectedBlockId) return { ...b, styles };
-                      return b;
-                    });
-                    handleUpdateTemplateBlocks(blocks);
+                  onUpdateBlockContent={(content) => selectedBlockId && handleUpdateBlockContent(selectedBlockId, content)}
+                  onUpdateBlockStyles={(styles) => selectedBlockId && handleUpdateBlockStyles(selectedBlockId, styles)}
+                  onUpdateBlockColumns={(columns) => {
+                    if (!selectedBlockId || !activeTemplate) return;
+                    handleUpdateTemplateBlocks(updateEmailBlock(activeTemplate.blocks, selectedBlockId, block => ({ ...block, columns })));
                   }}
                 />
               ) : (

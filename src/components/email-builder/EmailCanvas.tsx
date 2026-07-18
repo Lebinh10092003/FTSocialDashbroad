@@ -1,32 +1,9 @@
-import React, { useRef, useEffect } from 'react';
-import { 
-  ArrowUp, 
-  ArrowDown, 
-  Copy, 
-  Trash2, 
-  Eye, 
-  EyeOff, 
-  Tag,
-  Plus,
-  GripVertical,
-  ImagePlus,
-  Link
-} from 'lucide-react';
+import React, { useEffect, useRef } from 'react';
+import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, GripVertical, ImagePlus, Link, Plus, Trash2 } from 'lucide-react';
 import { BlockType, EmailBlock, EmailSettings } from '../../types/emailBuilder';
 import { BLOCK_CATEGORIES, EMAIL_BLOCK_REGISTRY } from '../../data/emailBlockRegistry';
 import BlockToolbar from './BlockToolbar';
 import { sanitizeCustomHtml } from '../../lib/emailSanitizer';
-
-function NewBlockPreview({ block }: { block: EmailBlock }) {
-  const c = block.content;
-  if (block.type === 'custom-html') return <iframe title="Custom HTML preview" sandbox="" srcDoc={`<!doctype html><html><body style="margin:0">${sanitizeCustomHtml(c.html || '')}</body></html>`} className="min-h-[100px] w-full rounded border border-slate-200 bg-white" />;
-  if (block.type === 'gallery') return <div className="grid grid-cols-2 gap-2">{(c.images || ['', '']).map((url: string, i: number) => url ? <img key={i} src={url} alt="" className="h-24 w-full rounded object-cover" /> : <div key={i} className="flex h-24 items-center justify-center rounded bg-slate-100 text-[10px] text-slate-400">\u1ea2nh {i + 1}</div>)}</div>;
-  if (['columns', 'feature-list', 'product-grid', 'pricing-table', 'data-table'].includes(block.type)) { const items = c.items || c.products || c.plans || c.rows || []; return <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${c.variant === 'three' ? 3 : c.variant === 'four' ? 4 : 2}, minmax(0, 1fr))` }}>{items.map((item: any, i: number) => <div key={i} className="rounded border border-slate-200 bg-white p-2 text-xs"><strong>{Array.isArray(item) ? item[0] : item.title || item.name}</strong><p className="mt-1 text-slate-500">{Array.isArray(item) ? item.slice(1).join(' \u2014 ') : item.body || item.price || item.features}</p></div>)}</div>; }
-  if (block.type === 'image-text' || block.type === 'product-card' || block.type === 'video') return <div className="grid grid-cols-2 gap-3 rounded bg-slate-50 p-3"><div className="flex min-h-24 items-center justify-center rounded bg-slate-200 text-slate-400">{c.imageUrl ? <img src={c.imageUrl} alt="" className="max-h-32 max-w-full object-cover" /> : '\u1ea2nh'}</div><div><strong className="text-[#0F3A72]">{c.heading || c.name || c.title}</strong><p className="mt-1 text-xs text-slate-600">{c.body || c.description || c.price}</p></div></div>;
-  if (block.type === 'callout' || block.type === 'section' || block.type === 'testimonial' || block.type === 'merge-tag') return <div className="rounded border-l-4 border-[#0F3A72] bg-blue-50 p-3 text-sm"><strong>{c.heading || c.title || c.author}</strong><p className="mt-1">{c.body || c.quote || c.text}</p></div>;
-  if (block.type === 'header' || block.type === 'footer') return <div className="rounded bg-slate-100 p-3 text-center text-xs text-slate-600">{block.type === 'header' ? c.navigation : `${c.company} \u00b7 ${c.address}`}</div>;
-  return null;
-}
 
 interface EmailCanvasProps {
   blocks: EmailBlock[];
@@ -41,482 +18,166 @@ interface EmailCanvasProps {
   insertedVarName: { blockId: string; varName: string } | null;
   onClearInsertedVar: () => void;
   emailSettings: EmailSettings;
-  onAddBlock: (type: BlockType, parentId?: string) => void;
-  onDropBlock: (sourceId: string, targetId: string) => void;
+  onAddBlock: (type: BlockType, parentId?: string, slotIndex?: number) => void;
+  onDropBlock: (sourceId: string, targetId: string, slotIndex?: number) => void;
 }
 
-export default function EmailCanvas({
-  blocks,
-  selectedBlockId,
-  onSelectBlock,
-  onMoveBlock,
-  onDuplicateBlock,
-  onDeleteBlock,
-  onToggleVisibility,
-  onUpdateBlockContent,
-  onOpenVariablePicker,
-  insertedVarName,
-  onClearInsertedVar,
-  emailSettings,
-  onAddBlock,
-  onDropBlock
-}: EmailCanvasProps) {
-  
-  const contentEditableRefs = useRef<Record<string, HTMLDivElement | null>>({});
+const TYPE_NAMES: Partial<Record<BlockType, string>> = {
+  logo: 'Logo', heading: 'Tiêu đề', paragraph: 'Đoạn văn', image: 'Ảnh / Banner', button: 'Nút CTA',
+  'button-group': 'Nhóm 2 nút', 'button-group-3': 'Nhóm 3 nút', 'bullet-list': 'Danh sách gạch đầu dòng', 'number-list': 'Danh sách số',
+  'highlight-box': 'Hộp thông tin', divider: 'Đường phân cách', spacer: 'Khoảng trắng', signature: 'Chữ ký',
+  'social-links': 'Mạng xã hội', section: 'Section / Container', columns: 'Cột linh hoạt', 'data-table': 'Bảng dữ liệu'
+};
+
+export default function EmailCanvas(props: EmailCanvasProps) {
+  const { blocks, selectedBlockId, onSelectBlock, onMoveBlock, onDuplicateBlock, onDeleteBlock, onToggleVisibility, onUpdateBlockContent, onOpenVariablePicker, insertedVarName, onClearInsertedVar, emailSettings, onAddBlock, onDropBlock } = props;
+  const editableRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const selectionRefs = useRef<Record<string, Range | null>>({});
+  const imageInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [isInserterOpen, setIsInserterOpen] = React.useState(false);
   const [blockQuery, setBlockQuery] = React.useState('');
-  const [isBlockDragOver, setIsBlockDragOver] = React.useState(false);
-  const imageInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-  const uploadImageForBlock = async (block: EmailBlock, file: File) => {
-    if (!file.type.startsWith('image/') || file.size > 3 * 1024 * 1024) return;
-    const setUrl = (url: string) => onUpdateBlockContent(block.id, { ...block.content, url });
-    try {
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name) },
-        body: file,
-      });
-      const data = await response.json();
-      if (data.success && data.url) {
-        setUrl(`${window.location.origin}${data.url}`);
-        return;
-      }
-    } catch { /* fall back to a portable data URL */ }
-    const reader = new FileReader();
-    reader.onload = () => setUrl(String(reader.result));
-    reader.readAsDataURL(file);
+  const [rootDragOver, setRootDragOver] = React.useState(false);
+
+  const updateHtml = (block: EmailBlock, element: HTMLElement) => onUpdateBlockContent(block.id, { ...block.content, html: element.innerHTML });
+  const saveSelection = (blockId: string) => {
+    const selection = window.getSelection();
+    const editable = editableRefs.current[blockId];
+    if (selection?.rangeCount && editable?.contains(selection.anchorNode)) selectionRefs.current[blockId] = selection.getRangeAt(0).cloneRange();
   };
-  const setImageUrl = (block: EmailBlock) => {
+  const restoreSelection = (blockId: string) => {
+    const range = selectionRefs.current[blockId];
+    if (!range) return;
+    const selection = window.getSelection();
+    selection?.removeAllRanges(); selection?.addRange(range);
+  };
+  const applySelectionFontSize = (block: EmailBlock, size: number) => {
+    const editable = editableRefs.current[block.id];
+    if (!editable) return;
+    editable.focus(); restoreSelection(block.id);
+    document.execCommand('fontSize', false, '7');
+    editable.querySelectorAll('font[size="7"]').forEach(font => {
+      const span = document.createElement('span');
+      span.style.fontSize = `${size}px`; span.innerHTML = font.innerHTML; font.replaceWith(span);
+    });
+    updateHtml(block, editable); saveSelection(block.id);
+  };
+
+  useEffect(() => {
+    if (!insertedVarName) return;
+    const block = findBlock(blocks, insertedVarName.blockId);
+    const editable = editableRefs.current[insertedVarName.blockId];
+    if (block && editable) {
+      editable.focus(); restoreSelection(block.id);
+      document.execCommand('insertText', false, `{{${insertedVarName.varName}}}`);
+      updateHtml(block, editable);
+    }
+    onClearInsertedVar();
+  }, [insertedVarName]);
+
+  const setImageMetadata = (block: EmailBlock, url: string) => {
+    const image = new Image();
+    image.onload = () => {
+      const ratio = image.naturalWidth / Math.max(1, image.naturalHeight);
+      const width = Number(block.content.width) || Math.min(image.naturalWidth, 600);
+      onUpdateBlockContent(block.id, { ...block.content, url, width, height: block.content.height || Math.round(width / ratio), naturalRatio: ratio, aspectLocked: block.content.aspectLocked !== false });
+    };
+    image.src = url;
+  };
+  const uploadImage = async (block: EmailBlock, file: File) => {
+    if (!file.type.startsWith('image/') || file.size > 3 * 1024 * 1024) return;
+    try {
+      const response = await fetch('/api/upload', { method: 'POST', headers: { 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name) }, body: file });
+      const data = await response.json();
+      if (data.success && data.url) { setImageMetadata(block, `${window.location.origin}${data.url}`); return; }
+    } catch { /* use a portable data URL below */ }
+    const reader = new FileReader(); reader.onload = () => setImageMetadata(block, String(reader.result)); reader.readAsDataURL(file);
+  };
+  const pasteImageUrl = (block: EmailBlock) => {
     const url = prompt('Dán đường dẫn ảnh:', block.content.url || 'https://');
-    if (url) onUpdateBlockContent(block.id, { ...block.content, url });
-  };  const handleDropOnBlock = (event: React.DragEvent, target: EmailBlock) => {
+    if (url) setImageMetadata(block, url);
+  };
+
+  const dropInto = (event: React.DragEvent, target: EmailBlock, slotIndex?: number) => {
     event.preventDefault(); event.stopPropagation();
     const sourceId = event.dataTransfer.getData('application/x-ft-email-block-id');
     const type = event.dataTransfer.getData('application/x-ft-email-block') as BlockType;
-    if (sourceId) onDropBlock(sourceId, target.id);
-    else if (type && EMAIL_BLOCK_REGISTRY[type]) onAddBlock(type, target.type === 'section' ? target.id : undefined);
-  };
-  const addFromInserter = (type: BlockType) => { onAddBlock(type); setIsInserterOpen(false); setBlockQuery(''); };
-  const handleBlockDrop = (event: React.DragEvent<HTMLDivElement>) => { event.preventDefault(); setIsBlockDragOver(false); const type = event.dataTransfer.getData('application/x-ft-email-block') as BlockType; if (type && EMAIL_BLOCK_REGISTRY[type]) onAddBlock(type); };
-
-  // Insert variable at cursor inside the contenteditable
-  useEffect(() => {
-    if (insertedVarName) {
-      const { blockId, varName } = insertedVarName;
-      const ref = contentEditableRefs.current[blockId];
-      if (ref) {
-        ref.focus();
-        const sel = window.getSelection();
-        if (sel && sel.rangeCount > 0) {
-          const range = sel.getRangeAt(0);
-          range.deleteContents();
-          const textNode = document.createTextNode(`{{${varName}}}`);
-          range.insertNode(textNode);
-          range.setStartAfter(textNode);
-          range.setEndAfter(textNode);
-          sel.removeAllRanges();
-          sel.addRange(range);
-        } else {
-          ref.innerHTML += `{{${varName}}}`;
-        }
-        
-        onUpdateBlockContent(blockId, {
-          ...blocks.find(b => b.id === blockId)?.content,
-          html: ref.innerHTML
-        });
-      }
-      onClearInsertedVar();
-    }
-  }, [insertedVarName]);
-
-  const handleContentBlur = (blockId: string, html: string) => {
-    const block = blocks.find(b => b.id === blockId);
-    if (block && block.content.html !== html) {
-      onUpdateBlockContent(blockId, {
-        ...block.content,
-        html
-      });
-    }
+    if (sourceId) onDropBlock(sourceId, target.id, slotIndex);
+    else if (type && EMAIL_BLOCK_REGISTRY[type]) onAddBlock(type, target.id, slotIndex);
   };
 
-  const handleParagraphAlignChange = (blockId: string, align: 'left' | 'center' | 'right') => {
-    const block = blocks.find(b => b.id === blockId);
-    if (block) {
-      onUpdateBlockContent(blockId, {
-        ...block.content,
-        align
-      });
-    }
+  const renderSimplePreview = (block: EmailBlock) => {
+    const content = block.content;
+    if (block.type === 'custom-html') return <iframe title="Xem trước HTML" sandbox="" srcDoc={`<!doctype html><html><body style="margin:0">${sanitizeCustomHtml(content.html || '')}</body></html>`} className="min-h-24 w-full rounded border bg-white" />;
+    if (block.type === 'gallery') return <div className="grid grid-cols-2 gap-2">{(content.images || ['', '']).map((url: string, index: number) => url ? <img key={index} src={url} className="h-24 w-full rounded object-cover" alt="" /> : <div key={index} className="flex h-24 items-center justify-center rounded bg-slate-100 text-xs text-slate-400">Ảnh {index + 1}</div>)}</div>;
+    if (['feature-list', 'product-grid', 'pricing-table'].includes(block.type)) { const items = content.items || content.products || content.plans || []; return <div className="grid grid-cols-2 gap-2">{items.map((item: any, index: number) => <div key={index} className="rounded border bg-white p-3 text-xs"><strong>{item.title || item.name}</strong><p className="mt-1 text-slate-500">{item.body || item.price || item.features}</p></div>)}</div>; }
+    if (['image-text', 'product-card', 'video'].includes(block.type)) return <div className="grid grid-cols-2 gap-3 rounded bg-slate-50 p-3"><div className="flex min-h-24 items-center justify-center rounded bg-slate-200">{content.imageUrl ? <img src={content.imageUrl} alt="" className="max-h-32 max-w-full" /> : 'Ảnh'}</div><div><strong className="text-[#0F3A72]">{content.heading || content.name || content.title}</strong><p className="mt-1 text-xs">{content.body || content.description || content.price}</p></div></div>;
+    if (['callout', 'testimonial', 'merge-tag'].includes(block.type)) return <div className="rounded border-l-4 border-[#0F3A72] bg-blue-50 p-3 text-sm"><strong>{content.heading || content.title || content.author}</strong><p className="mt-1">{content.body || content.quote || content.text}</p></div>;
+    if (block.type === 'header' || block.type === 'footer') return <div className="rounded bg-slate-100 p-3 text-center text-xs">{block.type === 'header' ? content.navigation : `${content.company} · ${content.address}`}</div>;
+    return null;
   };
 
-  // Helper: Display Vietnamese type name for block badges
-  const getBlockTypeName = (type: string) => {
-    switch (type) {
-      case 'logo': return 'Logo';
-      case 'heading': return 'Tiêu đề';
-      case 'paragraph': return 'Đoạn văn';
-      case 'image': return 'Ảnh banner';
-      case 'bullet-list': return 'Danh sách chấm';
-      case 'number-list': return 'Danh sách số';
-      case 'button': return 'Nút bấm CTA';
-      case 'button-group': return 'Nhóm 2 nút';
-      case 'highlight-box': return 'Hộp thông tin';
-      case 'divider': return 'Đường kẻ';
-      case 'spacer': return 'Khoảng trống';
-      case 'signature': return 'Chữ ký BTC';
-      case 'social-links': return 'Mạng xã hội';
-      default: return 'Khối';
-    }
-  };
+  const renderBlock = (block: EmailBlock, index: number, siblings: EmailBlock[]) => {
+    const selected = selectedBlockId === block.id;
+    const content = block.content;
+    const styles = block.styles;
+    const alignClass = content.align === 'right' ? 'justify-end' : content.align === 'center' ? 'justify-center' : 'justify-start';
+    const columnCount = content.variant === 'four' ? 4 : content.variant === 'three' ? 3 : 2;
+    const columns = Array.from({ length: columnCount }, (_, slot) => block.columns?.[slot] || []);
 
-  return (
-    <div className="flex w-full flex-col items-center px-4 py-6 select-text md:px-8 md:py-8">
-      <div
-        className="flex w-full max-w-full flex-col overflow-hidden rounded-lg border border-slate-200/90 bg-white shadow-[0_12px_36px_rgba(15,23,42,0.07)]"
-        style={{ maxWidth: `${emailSettings.maxWidth + 72}px` }}
-      >
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-3 select-none">
-          <div>
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Email canvas</p>
-            <p className="mt-0.5 text-xs font-bold text-slate-700">Kéo khối từ trái, chọn khối để chỉnh bên phải</p>
-          </div>
-          <div className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-black text-slate-500">
-            {emailSettings.maxWidth}px
-          </div>
-        </div>
-
-        {/* Email content viewport frame */}
-        <div onDragOver={event => { if (event.dataTransfer.types.includes('application/x-ft-email-block')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setIsBlockDragOver(true); } }} onDragLeave={event => { if (event.currentTarget === event.target) setIsBlockDragOver(false); }} onDrop={handleBlockDrop} className="relative flex min-h-[520px] w-full justify-center bg-[#f5f6f8] p-5 md:p-8">
-          {isBlockDragOver && <div className="pointer-events-none absolute inset-5 z-30 flex items-center justify-center rounded-xl border-2 border-dashed border-blue-500 bg-blue-50/90 text-sm font-black text-[#0F3A72] shadow-sm">Drop block here</div>}
-          <div 
-            className="relative w-full border border-slate-200/70 bg-white shadow-[0_6px_24px_rgba(15,23,42,0.05)] transition-all duration-300"
-            style={{
-              maxWidth: `${emailSettings.maxWidth}px`,
-              backgroundColor: emailSettings.contentBg,
-              borderRadius: `${emailSettings.borderRadius}px`,
-              fontFamily: emailSettings.fontFamily || 'Arial, sans-serif',
-              color: emailSettings.textColor || '#1e293b',
-            }}
-          >
-            <div style={{ padding: `${emailSettings.contentPadding}px` }} className="space-y-4">
-              
-              {blocks.map((block, index) => {
-                const isSelected = selectedBlockId === block.id;
-                const content = block.content;
-                const styles = block.styles;
-                const marginTop = styles.marginTop ?? 10;
-                const marginBottom = styles.marginBottom ?? 10;
-
-                return (
-                  <div
-                    key={block.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSelectBlock(block.id);
-                    }}
-                    onDragOver={event => {
-                      if (event.dataTransfer.types.includes('application/x-ft-email-block-id')) {
-                        event.preventDefault();
-                        event.dataTransfer.dropEffect = 'move';
-                      }
-                    }}
-                    onDrop={event => handleDropOnBlock(event, block)}
-                    className={`relative group border transition-all duration-200 ${
-                      isSelected 
-                        ? 'border-blue-500 ring-2 ring-blue-100 rounded-xl bg-blue-50/5' 
-                        : 'border-transparent hover:border-slate-350 hover:dashed rounded-xl hover:bg-slate-50/20'
-                    } ${!block.visible ? 'opacity-40 bg-slate-55/60 border-slate-250/50 border-dashed rounded-xl' : ''}`}
-                    style={{
-                      marginTop: `${marginTop}px`,
-                      marginBottom: `${marginBottom}px`
-                    }}
-                  >
-                    
-                    {/* Visual Hover Badge - Shows block type */}
-                    <div className="absolute -top-3.5 left-3.5 z-20 bg-blue-600 border border-blue-500/20 text-white text-[9px] font-black tracking-widest px-2 py-0.5 rounded-md shadow-sm uppercase scale-90 group-hover:flex hidden select-none">
-                      {getBlockTypeName(block.type)}
-                    </div>
-
-                    {/* Actions Controller Box (Top Right Corner) */}
-                    <div className="absolute -top-4.5 right-3 z-30 hidden group-hover:flex items-center gap-1 bg-white border border-slate-200 p-1.5 rounded-xl shadow-lg scale-90 origin-right select-none">
-                      <button draggable onDragStart={event => { event.dataTransfer.setData('application/x-ft-email-block-id', block.id); event.dataTransfer.setData('text/plain', block.id); event.dataTransfer.effectAllowed = 'move'; }} title="Kéo để sắp xếp hoặc thả vào Section" className="p-1 hover:bg-slate-100 text-slate-550 rounded-lg cursor-grab active:cursor-grabbing flex items-center justify-center"><GripVertical className="w-3.5 h-3.5" /></button>
-                      <button
-                        disabled={index === 0}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onMoveBlock(block.id, 'up');
-                        }}
-                        title="Di chuyển lên"
-                        className="p-1 hover:bg-slate-100 disabled:opacity-20 text-slate-550 rounded-lg cursor-pointer flex items-center justify-center"
-                      >
-                        <ArrowUp className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        disabled={index === blocks.length - 1}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onMoveBlock(block.id, 'down');
-                        }}
-                        title="Di chuyển xuống"
-                        className="p-1 hover:bg-slate-100 disabled:opacity-20 text-slate-550 rounded-lg cursor-pointer flex items-center justify-center"
-                      >
-                        <ArrowDown className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDuplicateBlock(block.id);
-                        }}
-                        title="Nhân bản khối"
-                        className="p-1 hover:bg-slate-100 text-slate-550 rounded-lg cursor-pointer flex items-center justify-center"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onToggleVisibility(block.id);
-                        }}
-                        title={block.visible ? 'Ẩn khối' : 'Hiện khối'}
-                        className="p-1 hover:bg-slate-100 text-slate-550 rounded-lg cursor-pointer flex items-center justify-center"
-                      >
-                        {block.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5 text-rose-500" />}
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm('Bạn chắc chắn muốn xóa khối này?')) {
-                            onDeleteBlock(block.id);
-                          }
-                        }}
-                        title="Xóa khối"
-                        className="p-1 hover:bg-rose-50 text-rose-600 rounded-lg cursor-pointer flex items-center justify-center"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    {/* Hidden overlay marker */}
-                    {!block.visible && (
-                      <div className="absolute top-1 right-1 text-[8px] bg-rose-100 border border-rose-200 text-rose-600 px-1.5 py-0.5 rounded font-black uppercase select-none z-10 pointer-events-none">
-                        Bị ẩn
-                      </div>
-                    )}
-
-                    {/* Render specific blocks */}
-                    <div className="p-3">
-                      
-                      {/* LOGO BLOCK */}
-                      {block.type === 'logo' && (
-                        <div className={`flex justify-${content.align === 'center' ? 'center' : content.align === 'right' ? 'end' : 'start'}`}>
-                          {content.url ? (
-                            <img 
-                              src={content.url} 
-                              alt={content.alt || 'Logo'} 
-                              style={{ width: `${content.width || 120}px` }}
-                              className="max-w-full height-auto object-contain pointer-events-none"
-                            />
-                          ) : (
-                            <div className="bg-slate-50 p-4 border border-dashed border-slate-350/50 text-[10px] font-bold text-slate-450 rounded-xl text-center w-full max-w-[200px]">
-                              [Chưa nhập ảnh Logo]
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* HEADING BLOCK */}
-                      {block.type === 'heading' && (
-                        <div
-                          style={{
-                            textAlign: content.align || 'left',
-                            color: content.color || '#0f3a72',
-                            fontSize: `${content.fontSize || 18}px`,
-                            fontWeight: content.bold ? 'bold' : 'normal'
-                          }}
-                          className="font-sans leading-snug"
-                        >
-                          {content.text || '[Chưa nhập tiêu đề]'}
-                        </div>
-                      )}
-
-                      {/* PARAGRAPH BLOCK */}
-                      {block.type === 'paragraph' && (
-                        <div>
-                          {isSelected && (
-                            <BlockToolbar 
-                              onInsertVariableClick={onOpenVariablePicker}
-                              onAlignChange={(align) => handleParagraphAlignChange(block.id, align)}
-                              activeAlign={content.align || 'left'}
-                            />
-                          )}
-                          <div
-                            ref={(el) => { contentEditableRefs.current[block.id] = el; }}
-                            contentEditable
-                            suppressContentEditableWarning
-                            onBlur={(e) => handleContentBlur(block.id, e.target.innerHTML)}
-                            style={{ textAlign: content.align || 'left', fontSize: (content.fontSize || 15) + 'px', lineHeight: content.lineHeight || 1.6 }}
-                            className="outline-none min-h-[40px] focus:bg-slate-50/50 p-1 rounded-lg border border-transparent focus:border-slate-200 font-sans"
-                            dangerouslySetInnerHTML={{ __html: content.html || '<p><br></p>' }}
-                          />
-                        </div>
-                      )}
-
-                      {/* IMAGE BLOCK */}
-                      {block.type === 'image' && (
-                        <div className="space-y-2">
-                          {isSelected && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-2 py-1.5 text-[10px] font-bold text-blue-800">
-                            <input ref={el => { imageInputRefs.current[block.id] = el; }} type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) uploadImageForBlock(block, file); event.currentTarget.value = ''; }} />
-                            <button type="button" onClick={() => imageInputRefs.current[block.id]?.click()} className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1.5 shadow-sm hover:bg-blue-100"><ImagePlus className="h-3.5 w-3.5" /> Tải ảnh</button>
-                            <button type="button" onClick={() => setImageUrl(block)} className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1.5 shadow-sm hover:bg-blue-100"><Link className="h-3.5 w-3.5" /> Dán URL</button>
-                            <span className="text-slate-500">hoặc kéo ảnh vào khung bên dưới</span>
-                          </div>}
-                          <div className={`flex justify-${content.align === 'center' ? 'center' : content.align === 'right' ? 'end' : 'start'}`} onDragOver={event => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'copy'; }} onDrop={event => { event.preventDefault(); event.stopPropagation(); const file = event.dataTransfer.files?.[0]; if (file) uploadImageForBlock(block, file); }}>
-                            {content.url ? (
-                              <img src={content.url} alt={content.alt || 'Banner'} style={{ width: `${content.width || 600}px`, borderRadius: `${content.borderRadius || 0}px` }} className="max-w-full height-auto object-cover pointer-events-none" />
-                            ) : (
-                              <button type="button" onClick={() => imageInputRefs.current[block.id]?.click()} className="w-full rounded-xl border border-dashed border-slate-350/50 bg-slate-50 p-8 text-center text-[10px] font-bold text-slate-450 hover:border-blue-400 hover:bg-blue-50">Chọn hoặc kéo thả ảnh vào đây</button>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      {/* BULLET & NUMBER LIST BLOCKS */}
-                      {(block.type === 'bullet-list' || block.type === 'number-list') && (
-                        <div className="pl-4" style={{ fontSize: (content.fontSize || 15) + 'px', lineHeight: content.lineHeight || 1.6 }}>
-                          {block.type === 'number-list' ? (
-                            <ol className="list-decimal space-y-1.5 ml-4 font-sans text-sm">
-                              {(content.items || []).map((item: string, i: number) => (
-                                <li key={i} dangerouslySetInnerHTML={{ __html: item }} />
-                              ))}
-                            </ol>
-                          ) : (
-                            <ul className="list-disc space-y-1.5 ml-4 font-sans text-sm">
-                              {(content.items || []).map((item: string, i: number) => (
-                                <li key={i} dangerouslySetInnerHTML={{ __html: item }} />
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      )}
-
-                      {/* BUTTON BLOCK */}
-                      {block.type === 'button' && (
-                        <div className={`flex justify-${content.align === 'center' ? 'center' : content.align === 'right' ? 'end' : 'start'}`}>
-                          <div 
-                            style={{
-                              backgroundColor: content.bg || '#1473d1',
-                              color: content.color || '#ffffff',
-                              borderRadius: `${content.radius ?? 8}px`,
-                              width: content.width === 'full' ? '100%' : 'auto', fontSize: (content.fontSize || 15) + 'px'
-                            }}
-                            className="px-6 py-2.5 text-center font-extrabold text-sm shadow-sm select-none border border-black/5"
-                          >
-                            {content.text || 'Nút bấm CTA'}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* ACTION BUTTON GROUP */}
-                      {block.type === 'button-group' && (() => { const buttons = content.buttons || [content.btn1, content.btn2].filter(Boolean); return <div className={`flex flex-wrap justify-${content.align === 'left' ? 'start' : content.align === 'right' ? 'end' : 'center'}`} style={{ gap: `${content.gap ?? 12}px` }}>{buttons.map((button: any, i: number) => <div key={i} style={{ backgroundColor: button.bg || '#0F3A72', color: button.color || '#ffffff', borderRadius: `${button.radius ?? 8}px` }} className="px-5 py-2 text-center text-xs font-extrabold shadow-sm">{button.text || `H\u00e0nh \u0111\u1ed9ng ${i + 1}`}</div>)}</div>; })()}
-
-                      {/* HIGHLIGHT BOX BLOCK */}
-                      {block.type === 'highlight-box' && (
-                        <div>
-                          {isSelected && (
-                            <BlockToolbar 
-                              onInsertVariableClick={onOpenVariablePicker}
-                            />
-                          )}
-                          <div
-                            ref={(el) => { contentEditableRefs.current[block.id] = el; }}
-                            contentEditable
-                            suppressContentEditableWarning
-                            onBlur={(e) => handleContentBlur(block.id, e.target.innerHTML)}
-                            style={{
-                              backgroundColor: content.bg || '#eef6ff',
-                              borderLeft: `4px solid ${content.borderColor || '#1473d1'}`,
-                              padding: `${content.padding ?? 16}px`
-                            }}
-                            className="outline-none min-h-[40px] focus:bg-slate-50/20 rounded-r-xl border border-transparent font-sans text-sm"
-                            dangerouslySetInnerHTML={{ __html: content.html || '<p><br></p>' }}
-                          />
-                        </div>
-                      )}
-
-                      {/* DIVIDER BLOCK */}
-                      {block.type === 'divider' && (
-                        <div 
-                          style={{
-                            borderTop: `${styles.thickness ?? 1}px ${styles.borderStyle || 'solid'} ${styles.color || '#e2e8f0'}`
-                          }}
-                          className="w-full font-size-1"
-                        />
-                      )}
-
-                      {/* SPACER BLOCK */}
-                      {block.type === 'spacer' && (
-                        <div 
-                          style={{ height: `${styles.height ?? 20}px` }} 
-                          className="w-full bg-slate-100/10 border-y border-dashed border-slate-200/20 text-center flex items-center justify-center text-[10px] text-slate-350 select-none"
-                        >
-                          Khoảng trắng: {styles.height ?? 20}px
-                        </div>
-                      )}
-
-                      {/* SIGNATURE BLOCK */}
-                      {block.type === 'signature' && (
-                        <div>
-                          {isSelected && (
-                            <BlockToolbar 
-                              onInsertVariableClick={onOpenVariablePicker}
-                            />
-                          )}
-                          <div
-                            ref={(el) => { contentEditableRefs.current[block.id] = el; }}
-                            contentEditable
-                            suppressContentEditableWarning
-                            onBlur={(e) => handleContentBlur(block.id, e.target.innerHTML)}
-                            style={{ fontSize: (content.fontSize || 14) + 'px', lineHeight: content.lineHeight || 1.5 }} className="outline-none min-h-[50px] focus:bg-slate-50/50 p-2 rounded-lg border border-transparent focus:border-slate-200 font-sans text-sm text-slate-650"
-                            dangerouslySetInnerHTML={{ __html: content.html || '<p><br></p>' }}
-                          />
-                        </div>
-                      )}
-
-                      {/* SOCIAL LINKS BLOCK */}
-                      {block.type === 'social-links' && (
-                        <div className={`flex justify-${content.align === 'center' ? 'center' : content.align === 'right' ? 'end' : 'start'} gap-3`}>
-                          {(content.links || []).filter((l: any) => l.visible !== false).map((link: any, i: number) => (
-                            <span 
-                              key={i} 
-                              style={{ color: emailSettings.linkColor || '#1473d1' }}
-                              className="text-xs font-bold bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg border border-slate-200 select-none"
-                            >
-                              {link.label}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      {['section', 'columns', 'image-text', 'data-table', 'testimonial', 'callout', 'gallery', 'video', 'feature-list', 'product-card', 'product-grid', 'pricing-table', 'header', 'footer', 'merge-tag', 'custom-html'].includes(block.type) && <NewBlockPreview block={block} />}
-
-                    </div>
-                  </div>
-                );
-              })}
-
-              <div className="relative mt-5 flex justify-center border-t border-dashed border-slate-200 pt-5">
-                <button type="button" onClick={() => setIsInserterOpen(open => !open)} className="flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-[#0F3A72] shadow-sm transition hover:bg-blue-50"><Plus className="h-4 w-4" /> Thêm khối nội dung</button>
-                {isInserterOpen && <div className="absolute bottom-12 z-40 w-[min(520px,calc(100vw-48px))] rounded-xl border border-slate-200 bg-white p-3 shadow-2xl">
-                  <div className="mb-3 flex items-center gap-2"><Plus className="h-4 w-4 text-[#0F3A72]" /><input autoFocus value={blockQuery} onChange={e => setBlockQuery(e.target.value)} placeholder="Tìm block..." className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-500" /></div>
-                  <div className="max-h-72 space-y-3 overflow-y-auto pr-1">{BLOCK_CATEGORIES.map(category => { const items = Object.values(EMAIL_BLOCK_REGISTRY).filter(item => item.category === category.id && (item.label + item.description).toLowerCase().includes(blockQuery.toLowerCase())); return items.length ? <div key={category.id}><p className="mb-1 text-[9px] font-black uppercase tracking-widest text-slate-400">{category.label}</p><div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">{items.map(item => <button key={item.id} type="button" onClick={() => addFromInserter(item.id)} className="rounded-lg border border-slate-200 px-2 py-2 text-left text-[10px] font-bold text-slate-700 hover:border-blue-300 hover:bg-blue-50">{item.label}</button>)}</div></div> : null; })}</div>
-                </div>}
-              </div>
-
-            </div>
-          </div>
-        </div>
-
+    return <div key={block.id} onClick={event => { event.stopPropagation(); onSelectBlock(block.id); }} onDragOver={event => { if (event.dataTransfer.types.includes('application/x-ft-email-block-id') || (block.type === 'section' && event.dataTransfer.types.includes('application/x-ft-email-block'))) { event.preventDefault(); event.dataTransfer.dropEffect = block.type === 'section' ? 'move' : 'move'; } }} onDrop={event => dropInto(event, block)} className={`group relative rounded-xl transition ${selected ? 'outline outline-2 outline-blue-500 bg-blue-50/5' : 'hover:outline hover:outline-1 hover:outline-slate-300'} ${block.visible ? '' : 'opacity-40'}`} style={{ marginTop: styles.marginTop ?? 10, marginBottom: styles.marginBottom ?? 10 }}>
+      <div className="absolute -top-3 left-3 z-20 hidden rounded bg-blue-600 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-white group-hover:block">{TYPE_NAMES[block.type] || block.type}</div>
+      <div className="absolute -top-4 right-3 z-30 hidden items-center gap-1 rounded-xl border bg-white p-1 shadow-lg group-hover:flex">
+        <button type="button" draggable onDragStart={event => { event.stopPropagation(); event.dataTransfer.setData('application/x-ft-email-block-id', block.id); event.dataTransfer.effectAllowed = 'move'; }} className="cursor-grab rounded p-1 hover:bg-slate-100" title="Kéo block"><GripVertical className="h-3.5 w-3.5" /></button>
+        <button type="button" disabled={index === 0} onClick={event => { event.stopPropagation(); onMoveBlock(block.id, 'up'); }} className="rounded p-1 disabled:opacity-20"><ArrowUp className="h-3.5 w-3.5" /></button>
+        <button type="button" disabled={index === siblings.length - 1} onClick={event => { event.stopPropagation(); onMoveBlock(block.id, 'down'); }} className="rounded p-1 disabled:opacity-20"><ArrowDown className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={event => { event.stopPropagation(); onDuplicateBlock(block.id); }} className="rounded p-1"><Copy className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={event => { event.stopPropagation(); onToggleVisibility(block.id); }} className="rounded p-1">{block.visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}</button>
+        <button type="button" onClick={event => { event.stopPropagation(); if (confirm('Bạn có chắc muốn xóa khối này?')) onDeleteBlock(block.id); }} className="rounded p-1 text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button>
       </div>
-      
+      <div>
+        {block.type === 'logo' && <div className={`flex ${alignClass}`}>{content.url ? <img src={content.url} alt={content.alt || 'Logo'} style={{ width: Number(content.width) || 120, height: content.height ? Number(content.height) : 'auto' }} className="max-w-full object-contain" /> : <div className="w-full rounded border border-dashed bg-slate-50 p-4 text-center text-xs text-slate-400">Chưa chọn ảnh logo</div>}</div>}
+        {block.type === 'heading' && <div contentEditable suppressContentEditableWarning onBlur={event => onUpdateBlockContent(block.id, { ...content, text: event.currentTarget.textContent || '' })} style={{ textAlign: content.align || 'left', color: content.color || '#0F3A72', fontSize: `${content.fontSize || 20}px`, fontWeight: content.bold === false ? 400 : 700 }} className="min-h-8 rounded font-sans leading-snug outline-none focus:bg-slate-50">{content.text || 'Nhấp để sửa tiêu đề'}</div>}
+        {block.type === 'paragraph' && <div>{selected && <BlockToolbar onInsertVariableClick={onOpenVariablePicker} onAlignChange={align => onUpdateBlockContent(block.id, { ...content, align })} onFontSizeChange={size => applySelectionFontSize(block, size)} activeAlign={content.align || 'left'} />}<div ref={element => { editableRefs.current[block.id] = element; }} contentEditable suppressContentEditableWarning onMouseUp={() => saveSelection(block.id)} onKeyUp={() => saveSelection(block.id)} onBlur={event => updateHtml(block, event.currentTarget)} style={{ textAlign: content.align || 'left', fontSize: `${content.fontSize || 15}px`, lineHeight: content.lineHeight || 1.6 }} className="min-h-10 rounded-lg font-sans outline-none focus:bg-slate-50" dangerouslySetInnerHTML={{ __html: content.html || '<p><br></p>' }} /></div>}
+        {block.type === 'image' && <div className="space-y-2">{selected && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-2 py-1.5 text-[10px] font-bold text-blue-800"><input ref={element => { imageInputRefs.current[block.id] = element; }} type="file" accept="image/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) uploadImage(block, file); event.currentTarget.value = ''; }} /><button type="button" onClick={() => imageInputRefs.current[block.id]?.click()} className="inline-flex items-center gap-1 rounded bg-white px-2 py-1.5 shadow"><ImagePlus className="h-3.5 w-3.5" />Tải ảnh</button><button type="button" onClick={() => pasteImageUrl(block)} className="inline-flex items-center gap-1 rounded bg-white px-2 py-1.5 shadow"><Link className="h-3.5 w-3.5" />Dán URL</button><span className="text-slate-500">hoặc kéo ảnh vào khung</span></div>}<div className={`flex ${alignClass}`} onDragOver={event => { if (event.dataTransfer.files.length) { event.preventDefault(); event.stopPropagation(); } }} onDrop={event => { if (event.dataTransfer.files.length) { event.preventDefault(); event.stopPropagation(); uploadImage(block, event.dataTransfer.files[0]); } }}>{content.url ? <img src={content.url} alt={content.alt || 'Banner'} onLoad={event => { if (!content.naturalRatio) { const ratio = event.currentTarget.naturalWidth / Math.max(1, event.currentTarget.naturalHeight); const width = Number(content.width) || Math.min(event.currentTarget.naturalWidth, 600); onUpdateBlockContent(block.id, { ...content, width, height: content.height || Math.round(width / ratio), naturalRatio: ratio, aspectLocked: content.aspectLocked !== false }); } }} style={{ width: Number(content.width) || 600, height: content.height ? Number(content.height) : 'auto', borderRadius: Number(content.borderRadius) || 0 }} className="max-w-full object-cover" /> : <button type="button" onClick={() => imageInputRefs.current[block.id]?.click()} className="w-full rounded-xl border border-dashed bg-slate-50 p-8 text-xs font-bold text-slate-500">Chọn hoặc kéo thả ảnh vào đây</button>}</div></div>}
+        {(block.type === 'bullet-list' || block.type === 'number-list') && (block.type === 'number-list' ? <ol className="ml-5 list-decimal space-y-1" style={{ fontSize: content.fontSize || 15 }}>{(content.items || []).map((item: string, itemIndex: number) => <li key={itemIndex} dangerouslySetInnerHTML={{ __html: item }} />)}</ol> : <ul className="ml-5 list-disc space-y-1" style={{ fontSize: content.fontSize || 15 }}>{(content.items || []).map((item: string, itemIndex: number) => <li key={itemIndex} dangerouslySetInnerHTML={{ __html: item }} />)}</ul>)}
+        {block.type === 'button' && <div className={`flex ${alignClass}`}><div style={{ background: content.bg || '#1473d1', color: content.color || '#fff', borderRadius: content.radius ?? 8, width: content.width === 'full' ? '100%' : 'auto', minWidth: content.minWidth ? `${content.minWidth}px` : undefined, fontSize: content.fontSize || 15, padding: `${content.paddingY ?? 12}px ${content.paddingX ?? 24}px` }} className="text-center font-bold">{content.text || 'Nút CTA'}</div></div>}
+        {(block.type === 'button-group' || block.type === 'button-group-3') && <div className={`flex flex-nowrap ${alignClass}`} style={{ gap: content.gap ?? 12 }}>{(content.buttons || [content.btn1, content.btn2].filter(Boolean)).map((button: any, buttonIndex: number) => <div key={buttonIndex} style={{ background: button.bg || '#0F3A72', color: button.color || '#fff', borderRadius: button.radius ?? 8, fontSize: button.fontSize ?? 14, padding: `${button.paddingY ?? 11}px ${button.paddingX ?? 18}px`, minWidth: button.minWidth ? `${button.minWidth}px` : undefined }} className="text-center font-bold">{button.text}</div>)}</div>}
+        {block.type === 'highlight-box' && <div>{selected && <BlockToolbar onInsertVariableClick={onOpenVariablePicker} onFontSizeChange={size => applySelectionFontSize(block, size)} />}<div ref={element => { editableRefs.current[block.id] = element; }} contentEditable suppressContentEditableWarning onMouseUp={() => saveSelection(block.id)} onKeyUp={() => saveSelection(block.id)} onBlur={event => updateHtml(block, event.currentTarget)} style={{ background: content.bg || '#eef6ff', borderLeft: `4px solid ${content.borderColor || '#1473d1'}`, padding: content.padding ?? 16, fontSize: content.fontSize || 14 }} className="min-h-10 rounded-r outline-none" dangerouslySetInnerHTML={{ __html: content.html || '<p><br></p>' }} /></div>}
+        {block.type === 'signature' && <div>{selected && <BlockToolbar onInsertVariableClick={onOpenVariablePicker} onFontSizeChange={size => applySelectionFontSize(block, size)} />}<div ref={element => { editableRefs.current[block.id] = element; }} contentEditable suppressContentEditableWarning onMouseUp={() => saveSelection(block.id)} onKeyUp={() => saveSelection(block.id)} onBlur={event => updateHtml(block, event.currentTarget)} style={{ fontSize: content.fontSize || 14, lineHeight: content.lineHeight || 1.5 }} className="min-h-10 rounded p-1 outline-none" dangerouslySetInnerHTML={{ __html: content.html || '<p><br></p>' }} /></div>}
+        {block.type === 'divider' && <div style={{ borderTop: `${styles.thickness ?? 1}px ${styles.borderStyle || 'solid'} ${styles.color || '#e2e8f0'}` }} />}
+        {block.type === 'spacer' && <div style={{ height: styles.height ?? 20 }} className="flex items-center justify-center border-y border-dashed text-[10px] text-slate-300">Khoảng trắng {styles.height ?? 20}px</div>}
+        {block.type === 'social-links' && <div className={`flex ${alignClass} gap-3`}>{(content.links || []).filter((item: any) => item.visible !== false).map((item: any, itemIndex: number) => <span key={itemIndex} className="rounded bg-slate-100 px-2 py-1 text-xs font-bold text-blue-700">{item.label}</span>)}</div>}
+        {block.type === 'data-table' && <div className="overflow-x-auto">{content.heading && <h3 className="mb-2 text-base font-bold text-[#0F3A72]">{content.heading}</h3>}<table className="w-full border-collapse text-left text-xs"><tbody>{(content.rows || []).map((row: string[], rowIndex: number) => <tr key={rowIndex}>{row.map((cell, cellIndex) => rowIndex === 0 ? <th key={cellIndex} className="border border-slate-300 bg-slate-100 p-2 font-bold">{cell}</th> : <td key={cellIndex} className="border border-slate-300 p-2">{cell}</td>)}</tr>)}</tbody></table></div>}
+        {block.type === 'section' && <div onDragOver={event => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; }} onDrop={event => dropInto(event, block)} style={{ background: content.bg || '#f8fafc', padding: content.padding ?? 20 }} className="rounded-lg border border-dashed border-slate-300"><div contentEditable suppressContentEditableWarning onBlur={event => onUpdateBlockContent(block.id, { ...content, heading: event.currentTarget.textContent || '' })} className="font-bold text-[#0F3A72] outline-none">{content.heading || 'Nội dung section'}</div><p className="mt-1 text-xs text-slate-500">{content.body}</p><div className="mt-3 min-h-16 space-y-2">{(block.children || []).map((child, childIndex, siblings) => renderBlock(child, childIndex, siblings))}{!(block.children || []).length && <div className="flex min-h-16 items-center justify-center rounded border border-dashed border-blue-200 bg-white/70 text-[10px] font-bold text-blue-600">Thả block vào Section</div>}</div><button type="button" onClick={event => { event.stopPropagation(); onAddBlock('paragraph', block.id); }} className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold text-blue-700"><Plus className="h-3.5 w-3.5" />Thêm đoạn văn</button></div>}
+        {block.type === 'columns' && <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}>{columns.map((column, slotIndex) => <div key={slotIndex} onDragOver={event => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; }} onDrop={event => dropInto(event, block, slotIndex)} className="min-h-28 rounded-lg border border-dashed border-blue-200 bg-blue-50/30 p-2"><p className="mb-2 text-[9px] font-black uppercase tracking-wide text-blue-500">Cột {slotIndex + 1}</p><div>{column.map((child, childIndex, siblings) => renderBlock(child, childIndex, siblings))}</div>{!column.length && <div className="flex min-h-14 items-center justify-center rounded bg-white/80 px-2 text-center text-[10px] font-bold text-slate-400">Thả block vào cột này</div>}<button type="button" onClick={event => { event.stopPropagation(); onAddBlock('paragraph', block.id, slotIndex); }} className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold text-blue-700"><Plus className="h-3.5 w-3.5" />Thêm nội dung</button></div>)}</div>}
+        {!['logo','heading','paragraph','image','bullet-list','number-list','button','button-group','button-group-3','highlight-box','signature','divider','spacer','social-links','data-table','section','columns'].includes(block.type) && renderSimplePreview(block)}
+      </div>
+    </div>;
+  };
+
+  const rootDrop = (event: React.DragEvent) => {
+    event.preventDefault(); setRootDragOver(false);
+    const type = event.dataTransfer.getData('application/x-ft-email-block') as BlockType;
+    if (type && EMAIL_BLOCK_REGISTRY[type]) onAddBlock(type);
+  };
+  const filteredDefinitions = BLOCK_CATEGORIES.map(category => ({ ...category, items: Object.values(EMAIL_BLOCK_REGISTRY).filter(item => item.category === category.id && `${item.label} ${item.description}`.toLowerCase().includes(blockQuery.toLowerCase())) })).filter(category => category.items.length);
+
+  return <div className="flex w-full flex-col items-center px-4 py-6 md:px-8">
+    <div className="flex w-full max-w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg" style={{ maxWidth: emailSettings.maxWidth + 72 }}>
+      <div className="flex items-center justify-between border-b px-4 py-3"><div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Email canvas</p><p className="mt-0.5 text-xs font-bold text-slate-700">Kéo block từ trái hoặc thả vào từng Section/cột</p></div><span className="rounded border bg-slate-50 px-2.5 py-1 text-[10px] font-black text-slate-500">{emailSettings.maxWidth}px</span></div>
+      <div onClick={() => onSelectBlock('')} onDragOver={event => { if (event.dataTransfer.types.includes('application/x-ft-email-block')) { event.preventDefault(); setRootDragOver(true); } }} onDragLeave={event => { if (event.currentTarget === event.target) setRootDragOver(false); }} onDrop={rootDrop} className="relative flex min-h-[520px] justify-center bg-[#f5f6f8] p-5 md:p-8">
+        {rootDragOver && <div className="pointer-events-none absolute inset-5 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-blue-500 bg-blue-50/90 text-sm font-black text-blue-700">Thả block vào cuối email</div>}
+        <div className="w-full border bg-white shadow-sm" style={{ maxWidth: emailSettings.maxWidth, backgroundColor: emailSettings.contentBg, borderRadius: emailSettings.borderRadius, fontFamily: emailSettings.fontFamily || 'Arial', color: emailSettings.textColor || '#1e293b' }}><div style={{ padding: emailSettings.contentPadding }} >{blocks.map((block, index, siblings) => renderBlock(block, index, siblings))}<div className="relative flex justify-center border-t border-dashed pt-5"><button type="button" onClick={event => { event.stopPropagation(); setIsInserterOpen(open => !open); }} className="flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-[#0F3A72] shadow"><Plus className="h-4 w-4" />Thêm khối nội dung</button>{isInserterOpen && <div className="absolute bottom-12 z-50 w-[min(520px,calc(100vw-48px))] rounded-xl border bg-white p-3 shadow-2xl" onClick={event => event.stopPropagation()}><input autoFocus value={blockQuery} onChange={event => setBlockQuery(event.target.value)} placeholder="Tìm block…" className="mb-3 w-full rounded-lg border px-3 py-2 text-xs outline-none focus:border-blue-500" /><div className="max-h-72 space-y-3 overflow-y-auto">{filteredDefinitions.map(category => <div key={category.id}><p className="mb-1 text-[9px] font-black uppercase tracking-widest text-slate-400">{category.label}</p><div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">{category.items.map(item => <button key={item.id} type="button" onClick={() => { onAddBlock(item.id); setIsInserterOpen(false); setBlockQuery(''); }} className="rounded-lg border px-2 py-2 text-left text-[10px] font-bold hover:border-blue-300 hover:bg-blue-50">{item.label}</button>)}</div></div>)}</div></div>}</div></div></div>
+      </div>
     </div>
-  );
+  </div>;
+}
+
+function findBlock(blocks: EmailBlock[], id: string): EmailBlock | undefined {
+  for (const block of blocks) {
+    if (block.id === id) return block;
+    const child = findBlock(block.children || [], id);
+    if (child) return child;
+    for (const column of block.columns || []) { const nested = findBlock(column, id); if (nested) return nested; }
+  }
 }
