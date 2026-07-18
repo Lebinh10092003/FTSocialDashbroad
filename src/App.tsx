@@ -541,7 +541,7 @@ export default function App() {
             userEmail={user?.email}
             userRole={userRole}
             isGuest={isGuest}
-            onAccountClick={() => isGuest ? setShowLoginModal(true) : handleLogout()}
+            onAccountClick={() => { if (isGuest) { setViewMode('workspace'); setShowLoginModal(true); } else { handleLogout(); } }}
           />
         </Suspense>
       </ExaminationErrorBoundary>

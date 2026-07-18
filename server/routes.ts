@@ -262,6 +262,15 @@ apiRouter.post('/examination/sessions', authenticateUser, requireManagerOrAdmin,
   const { competitionId, name, national, international } = req.body || {}; if (!competitionId || !name || !national || !international) return res.status(400).json({ error: 'Tên kỳ, cuộc thi và thời gian hai vòng là bắt buộc.' }); const competition = await adminDb.collection(EXAMINATION_COLLECTIONS.competitions).doc(String(competitionId)).get(); if (!competition.exists) return res.status(404).json({ error: 'Không tìm thấy cuộc thi.' });
   const parent = competition.data(); const id = `session-${uuidv4()}`; const item = examinationRecord({ id, competitionId, code: parent.code, name: String(name).trim(), parent: parent.parent, organizer: parent.organizer, time: `${national.label} · ${international.label}`, candidates: 0, national: national.label, nationalDate: national.date, international: international.label, internationalDate: international.date, phase: 'Chuẩn bị', note: 'Kỳ tổ chức mới tạo.', createdBy: req.user?.email }); await adminDb.collection(EXAMINATION_COLLECTIONS.sessions).doc(id).set(item); res.status(201).json(item);
 });
+apiRouter.put('/examination/sessions/:id', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const allowed = ['name', 'phase', 'note', 'national', 'nationalDate', 'international', 'internationalDate'];
+  const updates: any = { updatedAt: new Date().toISOString(), updatedBy: req.user?.email };
+  for (const key of allowed) if (typeof req.body?.[key] === 'string') updates[key] = req.body[key].trim();
+  if (Object.keys(updates).length === 2) return res.status(400).json({ error: 'Không có thông tin hợp lệ để cập nhật.' });
+  const ref = adminDb.collection(EXAMINATION_COLLECTIONS.sessions).doc(req.params.id);
+  const existing = await ref.get(); if (!existing.exists) return res.status(404).json({ error: 'Không tìm thấy đợt tổ chức.' });
+  await ref.update(updates); const latest = await ref.get(); res.json({ id: latest.id, ...latest.data() });
+});
 apiRouter.put('/examination/candidates/:id', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const allowed = ['email', 'parent', 'phone', 'identity', 'address']; const updates: any = {}; for (const key of allowed) if (typeof req.body?.[key] === 'string') updates[key] = req.body[key].trim(); if (!Object.keys(updates).length) return res.status(400).json({ error: 'Không có thông tin hợp lệ để cập nhật.' }); updates.updated = new Date().toISOString(); updates.updatedBy = req.user?.email; await adminDb.collection(EXAMINATION_COLLECTIONS.candidates).doc(req.params.id).update(updates); const latest = await adminDb.collection(EXAMINATION_COLLECTIONS.candidates).doc(req.params.id).get(); res.json({ id: latest.id, ...latest.data() });
 });
