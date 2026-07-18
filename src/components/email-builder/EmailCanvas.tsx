@@ -5,6 +5,15 @@ import { BLOCK_CATEGORIES, EMAIL_BLOCK_REGISTRY } from '../../data/emailBlockReg
 import BlockToolbar from './BlockToolbar';
 import { sanitizeCustomHtml } from '../../lib/emailSanitizer';
 import { addEmailLayoutCell, getLayoutSlotIndex, normalizeEmailLayout, resizeEmailLayout } from '../../lib/emailLayout';
+import { getEmailLucideIcon } from '../../lib/emailIcon';
+
+export interface EmailCanvasHandle {
+  hasTextSelection: (blockId: string) => boolean;
+  applySelectionFontSize: (blockId: string, size: number) => boolean;
+  applySelectionTextColor: (blockId: string, color: string) => boolean;
+}
+
+interface SelectionBookmark { start: number; end: number; }
 
 interface EmailCanvasProps {
   blocks: EmailBlock[];
@@ -26,39 +35,96 @@ interface EmailCanvasProps {
 
 const TYPE_NAMES: Partial<Record<BlockType, string>> = {
   logo: 'Logo', heading: 'Tiêu đề', paragraph: 'Đoạn văn', image: 'Ảnh / Banner', button: 'Nút CTA',
-  'button-group': 'Nhóm 2 nút', 'button-group-3': 'Nhóm 3 nút', 'bullet-list': 'Danh sách gạch đầu dòng', 'number-list': 'Danh sách số',
+  'icon-text': 'Icon + chữ', 'button-group': 'Nhóm 2 nút', 'button-group-3': 'Nhóm 3 nút', 'bullet-list': 'Danh sách gạch đầu dòng', 'number-list': 'Danh sách số',
   'highlight-box': 'Hộp thông tin', divider: 'Đường phân cách', spacer: 'Khoảng trắng', signature: 'Chữ ký',
   'social-links': 'Mạng xã hội', section: 'Section / Container', columns: 'Bố cục ô linh hoạt', 'data-table': 'Bảng dữ liệu'
 };
 
-export default function EmailCanvas(props: EmailCanvasProps) {
+const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(function EmailCanvas(props, ref) {
   const { blocks, selectedBlockId, onSelectBlock, onMoveBlock, onDuplicateBlock, onDeleteBlock, onToggleVisibility, onUpdateBlockContent, onOpenVariablePicker, insertedVarName, onClearInsertedVar, emailSettings, onAddBlock, onDropBlock, onUpdateBlock } = props;
   const editableRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const selectionRefs = useRef<Record<string, Range | null>>({});
+  const selectionBookmarks = useRef<Record<string, SelectionBookmark | null>>({});
   const imageInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [isInserterOpen, setIsInserterOpen] = React.useState(false);
   const [blockQuery, setBlockQuery] = React.useState('');
   const [rootDragOver, setRootDragOver] = React.useState(false);
 
   const updateHtml = (block: EmailBlock, element: HTMLElement) => onUpdateBlockContent(block.id, { ...block.content, html: element.innerHTML });
+  const clearSelectionHighlight = () => {
+    const highlights = (globalThis.CSS as any)?.highlights;
+    highlights?.delete('ft-email-selection');
+  };
+  const rangeToBookmark = (editable: HTMLElement, range: Range): SelectionBookmark => {
+    const before = range.cloneRange();
+    before.selectNodeContents(editable);
+    before.setEnd(range.startContainer, range.startOffset);
+    const start = before.toString().length;
+    return { start, end: start + range.toString().length };
+  };
+  const bookmarkToRange = (editable: HTMLElement, bookmark: SelectionBookmark): Range | null => {
+    const range = document.createRange();
+    const walker = document.createTreeWalker(editable, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    let offset = 0;
+    let startSet = false;
+    while (node) {
+      const length = node.textContent?.length || 0;
+      if (!startSet && bookmark.start <= offset + length) {
+        range.setStart(node, Math.max(0, bookmark.start - offset));
+        startSet = true;
+      }
+      if (startSet && bookmark.end <= offset + length) {
+        range.setEnd(node, Math.max(0, bookmark.end - offset));
+        return range;
+      }
+      offset += length;
+      node = walker.nextNode();
+    }
+    if (!startSet) return null;
+    range.setEnd(editable, editable.childNodes.length);
+    return range;
+  };
+  const showSelectionHighlight = (range: Range | null) => {
+    const highlights = (globalThis.CSS as any)?.highlights;
+    const HighlightConstructor = (globalThis as any).Highlight;
+    if (!highlights || !HighlightConstructor || !range || range.collapsed) { clearSelectionHighlight(); return; }
+    highlights.set('ft-email-selection', new HighlightConstructor(range));
+  };
+  const getSavedRange = (blockId: string) => {
+    const editable = editableRefs.current[blockId];
+    if (!editable) return null;
+    const current = selectionRefs.current[blockId];
+    if (current && editable.contains(current.commonAncestorContainer)) return current;
+    const bookmark = selectionBookmarks.current[blockId];
+    const restored = bookmark ? bookmarkToRange(editable, bookmark) : null;
+    if (restored) selectionRefs.current[blockId] = restored.cloneRange();
+    return restored;
+  };
   const saveSelection = (blockId: string) => {
     const selection = window.getSelection();
     const editable = editableRefs.current[blockId];
-    if (selection?.rangeCount && editable?.contains(selection.anchorNode)) selectionRefs.current[blockId] = selection.getRangeAt(0).cloneRange();
+    if (!selection?.rangeCount || !editable?.contains(selection.anchorNode)) return;
+    const range = selection.getRangeAt(0).cloneRange();
+    selectionRefs.current[blockId] = range;
+    selectionBookmarks.current[blockId] = rangeToBookmark(editable, range);
+    showSelectionHighlight(range);
   };
   const restoreSelection = (blockId: string) => {
-    const range = selectionRefs.current[blockId];
+    const range = getSavedRange(blockId);
     if (!range) return;
     const selection = window.getSelection();
     selection?.removeAllRanges(); selection?.addRange(range);
   };
-  const applySelectionFontSize = (block: EmailBlock, size: number) => {
+  const applySelectionFontSize = (block: EmailBlock, size: number, selectionOnly = false): boolean => {
     const editable = editableRefs.current[block.id];
-    if (!editable) return;
-    const savedRange = selectionRefs.current[block.id];
-    const hasTextSelection = Boolean(savedRange && !savedRange.collapsed && editable.contains(savedRange.commonAncestorContainer));
+    if (!editable) return false;
+    const savedRange = getSavedRange(block.id);
+    const bookmark = selectionBookmarks.current[block.id];
+    const hasTextSelection = Boolean(savedRange && !savedRange.collapsed && bookmark && bookmark.end > bookmark.start);
 
     if (!hasTextSelection) {
+      if (selectionOnly) return false;
       editable.querySelectorAll<HTMLElement>('[style]').forEach(element => {
         element.style.removeProperty('font-size');
         if (!element.getAttribute('style')?.trim()) element.removeAttribute('style');
@@ -69,8 +135,10 @@ export default function EmailCanvas(props: EmailCanvasProps) {
         font.replaceWith(fragment);
       });
       selectionRefs.current[block.id] = null;
+      selectionBookmarks.current[block.id] = null;
+      clearSelectionHighlight();
       onUpdateBlockContent(block.id, { ...block.content, fontSize: size, html: editable.innerHTML });
-      return;
+      return false;
     }
 
     editable.focus({ preventScroll: true });
@@ -83,16 +151,27 @@ export default function EmailCanvas(props: EmailCanvasProps) {
       font.replaceWith(span);
     });
     updateHtml(block, editable);
-    saveSelection(block.id);
+    selectionBookmarks.current[block.id] = bookmark;
+    const nextRange = bookmark ? bookmarkToRange(editable, bookmark) : null;
+    selectionRefs.current[block.id] = nextRange?.cloneRange() || null;
+    if (nextRange) {
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(nextRange);
+      showSelectionHighlight(nextRange);
+    }
+    return true;
   };
 
-  const applySelectionTextColor = (block: EmailBlock, color: string) => {
+  const applySelectionTextColor = (block: EmailBlock, color: string, selectionOnly = false): boolean => {
     const editable = editableRefs.current[block.id];
-    if (!editable) return;
-    const savedRange = selectionRefs.current[block.id];
-    const hasTextSelection = Boolean(savedRange && !savedRange.collapsed && editable.contains(savedRange.commonAncestorContainer));
+    if (!editable) return false;
+    const savedRange = getSavedRange(block.id);
+    const bookmark = selectionBookmarks.current[block.id];
+    const hasTextSelection = Boolean(savedRange && !savedRange.collapsed && bookmark && bookmark.end > bookmark.start);
 
     if (!hasTextSelection) {
+      if (selectionOnly) return false;
       editable.querySelectorAll<HTMLElement>('[style]').forEach(element => {
         element.style.removeProperty('color');
         if (!element.getAttribute('style')?.trim()) element.removeAttribute('style');
@@ -103,8 +182,10 @@ export default function EmailCanvas(props: EmailCanvasProps) {
         font.replaceWith(fragment);
       });
       selectionRefs.current[block.id] = null;
+      selectionBookmarks.current[block.id] = null;
+      clearSelectionHighlight();
       onUpdateBlockContent(block.id, { ...block.content, color, html: editable.innerHTML });
-      return;
+      return false;
     }
 
     editable.focus({ preventScroll: true });
@@ -118,8 +199,44 @@ export default function EmailCanvas(props: EmailCanvasProps) {
       font.replaceWith(span);
     });
     updateHtml(block, editable);
-    saveSelection(block.id);
+    selectionBookmarks.current[block.id] = bookmark;
+    const nextRange = bookmark ? bookmarkToRange(editable, bookmark) : null;
+    selectionRefs.current[block.id] = nextRange?.cloneRange() || null;
+    if (nextRange) {
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(nextRange);
+      showSelectionHighlight(nextRange);
+    }
+    return true;
   };
+
+  React.useImperativeHandle(ref, () => ({
+    hasTextSelection: blockId => {
+      const bookmark = selectionBookmarks.current[blockId];
+      return Boolean(bookmark && bookmark.end > bookmark.start && getSavedRange(blockId));
+    },
+    applySelectionFontSize: (blockId, size) => {
+      const previousFocus = document.activeElement as HTMLElement | null;
+      const block = findBlock(blocks, blockId);
+      const applied = block ? applySelectionFontSize(block, size, true) : false;
+      if (applied && previousFocus?.focus) requestAnimationFrame(() => previousFocus.focus({ preventScroll: true }));
+      return applied;
+    },
+    applySelectionTextColor: (blockId, color) => {
+      const previousFocus = document.activeElement as HTMLElement | null;
+      const block = findBlock(blocks, blockId);
+      const applied = block ? applySelectionTextColor(block, color, true) : false;
+      if (applied && previousFocus?.focus) requestAnimationFrame(() => previousFocus.focus({ preventScroll: true }));
+      return applied;
+    },
+  }));
+
+  React.useLayoutEffect(() => {
+    if (!selectedBlockId) { clearSelectionHighlight(); return; }
+    showSelectionHighlight(getSavedRange(selectedBlockId));
+  }, [blocks, selectedBlockId]);
+
   useEffect(() => {
     if (!insertedVarName) return;
     const block = findBlock(blocks, insertedVarName.blockId);
@@ -211,6 +328,14 @@ export default function EmailCanvas(props: EmailCanvasProps) {
         {block.type === 'logo' && <div className={`flex ${alignClass}`}>{content.url ? <img src={content.url} alt={content.alt || 'Logo'} style={{ width: Number(content.width) || 120, height: content.height ? Number(content.height) : 'auto' }} className="max-w-full object-contain" /> : <div className="w-full rounded border border-dashed bg-slate-50 p-4 text-center text-xs text-slate-400">Chưa chọn ảnh logo</div>}</div>}
         {block.type === 'heading' && <div contentEditable suppressContentEditableWarning onBlur={event => onUpdateBlockContent(block.id, { ...content, text: event.currentTarget.textContent || '' })} style={{ textAlign: content.align || 'left', color: content.color || '#0F3A72', fontSize: `${content.fontSize || 20}px`, fontWeight: content.bold === false ? 400 : 700 }} className="min-h-8 rounded font-sans leading-snug outline-none focus:bg-slate-50">{content.text || 'Nhấp để sửa tiêu đề'}</div>}
         {block.type === 'paragraph' && <div>{selected && <BlockToolbar onInsertVariableClick={onOpenVariablePicker} onAlignChange={align => onUpdateBlockContent(block.id, { ...content, align })} onFontSizeChange={size => applySelectionFontSize(block, size)} onTextColorChange={color => applySelectionTextColor(block, color)} activeFontSize={content.fontSize || 15} activeTextColor={content.color || emailSettings.textColor || '#1E293B'} activeAlign={content.align || 'left'} />}<div ref={element => { editableRefs.current[block.id] = element; }} contentEditable suppressContentEditableWarning onMouseUp={() => saveSelection(block.id)} onKeyUp={() => saveSelection(block.id)} onSelect={() => saveSelection(block.id)} onBlur={event => updateHtml(block, event.currentTarget)} style={{ textAlign: content.align || 'left', fontSize: `${content.fontSize || 15}px`, lineHeight: content.lineHeight || 1.6, color: content.color || undefined }} className="min-h-10 rounded-lg font-sans outline-none focus:bg-slate-50" dangerouslySetInnerHTML={{ __html: content.html || '<p><br></p>' }} /></div>}
+        {block.type === 'icon-text' && (() => {
+          const IconComponent = getEmailLucideIcon(content.iconName || 'CircleCheck');
+          const verticalClass = content.verticalAlign === 'top' ? 'items-start' : content.verticalAlign === 'bottom' ? 'items-end' : 'items-center';
+          return <div className={`flex ${alignClass}`}><div className={`inline-flex max-w-full ${verticalClass}`} style={{ gap: Number(content.gap) || 0, color: content.color || undefined, fontSize: `${Number(content.fontSize) || 15}px`, lineHeight: 1.45 }}>
+            {content.iconSource === 'upload' && content.iconUrl ? <img src={content.iconUrl} alt="" style={{ width: Number(content.iconSize) || 24, height: Number(content.iconSize) || 24 }} className="shrink-0 object-contain" /> : IconComponent ? <IconComponent size={Number(content.iconSize) || 24} color={content.iconColor || '#1473D1'} strokeWidth={2} className="shrink-0" /> : null}
+            <span contentEditable suppressContentEditableWarning onBlur={event => onUpdateBlockContent(block.id, { ...content, text: event.currentTarget.textContent || '' })} className="min-w-0 outline-none focus:bg-slate-50">{content.text || 'Nhấp để sửa nội dung minh họa'}</span>
+          </div></div>;
+        })()}
         {block.type === 'image' && <div className="space-y-2">{selected && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-2 py-1.5 text-[10px] font-bold text-blue-800"><input ref={element => { imageInputRefs.current[block.id] = element; }} type="file" accept="image/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) uploadImage(block, file); event.currentTarget.value = ''; }} /><button type="button" onClick={() => imageInputRefs.current[block.id]?.click()} className="inline-flex items-center gap-1 rounded bg-white px-2 py-1.5 shadow"><ImagePlus className="h-3.5 w-3.5" />Tải ảnh</button><button type="button" onClick={() => pasteImageUrl(block)} className="inline-flex items-center gap-1 rounded bg-white px-2 py-1.5 shadow"><Link className="h-3.5 w-3.5" />Dán URL</button><span className="text-slate-500">hoặc kéo ảnh vào khung</span></div>}<div className={`flex ${alignClass}`} onDragOver={event => { if (event.dataTransfer.files.length) { event.preventDefault(); event.stopPropagation(); } }} onDrop={event => { if (event.dataTransfer.files.length) { event.preventDefault(); event.stopPropagation(); uploadImage(block, event.dataTransfer.files[0]); } }}>{content.url ? <img src={content.url} alt={content.alt || 'Banner'} onLoad={event => { if (!content.naturalRatio) { const ratio = event.currentTarget.naturalWidth / Math.max(1, event.currentTarget.naturalHeight); const width = Number(content.width) || Math.min(event.currentTarget.naturalWidth, 600); onUpdateBlockContent(block.id, { ...content, width, height: content.height || Math.round(width / ratio), naturalRatio: ratio, aspectLocked: content.aspectLocked !== false }); } }} style={{ width: Number(content.width) || 600, height: content.height ? Number(content.height) : 'auto', borderRadius: Number(content.borderRadius) || 0 }} className="max-w-full object-cover" /> : <button type="button" onClick={() => imageInputRefs.current[block.id]?.click()} className="w-full rounded-xl border border-dashed bg-slate-50 p-8 text-xs font-bold text-slate-500">Chọn hoặc kéo thả ảnh vào đây</button>}</div></div>}
         {(block.type === 'bullet-list' || block.type === 'number-list') && (block.type === 'number-list' ? <ol className="ml-5 list-decimal space-y-1" style={{ fontSize: content.fontSize || 15, color: content.color || undefined }}>{(content.items || []).map((item: string, itemIndex: number) => <li key={itemIndex} dangerouslySetInnerHTML={{ __html: item }} />)}</ol> : <ul className="ml-5 list-disc space-y-1" style={{ fontSize: content.fontSize || 15, color: content.color || undefined }}>{(content.items || []).map((item: string, itemIndex: number) => <li key={itemIndex} dangerouslySetInnerHTML={{ __html: item }} />)}</ul>)}
         {block.type === 'button' && <div className={`flex ${alignClass}`}><div style={{ background: content.bg || '#1473d1', color: content.color || '#fff', borderRadius: content.radius ?? 8, width: content.width === 'full' ? '100%' : 'auto', minWidth: content.minWidth ? `${content.minWidth}px` : undefined, fontSize: content.fontSize || 15, padding: `${content.paddingY ?? 12}px ${content.paddingX ?? 24}px` }} className="text-center font-bold">{content.text || 'Nút CTA'}</div></div>}
@@ -240,7 +365,7 @@ export default function EmailCanvas(props: EmailCanvasProps) {
               {layoutColumn.cells.length < 4 && <button type="button" onClick={event => { event.stopPropagation(); onUpdateBlock(block.id, addEmailLayoutCell(block, columnIndex)); }} className="mt-1 inline-flex items-center justify-center gap-1 rounded border border-dashed border-slate-300 py-1 text-[8px] font-bold text-slate-500 opacity-0 transition hover:border-blue-300 hover:text-blue-700 group-hover:opacity-100"><Plus className="h-3 w-3" />Chia thêm ô dọc</button>}
             </div>)}
           </div>
-        </div>}        {!['logo','heading','paragraph','image','bullet-list','number-list','button','button-group','button-group-3','highlight-box','signature','divider','spacer','social-links','data-table','section','columns'].includes(block.type) && renderSimplePreview(block)}
+        </div>}        {!['logo','heading','paragraph','image','icon-text','bullet-list','number-list','button','button-group','button-group-3','highlight-box','signature','divider','spacer','social-links','data-table','section','columns'].includes(block.type) && renderSimplePreview(block)}
       </div>
     </div>;
   };
@@ -252,7 +377,7 @@ export default function EmailCanvas(props: EmailCanvasProps) {
   };
   const filteredDefinitions = BLOCK_CATEGORIES.map(category => ({ ...category, items: Object.values(EMAIL_BLOCK_REGISTRY).filter(item => item.category === category.id && `${item.label} ${item.description}`.toLowerCase().includes(blockQuery.toLowerCase())) })).filter(category => category.items.length);
 
-  return <div className="flex w-full flex-col items-center px-4 py-6 md:px-8">
+  return <div className="flex w-full flex-col items-center px-4 py-6 md:px-8"><style>{'::highlight(ft-email-selection){background:#2563eb;color:#ffffff;}'}</style>
     <div className="flex w-full max-w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg" style={{ maxWidth: emailSettings.maxWidth + 72 }}>
       <div className="flex items-center justify-between border-b px-4 py-3"><div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Email canvas</p><p className="mt-0.5 text-xs font-bold text-slate-700">Kéo block từ trái hoặc thả trực tiếp vào từng Section/ô</p></div><span className="rounded border bg-slate-50 px-2.5 py-1 text-[10px] font-black text-slate-500">{emailSettings.maxWidth}px</span></div>
       <div onClick={() => onSelectBlock('')} onDragOver={event => { if (event.dataTransfer.types.includes('application/x-ft-email-block')) { event.preventDefault(); setRootDragOver(true); } }} onDragLeave={event => { if (event.currentTarget === event.target) setRootDragOver(false); }} onDrop={rootDrop} className="relative flex min-h-[520px] justify-center bg-[#f5f6f8] p-5 md:p-8">
@@ -261,7 +386,9 @@ export default function EmailCanvas(props: EmailCanvasProps) {
       </div>
     </div>
   </div>;
-}
+});
+
+export default EmailCanvas;
 
 function findBlock(blocks: EmailBlock[], id: string): EmailBlock | undefined {
   for (const block of blocks) {

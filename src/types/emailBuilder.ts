@@ -3,6 +3,7 @@ export type BlockType =
   | 'heading'
   | 'paragraph'
   | 'image'
+  | 'icon-text'
   | 'button'
   | 'button-group'
   | 'button-group-3'

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Tag, 
   Settings, 
@@ -25,7 +25,7 @@ import { generateEmailHtml } from '../../lib/emailHtmlGenerator';
 import { copyEmailToClipboard, copyTextToClipboard } from '../../lib/emailClipboard';
 
 import BlockLibrary from './BlockLibrary';
-import EmailCanvas from './EmailCanvas';
+import EmailCanvas, { EmailCanvasHandle } from './EmailCanvas';
 import BlockSettings from './BlockSettings';
 import EmailSettingsComponent from './EmailSettings';
 import EmailPreview from './EmailPreview';
@@ -46,6 +46,8 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   const [showPreview, setShowPreview] = useState(false);
   const [showVarPicker, setShowVarPicker] = useState(false);
   const [insertedVar, setInsertedVar] = useState<{ blockId: string; varName: string } | null>(null);
+  const canvasRef = useRef<EmailCanvasHandle>(null);
+  const editorHistory = useRef<Record<string, { past: EmailTemplate[]; future: EmailTemplate[] }>>({});
 
   // Routing modes
   const [editorMode, setEditorMode] = useState<'list' | 'edit'>('list');
@@ -127,6 +129,50 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   // Helper: Find active template
   const activeTemplate = templates.find(t => t.id === activeTemplateId);
 
+  const getTemplateHistory = (templateId: string) => {
+    if (!editorHistory.current[templateId]) editorHistory.current[templateId] = { past: [], future: [] };
+    return editorHistory.current[templateId];
+  };
+
+  const commitActiveTemplate = (nextTemplate: EmailTemplate) => {
+    const current = templates.find(template => template.id === activeTemplateId);
+    if (!current || current.id !== nextTemplate.id) return;
+    const comparableCurrent = { ...current, lastUpdated: 0 };
+    const comparableNext = { ...nextTemplate, lastUpdated: 0 };
+    if (JSON.stringify(comparableCurrent) === JSON.stringify(comparableNext)) return;
+    const history = getTemplateHistory(activeTemplateId);
+    history.past.push(structuredClone(current));
+    if (history.past.length > 100) history.past.shift();
+    history.future = [];
+    const updated = templates.map(template => template.id === activeTemplateId ? { ...nextTemplate, lastUpdated: Date.now() } : template);
+    updateTemplatesList(updated);
+  };
+
+  const handleUndo = () => {
+    const current = templates.find(template => template.id === activeTemplateId);
+    const history = getTemplateHistory(activeTemplateId);
+    const previous = history.past.pop();
+    if (!current || !previous) return;
+    history.future.push(structuredClone(current));
+    updateTemplatesList(templates.map(template => template.id === activeTemplateId ? { ...previous, lastUpdated: Date.now() } : template));
+    setSelectedBlockId(selected => selected && findEmailBlock(previous.blocks, selected) ? selected : null);
+    showToast('Đã hoàn tác thay đổi.');
+  };
+
+  const handleRedo = () => {
+    const current = templates.find(template => template.id === activeTemplateId);
+    const history = getTemplateHistory(activeTemplateId);
+    const next = history.future.pop();
+    if (!current || !next) return;
+    history.past.push(structuredClone(current));
+    updateTemplatesList(templates.map(template => template.id === activeTemplateId ? { ...next, lastUpdated: Date.now() } : template));
+    setSelectedBlockId(selected => selected && findEmailBlock(next.blocks, selected) ? selected : null);
+    showToast('Đã làm lại thay đổi.');
+  };
+
+  const canUndo = Boolean(activeTemplateId && getTemplateHistory(activeTemplateId).past.length);
+  const canRedo = Boolean(activeTemplateId && getTemplateHistory(activeTemplateId).future.length);
+
   // Auto-select block tab when selecting a block
   useEffect(() => {
     if (selectedBlockId) {
@@ -180,6 +226,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
       case 'heading': return 'Tiêu đề';
       case 'paragraph': return 'Đoạn văn';
       case 'image': return 'Hình ảnh';
+      case 'icon-text': return 'Icon + chữ';
       case 'button': return 'Nút CTA';
       case 'button-group': return 'Nhóm 2 nút';
       case 'button-group-3': return 'Nhóm 3 nút';
@@ -203,25 +250,18 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
   };
 
   const handleUpdateTemplateBlocks = (newBlocks: EmailBlock[]) => {
-    if (!activeTemplateId) return;
-    const updated = templates.map(t => {
-      if (t.id === activeTemplateId) {
-        return { ...t, blocks: newBlocks, lastUpdated: Date.now() };
-      }
-      return t;
-    });
-    updateTemplatesList(updated);
+    if (!activeTemplate) return;
+    commitActiveTemplate({ ...activeTemplate, blocks: newBlocks });
   };
 
   const handleUpdateTemplateSettings = (newSettings: EmailSettings) => {
-    if (!activeTemplateId) return;
-    const updated = templates.map(t => {
-      if (t.id === activeTemplateId) {
-        return { ...t, settings: newSettings, lastUpdated: Date.now() };
-      }
-      return t;
-    });
-    updateTemplatesList(updated);
+    if (!activeTemplate) return;
+    commitActiveTemplate({ ...activeTemplate, settings: newSettings });
+  };
+
+  const handleUpdateSubject = (subject: string) => {
+    if (!activeTemplate) return;
+    commitActiveTemplate({ ...activeTemplate, subject });
   };
 
   // 4. Canvas Block Operations
@@ -316,13 +356,8 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
 
   // 6. Header Template Operations
   const handleRenameTemplate = (newName: string) => {
-    const updated = templates.map(t => {
-      if (t.id === activeTemplateId) {
-        return { ...t, name: newName };
-      }
-      return t;
-    });
-    updateTemplatesList(updated);
+    if (!activeTemplate) return;
+    commitActiveTemplate({ ...activeTemplate, name: newName });
     showToast('Đã đổi tên mẫu email.');
   };
 
@@ -399,6 +434,20 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
   };
+
+  useEffect(() => {
+    if (editorMode !== 'edit') return;
+    const handleHistoryShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable) return;
+      const key = event.key.toLowerCase();
+      if (key === 'z' && !event.shiftKey) { event.preventDefault(); handleUndo(); }
+      else if (key === 'y' || (key === 'z' && event.shiftKey)) { event.preventDefault(); handleRedo(); }
+    };
+    window.addEventListener('keydown', handleHistoryShortcut);
+    return () => window.removeEventListener('keydown', handleHistoryShortcut);
+  }, [editorMode, activeTemplateId, templates]);
 
   const filteredTemplates = templates.filter(t => 
     t.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -711,6 +760,10 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
         onCopySubject={handleCopySubject}
         copySuccess={copySuccess}
         copySubjectSuccess={copySubjectSuccess}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        canUndo={canUndo}
+        canRedo={canRedo}
       />
 
       {/* Editor Layout Frame */}
@@ -735,15 +788,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
                 type="text"
                 placeholder="Nhập tiêu đề email..."
                 value={activeTemplate.subject}
-                onChange={e => {
-                  const updated = templates.map(t => {
-                    if (t.id === activeTemplateId) {
-                      return { ...t, subject: e.target.value };
-                    }
-                    return t;
-                  });
-                  updateTemplatesList(updated);
-                }}
+                onChange={e => handleUpdateSubject(e.target.value)}
                 className="flex-1 text-xs font-bold text-slate-800 outline-none border border-transparent hover:border-slate-200 focus:border-blue-500 rounded-lg px-2.5 py-1.5 transition-all"
               />
               
@@ -760,6 +805,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
             {/* Scrollable design layout */}
             <div className="relative flex flex-1 flex-col overflow-y-auto bg-[#f5f6f8]">
               <EmailCanvas
+                ref={canvasRef}
                 blocks={activeTemplate.blocks}
                 selectedBlockId={selectedBlockId}
                 onSelectBlock={setSelectedBlockId}
@@ -830,6 +876,8 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
                   onUpdateBlockContent={(content) => selectedBlockId && handleUpdateBlockContent(selectedBlockId, content)}
                   onUpdateBlockStyles={(styles) => selectedBlockId && handleUpdateBlockStyles(selectedBlockId, styles)}
                   onUpdateBlock={(nextBlock) => selectedBlockId && handleUpdateWholeBlock(selectedBlockId, nextBlock)}
+                  onApplySelectionFontSize={(size) => selectedBlockId ? canvasRef.current?.applySelectionFontSize(selectedBlockId, size) || false : false}
+                  onApplySelectionTextColor={(color) => selectedBlockId ? canvasRef.current?.applySelectionTextColor(selectedBlockId, color) || false : false}
                   onUpdateBlockColumns={(columns) => {
                     if (!selectedBlockId || !activeTemplate) return;
                     handleUpdateTemplateBlocks(updateEmailBlock(activeTemplate.blocks, selectedBlockId, block => ({ ...block, columns })));

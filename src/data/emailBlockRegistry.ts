@@ -11,6 +11,7 @@ export const EMAIL_BLOCK_REGISTRY: Record<BlockType, EmailBlockDefinition> = {
   heading: block('heading','content','Tiêu đề','Heading',{text:'Nhấp để sửa tiêu đề mới',level:'h2',fontSize:20,color:'#0F3A72',bold:true,align:'left'},'Tiêu đề chính hoặc phụ'),
   paragraph: block('paragraph','content','Đoạn văn','Type',{html:'<p>Nội dung đoạn văn mới. Nhấp để chỉnh sửa trực quan.</p>',align:'left'},'Nội dung văn bản'),
   image: block('image','media','Ảnh / Banner','Image',{url:'',alt:'Banner hình ảnh',width:600,height:'',aspectLocked:true,naturalRatio:null,align:'center',borderRadius:8,link:''},'Ảnh HTTPS hoặc banner nổi bật'),
+  'icon-text': block('icon-text','content','Icon + chữ','BadgeCheck',{iconSource:'library',iconName:'CircleCheck',iconUrl:'',text:'Nội dung minh họa cùng dòng',iconSize:24,fontSize:15,gap:10,iconColor:'#1473D1',color:'#1E293B',align:'left',verticalAlign:'middle'},'Icon minh họa và nội dung luôn cùng một dòng'),
   button: block('button','cta','Nút CTA','MousePointerClick',{...CTA,radius:8,align:'center',width:'auto',fontSize:15,paddingX:24,paddingY:12,minWidth:0},'Nút kêu gọi hành động'),
   'button-group': block('button-group','cta','Hai nút cùng hàng','Columns2',{align:'center',gap:12,buttons:[
     {...CTA,text:'Nút bên trái',radius:8,fontSize:14,paddingX:18,paddingY:11,minWidth:0},

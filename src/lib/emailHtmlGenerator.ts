@@ -2,6 +2,7 @@ import { EmailTemplate, EmailVariable, EmailBlock } from '../types/emailBuilder'
 import { inlineCustomCss, sanitizeCustomHtml, sanitizeHtml } from './emailSanitizer';
 import { getVariablesInText, detectVariableWarnings, replaceVariables } from './emailVariables';
 import { getLayoutSlotIndex, normalizeEmailLayout } from './emailLayout';
+import { renderEmailIconDataUri } from './emailIcon';
 
 interface GeneratedEmail {
   subject: string;
@@ -186,6 +187,22 @@ export function generateEmailHtml(
 `;
       }
 
+      case 'icon-text': {
+        const iconSize = Math.max(8, Math.min(160, Number(content.iconSize) || 24));
+        const fontSize = Math.max(10, Math.min(72, Number(content.fontSize) || 15));
+        const gap = Math.max(0, Math.min(80, Number(content.gap) || 10));
+        const align = content.align || 'left';
+        const verticalAlign = content.verticalAlign || 'middle';
+        const iconUrl = content.iconSource === 'upload'
+          ? content.iconUrl || ''
+          : renderEmailIconDataUri(content.iconName || 'CircleCheck', content.iconColor || '#1473D1', iconSize);
+        const text = rep(content.text || '');
+        checkImageUrl(iconUrl, 'Icon minh họa');
+        const iconCell = iconUrl
+          ? `<td width="${iconSize}" valign="${verticalAlign}" style="width:${iconSize}px;padding:0;vertical-align:${verticalAlign};"><img src="${rep(iconUrl)}" alt="" width="${iconSize}" height="${iconSize}" style="display:block;width:${iconSize}px;height:${iconSize}px;max-width:none;border:0;outline:none;object-fit:contain;" /></td><td width="${gap}" style="width:${gap}px;padding:0;font-size:1px;line-height:1px;">&nbsp;</td>`
+          : '';
+        return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr><td align="${align}" style="padding:0;text-align:${align};"><table role="presentation" border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;display:inline-table;"><tr>${iconCell}<td valign="${verticalAlign}" style="padding:0;vertical-align:${verticalAlign};font-family:${fontFamily};font-size:${fontSize}px;line-height:1.45;color:${blockTextColor};">${text}</td></tr></table></td></tr></table>`;
+      }
       case 'image': {
         const url = content.url || '';
         const alt = content.alt || '';
@@ -495,6 +512,9 @@ export function generateEmailHtml(
         if (text) plainTextLines.push(rep(text));
         break;
       }
+      case 'icon-text':
+        if (content.text) plainTextLines.push(rep(content.text));
+        break;
       case 'bullet-list':
       case 'number-list':
         (content.items || []).forEach((item: string, idx: number) => {

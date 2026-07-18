@@ -1,9 +1,11 @@
 import React from 'react';
-import { AlignCenter, AlignLeft, AlignRight, Link2, Lock, LockOpen, Plus, Trash2 } from 'lucide-react';
+import { AlignCenter, AlignLeft, AlignRight, Link2, Lock, LockOpen, Plus, Search, Trash2, Upload } from 'lucide-react';
 import { EmailBlock } from '../../types/emailBuilder';
 import { addEmailLayoutCell, getLayoutSlotIndex, normalizeEmailLayout, removeEmailLayoutCell, resizeEmailLayout, updateEmailLayoutCell, updateEmailLayoutColumn } from '../../lib/emailLayout';
 import { getBlockDefinition } from '../../data/emailBlockRegistry';
 import ColorField from './ColorField';
+import { EMAIL_ICON_CATEGORY_LABELS, EMAIL_ICON_LIBRARY, EmailIconOption } from '../../data/emailIconLibrary';
+import { getEmailLucideIcon } from '../../lib/emailIcon';
 
 interface BlockSettingsProps {
   block: EmailBlock;
@@ -11,6 +13,8 @@ interface BlockSettingsProps {
   onUpdateBlockStyles: (styles: Record<string, any>) => void;
   onUpdateBlockColumns?: (columns: EmailBlock[][]) => void;
   onUpdateBlock?: (block: EmailBlock) => void;
+  onApplySelectionFontSize?: (size: number) => boolean;
+  onApplySelectionTextColor?: (color: string) => boolean;
 }
 
 const fieldClass = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none shadow-sm focus:border-blue-500';
@@ -38,12 +42,14 @@ function NumberDraft({ value, min = 0, max = 2000, onCommit, label }: { value: n
   return <div><label className="mb-1 block text-[10px] font-bold text-slate-500">{label}</label><input type="number" min={min} max={max} value={draft} onChange={event => { setDraft(event.target.value); if (event.target.value !== '') commit(event.target.value); }} onBlur={() => commit(draft)} className={fieldClass} /></div>;
 }
 
-export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlockStyles, onUpdateBlockColumns, onUpdateBlock }: BlockSettingsProps) {
+export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlockStyles, onUpdateBlockColumns, onUpdateBlock, onApplySelectionFontSize, onApplySelectionTextColor }: BlockSettingsProps) {
   const content = block.content;
   const styles = block.styles;
   const definition = getBlockDefinition(block.type);
   const [uploading, setUploading] = React.useState(false);
   const [uploadError, setUploadError] = React.useState('');
+  const [iconQuery, setIconQuery] = React.useState('');
+  const [iconCategory, setIconCategory] = React.useState<'all' | EmailIconOption['category']>('all');
   const updateContent = (key: string, value: any) => onUpdateBlockContent({ ...content, [key]: value });
   const updateStyles = (key: string, value: any) => onUpdateBlockStyles({ ...styles, [key]: value });
 
@@ -75,6 +81,32 @@ export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlo
     reader.readAsDataURL(file);
   };
 
+  const uploadIconImage = (file: File) => {
+    if (!file.type.startsWith('image/')) { setUploadError('Vui lòng chọn tệp hình ảnh hợp lệ.'); return; }
+    if (file.size > 3 * 1024 * 1024) { setUploadError('Tệp quá lớn. Kích thước tối đa là 3MB.'); return; }
+    setUploading(true); setUploadError('');
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = String(reader.result);
+      let iconUrl = dataUrl;
+      try {
+        const response = await fetch('/api/upload', { method: 'POST', headers: { 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name) }, body: file });
+        const result = await response.json();
+        if (result.success && result.url) iconUrl = `${window.location.origin}${result.url}`;
+      } catch { /* keep portable data URL */ }
+      onUpdateBlockContent({ ...content, iconSource: 'upload', iconUrl });
+      setUploading(false);
+    };
+    reader.onerror = () => { setUploadError('Không thể đọc dữ liệu tệp.'); setUploading(false); };
+    reader.readAsDataURL(file);
+  };
+
+  const filteredIcons = EMAIL_ICON_LIBRARY.filter(option => {
+    const matchesCategory = iconCategory === 'all' || option.category === iconCategory;
+    const query = iconQuery.trim().toLocaleLowerCase('vi');
+    return matchesCategory && (!query || `${option.label} ${option.name}`.toLocaleLowerCase('vi').includes(query));
+  });
+
   const ImageUploader = () => <div className="space-y-2">
     <label className="block text-[10px] font-bold text-slate-500">Tải ảnh hoặc dán ảnh (Ctrl+V)</label>
     <label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const file = event.dataTransfer.files?.[0]; if (file) uploadImage(file); }} onPaste={event => { const file = [...event.clipboardData.items].find(item => item.type.startsWith('image/'))?.getAsFile(); if (file) { event.preventDefault(); uploadImage(file); } }} className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-4 text-center hover:border-blue-400" tabIndex={0}>
@@ -102,7 +134,7 @@ export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlo
 
   const primitiveEntries = Object.entries(content).filter(([key, value]) => !['variant', 'url', 'alt', 'width', 'height', 'aspectLocked', 'naturalRatio', 'align', 'borderRadius', 'items', 'rows', 'html', 'fontSize', 'lineHeight'].includes(key) && (typeof value === 'string' || typeof value === 'number'));
   const isButtonGroup = block.type === 'button-group' || block.type === 'button-group-3';
-  const showGenericFields = !['logo', 'heading', 'paragraph', 'image', 'columns', 'data-table', 'bullet-list', 'number-list', 'spacer', 'button', 'button-group', 'button-group-3'].includes(block.type);
+  const showGenericFields = !['logo', 'heading', 'paragraph', 'image', 'icon-text', 'columns', 'data-table', 'bullet-list', 'number-list', 'spacer', 'button', 'button-group', 'button-group-3'].includes(block.type);
   const collectionEntries = Object.entries(content).filter(([key, value]) => Array.isArray(value) && key !== 'rows' && key !== 'layoutColumns' && !(isButtonGroup && key === 'buttons') && !(key === 'items' && ['bullet-list', 'number-list', 'columns'].includes(block.type)));
   const updateCollectionItem = (key: string, index: number, value: any) => {
     const next = [...(content[key] || [])]; next[index] = value; updateContent(key, next);
@@ -155,9 +187,29 @@ export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlo
       <section className="rounded-xl border border-blue-100 bg-blue-50/40 p-3"><div className="mb-2 flex items-center justify-between"><h4 className="text-[10px] font-black uppercase">Kích thước ảnh</h4><button type="button" onClick={() => updateContent('aspectLocked', content.aspectLocked === false)} className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-bold ${content.aspectLocked !== false ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-500'}`} title="Khóa tỉ lệ chiều rộng và chiều cao">{content.aspectLocked !== false ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />}{content.aspectLocked !== false ? 'Đang khóa tỉ lệ' : 'Tự do'}</button></div><div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2"><NumberDraft label="Chiều rộng (px)" value={content.width} min={1} max={2000} onCommit={value => changeImageDimension('width', value)} /><Link2 className={`mb-2 h-4 w-4 ${content.aspectLocked !== false ? 'text-blue-600' : 'text-slate-300'}`} /><NumberDraft label="Chiều cao (px)" value={content.height} min={1} max={2000} onCommit={value => changeImageDimension('height', value)} /></div><p className="mt-2 text-[9px] leading-relaxed text-slate-500">Có thể xóa trắng hoàn toàn một ô rồi nhập số mới. Khi khóa tỉ lệ, thay đổi một chiều sẽ tự cập nhật chiều còn lại.</p></section>
       {block.type === 'image' && <NumberDraft label="Bo góc ảnh (px)" value={content.borderRadius ?? 0} max={100} onCommit={value => updateContent('borderRadius', value === '' ? 0 : value)} />}{alignControl}<div><label className="mb-1 block text-[10px] font-bold text-slate-500">Liên kết khi bấm vào ảnh</label><input value={content.link || ''} onChange={event => updateContent('link', event.target.value)} className={fieldClass} /></div></div>}
 
+    {block.type === 'icon-text' && <div className="space-y-4">
+      <div><label className="mb-1 block text-[10px] font-bold text-slate-500">Nội dung cùng dòng</label><textarea value={content.text || ''} onChange={event => updateContent('text', event.target.value)} className={`${fieldClass} min-h-20`} /></div>
+      <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1"><button type="button" onClick={() => updateContent('iconSource', 'library')} className={`rounded-lg py-2 text-[10px] font-black ${content.iconSource !== 'upload' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>Thư viện icon</button><button type="button" onClick={() => updateContent('iconSource', 'upload')} className={`rounded-lg py-2 text-[10px] font-black ${content.iconSource === 'upload' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}>Tải ảnh icon</button></div>
+      {content.iconSource !== 'upload' ? <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div className="relative"><Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" /><input value={iconQuery} onChange={event => setIconQuery(event.target.value)} placeholder="Tìm icon: lịch, trường học, cảnh báo…" className={`${fieldClass} pl-8`} /></div>
+        <div className="flex gap-1 overflow-x-auto pb-1"><button type="button" onClick={() => setIconCategory('all')} className={`shrink-0 rounded-lg px-2 py-1 text-[8px] font-black ${iconCategory === 'all' ? 'bg-blue-600 text-white' : 'border bg-white text-slate-500'}`}>Tất cả</button>{Object.entries(EMAIL_ICON_CATEGORY_LABELS).map(([key, label]) => <button key={key} type="button" onClick={() => setIconCategory(key as EmailIconOption['category'])} className={`shrink-0 rounded-lg px-2 py-1 text-[8px] font-black ${iconCategory === key ? 'bg-blue-600 text-white' : 'border bg-white text-slate-500'}`}>{label}</button>)}</div>
+        <div className="grid max-h-64 grid-cols-[repeat(auto-fill,minmax(42px,1fr))] gap-1.5 overflow-y-auto pr-1">{filteredIcons.map(option => { const Icon = getEmailLucideIcon(option.name); return <button key={option.name} type="button" onClick={() => onUpdateBlockContent({ ...content, iconSource: 'library', iconName: option.name })} title={option.label} className={`flex aspect-square min-h-10 items-center justify-center rounded-lg border transition hover:border-blue-400 hover:bg-blue-50 ${content.iconName === option.name ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-400' : 'border-slate-200 bg-white text-slate-600'}`}>{Icon ? <Icon size={18} /> : null}</button>; })}</div>
+        {!filteredIcons.length && <p className="py-4 text-center text-[10px] font-bold text-slate-400">Không tìm thấy icon phù hợp.</p>}
+      </section> : <section className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/40 p-3">
+        <label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const file = event.dataTransfer.files?.[0]; if (file) uploadIconImage(file); }} className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-blue-200 bg-white p-3 text-center hover:border-blue-400"><input type="file" accept="image/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) uploadIconImage(file); event.currentTarget.value = ''; }} /><Upload className="mb-2 h-5 w-5 text-blue-600" /><span className="text-[10px] font-bold text-slate-700">{uploading ? 'Đang tải icon…' : 'Bấm hoặc kéo ảnh icon vào đây'}</span><span className="mt-1 text-[8px] text-slate-400">PNG nền trong suốt được khuyến nghị · tối đa 3MB</span></label>
+        <div><label className="mb-1 block text-[10px] font-bold text-slate-500">Đường dẫn ảnh icon</label><input value={content.iconUrl || ''} onChange={event => updateContent('iconUrl', event.target.value)} placeholder="https://…" className={fieldClass} /></div>
+        {content.iconUrl && <div className="flex justify-center rounded-lg border bg-white p-3"><img src={content.iconUrl} alt="Xem trước icon" style={{ width: Number(content.iconSize) || 24, height: Number(content.iconSize) || 24 }} className="object-contain" /></div>}
+      </section>}
+      {uploadError && <p className="rounded-lg bg-rose-50 p-2 text-[10px] font-bold text-rose-600">{uploadError}</p>}
+      <div className="grid grid-cols-2 gap-3"><NumberDraft label="Kích thước icon (px)" value={content.iconSize ?? 24} min={8} max={160} onCommit={value => updateContent('iconSize', value === '' ? 24 : value)} /><NumberDraft label="Khoảng cách icon–chữ (px)" value={content.gap ?? 10} max={80} onCommit={value => updateContent('gap', value === '' ? 0 : value)} /><NumberDraft label="Cỡ chữ (px)" value={content.fontSize ?? 15} min={10} max={72} onCommit={value => updateContent('fontSize', value === '' ? 15 : value)} /></div>
+      <div className="grid grid-cols-2 gap-2">{content.iconSource !== 'upload' && <ColorField label="Màu icon" value={content.iconColor || '#1473D1'} onChange={value => updateContent('iconColor', value)} />}<ColorField label="Màu chữ" value={content.color || '#1E293B'} onChange={value => updateContent('color', value)} /></div>
+      {alignControl}
+      <div><label className="mb-1 block text-[10px] font-bold text-slate-500">Căn icon theo chiều dọc</label><select value={content.verticalAlign || 'middle'} onChange={event => updateContent('verticalAlign', event.target.value)} className={fieldClass}><option value="top">Theo đỉnh dòng chữ</option><option value="middle">Giữa dòng chữ</option><option value="bottom">Theo đáy dòng chữ</option></select></div>
+    </div>}
+
     {block.type === 'heading' && <div className="space-y-4"><div><label className="mb-1 block text-[10px] font-bold text-slate-500">Nội dung tiêu đề</label><input value={content.text || ''} onChange={event => updateContent('text', event.target.value)} className={fieldClass} /></div><div className="grid grid-cols-2 gap-3"><div><label className="mb-1 block text-[10px] font-bold text-slate-500">Cấp tiêu đề</label><select value={content.level || 'h2'} onChange={event => updateContent('level', event.target.value)} className={fieldClass}><option value="h1">H1 — Chính</option><option value="h2">H2 — Phụ</option><option value="h3">H3 — Mục nhỏ</option></select></div><NumberDraft label="Cỡ chữ (px)" value={content.fontSize ?? 20} min={10} max={72} onCommit={value => updateContent('fontSize', value === '' ? 20 : value)} /></div><ColorField label="Màu chữ" value={content.color || '#0F3A72'} onChange={value => updateContent('color', value)} />{alignControl}</div>}
 
-    {['paragraph', 'signature', 'highlight-box'].includes(block.type) && <section className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/40 p-3.5"><h4 className="text-[10px] font-black uppercase">Định dạng mặc định email-safe</h4><div className="grid grid-cols-2 gap-3"><NumberDraft label="Cỡ chữ (px)" value={content.fontSize ?? 15} min={10} max={48} onCommit={value => updateContent('fontSize', value === '' ? 15 : value)} /><NumberDraft label="Giãn dòng" value={content.lineHeight ?? 1.6} min={1} max={2.4} onCommit={value => updateContent('lineHeight', value === '' ? 1.6 : value)} /></div><ColorField label="Màu chữ mặc định" value={content.color || '#1E293B'} onChange={value => updateContent('color', value)} />{alignControl}<p className="text-[9px] text-slate-500">Bôi đen văn bản trên canvas để đổi riêng cỡ chữ hoặc màu chữ cho vùng đã chọn.</p></section>}
+    {['paragraph', 'signature', 'highlight-box'].includes(block.type) && <section className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/40 p-3.5"><h4 className="text-[10px] font-black uppercase">Định dạng mặc định email-safe</h4><div className="grid grid-cols-2 gap-3"><NumberDraft label="Cỡ chữ (px)" value={content.fontSize ?? 15} min={10} max={48} onCommit={value => { const size = value === '' ? 15 : value; if (!onApplySelectionFontSize?.(size)) updateContent('fontSize', size); }} /><NumberDraft label="Giãn dòng" value={content.lineHeight ?? 1.6} min={1} max={2.4} onCommit={value => updateContent('lineHeight', value === '' ? 1.6 : value)} /></div><ColorField label="Màu chữ mặc định" value={content.color || '#1E293B'} onChange={value => { if (!onApplySelectionTextColor?.(value)) updateContent('color', value); }} />{alignControl}<p className="text-[9px] text-slate-500">Bôi đen văn bản trên canvas để đổi riêng cỡ chữ hoặc màu chữ cho vùng đã chọn.</p></section>}
 
     {block.type === 'columns' && layoutState && <section className="space-y-4 rounded-xl border border-blue-100 bg-blue-50/40 p-3.5">
       <div>

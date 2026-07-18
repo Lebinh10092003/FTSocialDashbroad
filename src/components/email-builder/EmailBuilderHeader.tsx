@@ -4,6 +4,8 @@ import {
   Save, 
   Copy, 
   RotateCcw, 
+  Undo2,
+  Redo2,
   Download, 
   Upload, 
   Trash2, 
@@ -29,6 +31,10 @@ interface EmailBuilderHeaderProps {
   onCopySubject: () => void;
   copySuccess: boolean;
   copySubjectSuccess: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 export default function EmailBuilderHeader({
@@ -45,7 +51,11 @@ export default function EmailBuilderHeader({
   onCopyEmail,
   onCopySubject,
   copySuccess,
-  copySubjectSuccess
+  copySubjectSuccess,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo
 }: EmailBuilderHeaderProps) {
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -106,6 +116,10 @@ export default function EmailBuilderHeader({
         >
           <ArrowLeft className="w-4 h-4 text-slate-550" />
         </button>
+        <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
+          <button type="button" onClick={onUndo} disabled={!canUndo} title="Hoàn tác (Ctrl+Z)" className="rounded-lg p-1.5 text-slate-600 hover:bg-white hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-4 w-4" /></button>
+          <button type="button" onClick={onRedo} disabled={!canRedo} title="Làm lại (Ctrl+Y hoặc Ctrl+Shift+Z)" className="rounded-lg p-1.5 text-slate-600 hover:bg-white hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-30"><Redo2 className="h-4 w-4" /></button>
+        </div>
 
         <div className="min-w-0">
           <div className="flex items-center gap-2">
