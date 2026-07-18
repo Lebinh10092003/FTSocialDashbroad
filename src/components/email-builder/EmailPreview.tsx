@@ -168,8 +168,10 @@ export default function EmailPreview({
             <div className="w-full bg-white relative">
               <iframe
                 ref={iframeRef}
+                key={viewMode}
                 title="Email Preview Frame"
                 srcDoc={html}
+                width="100%"
                 scrolling="no"
                 className="w-full border-0 block min-h-[300px]"
               />

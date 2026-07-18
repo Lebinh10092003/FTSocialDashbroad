@@ -26,6 +26,9 @@ export interface EmailLayoutCell {
   color: string;
   padding: number;
   minHeight: number;
+  heightMode: 'auto' | 'fixed';
+  height: number;
+  maxHeight: number;
   borderColor: string;
   borderWidth: number;
   borderRadius: number;
@@ -34,8 +37,10 @@ export interface EmailLayoutCell {
 
 export interface EmailLayoutColumn {
   id: string;
-  /** Relative width weight from 1 to 6. */
+  /** Relative width weight from 0.25 to 12. */
   width: number;
+  minWidth: number;
+  maxWidth: number;
   /** A column can be divided vertically into up to four independent drop cells. */
   cells: EmailLayoutCell[];
 }

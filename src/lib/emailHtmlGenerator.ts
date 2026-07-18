@@ -1,7 +1,7 @@
 import { EmailTemplate, EmailVariable, EmailBlock } from '../types/emailBuilder';
 import { inlineCustomCss, sanitizeCustomHtml, sanitizeHtml } from './emailSanitizer';
 import { getVariablesInText, detectVariableWarnings, replaceVariables } from './emailVariables';
-import { getLayoutSlotIndex, normalizeEmailLayout } from './emailLayout';
+import { getEmailLayoutColumnWidths, getLayoutSlotIndex, normalizeEmailLayout } from './emailLayout';
 import { renderEmailIconDataUri } from './emailIcon';
 
 interface GeneratedEmail {
@@ -94,14 +94,16 @@ export function generateEmailHtml(
   };
 
   // Compile blocks to HTML
-  const renderBlock = (block: EmailBlock, inheritedTextColor?: string): string => {
+  const renderBlock = (block: EmailBlock, inheritedTextColor?: string, fillHeight = false): string => {
     if (!block.visible) return '';
 
     const content = block.content;
     const blockTextColor = content.color || inheritedTextColor || textColor;
     const styles = block.styles;
-    const marginTop = styles.marginTop ?? 10;
-    const marginBottom = styles.marginBottom ?? 10;
+    const marginTop = styles.marginTop ?? (block.type === 'divider' ? 0 : 10);
+    const marginBottom = styles.marginBottom ?? (block.type === 'divider' ? 0 : 10);
+    const fillHeightAttribute = fillHeight ? ' height="100%"' : '';
+    const fillHeightStyle = fillHeight ? ' height: 100%;' : '';
 
     // Scan for variables & syntax warnings in all text fields
     Object.keys(content).forEach(key => {
@@ -176,11 +178,11 @@ export function generateEmailHtml(
         const color = content.color || '#0f3a72';
         const bold = content.bold !== false;
         const align = content.align || 'left';
-        const renderedText = preserveRichTextLineBreaks(rep(sanitizeHtml(text)));
+        const renderedText = preserveRichTextLineBreaks(rep(sanitizeHtml(content.html || escapePlainTextHtml(text))));
 
         return `
 <!-- Heading Block -->
-<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
+<table role="presentation" class="ft-email-block ft-email-heading" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
     <td align="${align}" style="padding: 0; text-align: ${align};">
       <${level} style="margin: 0; padding: 0; font-family: ${fontFamily}; color: ${color}; font-size: ${fontSize}px; line-height: 1.3; font-weight: ${bold ? 'bold' : 'normal'}; text-align: ${align};">
@@ -303,8 +305,8 @@ export function generateEmailHtml(
     <td align="${align}" style="padding: 0;">
       <table role="presentation" class="ft-email-button-table" border="0" cellspacing="0" cellpadding="0" style="width: ${width === 'full' ? '100%' : 'auto'};${minWidth ? `min-width:${minWidth}px;` : ''} border-collapse: collapse;">
         <tr>
-          <td class="ft-email-button-cell" align="center" bgcolor="${bg}" style="border-radius: ${radius}px; padding: ${paddingY}px ${paddingX}px;${minWidth ? `min-width:${minWidth}px;` : ''} text-align: center; background-color: ${bg}; white-space: nowrap;" valign="middle">
-            <a class="ft-email-button-text" href="${rep(link)}" target="_blank" style="display: ${width === 'full' ? 'block' : 'inline-block'}; font-family: ${fontFamily}; color: ${color}; font-size: ${fontSize}px; font-weight: bold; text-decoration: none; border-radius: ${radius}px; background-color: ${bg}; ${width === 'full' ? 'width: 100%;' : 'width: auto;'} box-sizing: border-box; white-space: nowrap;">
+          <td class="ft-email-button-cell" align="center" bgcolor="${bg}" style="border-radius: ${radius}px; padding: ${paddingY}px ${paddingX}px;${minWidth ? `min-width:${minWidth}px;` : ''} text-align: center; background-color: ${bg}; white-space: normal;" valign="middle">
+            <a class="ft-email-button-text" href="${rep(link)}" target="_blank" style="display: ${width === 'full' ? 'block' : 'inline-block'}; font-family: ${fontFamily}; color: ${color}; font-size: ${fontSize}px; font-weight: bold; text-decoration: none; border-radius: ${radius}px; background-color: ${bg}; ${width === 'full' ? 'width: 100%;' : 'width: auto;'} box-sizing: border-box; white-space: normal; overflow-wrap: anywhere;">
               ${renderedText}
             </a>
           </td>
@@ -327,7 +329,7 @@ export function generateEmailHtml(
           const minWidth = Math.max(0, Number(button.minWidth) || 0);
           const fontSize = Number(button.fontSize) || 14;
           const renderedButtonText = preserveRichTextLineBreaks(rep(sanitizeHtml(button.html || escapePlainTextHtml(button.text || ''))));
-          return `<td class="ft-email-button-cell" align="center" bgcolor="${button.bg || '#0F3A72'}"${minWidth ? ` width="${minWidth}"` : ''} style="border-radius:${button.radius ?? 8}px;padding:${paddingY}px ${paddingX}px;background-color:${button.bg || '#0F3A72'};${minWidth ? `min-width:${minWidth}px;` : ''}"><a class="ft-email-button-text" href="${rep(button.link || '')}" target="_blank" style="display:inline-block;font-family:${fontFamily};color:${button.color || '#ffffff'};font-size:${fontSize}px;line-height:1.2;font-weight:bold;text-decoration:none;white-space:nowrap;">${renderedButtonText}</a></td>${index < buttons.length - 1 ? `<td width="${gap}" style="width:${gap}px;font-size:1px;line-height:1px;">&nbsp;</td>` : ''}`;
+          return `<td class="ft-email-button-cell" align="center" bgcolor="${button.bg || '#0F3A72'}"${minWidth ? ` width="${minWidth}"` : ''} style="border-radius:${button.radius ?? 8}px;padding:${paddingY}px ${paddingX}px;background-color:${button.bg || '#0F3A72'};${minWidth ? `min-width:${minWidth}px;` : ''}"><a class="ft-email-button-text" href="${rep(button.link || '')}" target="_blank" style="display:inline-block;font-family:${fontFamily};color:${button.color || '#ffffff'};font-size:${fontSize}px;line-height:1.2;font-weight:bold;text-decoration:none;white-space:normal;overflow-wrap:anywhere;">${renderedButtonText}</a></td>${index < buttons.length - 1 ? `<td width="${gap}" style="width:${gap}px;font-size:1px;line-height:1px;">&nbsp;</td>` : ''}`;
         }).join('');
         return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr><td align="${align}" style="padding:0;"><table role="presentation" class="ft-email-button-group" border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;display:inline-table;"><tr>${cells}</tr></table></td></tr></table>`;
       }
@@ -344,9 +346,9 @@ export function generateEmailHtml(
 
         return `
 <!-- Highlight Box Block -->
-<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
+<table role="presentation" class="ft-email-block${fillHeight ? ' ft-email-fill-height' : ''}" width="100%"${fillHeightAttribute} border="0" cellspacing="0" cellpadding="0" style="width: 100%;${fillHeightStyle} border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
-    <td style="background-color: ${bg}; border-left: 4px solid ${borderColor}; padding: ${padding}px; border-radius: 4px; font-family: ${fontFamily}; color: ${blockTextColor}; font-size: ${fontSize}px; line-height: ${lineHeight}; text-align: left; background-color: ${bg};">
+    <td${fillHeightAttribute} valign="middle" style="${fillHeightStyle} background-color: ${bg}; border-left: 4px solid ${borderColor}; padding: ${padding}px; border-radius: 4px; font-family: ${fontFamily}; color: ${blockTextColor}; font-size: ${fontSize}px; line-height: ${lineHeight}; text-align: left; background-color: ${bg}; vertical-align: middle;">
       ${replaced}
     </td>
   </tr>
@@ -391,7 +393,7 @@ export function generateEmailHtml(
 
         return `
 <!-- Signature Block -->
-<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
+<table role="presentation" class="ft-email-block ft-email-signature" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
     <td style="padding: 0; font-family: ${fontFamily}; color: ${blockTextColor}; font-size: ${fontSize}px; line-height: ${lineHeight}; text-align: left; word-break: break-word;">
       ${replaced}
@@ -432,47 +434,60 @@ export function generateEmailHtml(
 
       case 'custom-html': {
         const custom = rep(inlineCustomCss(sanitizeCustomHtml(content.html || '')));
-        return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:0">' + custom + '</td></tr></table>';
+        return '<table role="presentation" class="ft-email-block" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:0">' + custom + '</td></tr></table>';
       }
       case 'columns': {
         const { layout, slots } = normalizeEmailLayout(block);
         const horizontalGap = Math.max(0, Number(content.horizontalGap) || 0);
         const verticalGap = Math.max(0, Number(content.verticalGap) || 0);
-        const totalWeight = layout.reduce((total, column) => total + Math.max(1, Number(column.width) || 1), 0);
-        const targetHeight = Math.max(...layout.map(column => column.cells.reduce((total, cell) => total + cell.minHeight, 0) + Math.max(0, column.cells.length - 1) * verticalGap));
-        const columnCells = layout.map((column, columnIndex) => {
-          const baseHeight = column.cells.reduce((total, cell) => total + cell.minHeight, 0) + Math.max(0, column.cells.length - 1) * verticalGap;
-          const extraPerCell = Math.max(0, targetHeight - baseHeight) / column.cells.length;
-          const renderedCells = column.cells.map((cell, cellIndex) => {
-            const slotIndex = getLayoutSlotIndex(layout, columnIndex, cellIndex);
-            const inner = (slots[slotIndex] || []).map(child => renderBlock(child, cell.color || blockTextColor)).join('') || '&nbsp;';
-            const height = Math.round(cell.minHeight + extraPerCell);
-            return { cell, inner, height, cellIndex };
-          });
-          const columnWeight = Math.max(1, Number(column.width) || 1);
-          const width = columnWeight / totalWeight * 100;
-          const gapShare = horizontalGap * Math.max(0, layout.length - 1) * columnWeight / totalWeight;
-          const widthStyle = horizontalGap ? `calc(${width.toFixed(2)}% - ${gapShare.toFixed(2)}px)` : `${width.toFixed(2)}%`;
-          const spacer = columnIndex < layout.length - 1 ? `<td width="${horizontalGap}" style="width:${horizontalGap}px;min-width:${horizontalGap}px;font-size:1px;line-height:1px;padding:0;">&nbsp;</td>` : '';
-          const finalCell = renderedCells[renderedCells.length - 1];
+        const availableWidth = Math.max(1, settings.maxWidth - settings.contentPadding * 2);
+        const columnWidths = getEmailLayoutColumnWidths(layout, availableWidth, horizontalGap);
+        const equalRowCount = layout.every(column => column.cells.length === layout[0].cells.length);
+        const requestedHeight = (cell: typeof layout[number]['cells'][number]) => {
+          const requested = cell.heightMode === 'fixed' ? cell.height : cell.minHeight;
+          return cell.maxHeight > 0 ? Math.min(requested, cell.maxHeight) : requested;
+        };
+        const cellHtml = (columnIndex: number, cellIndex: number, rowHeight = 0, nested = false) => {
+          const column = layout[columnIndex];
+          const cell = column.cells[cellIndex];
+          const slotIndex = getLayoutSlotIndex(layout, columnIndex, cellIndex);
+          const slotBlocks = slots[slotIndex] || [];
+          const shouldFill = slotBlocks.length === 1 && ['heading', 'paragraph', 'highlight-box', 'signature'].includes(slotBlocks[0].type);
+          const inner = slotBlocks.map(child => renderBlock(child, cell.color || blockTextColor, shouldFill)).join('') || '&nbsp;';
+          const width = nested ? 100 : columnWidths[columnIndex] / availableWidth * 100;
+          const height = Math.max(rowHeight, requestedHeight(cell));
+          const heightAttribute = height > 0 ? ` height="${Math.round(height)}"` : '';
+          const heightStyle = height > 0 ? `height:${Math.round(height)}px;min-height:${Math.round(height)}px;` : '';
+          const spacer = !nested && columnIndex < layout.length - 1 ? `<td aria-hidden="true" width="${horizontalGap}" style="width:${horizontalGap}px;min-width:${horizontalGap}px;font-size:1px;line-height:1px;padding:0;">&nbsp;</td>` : '';
+          return `<td class="ft-email-layout-cell" width="${width.toFixed(2)}%"${heightAttribute} valign="${cell.verticalAlign}" bgcolor="${cell.background}" style="width:${width.toFixed(2)}%;${heightStyle}box-sizing:border-box;padding:${cell.padding}px;background-color:${cell.background};color:${cell.color || blockTextColor};border:${cell.borderWidth}px solid ${cell.borderColor};border-radius:${cell.borderRadius}px;vertical-align:${cell.verticalAlign};font-family:${fontFamily};overflow:visible;">${inner}</td>${spacer}`;
+        };
 
-          // A single cell lives directly on the shared outer row. Native table
-          // cell stretching keeps its background equal to the tallest sibling.
-          if (renderedCells.length === 1) {
-            const { cell, inner } = renderedCells[0];
-            return `<td width="${width.toFixed(2)}%" height="${targetHeight}" valign="${cell.verticalAlign}" bgcolor="${cell.background}" style="width:${widthStyle};height:${targetHeight}px;padding:${cell.padding}px;background-color:${cell.background};color:${cell.color || blockTextColor};border:${cell.borderWidth}px solid ${cell.borderColor};border-radius:${cell.borderRadius}px;vertical-align:${cell.verticalAlign};font-family:${fontFamily};">${inner}</td>${spacer}`;
-          }
-
-          const rows = renderedCells.map(({ cell, inner, height, cellIndex }) => {
-            const cellHtml = `<tr height="${height}"><td height="${height}" valign="${cell.verticalAlign}" bgcolor="${cell.background}" style="height:${height}px;padding:${cell.padding}px;background-color:${cell.background};color:${cell.color || blockTextColor};border:${cell.borderWidth}px solid ${cell.borderColor};border-radius:${cell.borderRadius}px;vertical-align:${cell.verticalAlign};font-family:${fontFamily};">${inner}</td></tr>`;
-            return cellHtml + (cellIndex < column.cells.length - 1 ? `<tr height="${verticalGap}"><td height="${verticalGap}" style="height:${verticalGap}px;font-size:1px;line-height:1px;padding:0;">&nbsp;</td></tr>` : '');
+        if (equalRowCount) {
+          const rowCount = layout[0].cells.length;
+          const rows = Array.from({ length: rowCount }, (_, rowIndex) => {
+            const rowHeight = Math.max(0, ...layout.map(column => requestedHeight(column.cells[rowIndex])));
+            const cells = layout.map((_, columnIndex) => cellHtml(columnIndex, rowIndex, rowHeight)).join('');
+            const row = `<tr${rowHeight > 0 ? ` height="${Math.round(rowHeight)}" style="height:${Math.round(rowHeight)}px;"` : ''}>${cells}</tr>`;
+            const gap = rowIndex < rowCount - 1 ? `<tr height="${verticalGap}"><td colspan="${layout.length * 2 - 1}" height="${verticalGap}" style="height:${verticalGap}px;font-size:1px;line-height:1px;padding:0;">&nbsp;</td></tr>` : '';
+            return row + gap;
           }).join('');
+          return `<table role="presentation" class="ft-email-block ft-email-layout" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;">${rows}</table>`;
+        }
 
-          // Fallback background extends the final nested cell to the bottom in
-          // email clients that ignore percentage heights on nested tables.
-          return `<td width="${width.toFixed(2)}%" height="${targetHeight}" valign="top" bgcolor="${finalCell.cell.background}" style="width:${widthStyle};height:${targetHeight}px;padding:0;vertical-align:top;background-color:${finalCell.cell.background};"><table role="presentation" width="100%" height="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;height:100%;min-height:${targetHeight}px;border-collapse:separate;">${rows}</table></td>${spacer}`;
+        const targetHeight = Math.max(0, ...layout.map(column => column.cells.reduce((total, cell) => total + requestedHeight(cell), 0) + Math.max(0, column.cells.length - 1) * verticalGap));
+        const columnCells = layout.map((column, columnIndex) => {
+          const columnHeight = column.cells.reduce((total, cell) => total + requestedHeight(cell), 0) + Math.max(0, column.cells.length - 1) * verticalGap;
+          const extraPerCell = Math.max(0, targetHeight - columnHeight) / column.cells.length;
+          const rows = column.cells.map((cell, cellIndex) => {
+            const height = requestedHeight(cell) + extraPerCell;
+            const row = `<tr>${cellHtml(columnIndex, cellIndex, height, true)}</tr>`;
+            return row + (cellIndex < column.cells.length - 1 ? `<tr height="${verticalGap}"><td height="${verticalGap}" style="height:${verticalGap}px;font-size:1px;line-height:1px;padding:0;">&nbsp;</td></tr>` : '');
+          }).join('');
+          const width = columnWidths[columnIndex] / availableWidth * 100;
+          const spacer = columnIndex < layout.length - 1 ? `<td aria-hidden="true" width="${horizontalGap}" style="width:${horizontalGap}px;min-width:${horizontalGap}px;font-size:1px;line-height:1px;padding:0;">&nbsp;</td>` : '';
+          return `<td width="${width.toFixed(2)}%" valign="top" style="width:${width.toFixed(2)}%;padding:0;vertical-align:top;"><table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;">${rows}</table></td>${spacer}`;
         }).join('');
-        return `<table role="presentation" class="ft-email-layout" width="100%" height="${targetHeight}" border="0" cellspacing="0" cellpadding="0" style="width:100%;height:${targetHeight}px;table-layout:fixed;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr height="${targetHeight}" style="height:${targetHeight}px;">${columnCells}</tr></table>`;
+        return `<table role="presentation" class="ft-email-block ft-email-layout" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr>${columnCells}</tr></table>`;
       }      case 'data-table': {
         const rows: string[][] = Array.isArray(content.rows) ? content.rows : [];
         const heading = content.heading ? `<div style="margin:0 0 10px;font-family:${fontFamily};font-size:18px;line-height:1.3;font-weight:bold;color:#0F3A72;">${rep(content.heading)}</div>` : '';
@@ -500,14 +515,18 @@ export function generateEmailHtml(
   const blockHtmls = template.blocks.map(block => renderBlock(block)).join('\n');
   const responsiveStyle = `<style type="text/css">
     html, body { width: 100% !important; min-width: 0 !important; }
-    .ft-email-root, .ft-email-content { width: 100% !important; }
+    .ft-email-root, .ft-email-content { width: 100% !important; table-layout: fixed !important; }
+    .ft-email-content-cell, .ft-email-block { width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; }
+    .ft-email-block { table-layout: fixed !important; }
     .ft-email-root table { max-width: 100% !important; }
     .ft-email-root img { max-width: 100% !important; height: auto !important; }
     .ft-email-layout { width: 100% !important; table-layout: fixed !important; }
+    .ft-email-rich-table { width: 100% !important; max-width: 100% !important; table-layout: fixed !important; }
+    .ft-email-fill-height { height: 100% !important; }
     @media only screen and (max-width: 480px) {
       .ft-email-content-cell { padding: 16px !important; }
       .ft-email-root td, .ft-email-root th { overflow-wrap: anywhere !important; word-break: break-word !important; }
-      .ft-email-root table[width] { width: 100% !important; }
+      .ft-email-rich-table td, .ft-email-rich-table th { min-width: 0 !important; max-width: 100% !important; }
       .ft-email-button-table, .ft-email-button-group { max-width: 100% !important; }
       .ft-email-button-table { min-width: 0 !important; }
       .ft-email-button-group { width: 100% !important; table-layout: fixed !important; }
@@ -526,12 +545,12 @@ export function generateEmailHtml(
   <title>${processedSubject}</title>
 </head>
 <body style="margin: 0; padding: 0; background-color: #ffffff; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;">
-  <table role="presentation" class="ft-email-root" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; background-color: #ffffff;">
+  <table role="presentation" class="ft-email-root" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; table-layout: fixed; border-collapse: collapse; background-color: #ffffff;">
     <tr>
       <td align="center" style="padding: 0;">
-        <table role="presentation" class="ft-email-content" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
+        <table role="presentation" class="ft-email-content" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
           <tr>
-            <td class="ft-email-content-cell" style="padding: ${settings.contentPadding}px;">
+            <td class="ft-email-content-cell" width="100%" style="width: 100%; max-width: 100%; box-sizing: border-box; padding: ${settings.contentPadding}px;">
               ${blockHtmls}
             </td>
           </tr>
@@ -543,12 +562,12 @@ export function generateEmailHtml(
 </html>`;
 
   // Fallback wrapper if the preview document cannot be sliced as expected.
-  const fallbackCopyHtml = `<table role="presentation" class="ft-email-root" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; background-color: #ffffff;">
+  const fallbackCopyHtml = `<table role="presentation" class="ft-email-root" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; table-layout: fixed; border-collapse: collapse; background-color: #ffffff;">
   <tr>
     <td align="center" style="padding: 0;">
-      <table role="presentation" class="ft-email-content" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
+      <table role="presentation" class="ft-email-content" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
         <tr>
-          <td class="ft-email-content-cell" style="padding: ${settings.contentPadding}px;">
+          <td class="ft-email-content-cell" width="100%" style="width: 100%; max-width: 100%; box-sizing: border-box; padding: ${settings.contentPadding}px;">
             ${blockHtmls}
           </td>
         </tr>

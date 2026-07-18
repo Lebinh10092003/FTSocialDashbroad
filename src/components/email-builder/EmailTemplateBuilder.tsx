@@ -25,7 +25,7 @@ import { generateEmailHtml } from '../../lib/emailHtmlGenerator';
 import { copyEmailToClipboard, copyTextToClipboard } from '../../lib/emailClipboard';
 
 import BlockLibrary from './BlockLibrary';
-import EmailCanvas, { EmailCanvasHandle } from './EmailCanvas';
+import EmailCanvas, { EmailCanvasHandle, EmailSelectionFormat } from './EmailCanvas';
 import BlockSettings from './BlockSettings';
 import EmailSettingsComponent from './EmailSettings';
 import EmailPreview from './EmailPreview';
@@ -47,6 +47,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace }: EmailTemplateBuilder
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [activeTemplateId, setActiveTemplateIdState] = useState<string>('');
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const [selectionFormat, setSelectionFormat] = useState<EmailSelectionFormat | null>(null);
   
   const [variables, setVariables] = useState<EmailVariable[]>([]);
   const [showPreview, setShowPreview] = useState(false);
@@ -863,7 +864,8 @@ function EmailTemplateBuilderContent({ onBackToWorkspace }: EmailTemplateBuilder
                 ref={canvasRef}
                 blocks={activeTemplate.blocks}
                 selectedBlockId={selectedBlockId}
-                onSelectBlock={setSelectedBlockId}
+                onSelectBlock={id => { if (selectionFormat?.blockId !== id) setSelectionFormat(null); setSelectedBlockId(id); }}
+                onSelectionFormatChange={setSelectionFormat}
                 onMoveBlock={handleMoveBlock}
                 onDuplicateBlock={handleDuplicateBlock}
                 onDeleteBlock={handleDeleteBlock}
@@ -933,6 +935,10 @@ function EmailTemplateBuilderContent({ onBackToWorkspace }: EmailTemplateBuilder
                   onUpdateBlockStyles={(styles) => selectedBlockId && handleUpdateBlockStyles(selectedBlockId, styles)}
                   onUpdateBlock={(nextBlock) => selectedBlockId && handleUpdateWholeBlock(selectedBlockId, nextBlock)}
                   onApplySelectionFontSize={(size) => selectedBlockId ? canvasRef.current?.applySelectionFontSize(selectedBlockId, size) || false : false}
+                  hasTextSelection={selectionFormat?.blockId === selectedBlockId && selectionFormat.hasSelection}
+                  selectionFontSize={selectionFormat?.blockId === selectedBlockId && selectionFormat.hasSelection ? selectionFormat.fontSize : undefined}
+                  selectionTextColor={selectionFormat?.blockId === selectedBlockId && selectionFormat.hasSelection ? selectionFormat.textColor : undefined}
+                  selectionEditorKey={selectionFormat?.blockId === selectedBlockId && selectionFormat.hasSelection ? selectionFormat.editorKey : undefined}
                   onApplySelectionTextColor={(color) => selectedBlockId ? canvasRef.current?.applySelectionTextColor(selectedBlockId, color) || false : false}
                   onUpdateBlockColumns={(columns) => {
                     if (!selectedBlockId || !activeTemplate) return;

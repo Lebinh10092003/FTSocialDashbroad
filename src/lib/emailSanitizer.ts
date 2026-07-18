@@ -122,7 +122,14 @@ export function sanitizeHtml(html: string): string {
         if (!newEl.style.color) newEl.style.color = '#2563eb';
         if (!newEl.style.textDecoration) newEl.style.textDecoration = 'underline';
       }
-      if (tagName === 'table') newEl.style.maxWidth = '100%';
+      if (tagName === 'table') {
+        newEl.style.maxWidth = '100%';
+        if (!el.parentElement?.closest('table')) {
+          newEl.classList.add('ft-email-rich-table');
+          newEl.style.width = '100%';
+          newEl.style.tableLayout = 'fixed';
+        }
+      }
       if (tagName === 'img') {
         newEl.style.maxWidth = '100%';
         newEl.style.height = 'auto';
@@ -162,7 +169,14 @@ export function sanitizeCustomHtml(html: string): string {
       if (name.startsWith('on') || (name === 'src' && value.startsWith('javascript:')) || (name === 'href' && value.startsWith('javascript:'))) el.removeAttribute(attr.name);
     });
     const htmlElement = el as HTMLElement;
-    if (el.tagName.toLowerCase() === 'table') htmlElement.style.maxWidth = '100%';
+    if (el.tagName.toLowerCase() === 'table') {
+      htmlElement.style.maxWidth = '100%';
+      if (!el.parentElement?.closest('table')) {
+        htmlElement.classList.add('ft-email-rich-table');
+        htmlElement.style.width = '100%';
+        htmlElement.style.tableLayout = 'fixed';
+      }
+    }
     if (el.tagName.toLowerCase() === 'img') {
       htmlElement.style.maxWidth = '100%';
       htmlElement.style.height = 'auto';
