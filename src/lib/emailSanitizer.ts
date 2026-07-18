@@ -118,6 +118,15 @@ export function sanitizeHtml(html: string): string {
         const cleanedStyle = safeStyle(style);
         if (cleanedStyle) newEl.setAttribute('style', cleanedStyle);
       }
+      if (tagName === 'a' && newEl.getAttribute('href')) {
+        if (!newEl.style.color) newEl.style.color = '#2563eb';
+        if (!newEl.style.textDecoration) newEl.style.textDecoration = 'underline';
+      }
+      if (tagName === 'table') newEl.style.maxWidth = '100%';
+      if (tagName === 'img') {
+        newEl.style.maxWidth = '100%';
+        newEl.style.height = 'auto';
+      }
       
       // Process children
       el.childNodes.forEach(child => {
@@ -152,6 +161,12 @@ export function sanitizeCustomHtml(html: string): string {
       const name = attr.name.toLowerCase(); const value = attr.value.trim().toLowerCase();
       if (name.startsWith('on') || (name === 'src' && value.startsWith('javascript:')) || (name === 'href' && value.startsWith('javascript:'))) el.removeAttribute(attr.name);
     });
+    const htmlElement = el as HTMLElement;
+    if (el.tagName.toLowerCase() === 'table') htmlElement.style.maxWidth = '100%';
+    if (el.tagName.toLowerCase() === 'img') {
+      htmlElement.style.maxWidth = '100%';
+      htmlElement.style.height = 'auto';
+    }
   });
   return doc.body.innerHTML;
 }

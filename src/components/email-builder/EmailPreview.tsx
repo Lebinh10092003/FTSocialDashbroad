@@ -82,11 +82,11 @@ export default function EmailPreview({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [html]);
+  }, [html, viewMode]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4">
-      <div className="relative w-full max-w-5xl bg-slate-100 rounded-3xl border border-slate-200 shadow-2xl flex flex-col h-[90vh] overflow-hidden animate-fade-in">
+      <div className="relative w-full max-w-7xl bg-slate-100 rounded-3xl border border-slate-200 shadow-2xl flex flex-col h-[90vh] overflow-hidden animate-fade-in">
         
         {/* Header Toolbar */}
         <div className="p-4 bg-white border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
@@ -153,7 +153,9 @@ export default function EmailPreview({
           <div
             className="mx-auto flex shrink-0 flex-col border border-slate-200 bg-white transition-all duration-300"
             style={{
-              width: viewMode === 'mobile' ? '375px' : `${template.settings.maxWidth}px`
+              width: viewMode === 'mobile'
+                ? '390px'
+                : 'min(1100px, calc(100vw - 96px))'
             }}
           >
             {/* Subject preview */}

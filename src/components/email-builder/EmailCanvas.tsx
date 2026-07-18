@@ -38,6 +38,14 @@ const editableHtml = (html = '') => htmlText(html) === LEGACY_PARAGRAPH_PLACEHOL
   : normalizeEditableHtml(html);
 
 const editableText = (text = '', legacyPlaceholders: string[] = []) => legacyPlaceholders.includes(text.trim()) ? '' : text;
+const escapeEditableText = (text = '') => text
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;')
+  .replace(/\r\n?|\n/g, '<br>');
+const buttonEditableHtml = (html = '', text = '') => editableHtml(html) || escapeEditableText(text);
 
 interface EmailCanvasProps {
   blocks: EmailBlock[];
@@ -68,6 +76,8 @@ const TYPE_NAMES: Partial<Record<BlockType, string>> = {
 const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(function EmailCanvas(props, ref) {
   const { blocks, selectedBlockId, onSelectBlock, onMoveBlock, onDuplicateBlock, onDeleteBlock, onToggleVisibility, onUpdateBlockContent, onOpenVariablePicker, insertedVarName, onClearInsertedVar, emailSettings, onAddBlock, onDropBlock, onInsertBlock, onUpdateBlock } = props;
   const editableRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [activeRichEditorKey, setActiveRichEditorKey] = React.useState<string | null>(null);
+  const editableCommitRefs = useRef<Record<string, (() => boolean) | undefined>>({});
   const selectionRefs = useRef<Record<string, Range | null>>({});
   const selectionBookmarks = useRef<Record<string, SelectionBookmark | null>>({});
   const imageInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -157,14 +167,15 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     if (restored) selectionRefs.current[blockId] = restored.cloneRange();
     return restored;
   };
-  const saveSelection = (blockId: string) => {
-    if (selectedBlockId !== blockId) onSelectBlock(blockId);
+  const saveSelection = (editorKey: string, ownerBlockId = editorKey) => {
+    if (selectedBlockId !== ownerBlockId) onSelectBlock(ownerBlockId);
     const selection = window.getSelection();
-    const editable = editableRefs.current[blockId];
+    const editable = editableRefs.current[editorKey];
     if (!selection?.rangeCount || !editable?.contains(selection.anchorNode)) return;
     const range = selection.getRangeAt(0).cloneRange();
-    selectionRefs.current[blockId] = range;
-    selectionBookmarks.current[blockId] = rangeToBookmark(editable, range);
+    selectionRefs.current[editorKey] = range;
+    selectionBookmarks.current[editorKey] = rangeToBookmark(editable, range);
+    setActiveRichEditorKey(editorKey);
     showSelectionHighlight(range);
   };
   const restoreSelection = (blockId: string) => {
@@ -203,13 +214,39 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     editable.querySelectorAll<HTMLSpanElement>('span:empty').forEach(span => span.remove());
     editable.normalize();
   };
+  const applyEditorSelectionStyle = (
+    editorKey: string,
+    property: 'fontSize' | 'color',
+    value: string,
+    onCommit: (editable: HTMLElement) => boolean,
+    onFallback: () => void,
+  ) => {
+    const editable = editableRefs.current[editorKey];
+    const bookmark = selectionBookmarks.current[editorKey];
+    const range = getSavedRange(editorKey);
+    if (!editable || !bookmark || !range || range.collapsed || bookmark.end <= bookmark.start) {
+      onFallback();
+      return false;
+    }
+    applyInlineStyleToBookmark(editable, bookmark, property, value);
+    onCommit(editable);
+    selectionBookmarks.current[editorKey] = bookmark;
+    const nextRange = bookmarkToRange(editable, bookmark);
+    selectionRefs.current[editorKey] = nextRange?.cloneRange() || null;
+    if (nextRange) {
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(nextRange);
+      showSelectionHighlight(nextRange);
+    }
+    return true;
+  };
   const applySelectionFontSize = (block: EmailBlock, size: number, selectionOnly = false): boolean => {
     const editable = editableRefs.current[block.id];
     if (!editable) return false;
     const savedRange = getSavedRange(block.id);
     const bookmark = selectionBookmarks.current[block.id];
     const hasTextSelection = Boolean(savedRange && !savedRange.collapsed && bookmark && bookmark.end > bookmark.start);
-
     if (!hasTextSelection) {
       if (selectionOnly) return false;
       editable.querySelectorAll<HTMLElement>('[style]').forEach(element => {
@@ -227,7 +264,6 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
       onUpdateBlockContent(block.id, { ...block.content, fontSize: size, html: editable.innerHTML });
       return false;
     }
-
     applyInlineStyleToBookmark(editable, bookmark!, 'fontSize', `${size}px`);
     updateHtml(block, editable);
     selectionBookmarks.current[block.id] = bookmark;
@@ -241,7 +277,6 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     }
     return true;
   };
-
   const applySelectionTextColor = (block: EmailBlock, color: string, selectionOnly = false): boolean => {
     const editable = editableRefs.current[block.id];
     if (!editable) return false;
@@ -288,12 +323,15 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
       void dialog.alert('Hãy bôi đen đoạn văn bản cần gắn hoặc xóa liên kết trước.', 'Chưa chọn văn bản');
       return;
     }
+    editable.focus({ preventScroll: true });
     restoreSelection(block.id);
     document.execCommand(url ? 'createLink' : 'unlink', false, url || '');
     if (url) {
       editable.querySelectorAll<HTMLAnchorElement>('a').forEach(anchor => {
         anchor.target = '_blank';
         anchor.rel = 'noopener noreferrer';
+        anchor.style.color = '#2563eb';
+        anchor.style.textDecoration = 'underline';
       });
     }
     updateHtml(block, editable);
@@ -330,6 +368,9 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     },
     flushPendingChanges: () => {
       let changed = false;
+      Object.values(editableCommitRefs.current).forEach(commit => {
+        if (commit?.()) changed = true;
+      });
       Object.entries(editableRefs.current).forEach(([blockId, editableValue]) => {
         const editable = editableValue as HTMLDivElement | null;
         const block = editable ? findBlock(blocks, blockId) : undefined;
@@ -499,6 +540,25 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     });
     const removeListItem = (itemIndex: number) => onUpdateBlockContent(block.id, { ...content, items: (content.items || []).filter((_: string, currentIndex: number) => currentIndex !== itemIndex) });
     const addListItem = () => onUpdateBlockContent(block.id, { ...content, items: [...(content.items || []), 'Mục mới'] });
+    const buttonEditorKey = `${block.id}:button`;
+    const groupEditorKey = (buttonIndex: number) => `${block.id}:button:${buttonIndex}`;
+    const commitButtonEditor = (editable: HTMLElement) => {
+      const html = normalizeEditableHtml(editable.innerHTML);
+      const text = editable.innerText.replace(/\r\n?/g, '\n');
+      if (html === normalizeEditableHtml(buttonEditableHtml(content.html, content.text || '')) && text === (content.text || '')) return false;
+      onUpdateBlockContent(block.id, { ...content, html, text });
+      return true;
+    };
+    const commitGroupButtonEditor = (buttonIndex: number, editable: HTMLElement) => {
+      const button = groupButtons[buttonIndex];
+      if (!button) return false;
+      const html = normalizeEditableHtml(editable.innerHTML);
+      const text = editable.innerText.replace(/\r\n?/g, '\n');
+      if (html === normalizeEditableHtml(buttonEditableHtml(button.html, button.text || '')) && text === (button.text || '')) return false;
+      updateGroupButton(buttonIndex, { html, text });
+      return true;
+    };
+    const activeGroupIndex = Math.max(0, groupButtons.findIndex((_: any, buttonIndex: number) => groupEditorKey(buttonIndex) === activeRichEditorKey));
 
 
 
@@ -527,8 +587,14 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
         })()}
         {block.type === 'image' && <div className="space-y-2">{selected && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-2 py-1.5 text-[10px] font-bold text-blue-800"><input ref={element => { imageInputRefs.current[block.id] = element; }} type="file" accept="image/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) uploadImage(block, file); event.currentTarget.value = ''; }} /><button type="button" onClick={() => imageInputRefs.current[block.id]?.click()} className="inline-flex items-center gap-1 rounded bg-white px-2 py-1.5 shadow"><ImagePlus className="h-3.5 w-3.5" />Tải ảnh</button><button type="button" onClick={() => pasteImageUrl(block)} className="inline-flex items-center gap-1 rounded bg-white px-2 py-1.5 shadow"><Link className="h-3.5 w-3.5" />Dán URL</button><label className="inline-flex items-center gap-1">Rộng <input type="number" min={1} max={600} value={Number(content.width) || 600} onChange={event => { const width = Math.max(1, Number(event.target.value) || 1); const ratio = Number(content.naturalRatio); onUpdateBlockContent(block.id, { ...content, width, height: content.aspectLocked !== false && ratio ? Math.round(width / ratio) : content.height }); }} onClick={event => event.stopPropagation()} className="w-16 rounded border bg-white px-1 py-1" /></label><label className="inline-flex items-center gap-1">Cao <input type="number" min={1} value={Number(content.height) || 1} onChange={event => { const height = Math.max(1, Number(event.target.value) || 1); const ratio = Number(content.naturalRatio); onUpdateBlockContent(block.id, { ...content, height, width: content.aspectLocked !== false && ratio ? Math.round(height * ratio) : content.width }); }} onClick={event => event.stopPropagation()} className="w-16 rounded border bg-white px-1 py-1" /></label><input value={content.alt || ''} onChange={event => onUpdateBlockContent(block.id, { ...content, alt: event.target.value })} onClick={event => event.stopPropagation()} placeholder="Mô tả ảnh" className="min-w-24 flex-1 rounded border bg-white px-2 py-1" /></div>}<div className={`flex ${alignClass}`} onDragOver={event => { if (event.dataTransfer.files.length) { event.preventDefault(); event.stopPropagation(); } }} onDrop={event => { if (event.dataTransfer.files.length) { event.preventDefault(); event.stopPropagation(); uploadImage(block, event.dataTransfer.files[0]); } }}>{content.url ? <img src={content.url} alt={content.alt || 'Banner'} onLoad={event => { if (!content.naturalRatio) { const ratio = event.currentTarget.naturalWidth / Math.max(1, event.currentTarget.naturalHeight); const width = Number(content.width) || Math.min(event.currentTarget.naturalWidth, 600); onUpdateBlockContent(block.id, { ...content, width, height: content.height || Math.round(width / ratio), naturalRatio: ratio, aspectLocked: content.aspectLocked !== false }); } }} style={{ width: Number(content.width) || 600, height: content.height ? Number(content.height) : 'auto', borderRadius: Number(content.borderRadius) || 0 }} className="max-w-full object-cover" /> : <button type="button" onClick={() => imageInputRefs.current[block.id]?.click()} className="w-full rounded-xl border border-dashed bg-slate-50 p-8 text-xs font-bold text-slate-500">Chọn hoặc kéo thả ảnh vào đây</button>}</div></div>}
         {(block.type === 'bullet-list' || block.type === 'number-list') && <div>{block.type === 'number-list' ? <ol className="ml-5 list-decimal space-y-1" style={{ fontSize: content.fontSize || 15, color: content.color || undefined }}>{(content.items || []).map((item: string, itemIndex: number) => <li key={itemIndex} className="group/item relative pr-7"><span contentEditable suppressContentEditableWarning onFocus={() => onSelectBlock(block.id)} onBlur={event => updateListItem(itemIndex, event.currentTarget.innerHTML)} className="block min-h-5 outline-none focus:bg-blue-50" dangerouslySetInnerHTML={{ __html: item }} />{selected && <button type="button" onClick={event => { event.stopPropagation(); removeListItem(itemIndex); }} className="absolute right-0 top-0 rounded p-1 text-rose-500 hover:bg-rose-50" title="Xóa mục"><Trash2 className="h-3.5 w-3.5" /></button>}</li>)}</ol> : <ul className="ml-5 list-disc space-y-1" style={{ fontSize: content.fontSize || 15, color: content.color || undefined }}>{(content.items || []).map((item: string, itemIndex: number) => <li key={itemIndex} className="group/item relative pr-7"><span contentEditable suppressContentEditableWarning onFocus={() => onSelectBlock(block.id)} onBlur={event => updateListItem(itemIndex, event.currentTarget.innerHTML)} className="block min-h-5 outline-none focus:bg-blue-50" dangerouslySetInnerHTML={{ __html: item }} />{selected && <button type="button" onClick={event => { event.stopPropagation(); removeListItem(itemIndex); }} className="absolute right-0 top-0 rounded p-1 text-rose-500 hover:bg-rose-50" title="Xóa mục"><Trash2 className="h-3.5 w-3.5" /></button>}</li>)}</ul>}{selected && <button type="button" onClick={event => { event.stopPropagation(); addListItem(); }} className="mt-2 inline-flex items-center gap-1 rounded border border-blue-200 bg-white px-2 py-1 text-[9px] font-bold text-blue-700"><Plus className="h-3 w-3" />Thêm mục</button>}</div>}
-        {block.type === 'button' && <div className={`flex ${alignClass}`}><div contentEditable suppressContentEditableWarning onFocus={() => onSelectBlock(block.id)} onBlur={event => onUpdateBlockContent(block.id, { ...content, text: event.currentTarget.innerText.replace(/\r\n?/g, '\n') })} style={{ background: content.bg || '#1473d1', color: content.color || '#fff', borderRadius: content.radius ?? 8, width: content.width === 'full' ? '100%' : 'auto', minWidth: content.minWidth ? `${content.minWidth}px` : undefined, fontSize: content.fontSize || 15, lineHeight: 1.2, padding: `${content.paddingY ?? 12}px ${content.paddingX ?? 24}px`, whiteSpace: 'pre-line' }} className="min-h-5 cursor-text text-center font-bold outline-none focus:ring-2 focus:ring-blue-300">{content.text || 'Nút CTA'}</div></div>}
-        {(block.type === 'button-group' || block.type === 'button-group-3') && <div className={`flex flex-nowrap items-stretch ${alignClass}`} style={{ gap: content.gap ?? 12 }}>{groupButtons.map((button: any, buttonIndex: number) => <div key={buttonIndex} className="relative flex"><div contentEditable suppressContentEditableWarning onFocus={() => onSelectBlock(block.id)} onBlur={event => updateGroupButton(buttonIndex, { text: event.currentTarget.innerText.replace(/\r\n?/g, '\n') })} style={{ background: button.bg || '#0F3A72', color: button.color || '#fff', borderRadius: button.radius ?? 8, fontSize: button.fontSize ?? 14, lineHeight: 1.2, padding: `${button.paddingY ?? 11}px ${button.paddingX ?? 18}px`, minWidth: button.minWidth ? `${button.minWidth}px` : undefined, whiteSpace: 'pre-line' }} className="flex min-h-5 cursor-text items-center justify-center text-center font-bold outline-none focus:ring-2 focus:ring-blue-300">{button.text || `Nút ${buttonIndex + 1}`}</div>{selected && groupButtons.length > 2 && <button type="button" onClick={event => { event.stopPropagation(); updateGroupButtons(groupButtons.filter((_, currentIndex) => currentIndex !== buttonIndex)); }} className="absolute -right-2 -top-2 rounded-full bg-white p-1 text-rose-500 shadow" title="Xóa nút"><Trash2 className="h-3 w-3" /></button>}</div>)}{selected && groupButtons.length < 3 && <button type="button" onClick={event => { event.stopPropagation(); addGroupButton(); }} className="inline-flex min-h-10 items-center gap-1 rounded border border-dashed border-blue-300 px-2 text-[9px] font-bold text-blue-700"><Plus className="h-3 w-3" />Thêm nút</button>}</div>}
+        {block.type === 'button' && <div>
+          {selected && <BlockToolbar inlineOnly onInsertVariableClick={onOpenVariablePicker} onFontSizeChange={size => applyEditorSelectionStyle(buttonEditorKey, 'fontSize', `${size}px`, commitButtonEditor, () => onUpdateBlockContent(block.id, { ...content, fontSize: size }))} onTextColorChange={color => applyEditorSelectionStyle(buttonEditorKey, 'color', color, commitButtonEditor, () => onUpdateBlockContent(block.id, { ...content, color }))} activeFontSize={content.fontSize || 15} activeTextColor={content.color || '#ffffff'} />}
+          <div className={`flex ${alignClass}`}><div ref={element => { editableRefs.current[buttonEditorKey] = element; if (element) editableCommitRefs.current[buttonEditorKey] = () => commitButtonEditor(element); else delete editableCommitRefs.current[buttonEditorKey]; }} contentEditable suppressContentEditableWarning onFocus={() => { onSelectBlock(block.id); setActiveRichEditorKey(buttonEditorKey); }} onMouseUp={() => saveSelection(buttonEditorKey, block.id)} onKeyUp={() => saveSelection(buttonEditorKey, block.id)} onSelect={() => saveSelection(buttonEditorKey, block.id)} onBlur={event => commitButtonEditor(event.currentTarget)} style={{ background: content.bg || '#1473d1', color: content.color || '#fff', borderRadius: content.radius ?? 8, width: content.width === 'full' ? '100%' : 'auto', minWidth: content.minWidth ? `${content.minWidth}px` : undefined, fontSize: content.fontSize || 15, lineHeight: 1.2, padding: `${content.paddingY ?? 12}px ${content.paddingX ?? 24}px`, whiteSpace: 'nowrap' }} className="min-h-5 cursor-text text-center font-bold outline-none focus:ring-2 focus:ring-blue-300" dangerouslySetInnerHTML={{ __html: buttonEditableHtml(content.html, content.text || 'Nút CTA') }} /></div>
+        </div>}
+        {(block.type === 'button-group' || block.type === 'button-group-3') && <div>
+          {selected && groupButtons[activeGroupIndex] && <BlockToolbar inlineOnly onInsertVariableClick={onOpenVariablePicker} onFontSizeChange={size => { const editorKey = groupEditorKey(activeGroupIndex); applyEditorSelectionStyle(editorKey, 'fontSize', `${size}px`, editable => commitGroupButtonEditor(activeGroupIndex, editable), () => updateGroupButton(activeGroupIndex, { fontSize: size })); }} onTextColorChange={color => { const editorKey = groupEditorKey(activeGroupIndex); applyEditorSelectionStyle(editorKey, 'color', color, editable => commitGroupButtonEditor(activeGroupIndex, editable), () => updateGroupButton(activeGroupIndex, { color })); }} activeFontSize={groupButtons[activeGroupIndex].fontSize || 14} activeTextColor={groupButtons[activeGroupIndex].color || '#ffffff'} />}
+          <div className={`flex flex-nowrap items-stretch ${alignClass}`} style={{ gap: content.gap ?? 12 }}>{groupButtons.map((button: any, buttonIndex: number) => { const editorKey = groupEditorKey(buttonIndex); return <div key={buttonIndex} className="relative flex"><div ref={element => { editableRefs.current[editorKey] = element; if (element) editableCommitRefs.current[editorKey] = () => commitGroupButtonEditor(buttonIndex, element); else delete editableCommitRefs.current[editorKey]; }} contentEditable suppressContentEditableWarning onFocus={() => { onSelectBlock(block.id); setActiveRichEditorKey(editorKey); }} onMouseUp={() => saveSelection(editorKey, block.id)} onKeyUp={() => saveSelection(editorKey, block.id)} onSelect={() => saveSelection(editorKey, block.id)} onBlur={event => commitGroupButtonEditor(buttonIndex, event.currentTarget)} style={{ background: button.bg || '#0F3A72', color: button.color || '#fff', borderRadius: button.radius ?? 8, fontSize: button.fontSize ?? 14, lineHeight: 1.2, padding: `${button.paddingY ?? 11}px ${button.paddingX ?? 18}px`, minWidth: button.minWidth ? `${button.minWidth}px` : undefined, whiteSpace: 'nowrap' }} className="flex min-h-5 cursor-text items-center justify-center text-center font-bold outline-none focus:ring-2 focus:ring-blue-300" dangerouslySetInnerHTML={{ __html: buttonEditableHtml(button.html, button.text || `Nút ${buttonIndex + 1}`) }} />{selected && groupButtons.length > 2 && <button type="button" onClick={event => { event.stopPropagation(); updateGroupButtons(groupButtons.filter((_, currentIndex) => currentIndex !== buttonIndex)); }} className="absolute -right-2 -top-2 rounded-full bg-white p-1 text-rose-500 shadow" title="Xóa nút"><Trash2 className="h-3 w-3" /></button>}</div>; })}{selected && groupButtons.length < 3 && <button type="button" onClick={event => { event.stopPropagation(); addGroupButton(); }} className="inline-flex min-h-10 items-center gap-1 rounded border border-dashed border-blue-300 px-2 text-[9px] font-bold text-blue-700"><Plus className="h-3 w-3" />Thêm nút</button>}</div>
+        </div>}
         {block.type === 'highlight-box' && <div>{selected && <BlockToolbar onInsertVariableClick={onOpenVariablePicker} onFontSizeChange={size => applySelectionFontSize(block, size)} onTextColorChange={color => applySelectionTextColor(block, color)} onLinkChange={url => applySelectionLink(block, url)} activeFontSize={content.fontSize || 14} activeTextColor={content.color || emailSettings.textColor || '#1E293B'} />}<div key="editor" ref={element => { editableRefs.current[block.id] = element; }} contentEditable suppressContentEditableWarning data-ft-placeholder="true" data-placeholder="Nhập nội dung…" onFocus={() => onSelectBlock(block.id)} onMouseUp={() => saveSelection(block.id)} onKeyUp={() => saveSelection(block.id)} onSelect={() => saveSelection(block.id)} onBlur={event => updateHtml(block, event.currentTarget)} style={{ background: content.bg || '#eef6ff', borderLeft: `4px solid ${content.borderColor || '#1473d1'}`, padding: content.padding ?? 16, fontSize: content.fontSize || 14, color: content.color || undefined }} className="min-h-10 rounded-r outline-none" dangerouslySetInnerHTML={{ __html: editableHtml(content.html || '') }} /></div>}
         {block.type === 'signature' && <div>{selected && <BlockToolbar onInsertVariableClick={onOpenVariablePicker} onFontSizeChange={size => applySelectionFontSize(block, size)} onTextColorChange={color => applySelectionTextColor(block, color)} onLinkChange={url => applySelectionLink(block, url)} activeFontSize={content.fontSize || 14} activeTextColor={content.color || emailSettings.textColor || '#1E293B'} />}<div key="editor" ref={element => { editableRefs.current[block.id] = element; }} contentEditable suppressContentEditableWarning data-ft-placeholder="true" data-placeholder="Nhập nội dung…" onFocus={() => onSelectBlock(block.id)} onMouseUp={() => saveSelection(block.id)} onKeyUp={() => saveSelection(block.id)} onSelect={() => saveSelection(block.id)} onBlur={event => updateHtml(block, event.currentTarget)} style={{ fontSize: content.fontSize || 14, lineHeight: content.lineHeight || 1.5, color: content.color || undefined }} className="min-h-10 rounded p-1 outline-none" dangerouslySetInnerHTML={{ __html: editableHtml(content.html || '') }} /></div>}
         {block.type === 'divider' && <div className="flex items-center gap-2"><div style={{ borderTop: `${styles.thickness ?? 1}px ${styles.borderStyle || 'solid'} ${styles.color || '#e2e8f0'}` }} className="flex-1" />{selected && <label className="inline-flex items-center gap-1 rounded bg-blue-50 px-2 py-1 text-[9px] font-bold text-blue-700"><input type="number" min={1} max={20} value={Number(styles.thickness) || 1} onChange={event => onUpdateBlock(block.id, { ...block, styles: { ...styles, thickness: Math.max(1, Number(event.target.value) || 1) } })} onClick={event => event.stopPropagation()} className="w-12 rounded border bg-white px-1 py-0.5" />px</label>}</div>}
@@ -544,17 +610,26 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
         </div>}        {block.type === 'section' && <div onDragOver={event => { event.preventDefault(); event.stopPropagation(); setRootDragOver(false); event.dataTransfer.dropEffect = event.dataTransfer.types.includes('application/x-ft-email-block-id') ? 'move' : 'copy'; }} onDrop={event => dropInto(event, block)} style={{ background: content.bg || '#f8fafc', padding: content.padding ?? 20 }} className="rounded-lg border border-dashed border-slate-300"><div contentEditable suppressContentEditableWarning data-ft-placeholder="true" data-placeholder="Nhập tiêu đề Section…" onFocus={() => onSelectBlock(block.id)} onMouseUp={() => onSelectBlock(block.id)} onBlur={event => onUpdateBlockContent(block.id, { ...content, heading: event.currentTarget.textContent || '' })} className="min-h-6 font-bold text-[#0F3A72] outline-none">{editableText(content.heading || '', ['Nội dung section'])}</div><div contentEditable suppressContentEditableWarning data-ft-placeholder="true" data-placeholder="Nhập mô tả ngắn…" onFocus={() => onSelectBlock(block.id)} onMouseUp={() => onSelectBlock(block.id)} onBlur={event => onUpdateBlockContent(block.id, { ...content, body: event.currentTarget.textContent || '' })} className="mt-1 min-h-5 text-xs text-slate-500 outline-none">{editableText(content.body || '', ['Gom phần nội dung có cùng ngữ cảnh.'])}</div><div className="mt-3 min-h-16 space-y-2">{(block.children || []).map((child, childIndex, siblings) => renderBlock(child, childIndex, siblings))}{!(block.children || []).length && <div className="flex min-h-16 items-center justify-center rounded border border-dashed border-blue-200 bg-white/70 text-[10px] font-bold text-blue-600">Thả khối vào Section</div>}</div><div className="mt-2">{renderInserter({ parentId: block.id, placement: 'cell' })}</div></div>}
         {block.type === 'columns' && layoutState && <div className="space-y-2">
           <div className={`flex items-center justify-center gap-1 transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}><span className="mr-1 text-[9px] font-bold text-slate-400">Số cột</span>{[2, 3, 4].map(count => <button key={count} type="button" onClick={event => { event.stopPropagation(); setLayoutColumnCount(block, count); }} className={`rounded-lg border px-2 py-1 text-[9px] font-black ${layoutState.layout.length === count ? 'border-blue-500 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'}`}>{count}</button>)}</div>
-          <div className="grid items-stretch" style={{ gridTemplateColumns: layoutState.layout.map(column => `minmax(0, ${column.width}fr)`).join(' '), columnGap: content.horizontalGap ?? 12 }}>
-            {layoutState.layout.map((layoutColumn, columnIndex) => <div key={layoutColumn.id} className="grid h-full min-w-0" style={{ gridTemplateRows: `repeat(${layoutColumn.cells.length}, minmax(0, 1fr))`, rowGap: content.verticalGap ?? 12 }}>
-              {layoutColumn.cells.map((cell, cellIndex) => { const slotIndex = getLayoutSlotIndex(layoutState.layout, columnIndex, cellIndex); const slot = layoutState.slots[slotIndex] || []; return <div key={cell.id} onDragOver={event => { event.preventDefault(); event.stopPropagation(); setRootDragOver(false); event.dataTransfer.dropEffect = event.dataTransfer.types.includes('application/x-ft-email-block-id') ? 'move' : 'copy'; }} onDrop={event => dropInto(event, block, slotIndex)} className="group/cell relative flex min-w-0 flex-col transition hover:outline hover:outline-2 hover:outline-blue-300" style={{ minHeight: cell.minHeight, justifyContent: cell.verticalAlign === 'middle' ? 'center' : cell.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start', backgroundColor: cell.background, color: cell.color || undefined, padding: cell.padding, border: cell.borderWidth ? `${cell.borderWidth}px solid ${cell.borderColor}` : 'none', borderRadius: cell.borderRadius }}>
-                <div className="min-w-0">{slot.map((child, childIndex, siblings) => renderBlock(child, childIndex, siblings))}</div>
-                {layoutColumn.cells.length > 1 && <button type="button" onClick={event => { event.stopPropagation(); void removeLayoutCellSafely(block, columnIndex, cellIndex); }} title={`Xóa ô ${cellIndex + 1}`} className="absolute right-1.5 top-1.5 z-20 rounded-lg border border-rose-100 bg-white/95 p-1.5 text-rose-600 opacity-60 shadow-sm transition hover:bg-rose-50 hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>}
-                {!slot.length && <div className="flex min-h-12 flex-1 items-center justify-center rounded border border-dashed border-blue-200 bg-white/50 px-2 text-center text-[9px] font-bold text-slate-400">Thả khối vào ô này</div>}
-                <div className="mt-1 self-start">{renderInserter({ parentId: block.id, slotIndex, placement: 'cell' })}</div>
-              </div>; })}
-              {layoutColumn.cells.length < 4 && <button type="button" onClick={event => { event.stopPropagation(); onUpdateBlock(block.id, addEmailLayoutCell(block, columnIndex)); }} className="mt-1 inline-flex items-center justify-center gap-1 rounded border border-dashed border-slate-300 py-1 text-[8px] font-bold text-slate-500 opacity-0 transition hover:border-blue-300 hover:text-blue-700 group-hover:opacity-100"><Plus className="h-3 w-3" />Chia thêm ô dọc</button>}
-            </div>)}
-          </div>
+          {(() => {
+            const horizontalGap = Math.max(0, Number(content.horizontalGap) || 0);
+            const totalWeight = layoutState.layout.reduce((total, column) => total + Math.max(1, Number(column.width) || 1), 0);
+            return <table role="presentation" className="w-full table-fixed border-collapse"><tbody><tr>{layoutState.layout.map((layoutColumn, columnIndex) => {
+              const columnWeight = Math.max(1, Number(layoutColumn.width) || 1);
+              const width = columnWeight / totalWeight * 100;
+              const gapShare = horizontalGap * Math.max(0, layoutState.layout.length - 1) * columnWeight / totalWeight;
+              const widthStyle = horizontalGap ? `calc(${width.toFixed(2)}% - ${gapShare.toFixed(2)}px)` : `${width.toFixed(2)}%`;
+              const finalCell = layoutColumn.cells[layoutColumn.cells.length - 1];
+              return <React.Fragment key={layoutColumn.id}><td width={`${width.toFixed(2)}%`} valign="top" style={{ width: widthStyle, padding: 0, verticalAlign: 'top', backgroundColor: finalCell?.background }}><div className="grid h-full min-w-0" style={{ gridTemplateRows: `repeat(${layoutColumn.cells.length}, minmax(0, 1fr))`, rowGap: content.verticalGap ?? 12 }}>
+                {layoutColumn.cells.map((cell, cellIndex) => { const slotIndex = getLayoutSlotIndex(layoutState.layout, columnIndex, cellIndex); const slot = layoutState.slots[slotIndex] || []; return <div key={cell.id} onDragOver={event => { event.preventDefault(); event.stopPropagation(); setRootDragOver(false); event.dataTransfer.dropEffect = event.dataTransfer.types.includes('application/x-ft-email-block-id') ? 'move' : 'copy'; }} onDrop={event => dropInto(event, block, slotIndex)} className="group/cell relative flex min-w-0 flex-col transition hover:outline hover:outline-2 hover:outline-blue-300" style={{ minHeight: cell.minHeight, justifyContent: cell.verticalAlign === 'middle' ? 'center' : cell.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start', backgroundColor: cell.background, color: cell.color || undefined, padding: cell.padding, border: cell.borderWidth ? `${cell.borderWidth}px solid ${cell.borderColor}` : 'none', borderRadius: cell.borderRadius }}>
+                  <div className="min-w-0">{slot.map((child, childIndex, siblings) => renderBlock(child, childIndex, siblings))}</div>
+                  {layoutColumn.cells.length > 1 && <button type="button" onClick={event => { event.stopPropagation(); void removeLayoutCellSafely(block, columnIndex, cellIndex); }} title={`Xóa ô ${cellIndex + 1}`} className="absolute right-1.5 top-1.5 z-20 rounded-lg border border-rose-100 bg-white/95 p-1.5 text-rose-600 opacity-60 shadow-sm transition hover:bg-rose-50 hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>}
+                  {!slot.length && <div className="flex min-h-12 flex-1 items-center justify-center rounded border border-dashed border-blue-200 bg-white/50 px-2 text-center text-[9px] font-bold text-slate-400">Thả khối vào ô này</div>}
+                  <div className="mt-1 self-start">{renderInserter({ parentId: block.id, slotIndex, placement: 'cell' })}</div>
+                </div>; })}
+                {layoutColumn.cells.length < 4 && <button type="button" onClick={event => { event.stopPropagation(); onUpdateBlock(block.id, addEmailLayoutCell(block, columnIndex)); }} className="mt-1 inline-flex items-center justify-center gap-1 rounded border border-dashed border-slate-300 py-1 text-[8px] font-bold text-slate-500 opacity-0 transition hover:border-blue-300 hover:text-blue-700 group-hover:opacity-100"><Plus className="h-3 w-3" />Chia thêm ô dọc</button>}
+              </div></td>{columnIndex < layoutState.layout.length - 1 && <td aria-hidden="true" width={horizontalGap} style={{ width: horizontalGap, minWidth: horizontalGap, padding: 0, fontSize: 1, lineHeight: '1px' }}>&nbsp;</td>}</React.Fragment>;
+            })}</tr></tbody></table>;
+          })()}
         </div>}        {!['logo','heading','paragraph','image','icon-text','bullet-list','number-list','button','button-group','button-group-3','highlight-box','signature','divider','spacer','social-links','data-table','section','columns'].includes(block.type) && renderSimplePreview(block)}
       </div>
     </div>;
@@ -570,7 +645,7 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
   const filteredDefinitions = BLOCK_CATEGORIES.map(category => ({ ...category, items: Object.values(EMAIL_BLOCK_REGISTRY).filter(item => item.category === category.id && `${item.label} ${item.description}`.toLowerCase().includes(blockQuery.toLowerCase())) })).filter(category => category.items.length);
 
   return <div className="flex w-full flex-col items-center px-4 py-6 md:px-8">
-    <style>{'::highlight(ft-email-selection){background:#facc15;color:#111827;} [contenteditable="true"]::selection,[contenteditable="true"] *::selection{background:#facc15;color:#111827;} [data-ft-placeholder="true"]:empty::before{content:attr(data-placeholder);color:#94a3b8;font-weight:400;pointer-events:none;}'}</style>
+    <style>{'::highlight(ft-email-selection){background:#facc15;color:#111827;} [contenteditable="true"] a{color:#2563eb!important;text-decoration:underline!important;} [contenteditable="true"]::selection,[contenteditable="true"] *::selection{background:#facc15;color:#111827;} [data-ft-placeholder="true"]:empty::before{content:attr(data-placeholder);color:#94a3b8;font-weight:400;pointer-events:none;}'}</style>
     <div ref={selectionOverlayRef} aria-hidden="true" className="pointer-events-none fixed inset-0 z-[9999]" />
     <div className="flex w-full max-w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg" style={{ maxWidth: emailSettings.maxWidth + 72 }}>
       <div className="flex items-center justify-between border-b px-4 py-3"><div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Email canvas</p><p className="mt-0.5 text-xs font-bold text-slate-700">Kéo khối từ trái hoặc thả trực tiếp vào từng Section/ô</p></div><span className="rounded border bg-slate-50 px-2.5 py-1 text-[10px] font-black text-slate-500">{emailSettings.maxWidth}px</span></div>

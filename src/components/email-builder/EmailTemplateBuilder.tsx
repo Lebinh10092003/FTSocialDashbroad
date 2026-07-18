@@ -463,8 +463,11 @@ function EmailTemplateBuilderContent({ onBackToWorkspace }: EmailTemplateBuilder
   // 7. Copying to Clipboard
   const handleCopyEmail = async () => {
     if (!activeTemplate) return;
-    const { copyHtml, plainText } = generateEmailHtml(activeTemplate, variables, false);
-    const success = await copyEmailToClipboard(copyHtml, plainText, activeTemplate.settings.maxWidth);
+    const changed = canvasRef.current?.flushPendingChanges();
+    if (changed) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    const templateToCopy = templatesRef.current.find(template => template.id === activeTemplateId) || activeTemplate;
+    const { copyHtml, plainText } = generateEmailHtml(templateToCopy, variables, false);
+    const success = await copyEmailToClipboard(copyHtml, plainText, templateToCopy.settings.maxWidth);
     if (success) {
       setCopySuccess(true);
       showToast('Đã copy nội dung email.');
@@ -806,7 +809,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace }: EmailTemplateBuilder
         onDeleteTemplate={handleDeleteTemplate}
         onRestoreDefaults={handleRestoreDefaults}
         onImportTemplate={handleImportTemplate}
-        onPreviewClick={() => setShowPreview(true)}
+        onPreviewClick={() => { const changed = canvasRef.current?.flushPendingChanges(); if (changed) requestAnimationFrame(() => setShowPreview(true)); else setShowPreview(true); }}
         onBackToWorkspace={handleBackToList}
         onCopyEmail={handleCopyEmail}
         onCopySubject={handleCopySubject}

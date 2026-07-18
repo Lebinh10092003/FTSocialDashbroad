@@ -30,6 +30,12 @@ const preserveRichTextLineBreaks = (html: string) => html
     return withoutFormattingEdges.replace(/[\t ]*\n[\t ]*/g, '<br>');
   })
   .join('');
+const escapePlainTextHtml = (text = '') => text
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
 
 export function generateEmailHtml(
   template: EmailTemplate,
@@ -276,7 +282,7 @@ export function generateEmailHtml(
 
       case 'button': {
         const text = content.text || '';
-        const renderedText = preserveRichTextLineBreaks(rep(sanitizeHtml(text)));
+        const renderedText = preserveRichTextLineBreaks(rep(sanitizeHtml(content.html || escapePlainTextHtml(text))));
         const link = content.link || '';
         const bg = content.bg || settings.btnDefaultBg || '#1473d1';
         const color = content.color || settings.btnDefaultTextColor || '#ffffff';
@@ -295,10 +301,10 @@ export function generateEmailHtml(
 <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
     <td align="${align}" style="padding: 0;">
-      <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="width: ${width === 'full' ? '100%' : 'auto'};${minWidth ? `min-width:${minWidth}px;` : ''} border-collapse: collapse;">
+      <table role="presentation" class="ft-email-button-table" border="0" cellspacing="0" cellpadding="0" style="width: ${width === 'full' ? '100%' : 'auto'};${minWidth ? `min-width:${minWidth}px;` : ''} border-collapse: collapse;">
         <tr>
-          <td align="center" bgcolor="${bg}" style="border-radius: ${radius}px; padding: ${paddingY}px ${paddingX}px;${minWidth ? `min-width:${minWidth}px;` : ''} text-align: center; background-color: ${bg};" valign="middle">
-            <a href="${rep(link)}" target="_blank" style="display: ${width === 'full' ? 'block' : 'inline-block'}; font-family: ${fontFamily}; color: ${color}; font-size: ${fontSize}px; font-weight: bold; text-decoration: none; border-radius: ${radius}px; background-color: ${bg}; width: 100%; box-sizing: border-box;">
+          <td class="ft-email-button-cell" align="center" bgcolor="${bg}" style="border-radius: ${radius}px; padding: ${paddingY}px ${paddingX}px;${minWidth ? `min-width:${minWidth}px;` : ''} text-align: center; background-color: ${bg}; white-space: nowrap;" valign="middle">
+            <a class="ft-email-button-text" href="${rep(link)}" target="_blank" style="display: ${width === 'full' ? 'block' : 'inline-block'}; font-family: ${fontFamily}; color: ${color}; font-size: ${fontSize}px; font-weight: bold; text-decoration: none; border-radius: ${radius}px; background-color: ${bg}; ${width === 'full' ? 'width: 100%;' : 'width: auto;'} box-sizing: border-box; white-space: nowrap;">
               ${renderedText}
             </a>
           </td>
@@ -320,10 +326,10 @@ export function generateEmailHtml(
           const paddingY = Number(button.paddingY) || 11;
           const minWidth = Math.max(0, Number(button.minWidth) || 0);
           const fontSize = Number(button.fontSize) || 14;
-          const renderedButtonText = preserveRichTextLineBreaks(rep(sanitizeHtml(button.text || '')));
-          return `<td align="center" bgcolor="${button.bg || '#0F3A72'}"${minWidth ? ` width="${minWidth}"` : ''} style="border-radius:${button.radius ?? 8}px;padding:${paddingY}px ${paddingX}px;background-color:${button.bg || '#0F3A72'};${minWidth ? `min-width:${minWidth}px;` : ''}"><a href="${rep(button.link || '')}" target="_blank" style="display:inline-block;font-family:${fontFamily};color:${button.color || '#ffffff'};font-size:${fontSize}px;line-height:1.2;font-weight:bold;text-decoration:none;white-space:normal;">${renderedButtonText}</a></td>${index < buttons.length - 1 ? `<td width="${gap}" style="width:${gap}px;font-size:1px;line-height:1px;">&nbsp;</td>` : ''}`;
+          const renderedButtonText = preserveRichTextLineBreaks(rep(sanitizeHtml(button.html || escapePlainTextHtml(button.text || ''))));
+          return `<td class="ft-email-button-cell" align="center" bgcolor="${button.bg || '#0F3A72'}"${minWidth ? ` width="${minWidth}"` : ''} style="border-radius:${button.radius ?? 8}px;padding:${paddingY}px ${paddingX}px;background-color:${button.bg || '#0F3A72'};${minWidth ? `min-width:${minWidth}px;` : ''}"><a class="ft-email-button-text" href="${rep(button.link || '')}" target="_blank" style="display:inline-block;font-family:${fontFamily};color:${button.color || '#ffffff'};font-size:${fontSize}px;line-height:1.2;font-weight:bold;text-decoration:none;white-space:nowrap;">${renderedButtonText}</a></td>${index < buttons.length - 1 ? `<td width="${gap}" style="width:${gap}px;font-size:1px;line-height:1px;">&nbsp;</td>` : ''}`;
         }).join('');
-        return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr><td align="${align}" style="padding:0;"><table role="presentation" border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;display:inline-table;"><tr>${cells}</tr></table></td></tr></table>`;
+        return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr><td align="${align}" style="padding:0;"><table role="presentation" class="ft-email-button-group" border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;display:inline-table;"><tr>${cells}</tr></table></td></tr></table>`;
       }
 
       case 'highlight-box': {
@@ -466,7 +472,7 @@ export function generateEmailHtml(
           // email clients that ignore percentage heights on nested tables.
           return `<td width="${width.toFixed(2)}%" height="${targetHeight}" valign="top" bgcolor="${finalCell.cell.background}" style="width:${widthStyle};height:${targetHeight}px;padding:0;vertical-align:top;background-color:${finalCell.cell.background};"><table role="presentation" width="100%" height="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;height:100%;min-height:${targetHeight}px;border-collapse:separate;">${rows}</table></td>${spacer}`;
         }).join('');
-        return `<table role="presentation" width="100%" height="${targetHeight}" border="0" cellspacing="0" cellpadding="0" style="width:100%;height:${targetHeight}px;table-layout:fixed;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr height="${targetHeight}" style="height:${targetHeight}px;">${columnCells}</tr></table>`;
+        return `<table role="presentation" class="ft-email-layout" width="100%" height="${targetHeight}" border="0" cellspacing="0" cellpadding="0" style="width:100%;height:${targetHeight}px;table-layout:fixed;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr height="${targetHeight}" style="height:${targetHeight}px;">${columnCells}</tr></table>`;
       }      case 'data-table': {
         const rows: string[][] = Array.isArray(content.rows) ? content.rows : [];
         const heading = content.heading ? `<div style="margin:0 0 10px;font-family:${fontFamily};font-size:18px;line-height:1.3;font-weight:bold;color:#0F3A72;">${rep(content.heading)}</div>` : '';
@@ -492,6 +498,23 @@ export function generateEmailHtml(
   };
 
   const blockHtmls = template.blocks.map(block => renderBlock(block)).join('\n');
+  const responsiveStyle = `<style type="text/css">
+    html, body { width: 100% !important; min-width: 0 !important; }
+    .ft-email-root, .ft-email-content { width: 100% !important; }
+    .ft-email-root table { max-width: 100% !important; }
+    .ft-email-root img { max-width: 100% !important; height: auto !important; }
+    .ft-email-layout { width: 100% !important; table-layout: fixed !important; }
+    @media only screen and (max-width: 480px) {
+      .ft-email-content-cell { padding: 16px !important; }
+      .ft-email-root td, .ft-email-root th { overflow-wrap: anywhere !important; word-break: break-word !important; }
+      .ft-email-root table[width] { width: 100% !important; }
+      .ft-email-button-table, .ft-email-button-group { max-width: 100% !important; }
+      .ft-email-button-table { min-width: 0 !important; }
+      .ft-email-button-group { width: 100% !important; table-layout: fixed !important; }
+      .ft-email-button-cell { width: auto !important; min-width: 0 !important; padding-left: 8px !important; padding-right: 8px !important; }
+      .ft-email-button-text { white-space: normal !important; overflow-wrap: anywhere !important; word-break: break-word !important; }
+    }
+  </style>`;
 
   // Wrapper template
   const html = `<!DOCTYPE html>
@@ -499,15 +522,16 @@ export function generateEmailHtml(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  ${responsiveStyle}
   <title>${processedSubject}</title>
 </head>
 <body style="margin: 0; padding: 0; background-color: #ffffff; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;">
-  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; background-color: #ffffff;">
+  <table role="presentation" class="ft-email-root" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; background-color: #ffffff;">
     <tr>
       <td align="center" style="padding: 0;">
-        <table role="presentation" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
+        <table role="presentation" class="ft-email-content" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
           <tr>
-            <td style="padding: ${settings.contentPadding}px;">
+            <td class="ft-email-content-cell" style="padding: ${settings.contentPadding}px;">
               ${blockHtmls}
             </td>
           </tr>
@@ -519,12 +543,12 @@ export function generateEmailHtml(
 </html>`;
 
   // Fallback wrapper if the preview document cannot be sliced as expected.
-  const fallbackCopyHtml = `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; background-color: #ffffff;">
+  const fallbackCopyHtml = `<table role="presentation" class="ft-email-root" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; background-color: #ffffff;">
   <tr>
     <td align="center" style="padding: 0;">
-      <table role="presentation" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
+      <table role="presentation" class="ft-email-content" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
         <tr>
-          <td style="padding: ${settings.contentPadding}px;">
+          <td class="ft-email-content-cell" style="padding: ${settings.contentPadding}px;">
             ${blockHtmls}
           </td>
         </tr>
@@ -534,8 +558,9 @@ export function generateEmailHtml(
 </table>`;
   const previewFragmentStart = html.indexOf('<table role="presentation"');
   const previewFragmentEnd = html.lastIndexOf('</table>') + '</table>'.length;
-  const copyHtml = previewFragmentStart >= 0 && previewFragmentEnd > previewFragmentStart
+  const copyTableHtml = previewFragmentStart >= 0 && previewFragmentEnd > previewFragmentStart
     ? html.slice(previewFragmentStart, previewFragmentEnd) : fallbackCopyHtml;
+  const copyHtml = `${responsiveStyle}${copyTableHtml}`;
 
   // Build plain text fallback
   const plainTextLines: string[] = [];

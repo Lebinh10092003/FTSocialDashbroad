@@ -27,6 +27,7 @@ interface BlockToolbarProps {
   activeFontSize?: number;
   activeTextColor?: string;
   activeAlign?: 'left' | 'center' | 'right';
+  inlineOnly?: boolean;
 }
 
 export default function BlockToolbar({
@@ -37,6 +38,7 @@ export default function BlockToolbar({
   onLinkChange,
   activeFontSize = 15,
   activeTextColor = '#1E293B',
+  inlineOnly = false,
   activeAlign = 'left',
 }: BlockToolbarProps) {
   const dialog = useEmailBuilderDialog();
@@ -82,17 +84,19 @@ export default function BlockToolbar({
           <button type="button" onClick={() => { exec('removeFormat'); setShowColors(false); }} className="mt-2 w-full rounded-lg bg-rose-50 py-1.5 text-[10px] font-bold text-rose-600 hover:bg-rose-100">Xóa định dạng vùng chọn</button>
         </div>}
       </div>
-      <button type="button" onClick={createLink} title="Chèn liên kết" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Link className="h-4 w-4" /></button>
-      <button type="button" onClick={removeLink} title="Xóa liên kết" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Link2Off className="h-4 w-4" /></button>
-      <button type="button" onClick={() => exec('insertUnorderedList')} title="Danh sách gạch đầu dòng" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><List className="h-4 w-4" /></button>
-      <button type="button" onClick={() => exec('insertOrderedList')} title="Danh sách số" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><ListOrdered className="h-4 w-4" /></button>
-      <button type="button" onClick={async () => { const url = await dialog.prompt('Dán URL ảnh HTTPS:', { title: 'Chèn ảnh từ URL', defaultValue: 'https://', placeholder: 'https://example.com/image.png' }); if (url) exec('insertImage', url); }} title="Chèn ảnh từ URL" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><ImagePlus className="h-4 w-4" /></button>
-      {onAlignChange && <>
+      {!inlineOnly && <>
+        <button type="button" onClick={createLink} title="Chèn liên kết" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Link className="h-4 w-4" /></button>
+        <button type="button" onClick={removeLink} title="Xóa liên kết" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Link2Off className="h-4 w-4" /></button>
+        <button type="button" onClick={() => exec('insertUnorderedList')} title="Danh sách gạch đầu dòng" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><List className="h-4 w-4" /></button>
+        <button type="button" onClick={() => exec('insertOrderedList')} title="Danh sách số" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><ListOrdered className="h-4 w-4" /></button>
+        <button type="button" onClick={async () => { const url = await dialog.prompt('Dán URL ảnh HTTPS:', { title: 'Chèn ảnh từ URL', defaultValue: 'https://', placeholder: 'https://example.com/image.png' }); if (url) exec('insertImage', url); }} title="Chèn ảnh từ URL" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><ImagePlus className="h-4 w-4" /></button>
+      </>}
+      {!inlineOnly && onAlignChange && <>
         {(['left', 'center', 'right'] as const).map(align => <button key={align} type="button" onClick={() => onAlignChange(align)} className={`rounded-lg p-2 ${activeAlign === align ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:bg-slate-200'}`} title={`Căn ${align === 'left' ? 'trái' : align === 'center' ? 'giữa' : 'phải'}`}>
           {align === 'left' ? <AlignLeft className="h-4 w-4" /> : align === 'center' ? <AlignCenter className="h-4 w-4" /> : <AlignRight className="h-4 w-4" />}
         </button>)}
       </>}
-      <button type="button" onClick={onInsertVariableClick} className="ml-auto flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white"><Tag className="h-3.5 w-3.5" />Chèn biến</button>
+      {!inlineOnly && <button type="button" onClick={onInsertVariableClick} className="ml-auto flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white"><Tag className="h-3.5 w-3.5" />Chèn biến</button>}
     </div>
   );
 }
