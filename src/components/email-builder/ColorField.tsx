@@ -1,78 +1,87 @@
 import React from 'react';
+import { ChevronDown, Palette } from 'lucide-react';
+import {
+  EMAIL_COLOR_SWATCHES,
+  EmailColorSwatch,
+  formatEmailColor,
+  normalizeEmailColor,
+  parseEmailColor,
+} from '../../lib/emailColor';
 
-export const EMAIL_COLOR_SWATCHES = [
-  { value: '#0f3a72', name: 'Fermat Deep' },
-  { value: '#1473d1', name: 'Fermat Blue' },
-  { value: '#16a34a', name: 'Emerald' },
-  { value: '#ea580c', name: 'Orange' },
-  { value: '#e11d48', name: 'Rose Red' },
-  { value: '#f8fafc', name: 'Soft Slate' },
-  { value: '#f1f5f9', name: 'Light Slate' },
-  { value: '#1e293b', name: 'Dark Slate' },
-  { value: '#ffffff', name: 'White' },
-];
-
-const HEX_3_OR_6 = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
-const HEX_6 = /^#[0-9a-fA-F]{6}$/;
-
-function expandHex(value: string) {
-  const normalized = value.trim();
-  if (!/^#[0-9a-fA-F]{3}$/.test(normalized)) return normalized.toLowerCase();
-  return `#${normalized[1]}${normalized[1]}${normalized[2]}${normalized[2]}${normalized[3]}${normalized[3]}`.toLowerCase();
-}
-
-function normalizeHex(value: string) {
-  const withHash = value.trim().startsWith('#') ? value.trim() : `#${value.trim()}`;
-  return HEX_3_OR_6.test(withHash) ? expandHex(withHash) : null;
-}
-
-function colorInputValue(value: string | undefined, fallback: string) {
-  const normalized = normalizeHex(value || '');
-  return normalized && HEX_6.test(normalized) ? normalized : fallback;
-}
+export { EMAIL_COLOR_SWATCHES } from '../../lib/emailColor';
 
 interface ColorFieldProps {
   label: string;
   value?: string;
   fallback?: string;
-  swatches?: Array<{ value: string; name: string }>;
+  swatches?: EmailColorSwatch[];
   onChange: (color: string) => void;
+  compact?: boolean;
 }
 
 export default function ColorField({
   label,
   value,
-  fallback = '#ffffff',
+  fallback = '#FFFFFF',
   swatches = EMAIL_COLOR_SWATCHES,
   onChange,
+  compact = false,
 }: ColorFieldProps) {
-  const [draft, setDraft] = React.useState(value || fallback);
+  const initialFormat = String(value || '').trim().toLowerCase().startsWith('rgb') ? 'rgb' : 'hex';
+  const [format, setFormat] = React.useState<'hex' | 'rgb'>(initialFormat);
+  const [draft, setDraft] = React.useState(() => formatEmailColor(value, initialFormat, fallback));
+  const [showPalette, setShowPalette] = React.useState(false);
 
   React.useEffect(() => {
-    setDraft(value || fallback);
-  }, [fallback, value]);
+    setDraft(formatEmailColor(value, format, fallback));
+  }, [fallback, format, value]);
 
   const commit = (next: string) => {
-    const normalized = normalizeHex(next);
-    if (!normalized) return false;
-    setDraft(normalized);
-    onChange(normalized);
+    const parsed = parseEmailColor(next);
+    if (!parsed) return false;
+    setDraft(format === 'rgb' ? parsed.rgb : parsed.hex);
+    onChange(parsed.hex);
     return true;
   };
 
-  const pickerValue = colorInputValue(draft, fallback);
-  const isDraftValid = Boolean(normalizeHex(draft));
+  const parsedDraft = parseEmailColor(draft);
+  const parsedValue = parseEmailColor(value) || parseEmailColor(fallback);
+  const pickerValue = parsedDraft?.hex || normalizeEmailColor(fallback);
+  const quickColorValues = ['#0F3A72', '#1473D1', '#16A34A', '#EA580C', '#E11D48', '#7C3AED', '#F59E0B', '#0891B2', '#FFFFFF', '#F1F5F9', '#1E293B', '#000000'];
+  const preferredSwatches = quickColorValues.map(color => swatches.find(swatch => normalizeEmailColor(swatch.value) === color)).filter(Boolean) as EmailColorSwatch[];
+  const quickSwatches = (preferredSwatches.length ? preferredSwatches : swatches).slice(0, compact ? 8 : 12);
+  const setColorFormat = (nextFormat: 'hex' | 'rgb') => {
+    setFormat(nextFormat);
+    setDraft(formatEmailColor(draft, nextFormat, fallback));
+  };
 
   return (
     <div className="space-y-2">
-      <label className="block text-[10px] font-bold text-slate-500">{label}</label>
+      <div className="flex items-center justify-between gap-2">
+        <label className="block text-[10px] font-bold text-slate-500">{label}</label>
+        <div className="flex rounded-md bg-slate-100 p-0.5" aria-label="Định dạng mã màu">
+          {(['hex', 'rgb'] as const).map(item => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setColorFormat(item)}
+              className={`rounded px-1.5 py-0.5 text-[8px] font-black uppercase transition ${
+                format === item ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="flex items-center gap-2">
         <input
           type="color"
           value={pickerValue}
           onChange={event => commit(event.target.value)}
           className="h-9 w-10 shrink-0 cursor-pointer rounded-lg border border-slate-200 bg-white p-1 shadow-sm"
-          aria-label={`${label} color picker`}
+          aria-label={`Mở bộ chọn ${label.toLowerCase()}`}
+          title="Mở bộ chọn màu đầy đủ"
         />
         <input
           type="text"
@@ -80,38 +89,82 @@ export default function ColorField({
           onChange={event => {
             const next = event.target.value;
             setDraft(next);
-            const normalized = normalizeHex(next);
-            if (normalized) onChange(normalized);
+            const parsed = parseEmailColor(next);
+            if (parsed) onChange(parsed.hex);
           }}
           onBlur={() => {
-            if (!commit(draft)) setDraft(value || fallback);
+            if (!commit(draft)) setDraft(formatEmailColor(value, format, fallback));
+          }}
+          onKeyDown={event => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              commit(draft);
+              event.currentTarget.blur();
+            }
           }}
           spellCheck={false}
-          className={`h-9 w-full rounded-lg border px-3 text-xs font-semibold uppercase outline-none shadow-sm transition ${
-            isDraftValid ? 'border-slate-200 focus:border-blue-500' : 'border-rose-300 bg-rose-50 text-rose-700 focus:border-rose-400'
+          className={`h-9 min-w-0 flex-1 rounded-lg border px-3 text-xs font-semibold outline-none shadow-sm transition ${
+            parsedDraft ? 'border-slate-200 focus:border-blue-500' : 'border-rose-300 bg-rose-50 text-rose-700 focus:border-rose-400'
           }`}
-          placeholder="#1473d1"
+          placeholder={format === 'rgb' ? 'rgb(20, 115, 209)' : '#1473D1'}
+          aria-invalid={!parsedDraft}
         />
       </div>
-      <div className="grid grid-cols-9 gap-1.5 pt-0.5">
-        {swatches.map(swatch => (
+      <div className="flex flex-wrap items-center gap-1.5">
+        {quickSwatches.map(swatch => (
           <button
             key={swatch.value}
             type="button"
             onClick={() => commit(swatch.value)}
-            title={swatch.name}
-            className={`h-6 rounded-md border transition hover:scale-105 ${
-              normalizeHex(value || '') === swatch.value
+            title={`${swatch.name} · ${swatch.value}`}
+            aria-label={`Chọn màu ${swatch.name}`}
+            className={`h-5 w-5 rounded-md border transition hover:-translate-y-0.5 ${
+              parsedDraft?.hex === normalizeEmailColor(swatch.value)
                 ? 'border-white ring-2 ring-blue-550'
-                : 'border-slate-250/40'
+                : 'border-slate-300'
             }`}
             style={{ backgroundColor: swatch.value }}
           />
         ))}
+        {swatches.length > quickSwatches.length && (
+          <button
+            type="button"
+            onClick={() => setShowPalette(open => !open)}
+            className="ml-auto inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[8px] font-black text-slate-500 hover:border-blue-300 hover:text-blue-700"
+            aria-expanded={showPalette}
+          >
+            <Palette className="h-3 w-3" />
+            {showPalette ? 'Thu gọn' : 'Bảng màu'}
+            <ChevronDown className={`h-3 w-3 transition ${showPalette ? 'rotate-180' : ''}`} />
+          </button>
+        )}
       </div>
-      {!isDraftValid ? (
-        <p className="text-[9px] font-bold text-rose-600">Mã màu phải có dạng #RRGGBB hoặc #RGB.</p>
-      ) : null}
+      {showPalette && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5 shadow-inner">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(24px,1fr))] gap-1.5">
+            {swatches.map(swatch => (
+              <button
+                key={swatch.value}
+                type="button"
+                onClick={() => commit(swatch.value)}
+                title={`${swatch.name} · ${swatch.value}`}
+                aria-label={`Chọn màu ${swatch.name}`}
+                className={`aspect-square min-h-6 rounded-md border transition hover:scale-110 ${
+                  parsedDraft?.hex === normalizeEmailColor(swatch.value)
+                    ? 'border-white ring-2 ring-blue-550'
+                    : 'border-slate-300'
+                }`}
+                style={{ backgroundColor: swatch.value }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      {parsedDraft ? (
+        <p className="text-[9px] font-medium text-slate-400">{parsedDraft.hex} · {parsedDraft.rgb}</p>
+      ) : (
+        <p className="text-[9px] font-bold text-rose-600">Nhập #RGB, #RRGGBB hoặc rgb(0, 0, 0).</p>
+      )}
     </div>
   );
 }

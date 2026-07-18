@@ -73,7 +73,7 @@ export function generateEmailHtml(
     if (!block.visible) return '';
 
     const content = block.content;
-    const blockTextColor = inheritedTextColor || textColor;
+    const blockTextColor = content.color || inheritedTextColor || textColor;
     const styles = block.styles;
     const marginTop = styles.marginTop ?? 10;
     const marginBottom = styles.marginBottom ?? 10;

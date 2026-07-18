@@ -12,14 +12,17 @@ import {
   ListOrdered,
   Palette,
   Tag,
-  Underline
+  Underline,
 } from 'lucide-react';
+import ColorField from './ColorField';
 
 interface BlockToolbarProps {
   onInsertVariableClick: () => void;
   onAlignChange?: (align: 'left' | 'center' | 'right') => void;
   onFontSizeChange?: (size: number) => void;
+  onTextColorChange?: (color: string) => void;
   activeFontSize?: number;
+  activeTextColor?: string;
   activeAlign?: 'left' | 'center' | 'right';
 }
 
@@ -27,22 +30,28 @@ export default function BlockToolbar({
   onInsertVariableClick,
   onAlignChange,
   onFontSizeChange,
+  onTextColorChange,
   activeFontSize = 15,
-  activeAlign = 'left'
+  activeTextColor = '#1E293B',
+  activeAlign = 'left',
 }: BlockToolbarProps) {
   const [showColors, setShowColors] = useState(false);
   const [fontSize, setFontSize] = useState(activeFontSize);
   React.useEffect(() => setFontSize(activeFontSize), [activeFontSize]);
   const [showFontSizes, setShowFontSizes] = useState(false);
-  const colors = ['#1e293b', '#0f3a72', '#1473d1', '#e11d48', '#16a34a', '#ea580c', '#4f46e5'];
   const exec = (command: string, value = '') => document.execCommand(command, false, value);
   const keepSelection = (event: React.MouseEvent) => {
-    if (!(event.target instanceof HTMLSelectElement) && !(event.target instanceof HTMLOptionElement)) event.preventDefault();
+    if (!(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLSelectElement) && !(event.target instanceof HTMLOptionElement)) event.preventDefault();
   };
 
   const createLink = () => {
     const url = prompt('Nhập địa chỉ liên kết (URL):', 'https://');
     if (url) exec('createLink', url);
+  };
+
+  const applyTextColor = (color: string) => {
+    if (onTextColorChange) onTextColorChange(color);
+    else exec('foreColor', color);
   };
 
   return (
@@ -59,9 +68,9 @@ export default function BlockToolbar({
       </div>}
       <div className="relative">
         <button type="button" onClick={() => setShowColors(open => !open)} title="Màu chữ" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Palette className="h-4 w-4" /></button>
-        {showColors && <div className="absolute left-0 top-10 z-50 grid grid-cols-4 gap-1.5 rounded-xl border border-slate-200 bg-white p-2.5 shadow-xl">
-          {colors.map(color => <button key={color} type="button" onClick={() => { exec('foreColor', color); setShowColors(false); }} className="h-6 w-6 rounded-md border" style={{ backgroundColor: color }} />)}
-          <button type="button" onClick={() => { exec('removeFormat'); setShowColors(false); }} className="col-span-4 rounded bg-rose-50 py-1 text-[10px] font-bold text-rose-600">Xóa định dạng</button>
+        {showColors && <div className="absolute left-0 top-10 z-50 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-xl" onMouseDown={event => { if (event.target instanceof HTMLInputElement) event.stopPropagation(); }}>
+          <ColorField label="Màu chữ vùng đang chọn" value={activeTextColor} onChange={applyTextColor} compact />
+          <button type="button" onClick={() => { exec('removeFormat'); setShowColors(false); }} className="mt-2 w-full rounded-lg bg-rose-50 py-1.5 text-[10px] font-bold text-rose-600 hover:bg-rose-100">Xóa định dạng vùng chọn</button>
         </div>}
       </div>
       <button type="button" onClick={createLink} title="Chèn liên kết" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Link className="h-4 w-4" /></button>
