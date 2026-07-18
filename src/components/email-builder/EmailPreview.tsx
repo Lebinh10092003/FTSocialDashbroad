@@ -149,12 +149,11 @@ export default function EmailPreview({
         )}
 
         {/* Dynamic Frame container */}
-        <div className="flex-1 overflow-y-auto p-6 bg-slate-200/40 flex justify-center items-start">
+        <div className="flex flex-1 items-start justify-start overflow-auto bg-slate-200/40 p-6">
           <div
-            className="transition-all duration-300 bg-white border border-slate-200 w-full flex flex-col shrink-0"
+            className="mx-auto flex shrink-0 flex-col border border-slate-200 bg-white transition-all duration-300"
             style={{
-              width: viewMode === 'mobile' ? '375px' : '100%',
-              maxWidth: viewMode === 'mobile' ? '375px' : `${template.settings.maxWidth}px`
+              width: viewMode === 'mobile' ? '375px' : `${template.settings.maxWidth}px`
             }}
           >
             {/* Subject preview */}

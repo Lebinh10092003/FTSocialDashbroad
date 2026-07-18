@@ -166,7 +166,7 @@ export function generateEmailHtml(
       case 'heading': {
         const text = content.text || '';
         const level = content.level || 'h2';
-        const fontSize = content.fontSize || 18;
+        const fontSize = content.fontSize || 20;
         const color = content.color || '#0f3a72';
         const bold = content.bold !== false;
         const align = content.align || 'left';
@@ -276,6 +276,7 @@ export function generateEmailHtml(
 
       case 'button': {
         const text = content.text || '';
+        const renderedText = preserveRichTextLineBreaks(rep(sanitizeHtml(text)));
         const link = content.link || '';
         const bg = content.bg || settings.btnDefaultBg || '#1473d1';
         const color = content.color || settings.btnDefaultTextColor || '#ffffff';
@@ -298,7 +299,7 @@ export function generateEmailHtml(
         <tr>
           <td align="center" bgcolor="${bg}" style="border-radius: ${radius}px; padding: ${paddingY}px ${paddingX}px;${minWidth ? `min-width:${minWidth}px;` : ''} text-align: center; background-color: ${bg};" valign="middle">
             <a href="${rep(link)}" target="_blank" style="display: ${width === 'full' ? 'block' : 'inline-block'}; font-family: ${fontFamily}; color: ${color}; font-size: ${fontSize}px; font-weight: bold; text-decoration: none; border-radius: ${radius}px; background-color: ${bg}; width: 100%; box-sizing: border-box;">
-              ${rep(text)}
+              ${renderedText}
             </a>
           </td>
         </tr>
@@ -319,7 +320,8 @@ export function generateEmailHtml(
           const paddingY = Number(button.paddingY) || 11;
           const minWidth = Math.max(0, Number(button.minWidth) || 0);
           const fontSize = Number(button.fontSize) || 14;
-          return `<td align="center" bgcolor="${button.bg || '#0F3A72'}"${minWidth ? ` width="${minWidth}"` : ''} style="border-radius:${button.radius ?? 8}px;padding:${paddingY}px ${paddingX}px;background-color:${button.bg || '#0F3A72'};${minWidth ? `min-width:${minWidth}px;` : ''}"><a href="${rep(button.link || '')}" target="_blank" style="display:inline-block;font-family:${fontFamily};color:${button.color || '#ffffff'};font-size:${fontSize}px;line-height:1.2;font-weight:bold;text-decoration:none;white-space:nowrap;">${rep(button.text || '')}</a></td>${index < buttons.length - 1 ? `<td width="${gap}" style="width:${gap}px;font-size:1px;line-height:1px;">&nbsp;</td>` : ''}`;
+          const renderedButtonText = preserveRichTextLineBreaks(rep(sanitizeHtml(button.text || '')));
+          return `<td align="center" bgcolor="${button.bg || '#0F3A72'}"${minWidth ? ` width="${minWidth}"` : ''} style="border-radius:${button.radius ?? 8}px;padding:${paddingY}px ${paddingX}px;background-color:${button.bg || '#0F3A72'};${minWidth ? `min-width:${minWidth}px;` : ''}"><a href="${rep(button.link || '')}" target="_blank" style="display:inline-block;font-family:${fontFamily};color:${button.color || '#ffffff'};font-size:${fontSize}px;line-height:1.2;font-weight:bold;text-decoration:none;white-space:normal;">${renderedButtonText}</a></td>${index < buttons.length - 1 ? `<td width="${gap}" style="width:${gap}px;font-size:1px;line-height:1px;">&nbsp;</td>` : ''}`;
         }).join('');
         return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr><td align="${align}" style="padding:0;"><table role="presentation" border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;display:inline-table;"><tr>${cells}</tr></table></td></tr></table>`;
       }
@@ -516,8 +518,8 @@ export function generateEmailHtml(
 </body>
 </html>`;
 
-  // Clean wrapper snippet for safe Gmail copying
-  const copyHtml = `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; background-color: #ffffff;">
+  // Fallback wrapper if the preview document cannot be sliced as expected.
+  const fallbackCopyHtml = `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; background-color: #ffffff;">
   <tr>
     <td align="center" style="padding: 0;">
       <table role="presentation" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
@@ -530,6 +532,10 @@ export function generateEmailHtml(
     </td>
   </tr>
 </table>`;
+  const previewFragmentStart = html.indexOf('<table role="presentation"');
+  const previewFragmentEnd = html.lastIndexOf('</table>') + '</table>'.length;
+  const copyHtml = previewFragmentStart >= 0 && previewFragmentEnd > previewFragmentStart
+    ? html.slice(previewFragmentStart, previewFragmentEnd) : fallbackCopyHtml;
 
   // Build plain text fallback
   const plainTextLines: string[] = [];

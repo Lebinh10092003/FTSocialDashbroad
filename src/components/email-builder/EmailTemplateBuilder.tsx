@@ -464,7 +464,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace }: EmailTemplateBuilder
   const handleCopyEmail = async () => {
     if (!activeTemplate) return;
     const { copyHtml, plainText } = generateEmailHtml(activeTemplate, variables, false);
-    const success = await copyEmailToClipboard(copyHtml, plainText);
+    const success = await copyEmailToClipboard(copyHtml, plainText, activeTemplate.settings.maxWidth);
     if (success) {
       setCopySuccess(true);
       showToast('Đã copy nội dung email.');

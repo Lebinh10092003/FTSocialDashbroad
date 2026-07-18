@@ -3,14 +3,14 @@
  * Uses synchronous selection copying to preserve user gesture trust, which is highly compatible
  * with rich-text pasting into Gmail/Outlook and supports embedded Base64 images without security blocks.
  */
-export async function copyEmailToClipboard(htmlContent: string, plainTextContent: string): Promise<boolean> {
+export async function copyEmailToClipboard(htmlContent: string, plainTextContent: string, emailWidth = 650): Promise<boolean> {
   try {
     // 1. Create a temporary hidden container in the DOM
     const tempDiv = document.createElement('div');
     tempDiv.style.position = 'fixed';
     tempDiv.style.left = '-9999px';
     tempDiv.style.top = '0';
-    tempDiv.style.width = '650px';
+    tempDiv.style.width = `${emailWidth}px`;
     tempDiv.style.overflow = 'hidden';
     tempDiv.innerHTML = htmlContent;
     document.body.appendChild(tempDiv);

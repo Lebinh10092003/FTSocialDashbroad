@@ -8,6 +8,7 @@ import {
   ImagePlus,
   Italic,
   Link,
+  Link2Off,
   List,
   ListOrdered,
   Palette,
@@ -22,6 +23,7 @@ interface BlockToolbarProps {
   onAlignChange?: (align: 'left' | 'center' | 'right') => void;
   onFontSizeChange?: (size: number) => void;
   onTextColorChange?: (color: string) => void;
+  onLinkChange?: (url: string | null) => void;
   activeFontSize?: number;
   activeTextColor?: string;
   activeAlign?: 'left' | 'center' | 'right';
@@ -32,6 +34,7 @@ export default function BlockToolbar({
   onAlignChange,
   onFontSizeChange,
   onTextColorChange,
+  onLinkChange,
   activeFontSize = 15,
   activeTextColor = '#1E293B',
   activeAlign = 'left',
@@ -48,8 +51,12 @@ export default function BlockToolbar({
 
   const createLink = async () => {
     const url = await dialog.prompt('Nhập địa chỉ liên kết (URL):', { title: 'Chèn liên kết', defaultValue: 'https://', placeholder: 'https://example.com' });
-    if (url) exec('createLink', url);
+    if (!url) return;
+    if (onLinkChange) onLinkChange(url);
+    else exec('createLink', url);
   };
+  const removeLink = () => onLinkChange ? onLinkChange(null) : exec('unlink');
+
 
   const applyTextColor = (color: string) => {
     if (onTextColorChange) onTextColorChange(color);
@@ -76,6 +83,7 @@ export default function BlockToolbar({
         </div>}
       </div>
       <button type="button" onClick={createLink} title="Chèn liên kết" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Link className="h-4 w-4" /></button>
+      <button type="button" onClick={removeLink} title="Xóa liên kết" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Link2Off className="h-4 w-4" /></button>
       <button type="button" onClick={() => exec('insertUnorderedList')} title="Danh sách gạch đầu dòng" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><List className="h-4 w-4" /></button>
       <button type="button" onClick={() => exec('insertOrderedList')} title="Danh sách số" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><ListOrdered className="h-4 w-4" /></button>
       <button type="button" onClick={async () => { const url = await dialog.prompt('Dán URL ảnh HTTPS:', { title: 'Chèn ảnh từ URL', defaultValue: 'https://', placeholder: 'https://example.com/image.png' }); if (url) exec('insertImage', url); }} title="Chèn ảnh từ URL" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><ImagePlus className="h-4 w-4" /></button>
