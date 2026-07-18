@@ -268,7 +268,7 @@ apiRouter.put('/examination/sessions/:id', authenticateUser, requireManagerOrAdm
   for (const key of allowed) if (typeof req.body?.[key] === 'string') updates[key] = req.body[key].trim();
   if (Object.keys(updates).length === 2) return res.status(400).json({ error: 'Không có thông tin hợp lệ để cập nhật.' });
   const ref = adminDb.collection(EXAMINATION_COLLECTIONS.sessions).doc(req.params.id);
-  const existing = await ref.get(); if (!existing.exists) return res.status(404).json({ error: 'Không tìm thấy đợt tổ chức.' });
+  const existing = await ref.get(); if (!existing.exists) return res.status(404).json({ error: 'Không tìm thấy kỳ tổ chức.' });
   await ref.update(updates); const latest = await ref.get(); res.json({ id: latest.id, ...latest.data() });
 });
 apiRouter.put('/examination/candidates/:id', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {

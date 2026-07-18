@@ -12,7 +12,12 @@ export default function BlockLibrary({ onAddBlock, width }: BlockLibraryProps) {
   const [draggingBlock, setDraggingBlock] = useState<string | null>(null);
   const pressTimer = useRef<number | null>(null);
   const longPress = useRef(false);
-  const columns = width >= 290 ? 4 : width >= 220 ? 3 : width >= 145 ? 2 : 1;
+// Keep 1–2 columns visually stable.  At 3 columns cards grow only to 72px,
+  // then the remaining width becomes breathing room; only after that do we add a 4th column.
+  const contentWidth = Math.max(52, width - 16);
+  const columns = contentWidth >= 312 ? 4 : contentWidth >= 208 ? 3 : contentWidth >= 136 ? 2 : 1;
+  const cardWidth = columns <= 2 ? 64 : columns === 3 ? Math.min(72, Math.max(64, (contentWidth - 16) / 3)) : Math.min(84, Math.max(72, (contentWidth - 24) / 4));
+  const gap = columns === 1 ? 0 : Math.max(8, (contentWidth - columns * cardWidth) / (columns - 1));
 
   const showTooltip = (id: string, label: string, description: string, target: HTMLElement) => {
     const rect = target.getBoundingClientRect();
@@ -36,7 +41,7 @@ export default function BlockLibrary({ onAddBlock, width }: BlockLibraryProps) {
         const blocks = Object.values(EMAIL_BLOCK_REGISTRY).filter(item => item.category === category.id);
         return <section key={category.id} className="mb-4">
           <h3 className="mb-2 px-1 text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">{category.label}</h3>
-          <div className="grid justify-center gap-2" style={{ gridTemplateColumns: `repeat(${columns}, minmax(52px, 64px))` }}>
+          <div className="grid justify-center gap-2" style={{ gridTemplateColumns: `repeat(${columns}, ${cardWidth}px)`, columnGap: `${gap}px`, rowGap: "8px" }}>
             {blocks.map(item => {
               const Icon = (Icons as any)[item.icon] || Icons.Square;
               return <button key={item.id} type="button" draggable aria-label={item.label} onDragStart={e => { e.dataTransfer.setData('application/x-ft-email-block', item.id); e.dataTransfer.effectAllowed = 'copy'; setDraggingBlock(item.id); hideTooltip(); }} onDragEnd={() => setDraggingBlock(null)} onPointerEnter={e => showTooltip(item.id, item.label, item.description, e.currentTarget)} onPointerLeave={hideTooltip} onFocus={e => showTooltip(item.id, item.label, item.description, e.currentTarget)} onBlur={hideTooltip} onPointerDown={e => startPress(item.id, item.label, item.description, e)} onPointerUp={endPress} onPointerCancel={endPress} onClick={() => { if (longPress.current) { longPress.current = false; return; } onAddBlock(item.id); }} className={"group flex h-[62px] flex-col items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-1 text-center transition hover:-translate-y-px hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-400 " + (draggingBlock === item.id ? "scale-95 cursor-grabbing opacity-45" : "cursor-grab")}>
