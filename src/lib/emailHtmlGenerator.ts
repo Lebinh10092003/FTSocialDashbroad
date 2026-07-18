@@ -423,10 +423,14 @@ export function generateEmailHtml(
             const cellHtml = `<tr><td height="${height}" valign="${cell.verticalAlign}" bgcolor="${cell.background}" style="height:${height}px;padding:${cell.padding}px;background-color:${cell.background};color:${cell.color || blockTextColor};border:${cell.borderWidth}px solid ${cell.borderColor};border-radius:${cell.borderRadius}px;vertical-align:${cell.verticalAlign};font-family:${fontFamily};">${inner}</td></tr>`;
             return cellHtml + (cellIndex < column.cells.length - 1 ? `<tr><td height="${verticalGap}" style="height:${verticalGap}px;font-size:1px;line-height:1px;padding:0;">&nbsp;</td></tr>` : '');
           }).join('');
-          const width = Math.max(1, Number(column.width) || 1) / totalWeight * 100;
-          return `<td width="${width.toFixed(2)}%" valign="top" style="width:${width.toFixed(2)}%;padding:0;vertical-align:top;"><table role="presentation" width="100%" height="${targetHeight}" border="0" cellspacing="0" cellpadding="0" style="width:100%;height:${targetHeight}px;border-collapse:separate;">${rows}</table></td>${columnIndex < layout.length - 1 ? `<td width="${horizontalGap}" style="width:${horizontalGap}px;font-size:1px;line-height:1px;padding:0;">&nbsp;</td>` : ''}`;
+          const columnWeight = Math.max(1, Number(column.width) || 1);
+          const width = columnWeight / totalWeight * 100;
+          const gapShare = horizontalGap * Math.max(0, layout.length - 1) * columnWeight / totalWeight;
+          const widthStyle = horizontalGap ? `calc(${width.toFixed(2)}% - ${gapShare.toFixed(2)}px)` : `${width.toFixed(2)}%`;
+          const spacer = columnIndex < layout.length - 1 ? `<td width="${horizontalGap}" style="width:${horizontalGap}px;min-width:${horizontalGap}px;font-size:1px;line-height:1px;padding:0;">&nbsp;</td>` : '';
+          return `<td width="${width.toFixed(2)}%" height="100%" valign="top" style="width:${widthStyle};height:100%;padding:0;vertical-align:top;"><table role="presentation" width="100%" height="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;height:100%;min-height:${targetHeight}px;border-collapse:separate;">${rows}</table></td>${spacer}`;
         }).join('');
-        return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr>${columnCells}</tr></table>`;
+        return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr style="height:100%;">${columnCells}</tr></table>`;
       }      case 'data-table': {
         const rows: string[][] = Array.isArray(content.rows) ? content.rows : [];
         const heading = content.heading ? `<div style="margin:0 0 10px;font-family:${fontFamily};font-size:18px;line-height:1.3;font-weight:bold;color:#0F3A72;">${rep(content.heading)}</div>` : '';

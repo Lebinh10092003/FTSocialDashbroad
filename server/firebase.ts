@@ -1,6 +1,12 @@
 import 'dotenv/config';
-import { initializeApp, getApps, getApp, cert } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import { initializeApp, getApps, getApp, cert, type App } from 'firebase-admin/app';
+import {
+  getFirestore,
+  type DocumentData,
+  type Firestore,
+  type Query,
+  type WhereFilterOp
+} from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 import fs from 'fs';
 import path from 'path';
@@ -19,7 +25,26 @@ try {
   console.error('Không thể đọc file cấu hình firebase-applet-config.json:', e);
 }
 
-let app: any;
+type DatabaseRecord = Record<string, any>;
+
+interface WrappedDocumentSnapshot {
+  exists: boolean;
+  id: string;
+  data: () => DatabaseRecord | undefined;
+}
+
+interface WrappedQueryDocumentSnapshot {
+  id: string;
+  data: () => DatabaseRecord;
+}
+
+interface WrappedQuerySnapshot {
+  docs: WrappedQueryDocumentSnapshot[];
+  empty: boolean;
+  size: number;
+}
+
+let app: App;
 if (getApps().length === 0) {
   if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
     try {
@@ -52,7 +77,7 @@ const hasCredentials = !!(
   fs.existsSync(path.join(process.cwd(), 'serviceAccountKey.json'))
 );
 
-let rawFirestore: any = null;
+let rawFirestore: Firestore | null = null;
 if (hasCredentials) {
   try {
     rawFirestore = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
@@ -71,7 +96,7 @@ class WrappedDocRef {
     return this.docId;
   }
 
-  public async get(): Promise<any> {
+  public async get(): Promise<WrappedDocumentSnapshot> {
     if (rawFirestore) {
       try {
         const snap = await rawFirestore.collection(this.colName).doc(this.docId).get();
@@ -150,7 +175,7 @@ class WrappedDocRef {
 }
 
 class WrappedQuery {
-  private filters: Array<{ field: string; op: string; val: any }> = [];
+  private filters: Array<{ field: string; op: WhereFilterOp; val: any }> = [];
   private orderField: string | null = null;
   private orderDir: 'asc' | 'desc' = 'asc';
   private limitCount: number | null = null;
@@ -158,7 +183,11 @@ class WrappedQuery {
 
   constructor(private colName: string) {}
 
-  public where(field: string, op: string, val: any): WrappedQuery {
+  public doc(id?: string): WrappedDocRef {
+    return new WrappedDocRef(this.colName, id || 'main');
+  }
+
+  public where(field: string, op: WhereFilterOp, val: any): WrappedQuery {
     this.filters.push({ field, op, val });
     return this;
   }
@@ -179,10 +208,10 @@ class WrappedQuery {
     return this;
   }
 
-  public async get(): Promise<any> {
+  public async get(): Promise<WrappedQuerySnapshot> {
     if (rawFirestore) {
       try {
-        let q: any = rawFirestore.collection(this.colName);
+        let q: Query<DocumentData> = rawFirestore.collection(this.colName);
         for (const f of this.filters) {
           q = q.where(f.field, f.op, f.val);
         }
@@ -295,28 +324,8 @@ class WrappedBatch {
 }
 
 class WrappedFirestore {
-  public collection(name: string) {
-    return {
-      doc: (id?: string) => {
-        const finalId = id || 'main';
-        return new WrappedDocRef(name, finalId);
-      },
-      get: () => {
-        return new WrappedQuery(name).get();
-      },
-      where: (field: string, op: string, val: any) => {
-        return new WrappedQuery(name).where(field, op, val);
-      },
-      orderBy: (field: string, dir: 'asc' | 'desc' = 'asc') => {
-        return new WrappedQuery(name).orderBy(field, dir);
-      },
-      limit: (n: number) => {
-        return new WrappedQuery(name).limit(n);
-      },
-      startAfter: (value: any) => {
-        return new WrappedQuery(name).startAfter(value);
-      }
-    };
+  public collection(name: string): WrappedQuery {
+    return new WrappedQuery(name);
   }
 
   public batch() {
@@ -324,5 +333,5 @@ class WrappedFirestore {
   }
 }
 
-export const adminDb = new WrappedFirestore() as any;
+export const adminDb = new WrappedFirestore();
 export default app;

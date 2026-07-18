@@ -15,6 +15,7 @@ import {
   Underline,
 } from 'lucide-react';
 import ColorField from './ColorField';
+import { useEmailBuilderDialog } from './EmailBuilderDialog';
 
 interface BlockToolbarProps {
   onInsertVariableClick: () => void;
@@ -35,6 +36,7 @@ export default function BlockToolbar({
   activeTextColor = '#1E293B',
   activeAlign = 'left',
 }: BlockToolbarProps) {
+  const dialog = useEmailBuilderDialog();
   const [showColors, setShowColors] = useState(false);
   const [fontSize, setFontSize] = useState(activeFontSize);
   React.useEffect(() => setFontSize(activeFontSize), [activeFontSize]);
@@ -44,8 +46,8 @@ export default function BlockToolbar({
     if (!(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLSelectElement) && !(event.target instanceof HTMLOptionElement)) event.preventDefault();
   };
 
-  const createLink = () => {
-    const url = prompt('Nhập địa chỉ liên kết (URL):', 'https://');
+  const createLink = async () => {
+    const url = await dialog.prompt('Nhập địa chỉ liên kết (URL):', { title: 'Chèn liên kết', defaultValue: 'https://', placeholder: 'https://example.com' });
     if (url) exec('createLink', url);
   };
 
@@ -76,7 +78,7 @@ export default function BlockToolbar({
       <button type="button" onClick={createLink} title="Chèn liên kết" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><Link className="h-4 w-4" /></button>
       <button type="button" onClick={() => exec('insertUnorderedList')} title="Danh sách gạch đầu dòng" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><List className="h-4 w-4" /></button>
       <button type="button" onClick={() => exec('insertOrderedList')} title="Danh sách số" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><ListOrdered className="h-4 w-4" /></button>
-      <button type="button" onClick={() => { const url = prompt('Dán URL ảnh:', 'https://'); if (url) exec('insertImage', url); }} title="Chèn ảnh từ URL" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><ImagePlus className="h-4 w-4" /></button>
+      <button type="button" onClick={async () => { const url = await dialog.prompt('Dán URL ảnh HTTPS:', { title: 'Chèn ảnh từ URL', defaultValue: 'https://', placeholder: 'https://example.com/image.png' }); if (url) exec('insertImage', url); }} title="Chèn ảnh từ URL" className="rounded-lg p-2 text-slate-600 hover:bg-slate-200"><ImagePlus className="h-4 w-4" /></button>
       {onAlignChange && <>
         {(['left', 'center', 'right'] as const).map(align => <button key={align} type="button" onClick={() => onAlignChange(align)} className={`rounded-lg p-2 ${activeAlign === align ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:bg-slate-200'}`} title={`Căn ${align === 'left' ? 'trái' : align === 'center' ? 'giữa' : 'phải'}`}>
           {align === 'left' ? <AlignLeft className="h-4 w-4" /> : align === 'center' ? <AlignCenter className="h-4 w-4" /> : <AlignRight className="h-4 w-4" />}

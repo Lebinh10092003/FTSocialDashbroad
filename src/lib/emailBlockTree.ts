@@ -40,7 +40,7 @@ export const removeEmailBlock = (blocks: EmailBlock[], id: string): EmailBlock[]
     columns: block.columns ? block.columns.map(column => removeEmailBlock(column, id)) : undefined
   }));
 
-export const moveEmailBlock = (blocks: EmailBlock[], sourceId: string, targetId: string, slotIndex?: number): EmailBlock[] => {
+export const moveEmailBlock = (blocks: EmailBlock[], sourceId: string, targetId: string, slotIndex?: number, position: 'before' | 'after' = 'after'): EmailBlock[] => {
   if (sourceId === targetId) return blocks;
   const next = structuredClone(blocks) as EmailBlock[];
   const source = findEmailBlock(next, sourceId);
@@ -58,7 +58,8 @@ export const moveEmailBlock = (blocks: EmailBlock[], sourceId: string, targetId:
   } else if (target.type === 'section') {
     target.children = [...(target.children || []), source];
   } else {
-    targetList.splice(targetList.findIndex(block => block.id === targetId) + 1, 0, source);
+    const targetIndex = targetList.findIndex(block => block.id === targetId);
+    targetList.splice(targetIndex + (position === 'after' ? 1 : 0), 0, source);
   }
   return next;
 };
@@ -76,6 +77,17 @@ export const addEmailBlock = (blocks: EmailBlock[], block: EmailBlock, parentId?
       : parent;
   });
 };
+
+export const addEmailBlockRelative = (blocks: EmailBlock[], block: EmailBlock, targetId: string, position: 'before' | 'after'): EmailBlock[] => {
+  const next = structuredClone(blocks) as EmailBlock[];
+  const targetList = findList(next, targetId);
+  if (!targetList) return blocks;
+  const targetIndex = targetList.findIndex(item => item.id === targetId);
+  if (targetIndex < 0) return blocks;
+  targetList.splice(targetIndex + (position === 'after' ? 1 : 0), 0, block);
+  return next;
+};
+
 export const moveEmailBlockByDirection = (blocks: EmailBlock[], id: string, direction: 'up' | 'down'): EmailBlock[] => {
   const next = structuredClone(blocks) as EmailBlock[];
   const list = findList(next, id);

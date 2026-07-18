@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Plus, Trash2, Edit2, Copy, Check, X, Tag } from 'lucide-react';
 import { EmailVariable } from '../../types/emailBuilder';
 import { copyTextToClipboard } from '../../lib/emailClipboard';
+import { useEmailBuilderDialog } from './EmailBuilderDialog';
 
 interface VariablePickerProps {
   variables: EmailVariable[];
@@ -20,6 +21,7 @@ export default function VariablePicker({
   onInsertVariable,
   onClose
 }: VariablePickerProps) {
+  const dialog = useEmailBuilderDialog();
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -42,13 +44,13 @@ export default function VariablePicker({
     }
   };
 
-  const handleSaveNew = (e: React.FormEvent) => {
+  const handleSaveNew = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newKey.trim()) return;
     
     // Check if key already exists
     if (variables.some(v => v.key.toLowerCase() === newKey.trim().toLowerCase())) {
-      alert('Tên biến đã tồn tại!');
+      await dialog.alert('Tên biến đã tồn tại!', 'Biến bị trùng');
       return;
     }
 
@@ -71,13 +73,13 @@ export default function VariablePicker({
     setEditDefaultVal(v.defaultValue);
   };
 
-  const handleSaveEdit = (e: React.FormEvent, oldKey: string) => {
+  const handleSaveEdit = async (e: React.FormEvent, oldKey: string) => {
     e.preventDefault();
     if (!editKeyVal.trim()) return;
 
     if (editKeyVal.trim().toLowerCase() !== oldKey.toLowerCase() && 
         variables.some(v => v.key.toLowerCase() === editKeyVal.trim().toLowerCase())) {
-      alert('Tên biến mới bị trùng với biến đã có!');
+      await dialog.alert('Tên biến mới bị trùng với biến đã có!', 'Biến bị trùng');
       return;
     }
 
@@ -278,11 +280,7 @@ export default function VariablePicker({
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={() => {
-                        if (confirm(`Bạn chắc chắn muốn xóa biến {{${v.key}}}?`)) {
-                          onDeleteVariable(v.key);
-                        }
-                      }}
+                      onClick={async () => { if (await dialog.confirm(`Bạn chắc chắn muốn xóa biến {{${v.key}}}?`, { title: 'Xóa biến', confirmText: 'Xóa biến', danger: true })) onDeleteVariable(v.key); }}
                       title="Xóa biến"
                       className="p-2 hover:bg-rose-100 text-rose-600 rounded-lg transition-all cursor-pointer flex items-center justify-center"
                     >

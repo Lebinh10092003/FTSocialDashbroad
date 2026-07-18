@@ -12,7 +12,7 @@ import {
 
 import { BlockType, EmailBlock, EmailSettings, EmailTemplate, EmailVariable } from '../../types/emailBuilder';
 import { createEmailBlock, getBlockDefinition } from '../../data/emailBlockRegistry';
-import { addEmailBlock, duplicateEmailBlock, findEmailBlock, moveEmailBlock, moveEmailBlockByDirection, removeEmailBlock, updateEmailBlock } from '../../lib/emailBlockTree';
+import { addEmailBlock, addEmailBlockRelative, duplicateEmailBlock, findEmailBlock, moveEmailBlock, moveEmailBlockByDirection, removeEmailBlock, updateEmailBlock } from '../../lib/emailBlockTree';
 import { 
   loadTemplates, 
   saveTemplates, 
@@ -31,12 +31,18 @@ import EmailSettingsComponent from './EmailSettings';
 import EmailPreview from './EmailPreview';
 import VariablePicker from './VariablePicker';
 import EmailBuilderHeader from './EmailBuilderHeader';
+import { EmailBuilderDialogProvider, useEmailBuilderDialog } from './EmailBuilderDialog';
 
 interface EmailTemplateBuilderProps {
   onBackToWorkspace: () => void;
 }
 
-export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplateBuilderProps) {
+export default function EmailTemplateBuilder(props: EmailTemplateBuilderProps) {
+  return <EmailBuilderDialogProvider><EmailTemplateBuilderContent {...props} /></EmailBuilderDialogProvider>;
+}
+
+function EmailTemplateBuilderContent({ onBackToWorkspace }: EmailTemplateBuilderProps) {
+  const dialog = useEmailBuilderDialog();
   // 1. Storage & State Management
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [activeTemplateId, setActiveTemplateIdState] = useState<string>('');
@@ -344,9 +350,17 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
     handleUpdateTemplateBlocks(blocks);
   };
 
-  const handleDropBlock = (sourceId: string, targetId: string, slotIndex?: number) => {
+  const handleInsertBlock = (type: BlockType, targetId: string, position: 'before' | 'after') => {
     if (!activeTemplate) return;
-    handleUpdateTemplateBlocks(moveEmailBlock(activeTemplate.blocks, sourceId, targetId, slotIndex));
+    const newBlock = createEmailBlock(type);
+    handleUpdateTemplateBlocks(addEmailBlockRelative(activeTemplate.blocks, newBlock, targetId, position));
+    setSelectedBlockId(newBlock.id);
+    setMobileActiveTab('canvas');
+  };
+
+  const handleDropBlock = (sourceId: string, targetId: string, slotIndex?: number, position: 'before' | 'after' = 'after') => {
+    if (!activeTemplate) return;
+    handleUpdateTemplateBlocks(moveEmailBlock(activeTemplate.blocks, sourceId, targetId, slotIndex, position));
     setSelectedBlockId(sourceId);
   };
 
@@ -389,7 +403,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
       setShowVarPicker(false);
       showToast(`Chèn {{${varName}}} thành công`);
     } else {
-      alert('Vui lòng chọn khối Văn bản hoặc Hộp thông tin trên Canvas để chèn biến!');
+      void dialog.alert('Vui lòng chọn khối Văn bản hoặc Hộp thông tin trên Canvas để chèn biến!', 'Chưa chọn khối');
     }
   };
 
@@ -456,7 +470,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
       showToast('Đã copy nội dung email.');
       setTimeout(() => setCopySuccess(false), 3000);
     } else {
-      alert('Không thể sao chép tự động. Vui lòng mở chế độ xem trước, quét chọn văn bản để sao chép.');
+      await dialog.alert('Không thể sao chép tự động. Vui lòng mở chế độ xem trước, quét chọn văn bản để sao chép.', 'Không thể sao chép');
     }
   };
 
@@ -535,16 +549,16 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
                   const file = e.target.files?.[0];
                   if (file) {
                     const reader = new FileReader();
-                    reader.onload = (event) => {
+                    reader.onload = async (event) => {
                       try {
                         const parsed = JSON.parse(event.target?.result as string);
                         if (parsed.id && parsed.name && parsed.blocks) {
                           handleImportTemplate(parsed);
                         } else {
-                          alert('Định dạng file JSON không hợp lệ.');
+                          await dialog.alert('Định dạng file JSON không hợp lệ.', 'Không thể nhập mẫu');
                         }
                       } catch (err) {
-                        alert('Lỗi đọc file JSON.');
+                        await dialog.alert('Lỗi đọc file JSON.', 'Không thể nhập mẫu');
                       }
                     };
                     reader.readAsText(file);
@@ -556,8 +570,8 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
             </label>
 
             <button
-              onClick={() => {
-                const name = prompt('Nhập tên mẫu email mới:');
+              onClick={async () => {
+                const name = await dialog.prompt('Nhập tên mẫu email mới:', { title: 'Tạo mẫu email', confirmText: 'Tạo mẫu', placeholder: 'Tên mẫu email' });
                 if (name && name.trim()) {
                   const newId = `template-${Date.now()}`;
                   const newTemplate: EmailTemplate = {
@@ -734,8 +748,8 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
 
                         {!isDefault && (
                           <button
-                            onClick={() => {
-                              if (confirm(`Bạn chắc chắn muốn xóa mẫu "${tpl.name}"?`)) {
+                            onClick={async () => {
+                              if (await dialog.confirm(`Bạn chắc chắn muốn xóa mẫu "${tpl.name}"?`, { title: 'Xóa mẫu email', confirmText: 'Xóa mẫu', danger: true })) {
                                 const remaining = templates.filter(t => t.id !== tpl.id);
                                 updateTemplatesList(remaining);
                                 showToast('Đã xóa mẫu email.');
@@ -858,6 +872,7 @@ export default function EmailTemplateBuilder({ onBackToWorkspace }: EmailTemplat
                 emailSettings={activeTemplate.settings}
                 onAddBlock={handleAddBlock}
                 onDropBlock={handleDropBlock}
+                onInsertBlock={handleInsertBlock}
                 onUpdateBlock={handleUpdateWholeBlock}
               />
             </div>

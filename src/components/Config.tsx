@@ -8,7 +8,7 @@ import ConfirmModal from './ConfirmModal';
 
 export interface TokenRow {
   id: string;
-  platform: 'facebook' | 'zalo';
+  platform: 'facebook' | 'zalo' | 'mock';
   pageId: string;
   pageName: string;
   accessToken: string;

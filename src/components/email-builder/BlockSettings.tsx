@@ -6,6 +6,7 @@ import { getBlockDefinition } from '../../data/emailBlockRegistry';
 import ColorField from './ColorField';
 import { EMAIL_ICON_CATEGORY_LABELS, EMAIL_ICON_LIBRARY, EmailIconOption } from '../../data/emailIconLibrary';
 import { getEmailLucideIcon } from '../../lib/emailIcon';
+import { useEmailBuilderDialog } from './EmailBuilderDialog';
 
 interface BlockSettingsProps {
   block: EmailBlock;
@@ -33,13 +34,25 @@ const COLOR_KEYS = new Set(['bg', 'color', 'background', 'backgroundColor', 'bor
 
 function NumberDraft({ value, min = 0, max = 2000, onCommit, label }: { value: number | string | null | undefined; min?: number; max?: number; onCommit: (value: number | '') => void; label: string }) {
   const [draft, setDraft] = React.useState(value === null || value === undefined ? '' : String(value));
-  React.useEffect(() => setDraft(value === null || value === undefined ? '' : String(value)), [value]);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const dirtyRef = React.useRef(false);
+  React.useEffect(() => {
+    if (document.activeElement !== inputRef.current) {
+      setDraft(value === null || value === undefined ? '' : String(value));
+      dirtyRef.current = false;
+    }
+  }, [value]);
   const commit = (raw: string) => {
-    if (raw.trim() === '') { onCommit(''); return; }
+    if (!dirtyRef.current) return;
+    dirtyRef.current = false;
+    if (raw.trim() === '') { setDraft(''); onCommit(''); return; }
     const parsed = Number(raw);
-    if (Number.isFinite(parsed)) onCommit(Math.max(min, Math.min(max, parsed)));
+    if (!Number.isFinite(parsed)) return;
+    const normalized = Math.max(min, Math.min(max, parsed));
+    setDraft(String(normalized));
+    onCommit(normalized);
   };
-  return <div><label className="mb-1 block text-[10px] font-bold text-slate-500">{label}</label><input type="number" min={min} max={max} value={draft} onChange={event => { setDraft(event.target.value); if (event.target.value !== '') commit(event.target.value); }} onBlur={() => commit(draft)} className={fieldClass} /></div>;
+  return <div><label className="mb-1 block text-[10px] font-bold text-slate-500">{label}</label><input ref={inputRef} type="number" min={min} max={max} value={draft} onChange={event => { dirtyRef.current = true; setDraft(event.target.value); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); commit(draft); event.currentTarget.select(); } }} onBlur={() => commit(draft)} className={fieldClass} /></div>;
 }
 
 export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlockStyles, onUpdateBlockColumns, onUpdateBlock, onApplySelectionFontSize, onApplySelectionTextColor }: BlockSettingsProps) {
@@ -50,6 +63,7 @@ export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlo
   const [uploadError, setUploadError] = React.useState('');
   const [iconQuery, setIconQuery] = React.useState('');
   const [iconCategory, setIconCategory] = React.useState<'all' | EmailIconOption['category']>('all');
+  const dialog = useEmailBuilderDialog();
   const updateContent = (key: string, value: any) => onUpdateBlockContent({ ...content, [key]: value });
   const updateStyles = (key: string, value: any) => onUpdateBlockStyles({ ...styles, [key]: value });
 
@@ -163,18 +177,24 @@ export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlo
       onUpdateBlockColumns?.(nextBlock.columns || []);
     }
   };
-  const setLayoutCount = (count: number) => {
+  const setLayoutCount = async (count: number) => {
     if (!layoutState) return;
     if (count < layoutState.layout.length) {
       const keepSlots = layoutState.layout.slice(0, count).reduce((total, column) => total + column.cells.length, 0);
-      if (layoutState.slots.slice(keepSlots).some(slot => slot.length) && !confirm('Các ô bị xóa đang chứa nội dung. Bạn có chắc muốn giảm số cột?')) return;
+      if (layoutState.slots.slice(keepSlots).some(slot => slot.length)) {
+        const accepted = await dialog.confirm('Các ô bị xóa đang chứa nội dung. Bạn có chắc muốn giảm số cột?', { title: 'Giảm số cột', confirmText: 'Giảm số cột', danger: true });
+        if (!accepted) return;
+      }
     }
     commitLayout(resizeEmailLayout(block, count));
   };
-  const removeLayoutCellSafely = (columnIndex: number, cellIndex: number) => {
+  const removeLayoutCellSafely = async (columnIndex: number, cellIndex: number) => {
     if (!layoutState) return;
     const slotIndex = getLayoutSlotIndex(layoutState.layout, columnIndex, cellIndex);
-    if (layoutState.slots[slotIndex]?.length && !confirm('Ô này đang chứa nội dung. Bạn có chắc muốn xóa ô?')) return;
+    if (layoutState.slots[slotIndex]?.length) {
+      const accepted = await dialog.confirm('Ô này đang chứa nội dung. Xóa ô cũng sẽ xóa toàn bộ block bên trong.', { title: 'Xóa ô bố cục', confirmText: 'Xóa ô', danger: true });
+      if (!accepted) return;
+    }
     commitLayout(removeEmailLayoutCell(block, columnIndex, cellIndex));
   };
 

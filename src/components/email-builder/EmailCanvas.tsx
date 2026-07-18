@@ -1,11 +1,13 @@
 import React, { useEffect, useRef } from 'react';
 import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, GripVertical, ImagePlus, Link, Plus, Trash2 } from 'lucide-react';
+import * as LucideIcons from 'lucide-react';
 import { BlockType, EmailBlock, EmailSettings } from '../../types/emailBuilder';
 import { BLOCK_CATEGORIES, EMAIL_BLOCK_REGISTRY } from '../../data/emailBlockRegistry';
 import BlockToolbar from './BlockToolbar';
 import { sanitizeCustomHtml } from '../../lib/emailSanitizer';
-import { addEmailLayoutCell, getLayoutSlotIndex, normalizeEmailLayout, resizeEmailLayout } from '../../lib/emailLayout';
+import { addEmailLayoutCell, getLayoutSlotIndex, normalizeEmailLayout, removeEmailLayoutCell, resizeEmailLayout } from '../../lib/emailLayout';
 import { getEmailLucideIcon } from '../../lib/emailIcon';
+import { useEmailBuilderDialog } from './EmailBuilderDialog';
 
 export interface EmailCanvasHandle {
   hasTextSelection: (blockId: string) => boolean;
@@ -51,7 +53,8 @@ interface EmailCanvasProps {
   onClearInsertedVar: () => void;
   emailSettings: EmailSettings;
   onAddBlock: (type: BlockType, parentId?: string, slotIndex?: number) => void;
-  onDropBlock: (sourceId: string, targetId: string, slotIndex?: number) => void;
+  onDropBlock: (sourceId: string, targetId: string, slotIndex?: number, position?: 'before' | 'after') => void;
+  onInsertBlock: (type: BlockType, targetId: string, position: 'before' | 'after') => void;
   onUpdateBlock: (id: string, block: EmailBlock) => void;
 }
 
@@ -63,16 +66,27 @@ const TYPE_NAMES: Partial<Record<BlockType, string>> = {
 };
 
 const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(function EmailCanvas(props, ref) {
-  const { blocks, selectedBlockId, onSelectBlock, onMoveBlock, onDuplicateBlock, onDeleteBlock, onToggleVisibility, onUpdateBlockContent, onOpenVariablePicker, insertedVarName, onClearInsertedVar, emailSettings, onAddBlock, onDropBlock, onUpdateBlock } = props;
+  const { blocks, selectedBlockId, onSelectBlock, onMoveBlock, onDuplicateBlock, onDeleteBlock, onToggleVisibility, onUpdateBlockContent, onOpenVariablePicker, insertedVarName, onClearInsertedVar, emailSettings, onAddBlock, onDropBlock, onInsertBlock, onUpdateBlock } = props;
   const editableRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const selectionRefs = useRef<Record<string, Range | null>>({});
   const selectionBookmarks = useRef<Record<string, SelectionBookmark | null>>({});
   const imageInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-  const [isInserterOpen, setIsInserterOpen] = React.useState(false);
+  const [inserterTarget, setInserterTarget] = React.useState<{ parentId?: string; slotIndex?: number; placement: 'cell' | 'root' } | null>(null);
   const [blockQuery, setBlockQuery] = React.useState('');
   const [rootDragOver, setRootDragOver] = React.useState(false);
   const selectionOverlayRef = useRef<HTMLDivElement | null>(null);
+  const inserterRef = useRef<HTMLDivElement | null>(null);
+  const [dropHint, setDropHint] = React.useState<{ blockId: string; position: 'before' | 'after' } | null>(null);
+  const dialog = useEmailBuilderDialog();
 
+  useEffect(() => {
+    if (!inserterTarget) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!inserterRef.current?.contains(event.target as Node)) setInserterTarget(null);
+    };
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
+  }, [inserterTarget]);
   const updateHtml = (block: EmailBlock, element: HTMLElement) => {
     const html = normalizeEditableHtml(element.innerHTML);
     if (!html) element.innerHTML = '';
@@ -125,7 +139,7 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
       .filter(rect => rect.width > 0 && rect.height > 0)
       .forEach(rect => {
         const marker = document.createElement('span');
-        marker.className = 'absolute rounded-[2px] bg-blue-600/55 ring-1 ring-blue-700/20';
+        marker.className = 'absolute rounded-[2px] bg-amber-300/75 ring-1 ring-amber-700/40';
         marker.style.top = `${rect.top}px`;
         marker.style.left = `${rect.left}px`;
         marker.style.width = `${rect.width}px`;
@@ -159,6 +173,36 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     const selection = window.getSelection();
     selection?.removeAllRanges(); selection?.addRange(range);
   };
+  const applyInlineStyleToBookmark = (editable: HTMLElement, bookmark: SelectionBookmark, property: 'fontSize' | 'color', value: string) => {
+    const walker = document.createTreeWalker(editable, NodeFilter.SHOW_TEXT);
+    const targets: Array<{ node: Text; start: number; end: number }> = [];
+    let node = walker.nextNode() as Text | null;
+    let offset = 0;
+    while (node) {
+      const length = node.data.length;
+      const start = Math.max(0, bookmark.start - offset);
+      const end = Math.min(length, bookmark.end - offset);
+      if (start < end) targets.push({ node, start, end });
+      offset += length;
+      node = walker.nextNode() as Text | null;
+    }
+    targets.reverse().forEach(target => {
+      let selectedNode = target.node;
+      if (target.end < selectedNode.data.length) selectedNode.splitText(target.end);
+      if (target.start > 0) selectedNode = selectedNode.splitText(target.start);
+      const parent = selectedNode.parentElement;
+      if (parent?.tagName === 'SPAN' && parent.childNodes.length === 1) {
+        parent.style[property] = value;
+        return;
+      }
+      const span = document.createElement('span');
+      span.style[property] = value;
+      selectedNode.parentNode?.insertBefore(span, selectedNode);
+      span.appendChild(selectedNode);
+    });
+    editable.querySelectorAll<HTMLSpanElement>('span:empty').forEach(span => span.remove());
+    editable.normalize();
+  };
   const applySelectionFontSize = (block: EmailBlock, size: number, selectionOnly = false): boolean => {
     const editable = editableRefs.current[block.id];
     if (!editable) return false;
@@ -184,15 +228,7 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
       return false;
     }
 
-    editable.focus({ preventScroll: true });
-    restoreSelection(block.id);
-    document.execCommand('fontSize', false, '7');
-    editable.querySelectorAll('font[size="7"]').forEach(font => {
-      const span = document.createElement('span');
-      span.style.fontSize = `${size}px`;
-      while (font.firstChild) span.appendChild(font.firstChild);
-      font.replaceWith(span);
-    });
+    applyInlineStyleToBookmark(editable, bookmark!, 'fontSize', `${size}px`);
     updateHtml(block, editable);
     selectionBookmarks.current[block.id] = bookmark;
     const nextRange = bookmark ? bookmarkToRange(editable, bookmark) : null;
@@ -231,16 +267,7 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
       return false;
     }
 
-    editable.focus({ preventScroll: true });
-    restoreSelection(block.id);
-    document.execCommand('styleWithCSS', false, 'true');
-    document.execCommand('foreColor', false, color);
-    editable.querySelectorAll<HTMLFontElement>('font[color]').forEach(font => {
-      const span = document.createElement('span');
-      span.style.color = font.color || color;
-      while (font.firstChild) span.appendChild(font.firstChild);
-      font.replaceWith(span);
-    });
+    applyInlineStyleToBookmark(editable, bookmark!, 'color', color);
     updateHtml(block, editable);
     selectionBookmarks.current[block.id] = bookmark;
     const nextRange = bookmark ? bookmarkToRange(editable, bookmark) : null;
@@ -335,25 +362,53 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     } catch { /* use a portable data URL below */ }
     const reader = new FileReader(); reader.onload = () => setImageMetadata(block, String(reader.result)); reader.readAsDataURL(file);
   };
-  const pasteImageUrl = (block: EmailBlock) => {
-    const url = prompt('Dán đường dẫn ảnh:', block.content.url || 'https://');
+  const pasteImageUrl = async (block: EmailBlock) => {
+    const url = await dialog.prompt('Dán đường dẫn ảnh HTTPS:', { title: 'Chèn ảnh từ đường dẫn', defaultValue: block.content.url || 'https://', placeholder: 'https://example.com/image.png' });
     if (url) setImageMetadata(block, url);
   };
-  const setLayoutColumnCount = (block: EmailBlock, count: number) => {
+  const setLayoutColumnCount = async (block: EmailBlock, count: number) => {
     const state = normalizeEmailLayout(block);
     if (count < state.layout.length) {
       const keepSlots = state.layout.slice(0, count).reduce((total, column) => total + column.cells.length, 0);
-      if (state.slots.slice(keepSlots).some(slot => slot.length) && !confirm('Các cột bị xóa đang chứa nội dung. Bạn có chắc muốn tiếp tục?')) return;
+      if (state.slots.slice(keepSlots).some(slot => slot.length)) {
+        const accepted = await dialog.confirm('Các cột bị xóa đang chứa nội dung. Bạn có chắc muốn tiếp tục?', { title: 'Giảm số cột', confirmText: 'Xóa các cột', danger: true });
+        if (!accepted) return;
+      }
     }
     onUpdateBlock(block.id, resizeEmailLayout(block, count));
   };
+  const removeLayoutCellSafely = async (block: EmailBlock, columnIndex: number, cellIndex: number) => {
+    const state = normalizeEmailLayout(block);
+    const slotIndex = getLayoutSlotIndex(state.layout, columnIndex, cellIndex);
+    if (state.slots[slotIndex]?.length) {
+      const accepted = await dialog.confirm('Ô này đang chứa nội dung. Xóa ô cũng sẽ xóa toàn bộ block bên trong.', { title: 'Xóa ô bố cục', confirmText: 'Xóa ô', danger: true });
+      if (!accepted) return;
+    }
+    onUpdateBlock(block.id, removeEmailLayoutCell(block, columnIndex, cellIndex));
+  };
 
-  const dropInto = (event: React.DragEvent, target: EmailBlock, slotIndex?: number) => {
+  const dropInto = (event: React.DragEvent, target: EmailBlock, slotIndex?: number, position: 'before' | 'after' = 'after') => {
     event.preventDefault(); event.stopPropagation();
+    setDropHint(null);
     const sourceId = event.dataTransfer.getData('application/x-ft-email-block-id');
     const type = event.dataTransfer.getData('application/x-ft-email-block') as BlockType;
-    if (sourceId) onDropBlock(sourceId, target.id, slotIndex);
-    else if (type && EMAIL_BLOCK_REGISTRY[type]) onAddBlock(type, target.id, slotIndex);
+    const isContainerTarget = target.type === 'section' || (target.type === 'columns' && slotIndex !== undefined);
+    if (sourceId) onDropBlock(sourceId, target.id, slotIndex, position);
+    else if (type && EMAIL_BLOCK_REGISTRY[type]) {
+      if (isContainerTarget) onAddBlock(type, target.id, slotIndex);
+      else onInsertBlock(type, target.id, position);
+    }
+  };
+
+  const renderInserter = (target: { parentId?: string; slotIndex?: number; placement: 'cell' | 'root' }) => {
+    const active = inserterTarget?.parentId === target.parentId && inserterTarget?.slotIndex === target.slotIndex && inserterTarget?.placement === target.placement;
+    return <div ref={active ? inserterRef : undefined} className={`relative ${target.placement === 'root' ? 'flex justify-center' : 'inline-flex'}`}>
+      <button type="button" onClick={event => { event.stopPropagation(); setInserterTarget(current => active && current ? null : target); }} className={`inline-flex items-center justify-center gap-1 rounded-lg border border-blue-200 bg-white font-bold text-[#0F3A72] shadow-sm hover:border-blue-400 hover:bg-blue-50 ${target.placement === 'root' ? 'px-3 py-2 text-xs' : 'px-2 py-1.5 text-[9px]'}`}><Plus className={target.placement === 'root' ? 'h-4 w-4' : 'h-3 w-3'} />Thêm khối</button>
+      {active && <div className="fixed left-1/2 top-1/2 z-[100] w-[min(560px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl ring-1 ring-slate-900/10" onClick={event => event.stopPropagation()}>
+        <input autoFocus value={blockQuery} onChange={event => setBlockQuery(event.target.value)} placeholder="Tìm khối…" className="mb-3 w-full rounded-lg border px-3 py-2 text-xs outline-none focus:border-blue-500" />
+        <div className="max-h-72 space-y-3 overflow-y-auto pr-1">{filteredDefinitions.map(category => <div key={category.id}><p className="mb-1 text-[9px] font-black uppercase tracking-widest text-slate-400">{category.label}</p><div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">{category.items.map(item => { const Icon = (LucideIcons as any)[item.icon] || LucideIcons.Square; return <button key={item.id} type="button" onClick={() => { onAddBlock(item.id, target.parentId, target.slotIndex); setInserterTarget(null); setBlockQuery(''); }} className="flex min-h-14 items-center gap-2 rounded-lg border px-2 py-2 text-left text-[10px] font-bold text-slate-700 hover:border-blue-300 hover:bg-blue-50"><Icon className="h-4 w-4 shrink-0 text-[#0F3A72]" /><span>{item.label}</span></button>; })}</div></div>)}</div>
+      </div>}
+    </div>;
   };
 
   const renderSimplePreview = (block: EmailBlock) => {
@@ -382,15 +437,16 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     const removeTableRow = (rowIndex: number) => { if (tableRows.length > 1) updateTableRows(tableRows.filter((_, index) => index !== rowIndex)); };
     const removeTableColumn = (columnIndex: number) => { if (tableColumnCount > 1) updateTableRows(tableRows.map(row => row.filter((_, index) => index !== columnIndex))); };
 
-    return <div key={block.id} onClick={event => { event.stopPropagation(); onSelectBlock(block.id); }} onDragOver={event => { if (event.dataTransfer.types.includes('application/x-ft-email-block-id') || (block.type === 'section' && event.dataTransfer.types.includes('application/x-ft-email-block'))) { event.preventDefault(); event.dataTransfer.dropEffect = block.type === 'section' ? 'move' : 'move'; } }} onDrop={event => dropInto(event, block)} className={`group relative rounded-xl transition ${selected ? 'outline outline-2 outline-blue-500 bg-blue-50/5' : 'hover:outline hover:outline-1 hover:outline-slate-300'} ${block.visible ? '' : 'opacity-40'}`} style={{ marginTop: styles.marginTop ?? 10, marginBottom: styles.marginBottom ?? 10 }}>
+    return <div key={block.id} onClick={event => { event.stopPropagation(); onSelectBlock(block.id); }} onDragOver={event => { const acceptsDrop = event.dataTransfer.types.includes('application/x-ft-email-block-id') || event.dataTransfer.types.includes('application/x-ft-email-block'); if (!acceptsDrop) return; event.preventDefault(); event.stopPropagation(); setRootDragOver(false); event.dataTransfer.dropEffect = event.dataTransfer.types.includes('application/x-ft-email-block-id') ? 'move' : 'copy'; if (block.type === 'section') setDropHint(null); else { const rect = event.currentTarget.getBoundingClientRect(); setDropHint({ blockId: block.id, position: event.clientY < rect.top + rect.height / 2 ? 'before' : 'after' }); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropHint(current => current?.blockId === block.id ? null : current); }} onDrop={event => { const rect = event.currentTarget.getBoundingClientRect(); const position = dropHint?.blockId === block.id ? dropHint.position : event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'; dropInto(event, block, undefined, position); }} className={`group relative rounded-xl transition ${selected ? 'outline outline-2 outline-blue-500 bg-blue-50/5' : 'hover:outline hover:outline-1 hover:outline-slate-300'} ${block.visible ? '' : 'opacity-40'}`} style={{ marginTop: styles.marginTop ?? 10, marginBottom: styles.marginBottom ?? 10 }}>
+      {dropHint?.blockId === block.id && <div className={`pointer-events-none absolute inset-x-0 z-40 h-1 rounded-full bg-blue-500 shadow-[0_0_0_3px_rgba(59,130,246,0.18)] ${dropHint.position === 'before' ? '-top-1' : '-bottom-1'}`}><span className="absolute -left-1 -top-1 h-3 w-3 rounded-full bg-blue-500" /></div>}
       <div className="absolute -top-3 left-3 z-20 hidden rounded bg-blue-600 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-white group-hover:block">{TYPE_NAMES[block.type] || block.type}</div>
       <div className="absolute -top-4 right-3 z-30 hidden items-center gap-1 rounded-xl border bg-white p-1 shadow-lg group-hover:flex">
-        <button type="button" draggable onDragStart={event => { event.stopPropagation(); event.dataTransfer.setData('application/x-ft-email-block-id', block.id); event.dataTransfer.effectAllowed = 'move'; }} className="cursor-grab rounded p-1 hover:bg-slate-100" title="Kéo block"><GripVertical className="h-3.5 w-3.5" /></button>
+        <button type="button" draggable onDragStart={event => { event.stopPropagation(); event.dataTransfer.setData('application/x-ft-email-block-id', block.id); event.dataTransfer.effectAllowed = 'move'; }} className="cursor-grab rounded p-1 hover:bg-slate-100" title="Kéo khối"><GripVertical className="h-3.5 w-3.5" /></button>
         <button type="button" disabled={index === 0} onClick={event => { event.stopPropagation(); onMoveBlock(block.id, 'up'); }} className="rounded p-1 disabled:opacity-20"><ArrowUp className="h-3.5 w-3.5" /></button>
         <button type="button" disabled={index === siblings.length - 1} onClick={event => { event.stopPropagation(); onMoveBlock(block.id, 'down'); }} className="rounded p-1 disabled:opacity-20"><ArrowDown className="h-3.5 w-3.5" /></button>
         <button type="button" onClick={event => { event.stopPropagation(); onDuplicateBlock(block.id); }} className="rounded p-1"><Copy className="h-3.5 w-3.5" /></button>
         <button type="button" onClick={event => { event.stopPropagation(); onToggleVisibility(block.id); }} className="rounded p-1">{block.visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}</button>
-        <button type="button" onClick={event => { event.stopPropagation(); if (confirm('Bạn có chắc muốn xóa khối này?')) onDeleteBlock(block.id); }} className="rounded p-1 text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={async event => { event.stopPropagation(); if (await dialog.confirm('Bạn có chắc muốn xóa khối này?', { title: 'Xóa khối nội dung', confirmText: 'Xóa khối', danger: true })) onDeleteBlock(block.id); }} className="rounded p-1 text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button>
       </div>
       <div>
         {block.type === 'logo' && <div className={`flex ${alignClass}`}>{content.url ? <img src={content.url} alt={content.alt || 'Logo'} style={{ width: Number(content.width) || 120, height: content.height ? Number(content.height) : 'auto' }} className="max-w-full object-contain" /> : <div className="w-full rounded border border-dashed bg-slate-50 p-4 text-center text-xs text-slate-400">Chưa chọn ảnh logo</div>}</div>}
@@ -420,15 +476,16 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
           </div>
           {selected && <div className="mb-1 grid gap-1" style={{ gridTemplateColumns: `repeat(${tableColumnCount}, minmax(80px, 1fr)) 28px` }}>{Array.from({ length: tableColumnCount }, (_, columnIndex) => <button key={columnIndex} type="button" disabled={tableColumnCount <= 1} onClick={event => { event.stopPropagation(); removeTableColumn(columnIndex); }} className="inline-flex items-center justify-center gap-1 rounded bg-slate-100 py-1 text-[8px] font-bold text-slate-500 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-30"><Trash2 className="h-2.5 w-2.5" />Cột {columnIndex + 1}</button>)}<span /></div>}
           <table className="w-full border-collapse text-left text-xs"><tbody>{tableRows.map((row, rowIndex) => <tr key={rowIndex}>{Array.from({ length: tableColumnCount }, (_, cellIndex) => rowIndex === 0 ? <th key={cellIndex} className="border border-slate-300 bg-slate-100 p-0 font-bold"><div contentEditable suppressContentEditableWarning onFocus={() => onSelectBlock(block.id)} onMouseUp={() => onSelectBlock(block.id)} onBlur={event => updateTableCell(rowIndex, cellIndex, event.currentTarget.textContent || '')} className="min-h-9 px-2 py-2 outline-none focus:bg-blue-50">{row[cellIndex] || ''}</div></th> : <td key={cellIndex} className="border border-slate-300 p-0"><div contentEditable suppressContentEditableWarning onFocus={() => onSelectBlock(block.id)} onMouseUp={() => onSelectBlock(block.id)} onBlur={event => updateTableCell(rowIndex, cellIndex, event.currentTarget.textContent || '')} className="min-h-9 px-2 py-2 outline-none focus:bg-blue-50">{row[cellIndex] || ''}</div></td>)}{selected && <td className="w-7 border-y border-r border-slate-200 bg-white p-0 text-center"><button type="button" disabled={tableRows.length <= 1} onClick={event => { event.stopPropagation(); removeTableRow(rowIndex); }} className="rounded p-1 text-rose-500 hover:bg-rose-50 disabled:opacity-25" title={`Xóa dòng ${rowIndex + 1}`}><Trash2 className="h-3.5 w-3.5" /></button></td>}</tr>)}</tbody></table>
-        </div>}        {block.type === 'section' && <div onDragOver={event => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; }} onDrop={event => dropInto(event, block)} style={{ background: content.bg || '#f8fafc', padding: content.padding ?? 20 }} className="rounded-lg border border-dashed border-slate-300"><div contentEditable suppressContentEditableWarning data-ft-placeholder="true" data-placeholder="Nhập tiêu đề Section…" onFocus={() => onSelectBlock(block.id)} onMouseUp={() => onSelectBlock(block.id)} onBlur={event => onUpdateBlockContent(block.id, { ...content, heading: event.currentTarget.textContent || '' })} className="min-h-6 font-bold text-[#0F3A72] outline-none">{editableText(content.heading || '', ['Nội dung section'])}</div><div contentEditable suppressContentEditableWarning data-ft-placeholder="true" data-placeholder="Nhập mô tả ngắn…" onFocus={() => onSelectBlock(block.id)} onMouseUp={() => onSelectBlock(block.id)} onBlur={event => onUpdateBlockContent(block.id, { ...content, body: event.currentTarget.textContent || '' })} className="mt-1 min-h-5 text-xs text-slate-500 outline-none">{editableText(content.body || '', ['Gom phần nội dung có cùng ngữ cảnh.'])}</div><div className="mt-3 min-h-16 space-y-2">{(block.children || []).map((child, childIndex, siblings) => renderBlock(child, childIndex, siblings))}{!(block.children || []).length && <div className="flex min-h-16 items-center justify-center rounded border border-dashed border-blue-200 bg-white/70 text-[10px] font-bold text-blue-600">Thả block vào Section</div>}</div><button type="button" onClick={event => { event.stopPropagation(); onAddBlock('paragraph', block.id); }} className="mt-2 inline-flex items-center gap-1 text-[10px] font-bold text-blue-700"><Plus className="h-3.5 w-3.5" />Thêm đoạn văn</button></div>}
+        </div>}        {block.type === 'section' && <div onDragOver={event => { event.preventDefault(); event.stopPropagation(); setRootDragOver(false); event.dataTransfer.dropEffect = event.dataTransfer.types.includes('application/x-ft-email-block-id') ? 'move' : 'copy'; }} onDrop={event => dropInto(event, block)} style={{ background: content.bg || '#f8fafc', padding: content.padding ?? 20 }} className="rounded-lg border border-dashed border-slate-300"><div contentEditable suppressContentEditableWarning data-ft-placeholder="true" data-placeholder="Nhập tiêu đề Section…" onFocus={() => onSelectBlock(block.id)} onMouseUp={() => onSelectBlock(block.id)} onBlur={event => onUpdateBlockContent(block.id, { ...content, heading: event.currentTarget.textContent || '' })} className="min-h-6 font-bold text-[#0F3A72] outline-none">{editableText(content.heading || '', ['Nội dung section'])}</div><div contentEditable suppressContentEditableWarning data-ft-placeholder="true" data-placeholder="Nhập mô tả ngắn…" onFocus={() => onSelectBlock(block.id)} onMouseUp={() => onSelectBlock(block.id)} onBlur={event => onUpdateBlockContent(block.id, { ...content, body: event.currentTarget.textContent || '' })} className="mt-1 min-h-5 text-xs text-slate-500 outline-none">{editableText(content.body || '', ['Gom phần nội dung có cùng ngữ cảnh.'])}</div><div className="mt-3 min-h-16 space-y-2">{(block.children || []).map((child, childIndex, siblings) => renderBlock(child, childIndex, siblings))}{!(block.children || []).length && <div className="flex min-h-16 items-center justify-center rounded border border-dashed border-blue-200 bg-white/70 text-[10px] font-bold text-blue-600">Thả khối vào Section</div>}</div><div className="mt-2">{renderInserter({ parentId: block.id, placement: 'cell' })}</div></div>}
         {block.type === 'columns' && layoutState && <div className="space-y-2">
           <div className={`flex items-center justify-center gap-1 transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}><span className="mr-1 text-[9px] font-bold text-slate-400">Số cột</span>{[2, 3, 4].map(count => <button key={count} type="button" onClick={event => { event.stopPropagation(); setLayoutColumnCount(block, count); }} className={`rounded-lg border px-2 py-1 text-[9px] font-black ${layoutState.layout.length === count ? 'border-blue-500 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'}`}>{count}</button>)}</div>
           <div className="grid items-stretch" style={{ gridTemplateColumns: layoutState.layout.map(column => `minmax(0, ${column.width}fr)`).join(' '), columnGap: content.horizontalGap ?? 12 }}>
             {layoutState.layout.map((layoutColumn, columnIndex) => <div key={layoutColumn.id} className="grid h-full min-w-0" style={{ gridTemplateRows: `repeat(${layoutColumn.cells.length}, minmax(0, 1fr))`, rowGap: content.verticalGap ?? 12 }}>
-              {layoutColumn.cells.map((cell, cellIndex) => { const slotIndex = getLayoutSlotIndex(layoutState.layout, columnIndex, cellIndex); const slot = layoutState.slots[slotIndex] || []; return <div key={cell.id} onDragOver={event => { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; }} onDrop={event => dropInto(event, block, slotIndex)} className="group/cell relative flex min-w-0 flex-col transition hover:outline hover:outline-2 hover:outline-blue-300" style={{ minHeight: cell.minHeight, justifyContent: cell.verticalAlign === 'middle' ? 'center' : cell.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start', backgroundColor: cell.background, color: cell.color || undefined, padding: cell.padding, border: cell.borderWidth ? `${cell.borderWidth}px solid ${cell.borderColor}` : 'none', borderRadius: cell.borderRadius }}>
+              {layoutColumn.cells.map((cell, cellIndex) => { const slotIndex = getLayoutSlotIndex(layoutState.layout, columnIndex, cellIndex); const slot = layoutState.slots[slotIndex] || []; return <div key={cell.id} onDragOver={event => { event.preventDefault(); event.stopPropagation(); setRootDragOver(false); event.dataTransfer.dropEffect = event.dataTransfer.types.includes('application/x-ft-email-block-id') ? 'move' : 'copy'; }} onDrop={event => dropInto(event, block, slotIndex)} className="group/cell relative flex min-w-0 flex-col transition hover:outline hover:outline-2 hover:outline-blue-300" style={{ minHeight: cell.minHeight, justifyContent: cell.verticalAlign === 'middle' ? 'center' : cell.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start', backgroundColor: cell.background, color: cell.color || undefined, padding: cell.padding, border: cell.borderWidth ? `${cell.borderWidth}px solid ${cell.borderColor}` : 'none', borderRadius: cell.borderRadius }}>
                 <div className="min-w-0">{slot.map((child, childIndex, siblings) => renderBlock(child, childIndex, siblings))}</div>
-                {!slot.length && <div className="flex min-h-12 flex-1 items-center justify-center rounded border border-dashed border-blue-200 bg-white/50 px-2 text-center text-[9px] font-bold text-slate-400">Thả block vào ô này</div>}
-                <button type="button" onClick={event => { event.stopPropagation(); onAddBlock('paragraph', block.id, slotIndex); }} className="mt-1 inline-flex items-center justify-center gap-1 self-start rounded px-1.5 py-1 text-[9px] font-bold text-blue-700 opacity-70 hover:bg-blue-50 hover:opacity-100"><Plus className="h-3 w-3" />Thêm block</button>
+                {layoutColumn.cells.length > 1 && <button type="button" onClick={event => { event.stopPropagation(); void removeLayoutCellSafely(block, columnIndex, cellIndex); }} title={`Xóa ô ${cellIndex + 1}`} className="absolute right-1.5 top-1.5 z-20 rounded-lg border border-rose-100 bg-white/95 p-1.5 text-rose-600 opacity-60 shadow-sm transition hover:bg-rose-50 hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>}
+                {!slot.length && <div className="flex min-h-12 flex-1 items-center justify-center rounded border border-dashed border-blue-200 bg-white/50 px-2 text-center text-[9px] font-bold text-slate-400">Thả khối vào ô này</div>}
+                <div className="mt-1 self-start">{renderInserter({ parentId: block.id, slotIndex, placement: 'cell' })}</div>
               </div>; })}
               {layoutColumn.cells.length < 4 && <button type="button" onClick={event => { event.stopPropagation(); onUpdateBlock(block.id, addEmailLayoutCell(block, columnIndex)); }} className="mt-1 inline-flex items-center justify-center gap-1 rounded border border-dashed border-slate-300 py-1 text-[8px] font-bold text-slate-500 opacity-0 transition hover:border-blue-300 hover:text-blue-700 group-hover:opacity-100"><Plus className="h-3 w-3" />Chia thêm ô dọc</button>}
             </div>)}
@@ -439,20 +496,22 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
   };
 
   const rootDrop = (event: React.DragEvent) => {
-    event.preventDefault(); setRootDragOver(false);
+    event.preventDefault(); setRootDragOver(false); setDropHint(null);
+    const sourceId = event.dataTransfer.getData('application/x-ft-email-block-id');
     const type = event.dataTransfer.getData('application/x-ft-email-block') as BlockType;
-    if (type && EMAIL_BLOCK_REGISTRY[type]) onAddBlock(type);
+    if (sourceId && blocks.length) onDropBlock(sourceId, blocks[blocks.length - 1].id, undefined, 'after');
+    else if (type && EMAIL_BLOCK_REGISTRY[type]) onAddBlock(type);
   };
   const filteredDefinitions = BLOCK_CATEGORIES.map(category => ({ ...category, items: Object.values(EMAIL_BLOCK_REGISTRY).filter(item => item.category === category.id && `${item.label} ${item.description}`.toLowerCase().includes(blockQuery.toLowerCase())) })).filter(category => category.items.length);
 
   return <div className="flex w-full flex-col items-center px-4 py-6 md:px-8">
-    <style>{'::highlight(ft-email-selection){background:#2563eb;color:#ffffff;} [data-ft-placeholder="true"]:empty::before{content:attr(data-placeholder);color:#94a3b8;font-weight:400;pointer-events:none;}'}</style>
+    <style>{'::highlight(ft-email-selection){background:#facc15;color:#111827;} [contenteditable="true"]::selection,[contenteditable="true"] *::selection{background:#facc15;color:#111827;} [data-ft-placeholder="true"]:empty::before{content:attr(data-placeholder);color:#94a3b8;font-weight:400;pointer-events:none;}'}</style>
     <div ref={selectionOverlayRef} aria-hidden="true" className="pointer-events-none fixed inset-0 z-[9999]" />
     <div className="flex w-full max-w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg" style={{ maxWidth: emailSettings.maxWidth + 72 }}>
-      <div className="flex items-center justify-between border-b px-4 py-3"><div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Email canvas</p><p className="mt-0.5 text-xs font-bold text-slate-700">Kéo block từ trái hoặc thả trực tiếp vào từng Section/ô</p></div><span className="rounded border bg-slate-50 px-2.5 py-1 text-[10px] font-black text-slate-500">{emailSettings.maxWidth}px</span></div>
-      <div onClick={() => onSelectBlock('')} onDragOver={event => { if (event.dataTransfer.types.includes('application/x-ft-email-block')) { event.preventDefault(); setRootDragOver(true); } }} onDragLeave={event => { if (event.currentTarget === event.target) setRootDragOver(false); }} onDrop={rootDrop} className="relative flex min-h-[520px] justify-center bg-[#f5f6f8] p-5 md:p-8">
-        {rootDragOver && <div className="pointer-events-none absolute inset-5 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-blue-500 bg-blue-50/90 text-sm font-black text-blue-700">Thả block vào cuối email</div>}
-        <div className="w-full border bg-white shadow-sm" style={{ maxWidth: emailSettings.maxWidth, backgroundColor: emailSettings.contentBg, borderRadius: emailSettings.borderRadius, fontFamily: emailSettings.fontFamily || 'Arial', color: emailSettings.textColor || '#1e293b' }}><div style={{ padding: emailSettings.contentPadding }} >{blocks.map((block, index, siblings) => renderBlock(block, index, siblings))}<div className="relative flex justify-center border-t border-dashed pt-5"><button type="button" onClick={event => { event.stopPropagation(); setIsInserterOpen(open => !open); }} className="flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-[#0F3A72] shadow"><Plus className="h-4 w-4" />Thêm khối nội dung</button>{isInserterOpen && <div className="absolute bottom-12 z-50 w-[min(520px,calc(100vw-48px))] rounded-xl border bg-white p-3 shadow-2xl" onClick={event => event.stopPropagation()}><input autoFocus value={blockQuery} onChange={event => setBlockQuery(event.target.value)} placeholder="Tìm block…" className="mb-3 w-full rounded-lg border px-3 py-2 text-xs outline-none focus:border-blue-500" /><div className="max-h-72 space-y-3 overflow-y-auto">{filteredDefinitions.map(category => <div key={category.id}><p className="mb-1 text-[9px] font-black uppercase tracking-widest text-slate-400">{category.label}</p><div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">{category.items.map(item => <button key={item.id} type="button" onClick={() => { onAddBlock(item.id); setIsInserterOpen(false); setBlockQuery(''); }} className="rounded-lg border px-2 py-2 text-left text-[10px] font-bold hover:border-blue-300 hover:bg-blue-50">{item.label}</button>)}</div></div>)}</div></div>}</div></div></div>
+      <div className="flex items-center justify-between border-b px-4 py-3"><div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Email canvas</p><p className="mt-0.5 text-xs font-bold text-slate-700">Kéo khối từ trái hoặc thả trực tiếp vào từng Section/ô</p></div><span className="rounded border bg-slate-50 px-2.5 py-1 text-[10px] font-black text-slate-500">{emailSettings.maxWidth}px</span></div>
+      <div onClick={() => onSelectBlock('')} onDragOver={event => { if (event.dataTransfer.types.includes('application/x-ft-email-block') || event.dataTransfer.types.includes('application/x-ft-email-block-id')) { event.preventDefault(); setRootDragOver(true); } }} onDragLeave={event => { if (event.currentTarget === event.target) setRootDragOver(false); }} onDrop={rootDrop} className="relative flex min-h-[520px] justify-center bg-[#f5f6f8] p-5 md:p-8">
+        {rootDragOver && <div className="pointer-events-none absolute inset-5 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-blue-500 bg-blue-50/90 text-sm font-black text-blue-700">Thả khối vào cuối email</div>}
+        <div className="w-full border bg-white shadow-sm" style={{ maxWidth: emailSettings.maxWidth, backgroundColor: emailSettings.contentBg, borderRadius: emailSettings.borderRadius, fontFamily: emailSettings.fontFamily || 'Arial', color: emailSettings.textColor || '#1e293b' }}><div style={{ padding: emailSettings.contentPadding }} >{blocks.map((block, index, siblings) => renderBlock(block, index, siblings))}<div className="relative border-t border-dashed pt-5">{renderInserter({ placement: 'root' })}</div></div></div>
       </div>
     </div>
   </div>;

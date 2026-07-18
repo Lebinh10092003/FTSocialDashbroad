@@ -242,7 +242,7 @@ async function ensureExaminationSeed() {
 }
 function pageSize(value: unknown) { const parsed = Number(value); return Number.isInteger(parsed) ? Math.max(1, Math.min(parsed, 100)) : 50; }
 async function listExamination(collection: string, limit: number, cursor?: string) {
-  let query: any = adminDb.collection(collection).orderBy('sortKey').limit(limit + 1);
+  let query = adminDb.collection(collection).orderBy('sortKey').limit(limit + 1);
   if (cursor) query = query.startAfter(cursor);
   const snap = await query.get(); const docs = snap.docs.slice(0, limit);
   return { items: docs.map((doc: any) => ({ id: doc.id, ...doc.data() })), nextCursor: snap.docs.length > limit ? docs[docs.length - 1]?.data().sortKey : null };
@@ -267,7 +267,7 @@ apiRouter.put('/examination/competitions/:id', authenticateUser, requireManagerO
 });
 apiRouter.post('/examination/sessions', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const { competitionId, name, national, international, note, rounds } = req.body || {}; if (!competitionId || !name || !national || !international) return res.status(400).json({ error: 'Tên kỳ, cuộc thi và thời gian hai vòng là bắt buộc.' }); const competition = await adminDb.collection(EXAMINATION_COLLECTIONS.competitions).doc(String(competitionId)).get(); if (!competition.exists) return res.status(404).json({ error: 'Không tìm thấy cuộc thi.' });
-  const parent = competition.data(); const id = `session-${uuidv4()}`; const item = examinationRecord({ id, competitionId, code: parent.code, name: String(name).trim(), parent: parent.parent, organizer: parent.organizer, time: `${national.label} · ${international.label}`, candidates: 0, national: national.label, nationalDate: national.date, international: international.label, internationalDate: international.date, phase: 'Chuẩn bị', note: typeof note === 'string' && note.trim() ? note.trim() : 'Kỳ tổ chức mới tạo.', rounds: Array.isArray(rounds) ? rounds.filter((round: any) => round && typeof round.name === 'string' && typeof round.label === 'string').map((round: any) => ({ id: String(round.id || uuidv4()), name: round.name.trim(), label: round.label.trim(), date: typeof round.date === 'string' ? round.date : undefined })) : [], createdBy: req.user?.email }); await adminDb.collection(EXAMINATION_COLLECTIONS.sessions).doc(id).set(item); res.status(201).json(item);
+  const parent = competition.data(); if (!parent) return res.status(404).json({ error: 'Không tìm thấy dữ liệu cuộc thi.' }); const id = `session-${uuidv4()}`; const item = examinationRecord({ id, competitionId, code: parent.code, name: String(name).trim(), parent: parent.parent, organizer: parent.organizer, time: `${national.label} · ${international.label}`, candidates: 0, national: national.label, nationalDate: national.date, international: international.label, internationalDate: international.date, phase: 'Chuẩn bị', note: typeof note === 'string' && note.trim() ? note.trim() : 'Kỳ tổ chức mới tạo.', rounds: Array.isArray(rounds) ? rounds.filter((round: any) => round && typeof round.name === 'string' && typeof round.label === 'string').map((round: any) => ({ id: String(round.id || uuidv4()), name: round.name.trim(), label: round.label.trim(), date: typeof round.date === 'string' ? round.date : undefined })) : [], createdBy: req.user?.email }); await adminDb.collection(EXAMINATION_COLLECTIONS.sessions).doc(id).set(item); res.status(201).json(item);
 });
 apiRouter.put('/examination/sessions/:id', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const allowed = ['name', 'phase', 'note', 'national', 'nationalDate', 'international', 'internationalDate'];
@@ -290,7 +290,7 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
     const { periodStart, periodEnd } = resolveReportingPeriod({ startDate, endDate });
 
     // Lấy danh sách posts
-    let postsQuery: any = adminDb.collection('posts');
+    let postsQuery = adminDb.collection('posts');
     if (platform) postsQuery = postsQuery.where('platform', '==', platform);
     if (channelId) postsQuery = postsQuery.where('channelId', '==', channelId);
     if (postType && postType !== 'all') {
@@ -313,7 +313,7 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
     });
 
     // Lấy snapshots theo thời gian lọc
-    let snapshotsQuery: any = adminDb.collection('dailySnapshots');
+    let snapshotsQuery = adminDb.collection('dailySnapshots');
     if (platform) snapshotsQuery = snapshotsQuery.where('platform', '==', platform);
     if (channelId) snapshotsQuery = snapshotsQuery.where('channelId', '==', channelId);
 
@@ -811,7 +811,7 @@ apiRouter.post('/channels/:id/sync', authenticateUser, requireManagerOrAdmin, as
     const sinceDate = period ? new Date(`${period.periodStart}T00:00:00.000Z`) : undefined;
     const untilDate = period ? new Date(`${period.periodEnd}T23:59:59.999Z`) : undefined;
 
-    const result = await SyncEngine.syncChannel(id, req.googleAccessToken, sinceDate, untilDate);
+    const result = await SyncEngine.syncChannel(id, req.googleAccessToken ?? null, sinceDate, untilDate);
     res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -902,7 +902,7 @@ apiRouter.post('/sync/all', authenticateUser, requireManagerOrAdmin, async (req:
     const period = hasCustomPeriod ? resolveReportingPeriod({ startDate: since, endDate: until }) : null;
     const sinceDate = period ? new Date(`${period.periodStart}T00:00:00.000Z`) : undefined;
     const untilDate = period ? new Date(`${period.periodEnd}T23:59:59.999Z`) : undefined;
-    const results = await SyncEngine.syncAllChannels(req.googleAccessToken, sinceDate, untilDate);
+    const results = await SyncEngine.syncAllChannels(req.googleAccessToken ?? null, sinceDate, untilDate);
     res.json({ success: true, results });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -934,7 +934,7 @@ apiRouter.get('/posts', authenticateUser, async (req: AuthenticatedRequest, res:
     const activeChannelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
     const activeChannelIds = new Set(activeChannelsSnap.docs.map(doc => doc.id));
 
-    let query: any = adminDb.collection('posts');
+    let query = adminDb.collection('posts');
     if (platform) query = query.where('platform', '==', platform);
     if (channelId) query = query.where('channelId', '==', channelId);
 
@@ -1009,7 +1009,7 @@ apiRouter.get('/reports/export.csv', authenticateUser, async (req: Authenticated
     const activeChannelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
     const activeChannelIds = new Set(activeChannelsSnap.docs.map(doc => doc.id));
 
-    let query: any = adminDb.collection('posts');
+    let query = adminDb.collection('posts');
     if (platform) query = query.where('platform', '==', platform);
     if (channelId) query = query.where('channelId', '==', channelId);
 
@@ -1075,7 +1075,7 @@ apiRouter.post('/setup/sheets', authenticateUser, requireAdmin, async (req: Auth
       updatedAt: new Date().toISOString()
     }, { merge: true });
 
-    const googleAuth = await getGoogleSheetsAuth(req.googleAccessToken);
+    const googleAuth = await getGoogleSheetsAuth(req.googleAccessToken ?? null);
     if (!googleAuth) {
       return res.status(401).json({ error: 'Yêu cầu token xác thực Google hoặc Service Account để truy cập Sheets.' });
     }

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { EmailTemplate } from '../../types/emailBuilder';
 import { exportTemplateToJson } from '../../lib/emailStorage';
+import { useEmailBuilderDialog } from './EmailBuilderDialog';
 
 interface EmailBuilderHeaderProps {
   template: EmailTemplate;
@@ -58,6 +59,7 @@ export default function EmailBuilderHeader({
   canRedo
 }: EmailBuilderHeaderProps) {
   
+  const dialog = useEmailBuilderDialog();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameVal, setNameVal] = useState(template.name);
@@ -75,7 +77,7 @@ export default function EmailBuilderHeader({
       try {
         const parsed = JSON.parse(event.target?.result as string);
         if (!parsed.name || !Array.isArray(parsed.blocks) || !parsed.settings) {
-          alert('File JSON không đúng định dạng Email Template!');
+          void dialog.alert('File JSON không đúng định dạng Email Template!', 'Không thể nhập mẫu');
           return;
         }
         
@@ -86,9 +88,9 @@ export default function EmailBuilderHeader({
           lastUpdated: Date.now()
         };
         onImportTemplate(importedTemplate);
-        alert('Nhập mẫu email thành công!');
+        void dialog.alert('Nhập mẫu email thành công!', 'Nhập mẫu hoàn tất');
       } catch (error) {
-        alert('Lỗi đọc file JSON: ' + error);
+        void dialog.alert('Lỗi đọc file JSON: ' + error, 'Không thể nhập mẫu');
       }
     };
     reader.readAsText(file);
@@ -181,7 +183,7 @@ export default function EmailBuilderHeader({
         </button>
 
         <button
-          onClick={() => exportTemplateToJson(template)}
+          onClick={() => { if (!exportTemplateToJson(template)) void dialog.alert('Không thể xuất file JSON template.', 'Xuất mẫu thất bại'); }}
           title="Xuất file JSON"
           className="p-2 hover:bg-slate-50 border border-slate-200/50 hover:border-slate-350/50 rounded-xl text-slate-550 transition-all cursor-pointer flex items-center justify-center bg-white shadow-sm"
         >
@@ -204,11 +206,7 @@ export default function EmailBuilderHeader({
         />
 
         <button
-          onClick={() => {
-            if (confirm('Bạn muốn khôi phục tất cả các mẫu mặc định ban đầu của FermatTech (sẽ xóa các sửa đổi hiện tại)?')) {
-              onRestoreDefaults();
-            }
-          }}
+          onClick={async () => { if (await dialog.confirm('Bạn muốn khôi phục tất cả các mẫu mặc định ban đầu của FermatTech? Các sửa đổi hiện tại sẽ bị xóa.', { title: 'Khôi phục mẫu mặc định', confirmText: 'Khôi phục', danger: true })) onRestoreDefaults(); }}
           title="Khôi phục mẫu mặc định"
           className="p-2 hover:bg-slate-50 border border-slate-200/50 hover:border-slate-350/50 rounded-xl text-slate-550 transition-all cursor-pointer flex items-center justify-center bg-white shadow-sm"
         >
@@ -217,11 +215,7 @@ export default function EmailBuilderHeader({
 
         <button
           disabled={templatesList.length <= 1}
-          onClick={() => {
-            if (confirm('Bạn chắc chắn muốn xóa mẫu này?')) {
-              onDeleteTemplate();
-            }
-          }}
+          onClick={async () => { if (await dialog.confirm('Bạn chắc chắn muốn xóa mẫu này?', { title: 'Xóa mẫu email', confirmText: 'Xóa mẫu', danger: true })) onDeleteTemplate(); }}
           title="Xóa mẫu này"
           className="p-2 hover:bg-rose-50 border border-slate-200/50 hover:border-rose-100 rounded-xl text-slate-500 hover:text-rose-600 transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-500 flex items-center justify-center bg-white shadow-sm"
         >

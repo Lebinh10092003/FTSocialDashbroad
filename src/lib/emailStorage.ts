@@ -82,7 +82,7 @@ export function restoreDefaultTemplates(): EmailTemplate[] {
   return resetTemplatesToDefault();
 }
 
-export function exportTemplateToJson(template: EmailTemplate): void {
+export function exportTemplateToJson(template: EmailTemplate): boolean {
   try {
     const jsonString = JSON.stringify(template, null, 2);
     const blob = new Blob([jsonString], { type: 'application/json' });
@@ -96,8 +96,9 @@ export function exportTemplateToJson(template: EmailTemplate): void {
 
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    return true;
   } catch (error) {
     console.error('Lỗi khi xuất JSON template:', error);
-    alert('Không thể xuất file JSON template.');
+    return false;
   }
 }
