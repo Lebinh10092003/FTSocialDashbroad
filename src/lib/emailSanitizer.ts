@@ -1,10 +1,45 @@
 export function sanitizeHtml(html: string): string {
   if (typeof window === 'undefined') return html;
   
-  // Safe HTML tags list (including img tags for inline images)
+  // Rich-text blocks can contain email-signature tables, so preserve them.
   const allowedTags = new Set([
-    'p', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 'br', 'a', 'ul', 'ol', 'li', 'img'
+    'p', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 'br', 'a', 'ul', 'ol', 'li', 'img',
+    'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'caption', 'colgroup', 'col'
   ]);
+
+  const tableAttributes = new Set(['role', 'width', 'height', 'border', 'cellpadding', 'cellspacing']);
+  const cellAttributes = new Set(['width', 'height', 'colspan', 'rowspan']);
+  const commonPresentationAttributes = new Set(['align', 'valign', 'bgcolor']);
+  const safeLinkProtocols = new Set(['http:', 'https:', 'mailto:', 'tel:']);
+
+  const safeStyle = (style: string) => style
+    .split(';')
+    .map(declaration => declaration.trim())
+    .filter(declaration => {
+      const separator = declaration.indexOf(':');
+      if (separator <= 0) return false;
+      const property = declaration.slice(0, separator).trim().toLowerCase();
+      const value = declaration.slice(separator + 1).trim().toLowerCase();
+      return !property.startsWith('--')
+        && !/expression\s*\(|behavior\s*:|-moz-binding|@import|javascript:|vbscript:|url\s*\(/i.test(value);
+    })
+    .join('; ');
+
+  const safeUrl = (value: string, protocols: Set<string>) => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('/') || trimmed.startsWith('./') || trimmed.startsWith('../')) return trimmed;
+    try {
+      return protocols.has(new URL(trimmed, window.location.origin).protocol.toLowerCase()) ? trimmed : '';
+    } catch {
+      return '';
+    }
+  };
+
+  const safeImageUrl = (value: string) => {
+    const trimmed = value.trim();
+    if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(trimmed) || /^cid:/i.test(trimmed)) return trimmed;
+    return safeUrl(trimmed, new Set(['http:', 'https:', 'blob:']));
+  };
   
   const parser = new DOMParser();
   const doc = parser.parseFromString(html || '', 'text/html');
@@ -18,7 +53,7 @@ export function sanitizeHtml(html: string): string {
       const el = node as HTMLElement;
       const tagName = el.tagName.toLowerCase();
       
-      // Block harmful tags
+      // Drop both harmful tags and their contents.
       if (['script', 'iframe', 'form', 'input', 'object', 'embed', 'video', 'audio', 'button'].includes(tagName)) {
         return null;
       }
@@ -35,52 +70,54 @@ export function sanitizeHtml(html: string): string {
       
       const newEl = doc.createElement(tagName);
       
-      // Copy only allowed attributes
       if (tagName === 'a') {
-        const href = el.getAttribute('href') || '';
-        // Block javascript: URLs
-        if (href && !href.trim().toLowerCase().startsWith('javascript:')) {
+        const href = safeUrl(el.getAttribute('href') || '', safeLinkProtocols);
+        if (href) {
           newEl.setAttribute('href', href);
           newEl.setAttribute('target', '_blank');
+          newEl.setAttribute('rel', 'noopener noreferrer');
         }
       }
       
       if (tagName === 'img') {
-        const src = el.getAttribute('src') || '';
-        // Block javascript: URLs in image sources
-        if (src && !src.trim().toLowerCase().startsWith('javascript:')) {
+        const src = safeImageUrl(el.getAttribute('src') || '');
+        if (src) {
           newEl.setAttribute('src', src);
         }
-        const alt = el.getAttribute('alt');
-        if (alt) newEl.setAttribute('alt', alt);
-        const width = el.getAttribute('width');
-        if (width) newEl.setAttribute('width', width);
-        const height = el.getAttribute('height');
-        if (height) newEl.setAttribute('height', height);
+        ['alt', 'width', 'height', 'border', 'align', 'hspace', 'vspace'].forEach(name => {
+          const value = el.getAttribute(name);
+          if (value) newEl.setAttribute(name, value);
+        });
       }
-      
-      // Safe attributes
+
+      if (tagName === 'table') {
+        tableAttributes.forEach(name => {
+          const value = el.getAttribute(name);
+          if (value) newEl.setAttribute(name, value);
+        });
+      }
+      if (['td', 'th'].includes(tagName)) {
+        cellAttributes.forEach(name => {
+          const value = el.getAttribute(name);
+          if (value) newEl.setAttribute(name, value);
+        });
+      }
+      if (tagName === 'col') {
+        ['span', 'width'].forEach(name => {
+          const value = el.getAttribute(name);
+          if (value) newEl.setAttribute(name, value);
+        });
+      }
+
+      commonPresentationAttributes.forEach(name => {
+        const value = el.getAttribute(name);
+        if (value) newEl.setAttribute(name, value);
+      });
       const style = el.getAttribute('style');
       if (style) {
-        // Strip event handler expressions or expressions within styles if any (simplistic)
-        if (!style.toLowerCase().includes('expression') && !style.toLowerCase().includes('behavior')) {
-          newEl.setAttribute('style', style);
-        }
+        const cleanedStyle = safeStyle(style);
+        if (cleanedStyle) newEl.setAttribute('style', cleanedStyle);
       }
-      
-      const align = el.getAttribute('align');
-      if (align) newEl.setAttribute('align', align);
-      
-      const color = el.getAttribute('color');
-      if (color) newEl.setAttribute('color', color);
-
-      // Clean event attributes completely
-      Array.from(el.attributes).forEach(attr => {
-        const name = attr.name.toLowerCase();
-        if (name.startsWith('on')) {
-          // Do not copy events
-        }
-      });
       
       // Process children
       el.childNodes.forEach(child => {
