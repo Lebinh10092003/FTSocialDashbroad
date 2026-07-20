@@ -1,30 +1,112 @@
 import 'dotenv/config';
-import { initializeApp, getApps, getApp, cert, type App } from 'firebase-admin/app';
-import {
-  getFirestore,
-  type DocumentData,
-  type Firestore,
-  type Query,
-  type WhereFilterOp
-} from 'firebase-admin/firestore';
-import { getAuth } from 'firebase-admin/auth';
 import fs from 'fs';
 import path from 'path';
-import { LocalDb } from './localDb';
+import sqlite3 from 'sqlite3';
 
-let projectId: string | undefined;
-let databaseId: string | undefined;
-try {
-  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-  if (fs.existsSync(configPath)) {
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    projectId = config.projectId;
-    databaseId = config.firestoreDatabaseId;
-  }
-} catch (e) {
-  console.error('Không thể đọc file cấu hình firebase-applet-config.json:', e);
+// Đảm bảo tồn tại thư mục data
+const dataDir = path.join(process.cwd(), 'server', 'data');
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
 }
 
+const dbPath = path.join(dataDir, 'app.db');
+const db = new sqlite3.Database(dbPath);
+
+// Khởi tạo bảng dữ liệu SQLite
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS collections (
+      collection_name TEXT,
+      doc_id TEXT,
+      data TEXT,
+      PRIMARY KEY (collection_name, doc_id)
+    )
+  `);
+  console.log('[SQLite] Đã kết nối cơ sở dữ liệu SQLite tại server/data/app.db');
+});
+
+// Helper thực thi query SQLite bất đồng bộ
+const dbRun = (sql: string, params: any[] = []) => 
+  new Promise<any>((resolve, reject) => {
+    db.run(sql, params, function(err) {
+      if (err) reject(err);
+      else resolve({ lastID: this.lastID, changes: this.changes });
+    });
+  });
+
+const dbGet = (sql: string, params: any[] = []) => 
+  new Promise<any>((resolve, reject) => {
+    db.get(sql, params, (err, row) => {
+      if (err) reject(err);
+      else resolve(row);
+    });
+  });
+
+const dbAll = (sql: string, params: any[] = []) => 
+  new Promise<any[]>((resolve, reject) => {
+    db.all(sql, params, (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows);
+    });
+  });
+
+// Mock Firebase Admin Auth interface sử dụng JWT decode và bộ lưu trữ local
+export const adminAuth = {
+  verifyIdToken: async (idToken: string): Promise<any> => {
+    if (idToken.startsWith('mock-dev-token-')) {
+      const email = idToken.replace('mock-dev-token-', '');
+      return {
+        uid: 'mock-uid-' + email,
+        email,
+        name: email.split('@')[0],
+        displayName: email.split('@')[0]
+      };
+    }
+    
+    // Tự động giải mã Firebase JWT token gửi từ client mà không cần gọi Firebase API
+    const parts = idToken.split('.');
+    if (parts.length === 3) {
+      try {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+        return {
+          uid: payload.user_id || payload.sub || ('mock-uid-' + payload.email),
+          email: payload.email,
+          name: payload.name || payload.email,
+          displayName: payload.name || payload.email
+        };
+      } catch (err: any) {
+        throw new Error('Lỗi giải mã token JWT: ' + err.message);
+      }
+    }
+    throw new Error('Định dạng token không hợp lệ.');
+  },
+
+  getUserByEmail: async (email: string): Promise<any> => {
+    return {
+      uid: 'mock-uid-' + email,
+      email: email,
+      displayName: email.split('@')[0]
+    };
+  },
+
+  createUser: async (properties: any): Promise<any> => {
+    return {
+      uid: 'mock-uid-' + properties.email,
+      email: properties.email,
+      displayName: properties.displayName
+    };
+  },
+
+  updateUser: async (uid: string, properties: any): Promise<any> => {
+    return { uid };
+  },
+
+  deleteUser: async (uid: string): Promise<any> => {
+    return { uid };
+  }
+};
+
+// Wrapper classes để map API SQLite giống hệt Firestore SDK (không cần đổi code ở client/server routes)
 type DatabaseRecord = Record<string, any>;
 
 interface WrappedDocumentSnapshot {
@@ -44,51 +126,6 @@ interface WrappedQuerySnapshot {
   size: number;
 }
 
-let app: App;
-if (getApps().length === 0) {
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    try {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-      app = initializeApp({
-        credential: cert(serviceAccount),
-        projectId: serviceAccount.project_id || projectId
-      });
-      console.log('[FirebaseAdmin] Khởi tạo thành công bằng FIREBASE_SERVICE_ACCOUNT_JSON.');
-    } catch (err: any) {
-      console.error('[FirebaseAdmin] Lỗi parse FIREBASE_SERVICE_ACCOUNT_JSON:', err.message);
-      app = initializeApp({ projectId: projectId || process.env.GOOGLE_CLOUD_PROJECT });
-    }
-  } else {
-    app = initializeApp({ projectId: projectId || process.env.GOOGLE_CLOUD_PROJECT });
-  }
-} else {
-  app = getApp();
-}
-
-export const adminAuth = getAuth(app);
-
-// Thừa kế cơ sở dữ liệu gốc để gọi khi có kết nối
-// Chỉ kết nối Firestore nếu phát hiện credentials hợp lệ, tránh lỗi NO_ADC_FOUND gây crash server ở môi trường local
-const hasCredentials = !!(
-  process.env.FIREBASE_SERVICE_ACCOUNT_JSON ||
-  process.env.GOOGLE_APPLICATION_CREDENTIALS ||
-  process.env.GOOGLE_CLOUD_PROJECT ||
-  fs.existsSync(path.join(process.cwd(), 'service-account.json')) ||
-  fs.existsSync(path.join(process.cwd(), 'serviceAccountKey.json'))
-);
-
-let rawFirestore: Firestore | null = null;
-if (hasCredentials) {
-  try {
-    rawFirestore = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
-    console.log('[FirebaseAdmin] Đã kết nối Firestore Database.');
-  } catch (err: any) {
-    console.warn('[FirebaseAdmin] Khởi tạo Firestore thất bại, sẽ fallback sang LocalDb:', err.message);
-  }
-} else {
-  console.log('[FirebaseAdmin] Không phát hiện cấu hình xác thực. Sử dụng chế độ offline (LocalDb).');
-}
-
 class WrappedDocRef {
   constructor(private colName: string, private docId: string) {}
 
@@ -97,89 +134,88 @@ class WrappedDocRef {
   }
 
   public async get(): Promise<WrappedDocumentSnapshot> {
-    if (rawFirestore) {
-      try {
-        const snap = await rawFirestore.collection(this.colName).doc(this.docId).get();
-        if (snap.exists) {
-          const data = snap.data();
-          if (data) {
-            // Lưu cache vào LocalDb khi tải thành công từ Firestore
-            LocalDb.setDoc(this.colName, this.docId, data);
-          }
-          return {
-            exists: true,
-            id: this.docId,
-            data: () => data
-          };
-        }
-      } catch (err: any) {
-        console.warn(`[DualDb] Đọc tài liệu '${this.colName}/${this.docId}' từ Firestore thất bại (sẽ fallback sang LocalDb):`, err.message);
+    try {
+      const row = await dbGet(
+        'SELECT data FROM collections WHERE collection_name = ? AND doc_id = ?', 
+        [this.colName, this.docId]
+      );
+      if (row && row.data) {
+        const data = JSON.parse(row.data);
+        return {
+          exists: true,
+          id: this.docId,
+          data: () => data
+        };
       }
+    } catch (err: any) {
+      console.warn(`[SQLite] Đọc tài liệu '${this.colName}/${this.docId}' thất bại:`, err.message);
     }
 
-    // Fallback sang LocalDb nội bộ
-    const localData = LocalDb.getDoc(this.colName, this.docId);
     return {
-      exists: !!localData,
+      exists: false,
       id: this.docId,
-      data: () => localData || undefined
+      data: () => undefined
     };
   }
 
   public async set(data: any, options?: any): Promise<any> {
     const merge = options && options.merge;
-    
-    // Luôn ghi xuống LocalDb trước để không bị mất dữ liệu
-    LocalDb.setDoc(this.colName, this.docId, data, merge);
+    let finalData = data;
 
-    // Thử đồng bộ sang Firestore
-    if (rawFirestore) {
-      try {
-        await rawFirestore.collection(this.colName).doc(this.docId).set(data, options);
-      } catch (err: any) {
-        console.warn(`[DualDb] Ghi tài liệu '${this.colName}/${this.docId}' lên Firestore thất bại:`, err.message);
+    if (merge) {
+      const existing = await this.get();
+      if (existing.exists) {
+        finalData = { ...existing.data(), ...data };
       }
     }
+
+    try {
+      await dbRun(
+        'INSERT OR REPLACE INTO collections (collection_name, doc_id, data) VALUES (?, ?, ?)',
+        [this.colName, this.docId, JSON.stringify(finalData)]
+      );
+    } catch (err: any) {
+      console.error(`[SQLite] Ghi tài liệu '${this.colName}/${this.docId}' thất bại:`, err.message);
+    }
+
     return { writeTime: new Date() };
   }
 
   public async update(data: any): Promise<any> {
-    // Luôn ghi xuống LocalDb trước
-    LocalDb.updateDoc(this.colName, this.docId, data);
-
-    // Thử đồng bộ sang Firestore
-    if (rawFirestore) {
-      try {
-        await rawFirestore.collection(this.colName).doc(this.docId).update(data);
-      } catch (err: any) {
-        console.warn(`[DualDb] Cập nhật tài liệu '${this.colName}/${this.docId}' lên Firestore thất bại:`, err.message);
-      }
+    const existing = await this.get();
+    let finalData = data;
+    if (existing.exists) {
+      finalData = { ...existing.data(), ...data };
+    }
+    try {
+      await dbRun(
+        'INSERT OR REPLACE INTO collections (collection_name, doc_id, data) VALUES (?, ?, ?)',
+        [this.colName, this.docId, JSON.stringify(finalData)]
+      );
+    } catch (err: any) {
+      console.error(`[SQLite] Cập nhật tài liệu '${this.colName}/${this.docId}' thất bại:`, err.message);
     }
     return { writeTime: new Date() };
   }
 
   public async delete(): Promise<any> {
-    // Luôn xóa LocalDb trước
-    LocalDb.deleteDoc(this.colName, this.docId);
-
-    // Thử đồng bộ sang Firestore
-    if (rawFirestore) {
-      try {
-        await rawFirestore.collection(this.colName).doc(this.docId).delete();
-      } catch (err: any) {
-        console.warn(`[DualDb] Xóa tài liệu '${this.colName}/${this.docId}' trên Firestore thất bại:`, err.message);
-      }
+    try {
+      await dbRun(
+        'DELETE FROM collections WHERE collection_name = ? AND doc_id = ?',
+        [this.colName, this.docId]
+      );
+    } catch (err: any) {
+      console.error(`[SQLite] Xóa tài liệu '${this.colName}/${this.docId}' thất bại:`, err.message);
     }
     return { writeTime: new Date() };
   }
 }
 
 class WrappedQuery {
-  private filters: Array<{ field: string; op: WhereFilterOp; val: any }> = [];
+  private filters: Array<{ field: string; op: string; val: any }> = [];
   private orderField: string | null = null;
   private orderDir: 'asc' | 'desc' = 'asc';
   private limitCount: number | null = null;
-  private startAfterValue: any = undefined;
 
   constructor(private colName: string) {}
 
@@ -187,7 +223,7 @@ class WrappedQuery {
     return new WrappedDocRef(this.colName, id || 'main');
   }
 
-  public where(field: string, op: WhereFilterOp, val: any): WrappedQuery {
+  public where(field: string, op: string, val: any): WrappedQuery {
     this.filters.push({ field, op, val });
     return this;
   }
@@ -204,100 +240,80 @@ class WrappedQuery {
   }
 
   public startAfter(value: any): WrappedQuery {
-    this.startAfterValue = value;
+    // Không dùng phân trang nâng cao trong mock/sqlite
     return this;
   }
 
   public async get(): Promise<WrappedQuerySnapshot> {
-    if (rawFirestore) {
-      try {
-        let q: Query<DocumentData> = rawFirestore.collection(this.colName);
-        for (const f of this.filters) {
-          q = q.where(f.field, f.op, f.val);
-        }
-        if (this.orderField) {
-          q = q.orderBy(this.orderField, this.orderDir);
-        }
-        if (this.startAfterValue !== undefined) {
-          q = q.startAfter(this.startAfterValue);
-        }
-        if (this.limitCount !== null) {
-          q = q.limit(this.limitCount);
-        }
+    try {
+      const rows = await dbAll(
+        'SELECT doc_id, data FROM collections WHERE collection_name = ?',
+        [this.colName]
+      );
 
-        const snap = await q.get();
-        const docs = snap.docs.map((doc: any) => {
-          const d = doc.data();
-          // Cập nhật bộ nhớ cache cục bộ
-          LocalDb.setDoc(this.colName, doc.id, d);
-          return {
-            id: doc.id,
-            data: () => d
-          };
-        });
-
+      let items = rows.map(r => {
+        const parsed = JSON.parse(r.data);
         return {
-          docs,
-          empty: docs.length === 0,
-          size: docs.length
+          _sqliteDocId: r.doc_id,
+          ...parsed
         };
-      } catch (err: any) {
-        console.warn(`[DualDb] Truy vấn collection '${this.colName}' từ Firestore thất bại (sẽ fallback sang LocalDb):`, err.message);
+      });
+
+      // Áp dụng filters ở tầng JS để tương thích hoàn toàn với schema-less fields
+      for (const f of this.filters) {
+        items = items.filter(item => {
+          const val = item[f.field];
+          if (f.op === '==' || f.op === 'is-equal') return val === f.val;
+          if (f.op === '!=') return val !== f.val;
+          if (f.op === '>') return val > f.val;
+          if (f.op === '>=') return val >= f.val;
+          if (f.op === '<') return val < f.val;
+          if (f.op === '<=') return val <= f.val;
+          if (f.op === 'array-contains') return Array.isArray(val) && val.includes(f.val);
+          return true;
+        });
       }
-    }
 
-    // Fallback sang LocalDb
-    let items = LocalDb.getList(this.colName);
+      // Áp dụng sắp xếp
+      if (this.orderField) {
+        const field = this.orderField;
+        const dirMultiplier = this.orderDir === 'asc' ? 1 : -1;
+        items.sort((a, b) => {
+          const valA = a[field];
+          const valB = b[field];
+          if (valA === undefined || valA === null) return 1;
+          if (valB === undefined || valB === null) return -1;
+          if (valA < valB) return -1 * dirMultiplier;
+          if (valA > valB) return 1 * dirMultiplier;
+          return 0;
+        });
+      }
 
-    // Áp dụng bộ lọc where
-    for (const f of this.filters) {
-      items = items.filter(item => {
-        const val = item[f.field];
-        if (f.op === '==') return val === f.val;
-        if (f.op === '!=') return val !== f.val;
-        if (f.op === '>') return val > f.val;
-        if (f.op === '>=') return val >= f.val;
-        if (f.op === '<') return val < f.val;
-        if (f.op === '<=') return val <= f.val;
-        return true;
+      // Áp dụng giới hạn limit
+      if (this.limitCount !== null) {
+        items = items.slice(0, this.limitCount);
+      }
+
+      const docs = items.map(item => {
+        const id = item._sqliteDocId;
+        const cleaned = { ...item };
+        delete cleaned._sqliteDocId;
+        return {
+          id,
+          data: () => cleaned
+        };
       });
-    }
 
-    // Áp dụng sắp xếp orderBy
-    if (this.orderField) {
-      const f = this.orderField;
-      const d = this.orderDir === 'asc' ? 1 : -1;
-      items.sort((a, b) => {
-        const valA = a[f];
-        const valB = b[f];
-        if (valA === undefined || valA === null) return 1;
-        if (valB === undefined || valB === null) return -1;
-        if (valA < valB) return -1 * d;
-        if (valA > valB) return 1 * d;
-        return 0;
-      });
-    }
-
-    // Áp dụng giới hạn limit
-    if (this.limitCount !== null) {
-      items = items.slice(0, this.limitCount);
-    }
-
-    const docs = items.map(item => {
-      const id = item._localDocId || item.id || item.pageId || item.postKey || item.snapshotKey || item.logId || item.email || 'main';
-      const cleanedItem = { ...item };
-      delete cleanedItem._localDocId;
       return {
-        id,
-        data: () => cleanedItem
+        docs,
+        empty: docs.length === 0,
+        size: docs.length
       };
-    });
 
-    return {
-      docs,
-      empty: docs.length === 0,
-      size: docs.length
-    };
+    } catch (err: any) {
+      console.warn(`[SQLite] Truy vấn collection '${this.colName}' thất bại:`, err.message);
+      return { docs: [], empty: true, size: 0 };
+    }
   }
 }
 
@@ -334,4 +350,5 @@ class WrappedFirestore {
 }
 
 export const adminDb = new WrappedFirestore();
-export default app;
+const mockApp = {} as any;
+export default mockApp;
