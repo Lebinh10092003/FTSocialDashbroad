@@ -7,6 +7,7 @@ import { apiRouter } from './server/routes';
 import { uploadErrorHandler, uploadRouter } from './server/uploadRoutes';
 import { SyncEngine } from './server/sync';
 import { adminDb } from './server/firebase';
+import { syncExaminationFromGoogleSheet } from './server/examinationSync';
 
 function setupAutoSyncScheduler() {
   let lastCronRunDay = '';
@@ -43,6 +44,15 @@ function setupAutoSyncScheduler() {
 
         const results = await SyncEngine.syncAllChannels(googleTokenToUse, undefined, undefined, `auto-${dayStr}`);
         console.log('[AutoSync] Hoàn tất đồng bộ tự động hàng ngày:', JSON.stringify(results));
+
+        // Tự động đồng bộ thí sinh từ Google Sheets lúc 7h sáng
+        try {
+          console.log('[AutoSync] Kích hoạt đồng bộ tự động Google Sheets khảo thí...');
+          const examSyncResult = await syncExaminationFromGoogleSheet();
+          console.log('[AutoSync] Hoàn tất đồng bộ Google Sheets khảo thí:', JSON.stringify(examSyncResult));
+        } catch (examErr: any) {
+          console.error('[AutoSync] Lỗi đồng bộ Google Sheets khảo thí tự động:', examErr.message);
+        }
       }
     } catch (error: any) {
       console.error('[AutoSync] Lỗi trong quá trình tự động đồng bộ hàng ngày:', error.message);

@@ -5,6 +5,7 @@ import { SheetsService, getGoogleSheetsAuth } from './sheets';
 import { Channel, Post, DailySnapshot, ApiLog, UserProfile, UserRole } from '../src/types';
 import { v4 as uuidv4 } from 'uuid';
 import * as XLSX from 'xlsx';
+import { syncExaminationFromGoogleSheet } from './examinationSync';
 
 export const apiRouter = Router();
 
@@ -413,6 +414,24 @@ function nextCandidateCode(existing: any[], preferred: string, index: number) {
   while (used.has(`FT${year}-${String(sequence).padStart(4, '0')}`)) sequence += 1;
   return `FT${year}-${String(sequence + index).padStart(4, '0')}`;
 }
+apiRouter.post('/examination/sync/google-sheet', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const url = typeof req.body?.url === 'string' && req.body.url.trim() ? req.body.url.trim() : undefined;
+    const result = await syncExaminationFromGoogleSheet(url);
+    if (!result.success) return res.status(400).json({ error: result.message });
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Không thể đồng bộ Google Sheets.' });
+  }
+});
+apiRouter.get('/examination/sync/status', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const configSnap = await adminDb.collection('systemConfig').doc('examination_sync_state').get();
+    res.json(configSnap.exists ? configSnap.data() : { status: 'idle' });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
 apiRouter.post('/examination/import/google-sheet', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const spreadsheetId = examinationSheetId(req.body?.url);
