@@ -8,10 +8,10 @@ Hệ thống phân tích tương tác Facebook và Zalo OA, đồng bộ dữ li
 npm install; npm run dev
 ```
 
-## 2. Cập nhật & Reset VPS qua Git Pull bằng 1 dòng SSH (Chạy tại máy local - Tự động build code mới nhất trên VPS)
+## 2. Cập nhật & Reset VPS qua Git Pull bằng 1 dòng SSH (Chạy tại máy local - Tự động sửa lỗi xung đột file trên VPS)
 
 ```powershell
-ssh root@103.142.27.69 "cd /var/www/ft-social-dashboard && (git status >/dev/null 2>&1 || (git init && git remote add origin https://github.com/Lebinh10092003/FTSocialDashbroad.git && git fetch && git checkout -f main)) && git pull && npm install && npm run build && pm2 restart all"
+ssh root@103.142.27.69 "cd /var/www/ft-social-dashboard && (git status >/dev/null 2>&1 || (git init && git remote add origin https://github.com/Lebinh10092003/FTSocialDashbroad.git && git fetch && git checkout -f main)) && git reset --hard && git pull && npm install && npm run build && pm2 restart all"
 ```
 
 ## 3. Build & Deploy trực tiếp từ local lên VPS qua 1 dòng script (Chạy tại máy local)
