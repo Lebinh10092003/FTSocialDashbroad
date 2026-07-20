@@ -144,16 +144,28 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     if (!sourceUrl.trim()) return setMessage('Hãy dán liên kết Google Sheets có quyền xem.');
     setLoading(true); setMessage('');
     try {
-      const res = await fetch('/api/examination/import/google-sheet', {
+      // Gọi endpoint đồng bộ CSV công khai — không cần OAuth
+      const res = await fetch('/api/examination/sync/google-sheet', {
         method: 'POST', headers: authHeaders,
         body: JSON.stringify({ url: sourceUrl.trim() }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Không thể đọc Google Sheets.');
-      setParsedRows(body.rows || [], body.title || 'Google Sheets');
-    } catch (err: any) { setMessage(err.message || 'Không thể đọc Google Sheets.'); }
+      // Sau khi sync, hiển thị kết quả dạng thông báo (không cần preview riêng)
+      setSyncState({
+        status: 'success',
+        lastSyncTime: body.timestamp,
+        created: body.created,
+        updated: body.updated,
+        total: body.total,
+        message: body.message,
+      });
+      setMessage(`✅ ${body.message}`);
+      onImported([]);
+    } catch (err: any) { setMessage(`❌ ${err.message || 'Không thể đọc Google Sheets.'}`); }
     finally { setLoading(false); }
   };
+
 
   const importRows = async () => {
     if (!rows.length) return;
@@ -331,8 +343,10 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
           <div className="flex items-center gap-3">
             <Link2 className="h-6 w-6 text-[#003366]" />
             <div>
-              <h2 className="font-bold text-[#001e40]">Google Sheets (tuỳ chỉnh)</h2>
-              <p className="text-sm text-slate-500">Dán link chia sẻ công khai để đọc & import.</p>
+              <h2 className="font-bold text-[#001e40]">Google Sheets nguồn khác</h2>
+              <p className="text-sm text-slate-500">
+                Dán link chia sẻ công khai (Anyone with link) · Không cần đăng nhập Google.
+              </p>
             </div>
           </div>
           <div className="mt-5 flex gap-2">
@@ -340,8 +354,8 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
               placeholder="https://docs.google.com/spreadsheets/d/..."
               className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
             <button disabled={!canImport || loading} onClick={loadSheet}
-              className="rounded-lg border border-[#003366] px-4 text-sm font-bold text-[#003366] hover:bg-slate-50 disabled:opacity-50 transition-colors">
-              Đọc nguồn
+              className="rounded-lg border border-[#003366] px-4 text-sm font-bold text-[#003366] hover:bg-slate-50 disabled:opacity-50 transition-colors whitespace-nowrap">
+              Đồng bộ & Import
             </button>
           </div>
         </section>
