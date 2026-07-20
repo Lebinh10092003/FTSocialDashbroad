@@ -677,7 +677,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
                       maxWidth: 650,
                       externalBg: '#f8fafc',
                       contentBg: '#ffffff',
-                      fontFamily: 'Arial, Helvetica, sans-serif',
+                      fontFamily: 'Roboto, "Helvetica Neue", Arial, sans-serif',
                       textColor: '#1e293b',
                       contentPadding: 24,
                       borderRadius: 16,

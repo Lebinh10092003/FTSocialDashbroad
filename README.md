@@ -19,3 +19,9 @@ ssh root@103.142.27.69 "cd /var/www/ft-social-dashboard && (git status >/dev/nul
 ```powershell
 npm run deploy
 ```
+
+## 4. Git Commit & Push nhanh trên 1 dòng (Windows PowerShell)
+
+```powershell
+git add .; git commit -m "update"; git push origin
+```
