@@ -185,7 +185,7 @@ class WrappedDocRef {
     const existing = await this.get();
     let finalData = data;
     if (existing.exists) {
-      finalData = { ...existing.data(), ...data };
+      finalData = { ...(existing.data() || {}), ...data };
     }
     try {
       await dbRun(
@@ -329,12 +329,23 @@ class WrappedBatch {
   }
 
   public async commit(): Promise<void> {
-    for (const op of this.operations) {
-      if (op.type === 'set') {
-        await op.docRef.set(op.data, op.options);
-      } else if (op.type === 'delete') {
-        await op.docRef.delete();
+    try {
+      await dbRun('BEGIN TRANSACTION');
+      for (const op of this.operations) {
+        if (op.type === 'set') {
+          await op.docRef.set(op.data, op.options);
+        } else if (op.type === 'delete') {
+          await op.docRef.delete();
+        }
       }
+      await dbRun('COMMIT');
+    } catch (err) {
+      try {
+        await dbRun('ROLLBACK');
+      } catch (rollbackErr) {
+        // Ignored
+      }
+      throw err;
     }
   }
 }
