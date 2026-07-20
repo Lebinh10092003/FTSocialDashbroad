@@ -26,7 +26,7 @@ export function DateBadge({ label, date }: { label: string; date?: string }) {
   }, [today]);
   const days = Math.round((new Date(`${date}T00:00:00`).getTime() - new Date(`${today}T00:00:00`).getTime()) / 86400000);
   const style = days < 0 ? 'border-blue-200 bg-blue-50 text-blue-700' : days <= 7 ? 'border-red-600 bg-red-600 text-white' : days <= 15 ? 'border-red-300 bg-white text-red-600' : days <= 31 ? 'border-orange-200 bg-orange-50 text-orange-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700';
-  return <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-1 text-[11px] font-bold ${style}`}>{label} · {days < 0 ? 'Đã qua' : days === 0 ? 'Hôm nay' : `Còn ${days} ngày`}</span>;
+  return <span className={`inline-flex whitespace-nowrap rounded-lg border px-2.5 py-1 text-[11px] font-bold ${style}`}>{label} · {days < 0 ? 'Đã qua' : days === 0 ? 'Hôm nay' : `Còn ${days} ngày`}</span>;
 }
 export function Metric({ label, value, icon: Icon, onClick }: { label: string; value: string; icon: React.ElementType; onClick?: () => void }) {
   const body = <><div className="flex justify-between"><span className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</span><Icon className="h-5 w-5 text-[#001e40]" /></div><p className="mt-4 text-4xl font-extrabold text-[#001e40]">{value}</p></>;
