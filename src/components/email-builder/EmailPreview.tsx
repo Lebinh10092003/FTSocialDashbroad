@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { X, Monitor, Smartphone, AlertTriangle } from 'lucide-react';
 import { EmailTemplate, EmailVariable } from '../../types/emailBuilder';
 import { generateEmailHtml } from '../../lib/emailHtmlGenerator';
@@ -20,73 +20,17 @@ export default function EmailPreview({
   // Dùng previewHtml (WYSIWYG) thay vì html (email export)
   const { previewHtml, subject, warnings } = generateEmailHtml(template, variables, useMock);
 
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const lastHeightRef = useRef<number>(0);
-  const animationFrameRef = useRef<number | null>(null);
-
-  const updateIframeHeight = () => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
-
-    animationFrameRef.current = requestAnimationFrame(() => {
-      const iframe = iframeRef.current;
-      if (iframe && iframe.contentWindow && iframe.contentDocument) {
-        try {
-          const doc = iframe.contentDocument;
-          const height = doc.documentElement.scrollHeight || doc.body.scrollHeight;
-          if (height !== lastHeightRef.current && height > 0) {
-            lastHeightRef.current = height;
-            iframe.style.height = `${height}px`;
-          }
-        } catch (e) {
-          // Ignored
-        }
-      }
-    });
-  };
-
-  useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-
-    let timers: NodeJS.Timeout[] = [];
-    lastHeightRef.current = 0; // Reset khi nội dung thay đổi
-
-    const triggerHeightUpdate = () => updateIframeHeight();
-
-    const handleLoad = () => {
-      triggerHeightUpdate();
-      const t1 = setTimeout(triggerHeightUpdate, 100);
-      const t2 = setTimeout(triggerHeightUpdate, 400);
-      const t3 = setTimeout(triggerHeightUpdate, 1000);
-      const t4 = setTimeout(triggerHeightUpdate, 2000);
-      timers.push(t1, t2, t3, t4);
-    };
-
-    iframe.addEventListener('load', handleLoad);
-    triggerHeightUpdate();
-    const tStart = setTimeout(triggerHeightUpdate, 250);
-    timers.push(tStart);
-
-    return () => {
-      iframe.removeEventListener('load', handleLoad);
-      timers.forEach(t => clearTimeout(t));
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-    };
-  }, [previewHtml, viewMode]);
-
   // Màu nền ngoài để container preview khớp với iframe
   const externalBg = template.settings?.externalBg || '#f1f5f9';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4">
-      <div className="relative w-full max-w-7xl bg-slate-100 rounded-3xl border border-slate-200 shadow-2xl flex flex-col h-[90vh] overflow-hidden animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4 animate-fade-in-fast">
+      <div className="relative w-full max-w-7xl bg-slate-100 rounded-3xl border border-slate-200 shadow-2xl flex flex-col h-[90vh] overflow-hidden">
 
         {/* Header Toolbar */}
         <div className="p-4 bg-white border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3">
-            <h2 className="text-sm font-extrabold text-slate-900">Xem trước Email</h2>
+            <h2 className="text-sm font-extrabold text-slate-900" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>Xem trước Email</h2>
             <div className="flex bg-slate-100 border border-slate-200 p-0.5 rounded-xl">
               <button
                 onClick={() => setViewMode('desktop')}
@@ -107,12 +51,12 @@ export default function EmailPreview({
 
           <div className="flex items-center gap-3 self-end sm:self-auto">
             {/* Toggle Mock Data */}
-            <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700 font-bold select-none bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl hover:bg-slate-100/70 transition-all">
+            <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-705 font-bold select-none bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl hover:bg-slate-100/75 transition-all">
               <input
                 type="checkbox"
                 checked={useMock}
                 onChange={e => setUseMock(e.target.checked)}
-                className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                className="w-4 h-4 text-blue-600 border-slate-350 rounded focus:ring-blue-500 cursor-pointer"
               />
               Điền dữ liệu mẫu (Mock data)
             </label>
@@ -145,36 +89,31 @@ export default function EmailPreview({
 
         {/* Subject preview bar */}
         <div
-          className="shrink-0 border-b px-5 py-2 flex items-center gap-2 text-xs select-none"
+          className="shrink-0 border-b px-5 py-2.5 flex items-center gap-2 text-xs select-none"
           style={{ background: externalBg }}
         >
-          <span className="font-bold text-slate-700 shrink-0">Tiêu đề:</span>
+          <span className="font-bold text-slate-750 shrink-0">Tiêu đề:</span>
           <span className="truncate text-slate-900 font-semibold">{subject || '[Trống]'}</span>
         </div>
 
-        {/* Email preview frame - màu nền ngoài khớp với externalBg */}
+        {/* Email preview frame - cho phép iframe tự cuộn độc lập */}
         <div
-          className="flex flex-1 overflow-auto"
+          className="flex flex-1 overflow-hidden h-full p-4 justify-center"
           style={{ background: externalBg }}
         >
           {/* Desktop: căn giữa email trong khung, Mobile: giới hạn 390px căn giữa */}
           <div
-            className="mx-auto w-full shrink-0 flex flex-col transition-all duration-300"
+            className="w-full h-full flex flex-col transition-all duration-300 shadow-lg rounded-2xl overflow-hidden border border-slate-200/80 bg-white"
             style={{
               maxWidth: viewMode === 'mobile' ? '390px' : `${template.settings?.maxWidth || 680}px`,
-              width: viewMode === 'mobile' ? '390px' : '100%',
             }}
           >
-            {/* Iframe không có thanh cuộn, tự giãn chiều cao theo nội dung */}
             <iframe
-              ref={iframeRef}
               key={`${viewMode}-${previewHtml.length}`}
               title="Email Preview Frame"
               srcDoc={previewHtml}
-              width="100%"
-              scrolling="no"
-              className="w-full border-0 block min-h-[400px]"
-              style={{ background: externalBg }}
+              className="w-full h-full border-0 block"
+              style={{ background: '#ffffff' }}
             />
           </div>
         </div>

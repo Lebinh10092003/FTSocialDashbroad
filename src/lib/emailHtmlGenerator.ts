@@ -523,7 +523,7 @@ export function generateEmailHtml(
     .ft-email-content-cell, .ft-email-block { width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; }
     .ft-email-block { table-layout: fixed !important; }
     .ft-email-root table { max-width: 100% !important; }
-    .ft-email-root img { max-width: 100% !important; height: auto !important; }
+    .ft-email-root img, .ft-email-content img, img { max-width: 100% !important; height: auto !important; }
     .ft-email-layout { width: 100% !important; table-layout: fixed !important; }
     .ft-email-rich-table { width: 100% !important; max-width: 100% !important; table-layout: fixed !important; }
     .ft-email-fill-height { height: 100% !important; }
