@@ -11,7 +11,7 @@ import {
   ArrowLeft,
   LogIn
 } from 'lucide-react';
-import { UserRole } from '../types';
+import { UserRole } from '../../types';
 import TokenNotifications from './TokenNotifications';
 
 interface SidebarProps {
@@ -104,7 +104,7 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
             className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all cursor-pointer shadow-sm active:scale-[0.99]"
           >
             <LogIn className="w-3.5 h-3.5" />
-            Đăng nhập Quản trị
+            Đăng nhập
           </button>
         ) : (
           <button

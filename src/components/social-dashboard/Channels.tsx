@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { 
   Radio, Plus, RefreshCw, CheckCircle2, XCircle, Settings, Trash2, ShieldAlert, Wifi, Globe, AlertTriangle
 } from 'lucide-react';
-import { Channel, UserRole } from '../types';
-import ConfirmModal from './ConfirmModal';
+import { Channel, UserRole } from '../../types';
+import ConfirmModal from '../ConfirmModal';
 
 interface ChannelsProps {
   idToken: string;

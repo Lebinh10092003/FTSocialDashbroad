@@ -12,16 +12,18 @@ import { Channel, UserRole } from './types';
 
 // Components (Lazy Loaded)
 import { ShieldAlert, AlertTriangle, Key, Layers, Lock, Mail, UserPlus, LogIn, LogOut, AlertCircle, Eye, EyeOff } from 'lucide-react';
-import Sidebar from './components/Sidebar';
+import Sidebar from './components/social-dashboard/Sidebar';
+import LoginModal from './components/LoginModal';
 
-const Dashboard = lazy(() => import('./components/Dashboard'));
-const MediaSummary = lazy(() => import('./components/MediaSummary'));
-const Posts = lazy(() => import('./components/Posts'));
-const Sync = lazy(() => import('./components/Sync'));
-const Config = lazy(() => import('./components/Config'));
-const AccountManagement = lazy(() => import('./components/AccountManagement'));
+const Dashboard = lazy(() => import('./components/social-dashboard/Dashboard'));
+const MediaSummary = lazy(() => import('./components/social-dashboard/MediaSummary'));
+const Posts = lazy(() => import('./components/social-dashboard/Posts'));
+const Sync = lazy(() => import('./components/social-dashboard/Sync'));
+const Config = lazy(() => import('./components/social-dashboard/Config'));
+const AccountManagement = lazy(() => import('./components/social-dashboard/AccountManagement'));
 const EmailTemplateBuilder = lazy(() => import('./components/email-builder/EmailTemplateBuilder'));
 const ExaminationModule = lazy(() => import('./components/ExaminationModule'));
+const DigitalTraining = lazy(() => import('./components/digital-training/DigitalTraining'));
 
 class ExaminationErrorBoundary extends Component<{ children: React.ReactNode }, { error: Error | null }> {
   declare props: { children: React.ReactNode };
@@ -47,13 +49,15 @@ export default function App() {
   const [userRole, setUserRole] = useState<UserRole>('EMPLOYEE');
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const isGuest = user?.email === 'guest@ftsocial.com';
-  const [viewMode, setViewModeState] = useState<'workspace' | 'social-dashboard' | 'email-builder' | 'examination'>('workspace');
+  const [viewMode, setViewModeState] = useState<'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training'>('workspace');
   const [channels, setChannels] = useState<Channel[]>([]);
 
   useEffect(() => {
     const handleLocationChange = () => {
       const path = window.location.pathname;
-      if (path.startsWith('/social-dashboard')) {
+      if (path.startsWith('/digital-training')) {
+        setViewModeState('digital-training');
+      } else if (path.startsWith('/social-dashboard')) {
         setViewModeState('social-dashboard');
       } else if (path.startsWith('/email-builder')) {
         setViewModeState('email-builder');
@@ -71,7 +75,7 @@ export default function App() {
     return () => window.removeEventListener('popstate', handleLocationChange);
   }, []);
 
-  const setViewMode = (mode: 'workspace' | 'social-dashboard' | 'email-builder' | 'examination') => {
+  const setViewMode = (mode: 'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training') => {
     setViewModeState(mode);
     const newPath = mode === 'workspace' ? '/' : `/${mode}`;
     if (window.location.pathname !== newPath) {
@@ -315,6 +319,7 @@ export default function App() {
     setAuthChecking(false);
   };
 
+  const loginModal = <LoginModal open={showLoginModal} onClose={() => setShowLoginModal(false)} onSubmit={handleCredentialsAuth} onGoogle={handleGoogleSignIn} email={loginEmail} password={loginPassword} setEmail={setLoginEmail} setPassword={setLoginPassword} loading={authLoading} error={authError} />;
   // Fetch all channels
   const handleRefreshChannels = async () => {
     if (!idToken) return;
@@ -495,18 +500,18 @@ export default function App() {
               </div>
               <div className="pt-4 flex items-center text-xs font-bold text-amber-600 group-hover:translate-x-1 transition-transform">Truy cập ứng dụng →</div>
             </div>
-            {/* Card 6: Digital Training (Coming Soon) */}
-            <div className="glass-card p-6.5 rounded-3xl opacity-80 relative group flex flex-col justify-between min-h-[220px]">
+            {/* Card 6: Digital Training */}
+            <div onClick={() => setViewMode('digital-training')} className="glass-card p-6.5 rounded-3xl relative group flex flex-col justify-between min-h-[220px] cursor-pointer">
               <div className="space-y-4">
                 <div className="w-12 h-12 bg-gradient-to-tr from-cyan-500 to-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-cyan-500/10">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v11.494m-9-5.747h18M4.5 8.5h15M4.5 15.5h15M12 3a9 9 0 100 18 9 9 0 000-18z" /></svg>
                 </div>
                 <div className="space-y-1.5">
-                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">Đào tạo số <span className="text-[9px] bg-slate-100 text-slate-500 font-extrabold px-1.5 py-0.5 rounded-full border border-slate-200 uppercase tracking-wide">Sắp ra mắt</span></h3>
+                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">Đào tạo số <span className="text-[9px] bg-slate-100 text-slate-500 font-extrabold px-1.5 py-0.5 rounded-full border border-slate-200 uppercase tracking-wide">Đang chạy</span></h3>
                   <p className="text-xs text-slate-500 leading-relaxed">Công tác đào tạo Chuyển đổi số, Đào tạo Ứng dụng AI trong công việc.</p>
                 </div>
               </div>
-              <div className="pt-4 text-xs font-bold text-slate-400">Đang phát triển</div>
+              <div className="pt-4 text-xs font-bold text-slate-400">Truy cập ứng dụng →</div>
             </div>          </div>
         </main>
 
@@ -514,6 +519,7 @@ export default function App() {
         <footer className="w-full text-center py-6 text-[10px] text-slate-400 z-10 border-t border-slate-200">
           Copyright &copy; 2026 FermatTech Workspace. Powered by Cloud Run containers & VPS PM2 engines.
         </footer>
+        {loginModal}
       </div>
     );
   }
@@ -526,14 +532,29 @@ export default function App() {
           <p className="text-sm font-semibold text-slate-500">Đang nạp Trình tạo Email...</p>
         </div>
       }>
-        <EmailTemplateBuilder onBackToWorkspace={() => setViewMode('workspace')} />
+        <EmailTemplateBuilder onBackToWorkspace={() => setViewMode('workspace')} onAccountClick={() => { if (isGuest) { setShowLoginModal(true); } else { handleLogout(); } }} isGuest={isGuest} userName={user?.displayName} />
       </Suspense>
     );
   }
 
+  if (viewMode === 'digital-training') {
+    return (
+      <>
+        <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50 text-sm font-semibold text-slate-500">Đang nạp mô-đun Đào tạo số...</div>}>
+          <DigitalTraining
+            onBackToWorkspace={() => setViewMode('workspace')}
+            onAccountClick={() => { if (isGuest) { setShowLoginModal(true); } else { handleLogout(); } }}
+            isGuest={isGuest}
+            userName={user?.displayName}
+          />
+        </Suspense>
+        {loginModal}
+      </>
+    );
+  }
   if (viewMode === 'examination') {
     return (
-      <ExaminationErrorBoundary>
+      <><ExaminationErrorBoundary>
         <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50 text-sm font-semibold text-slate-500">Đang nạp mô-đun Khảo thí...</div>}>
           <ExaminationModule
             onBackToWorkspace={() => setViewMode('workspace')}
@@ -543,10 +564,12 @@ export default function App() {
             googleAccessToken={googleAccessToken}
             userRole={userRole}
             isGuest={isGuest}
-            onAccountClick={() => { if (isGuest) { setViewMode('workspace'); setShowLoginModal(true); } else { handleLogout(); } }}
+            onAccountClick={() => { if (isGuest) { setShowLoginModal(true); } else { handleLogout(); } }}
           />
         </Suspense>
       </ExaminationErrorBoundary>
+        {loginModal}
+      </>
     );
   }
   // Dashboard / Admin Panel view
@@ -610,64 +633,7 @@ export default function App() {
           </div>
         )}
       </main>
-
-      {/* Popup Login Modal */}
-      {showLoginModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-6">
-          <div className="relative w-full max-w-lg bg-white rounded-3xl border border-slate-200 shadow-2xl p-9 md:p-10 space-y-5 animate-fade-in">
-            {/* Nút đóng */}
-            <button 
-              onClick={() => setShowLoginModal(false)} 
-              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-xl transition-all cursor-pointer"
-              aria-label="Đóng cửa sổ"
-            >
-              ✕
-            </button>
-            
-            <form onSubmit={handleCredentialsAuth} className="space-y-5">
-              <div className="text-center mb-4 flex flex-col items-center">
-                <img src="/logo.png" alt="FermatTech Logo" className="h-10 object-contain mb-3" />
-                <h1 className="text-xl font-extrabold text-slate-900 leading-tight">FermatTech Workspace</h1>
-              </div>
-              
-              <div className="space-y-3">
-                <input 
-                  value={loginEmail} 
-                  onChange={e => setLoginEmail(e.target.value)} 
-                  placeholder="Email"
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" 
-                  autoComplete="username" 
-                />
-                <input 
-                  value={loginPassword} 
-                  onChange={e => setLoginPassword(e.target.value)} 
-                  type="password" 
-                  placeholder="Mật khẩu" 
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" 
-                  autoComplete="current-password" 
-                />
-              </div>
-              
-              {authError && <p className="text-xs text-rose-600 font-semibold">{authError}</p>}
-              
-              <button 
-                disabled={authLoading} 
-                className="w-full rounded-xl bg-blue-600 py-3.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50 transition-all cursor-pointer"
-              >
-                {authLoading ? 'Đang đăng nhập...' : 'Đăng nhập'}
-              </button>
-              <button 
-                type="button" 
-                onClick={handleGoogleSignIn} 
-                disabled={authLoading} 
-                className="w-full rounded-xl border border-slate-200 py-3.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-all cursor-pointer"
-              >
-                Đăng nhập bằng Google
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
+      {loginModal}
     </div>
   );
 }

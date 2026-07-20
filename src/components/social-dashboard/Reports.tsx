@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   BarChart3, FileSpreadsheet, Download, ExternalLink, Calendar, Radio, TrendingUp, AlertCircle
 } from 'lucide-react';
-import { Channel, DashboardData, SystemConfig } from '../types';
+import { Channel, DashboardData, SystemConfig } from '../../types';
 
 interface ReportsProps {
   idToken: string;

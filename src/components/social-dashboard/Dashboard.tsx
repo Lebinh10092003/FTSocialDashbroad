@@ -28,8 +28,8 @@ import {
   TrendingUp,
   Users,
 } from 'lucide-react';
-import { Channel, DashboardData } from '../types';
-import SearchableSelect from './SearchableSelect';
+import { Channel, DashboardData } from '../../types';
+import SearchableSelect from '../SearchableSelect';
 
 const COLORS = ['#2563eb', '#0f766e', '#f59e0b', '#ef4444', '#7c3aed', '#ec4899', '#0891b2', '#ea580c'];
 const DEFAULT_AUTO_SCALE_STEPS = 8;

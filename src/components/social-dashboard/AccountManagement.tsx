@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Edit3, Plus, Shield, Trash2, Users, UserCog } from 'lucide-react';
-import { UserProfile, UserRole } from '../types';
+import { UserProfile, UserRole } from '../../types';
 
 interface AccountManagementProps { idToken: string; userRole: UserRole; }
 

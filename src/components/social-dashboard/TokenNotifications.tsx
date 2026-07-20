@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Bell, X } from 'lucide-react';
-import { UserRole } from '../types';
+import { UserRole } from '../../types';
 
 interface TokenNotification {
   platform: string;

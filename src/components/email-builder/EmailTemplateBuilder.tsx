@@ -35,13 +35,16 @@ import { EmailBuilderDialogProvider, useEmailBuilderDialog } from './EmailBuilde
 
 interface EmailTemplateBuilderProps {
   onBackToWorkspace: () => void;
+  onAccountClick: () => void;
+  isGuest: boolean;
+  userName?: string | null;
 }
 
 export default function EmailTemplateBuilder(props: EmailTemplateBuilderProps) {
   return <EmailBuilderDialogProvider><EmailTemplateBuilderContent {...props} /></EmailBuilderDialogProvider>;
 }
 
-function EmailTemplateBuilderContent({ onBackToWorkspace }: EmailTemplateBuilderProps) {
+function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGuest, userName }: EmailTemplateBuilderProps) {
   const dialog = useEmailBuilderDialog();
   // 1. Storage & State Management
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
@@ -646,6 +649,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace }: EmailTemplateBuilder
               Tạo mẫu mới
             </button>
 
+            <button onClick={onAccountClick} className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer transition-all">{isGuest ? 'Đăng nhập' : userName || 'Tài khoản'}</button>
             <button
               onClick={onBackToWorkspace}
               className="px-4 py-2 text-xs font-bold text-slate-650 bg-slate-100 hover:bg-slate-200/80 rounded-xl cursor-pointer transition-all border border-slate-200"
@@ -802,6 +806,9 @@ function EmailTemplateBuilderContent({ onBackToWorkspace }: EmailTemplateBuilder
 
       {/* Main Top Header */}
       <EmailBuilderHeader
+        onAccountClick={onAccountClick}
+        isGuest={isGuest}
+        userName={userName}
         template={activeTemplate}
         templatesList={templates}
         onSelectTemplate={handleSelectTemplate}

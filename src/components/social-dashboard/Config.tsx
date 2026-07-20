@@ -3,8 +3,8 @@ import {
   Settings, FileSpreadsheet, Lock, Users, AlertCircle, CheckCircle2, Shield, Plus, Trash2, Eye, ShieldAlert, KeyRound, ExternalLink, Edit3, EyeOff, FileCode, HelpCircle,
   Check, Layers, Search, Sparkles, Copy
 } from 'lucide-react';
-import { Channel, SystemConfig, UserProfile, UserRole } from '../types';
-import ConfirmModal from './ConfirmModal';
+import { Channel, SystemConfig, UserProfile, UserRole } from '../../types';
+import ConfirmModal from '../ConfirmModal';
 
 export interface TokenRow {
   id: string;

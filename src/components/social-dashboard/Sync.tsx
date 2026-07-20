@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   RefreshCw, Play, Calendar, CheckCircle2, XCircle, AlertCircle, ShieldAlert, History, ArrowRight
 } from 'lucide-react';
-import { Channel, ApiLog, UserRole } from '../types';
-import ConfirmModal from './ConfirmModal';
+import { Channel, ApiLog, UserRole } from '../../types';
+import ConfirmModal from '../ConfirmModal';
 
 interface SyncProps {
   idToken: string;

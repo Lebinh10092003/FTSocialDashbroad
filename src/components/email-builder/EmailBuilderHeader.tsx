@@ -10,8 +10,8 @@ import {
   Upload, 
   Trash2, 
   Eye, 
-  Check,
-  Edit2
+  Check,  Edit2,
+  LogIn
 } from 'lucide-react';
 import { EmailTemplate } from '../../types/emailBuilder';
 import { exportTemplateToJson } from '../../lib/emailStorage';
@@ -28,6 +28,9 @@ interface EmailBuilderHeaderProps {
   onImportTemplate: (imported: EmailTemplate) => void;
   onPreviewClick: () => void;
   onBackToWorkspace: () => void;
+  onAccountClick: () => void;
+  isGuest: boolean;
+  userName?: string | null;
   onCopyEmail: () => void;
   onCopySubject: () => void;
   copySuccess: boolean;
@@ -49,6 +52,9 @@ export default function EmailBuilderHeader({
   onImportTemplate,
   onPreviewClick,
   onBackToWorkspace,
+  onAccountClick,
+  isGuest,
+  userName,
   onCopyEmail,
   onCopySubject,
   copySuccess,
@@ -173,6 +179,7 @@ export default function EmailBuilderHeader({
 
       {/* Right section: utility operations + COPY CTA */}
       <div className="flex items-center gap-2 flex-wrap sm:justify-end">
+        <button onClick={onAccountClick} className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-extrabold text-blue-700 hover:bg-blue-100">{isGuest && <LogIn className="h-3.5 w-3.5" />}{isGuest ? 'Đăng nhập' : userName || 'Tài khoản'}</button>
         {/* Template admin controls */}
         <button
           onClick={onDuplicateTemplate}

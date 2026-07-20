@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Search, Radio, Layers, ExternalLink, Download, ArrowUpDown, ChevronLeft, ChevronRight, AlertCircle, FileText, Calendar
 } from 'lucide-react';
-import { Channel, Post, Platform } from '../types';
-import SearchableSelect from './SearchableSelect';
+import { Channel, Post, Platform } from '../../types';
+import SearchableSelect from '../SearchableSelect';
 
 interface PostsProps {
   idToken: string;
