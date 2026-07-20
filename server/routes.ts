@@ -1681,3 +1681,158 @@ apiRouter.get('/admin/users', authenticateUser, requireManagerOrAdmin, async (re
     res.status(500).json({ error: 'Không thể tải danh sách thành viên: ' + error.message });
   }
 });
+
+// =====================================================================
+// EMAIL TEMPLATES API - Đồng bộ template email giữa các máy qua Firestore
+// =====================================================================
+
+/**
+ * GET /api/email-templates - Lấy tất cả email templates (shared trong org)
+ */
+apiRouter.get('/email-templates', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const snap = await adminDb.collection('emailTemplates').orderBy('lastUpdated', 'desc').get();
+    const templates = snap.docs.map(doc => {
+      const data = doc.data();
+      // Giải mã blocks từ JSON string nếu cần (Firestore có giới hạn document size)
+      if (typeof data.blocksJson === 'string') {
+        try { data.blocks = JSON.parse(data.blocksJson); } catch {}
+        delete data.blocksJson;
+      }
+      return { id: doc.id, ...data };
+    });
+    res.json(templates);
+  } catch (error: any) {
+    console.error('Lỗi lấy email templates:', error);
+    res.status(500).json({ error: 'Không thể tải danh sách email template: ' + error.message });
+  }
+});
+
+/**
+ * POST /api/email-templates - Tạo email template mới
+ */
+apiRouter.post('/email-templates', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id, name, subject, blocks, settings, lastUpdated } = req.body;
+    if (!id || !name) {
+      return res.status(400).json({ error: 'Thiếu id hoặc name cho template.' });
+    }
+    const userEmail = req.user?.email || 'unknown';
+    const templateData: Record<string, any> = {
+      id,
+      name,
+      subject: subject || '',
+      settings: settings || {},
+      lastUpdated: lastUpdated || Date.now(),
+      createdBy: userEmail,
+      updatedBy: userEmail,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    // Lưu blocks dạng JSON string để tránh giới hạn nesting của Firestore
+    templateData.blocksJson = JSON.stringify(blocks || []);
+
+    await adminDb.collection('emailTemplates').doc(id).set(templateData);
+    res.json({ success: true, id });
+  } catch (error: any) {
+    console.error('Lỗi tạo email template:', error);
+    res.status(500).json({ error: 'Không thể tạo email template: ' + error.message });
+  }
+});
+
+/**
+ * PUT /api/email-templates/:id - Cập nhật email template
+ */
+apiRouter.put('/email-templates/:id', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, subject, blocks, settings, lastUpdated } = req.body;
+    const userEmail = req.user?.email || 'unknown';
+
+    const updateData: Record<string, any> = {
+      updatedBy: userEmail,
+      updatedAt: new Date().toISOString(),
+      lastUpdated: lastUpdated || Date.now(),
+    };
+    if (name !== undefined) updateData.name = name;
+    if (subject !== undefined) updateData.subject = subject;
+    if (settings !== undefined) updateData.settings = settings;
+    if (blocks !== undefined) updateData.blocksJson = JSON.stringify(blocks);
+
+    const docRef = adminDb.collection('emailTemplates').doc(id);
+    const existing = await docRef.get();
+    if (!existing.exists) {
+      // Nếu chưa có thì tạo mới (upsert)
+      const fullData = {
+        id,
+        name: name || 'Untitled',
+        subject: subject || '',
+        settings: settings || {},
+        blocksJson: JSON.stringify(blocks || []),
+        lastUpdated: lastUpdated || Date.now(),
+        createdBy: userEmail,
+        updatedBy: userEmail,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await docRef.set(fullData);
+    } else {
+      await docRef.update(updateData);
+    }
+    res.json({ success: true, id });
+  } catch (error: any) {
+    console.error('Lỗi cập nhật email template:', error);
+    res.status(500).json({ error: 'Không thể cập nhật email template: ' + error.message });
+  }
+});
+
+/**
+ * DELETE /api/email-templates/:id - Xóa email template
+ */
+apiRouter.delete('/email-templates/:id', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    await adminDb.collection('emailTemplates').doc(id).delete();
+    res.json({ success: true, id });
+  } catch (error: any) {
+    console.error('Lỗi xóa email template:', error);
+    res.status(500).json({ error: 'Không thể xóa email template: ' + error.message });
+  }
+});
+
+/**
+ * GET /api/email-user-prefs - Lấy preferences của user hiện tại
+ */
+apiRouter.get('/email-user-prefs', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userEmail = req.user?.email || 'unknown';
+    const snap = await adminDb.collection('emailUserPrefs').doc(userEmail).get();
+    if (!snap.exists) {
+      return res.json({ activeTemplateId: null, leftPanelWidth: 152, rightPanelWidth: 300 });
+    }
+    res.json(snap.data());
+  } catch (error: any) {
+    console.error('Lỗi lấy email user prefs:', error);
+    res.status(500).json({ error: 'Không thể tải preferences: ' + error.message });
+  }
+});
+
+/**
+ * PUT /api/email-user-prefs - Lưu preferences của user hiện tại
+ */
+apiRouter.put('/email-user-prefs', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userEmail = req.user?.email || 'unknown';
+    const { activeTemplateId, leftPanelWidth, rightPanelWidth } = req.body;
+    const data: Record<string, any> = { updatedAt: new Date().toISOString() };
+    if (activeTemplateId !== undefined) data.activeTemplateId = activeTemplateId;
+    if (leftPanelWidth !== undefined) data.leftPanelWidth = leftPanelWidth;
+    if (rightPanelWidth !== undefined) data.rightPanelWidth = rightPanelWidth;
+
+    await adminDb.collection('emailUserPrefs').doc(userEmail).set(data, { merge: true });
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Lỗi lưu email user prefs:', error);
+    res.status(500).json({ error: 'Không thể lưu preferences: ' + error.message });
+  }
+});

@@ -20,6 +20,12 @@ import {
   setActiveTemplateId,
   restoreDefaultTemplates
 } from '../../lib/emailStorage';
+import {
+  loadTemplatesAsync,
+  saveTemplatesAsync,
+  loadUserPrefsAsync,
+  saveUserPrefsAsync,
+} from '../../lib/emailStorageApi';
 import { DEFAULT_EMAIL_VARIABLES } from '../../data/defaultEmailVariables';
 import { generateEmailHtml } from '../../lib/emailHtmlGenerator';
 import { copyEmailToClipboard, copyTextToClipboard } from '../../lib/emailClipboard';
@@ -51,6 +57,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
   const [activeTemplateId, setActiveTemplateIdState] = useState<string>('');
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [selectionFormat, setSelectionFormat] = useState<EmailSelectionFormat | null>(null);
+  const [isLoading, setIsLoading] = useState(true); // Loading state khi fetch từ server
   
   const [variables, setVariables] = useState<EmailVariable[]>([]);
   const [showPreview, setShowPreview] = useState(false);
@@ -59,6 +66,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
   const canvasRef = useRef<EmailCanvasHandle>(null);
   const templatesRef = useRef<EmailTemplate[]>([]);
   const editorHistory = useRef<Record<string, { past: EmailTemplate[]; future: EmailTemplate[]; lastCommitAt: number; lastSignature: string }>>({});
+  const panelWidthSyncTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Routing modes
   const [editorMode, setEditorMode] = useState<'list' | 'edit'>('list');
@@ -67,40 +75,107 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
   // UI Tabs
   const [activeRightTab, setActiveRightTab] = useState<'block' | 'email'>('email');
   const [mobileActiveTab, setMobileActiveTab] = useState<'library' | 'canvas' | 'settings'>('canvas');
-  const [leftPanelWidth, setLeftPanelWidth] = useState(() => { const max = Math.max(152, Math.floor(window.innerWidth * 0.25)); return Math.max(96, Math.min(max, Number(localStorage.getItem('ft_email_left_panel_width')) || 152)); });
-  const [rightPanelWidth, setRightPanelWidth] = useState(() => Number(localStorage.getItem('ft_email_right_panel_width')) || 300);
+  const [leftPanelWidth, setLeftPanelWidth] = useState(152);
+  const [rightPanelWidth, setRightPanelWidth] = useState(300);
   
   // Toast notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
   const [copySubjectSuccess, setCopySubjectSuccess] = useState(false);
 
-  // Initialize templates and variables
+  // Debounced panel width sync lên server (tránh quá nhiều request khi kéo)
   useEffect(() => {
-    // Templates
-    const loaded = loadTemplates();
-    templatesRef.current = loaded;
-    setTemplates(loaded);
-    
-    // Read route from URL search params
-    const params = new URLSearchParams(window.location.search);
-    const templateId = params.get('id');
-    
-    if (templateId && loaded.some(t => t.id === templateId)) {
-      setActiveTemplateIdState(templateId);
-      setEditorMode('edit');
-    } else {
-      setEditorMode('list');
-      if (loaded.length > 0) {
-        setActiveTemplateIdState(loaded[0].id);
+    if (panelWidthSyncTimer.current) clearTimeout(panelWidthSyncTimer.current);
+    panelWidthSyncTimer.current = setTimeout(() => {
+      saveUserPrefsAsync({ leftPanelWidth, rightPanelWidth });
+      // Giữ localStorage compatibility
+      localStorage.setItem('ft_email_left_panel_width', String(leftPanelWidth));
+      localStorage.setItem('ft_email_right_panel_width', String(rightPanelWidth));
+    }, 1500);
+    return () => { if (panelWidthSyncTimer.current) clearTimeout(panelWidthSyncTimer.current); };
+  }, [leftPanelWidth, rightPanelWidth]);
+
+  // Initialize templates and variables (async - fetch từ server, fallback về localStorage)
+  useEffect(() => {
+    let cancelled = false;
+
+    const initAsync = async () => {
+      setIsLoading(true);
+      try {
+        // 1. Load user preferences (panel widths, active template)
+        const prefs = await loadUserPrefsAsync();
+        if (!cancelled) {
+          if (prefs.leftPanelWidth) {
+            const max = Math.max(152, Math.floor(window.innerWidth * 0.25));
+            setLeftPanelWidth(Math.max(96, Math.min(max, prefs.leftPanelWidth)));
+          }
+          if (prefs.rightPanelWidth) setRightPanelWidth(prefs.rightPanelWidth);
+        }
+
+        // 2. Load email templates từ server (hoặc localStorage fallback)
+        let loaded = await loadTemplatesAsync();
+        // Nếu server không có dữ liệu, fallback về localStorage rồi dùng defaults
+        if (!loaded || loaded.length === 0) {
+          loaded = loadTemplates();
+        }
+        if (!cancelled) {
+          templatesRef.current = loaded;
+          setTemplates(loaded);
+
+          // 3. Xác định template đang active
+          const params = new URLSearchParams(window.location.search);
+          const templateId = params.get('id') || prefs.activeTemplateId || null;
+
+          if (templateId && loaded.some(t => t.id === templateId)) {
+            setActiveTemplateIdState(templateId);
+            setEditorMode('edit');
+          } else {
+            setEditorMode('list');
+            if (loaded.length > 0) setActiveTemplateIdState(loaded[0].id);
+          }
+        }
+      } catch (err: any) {
+        console.warn('[EmailTemplateBuilder] Lỗi load templates:', err.message);
+        // Fallback an toàn về localStorage
+        const loaded = loadTemplates();
+        if (!cancelled) {
+          templatesRef.current = loaded;
+          setTemplates(loaded);
+          if (loaded.length > 0) setActiveTemplateIdState(loaded[0].id);
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
-    }
+
+      // Variables (vẫn dùng localStorage)
+      const storedVars = localStorage.getItem('ft_email_variables');
+      if (storedVars) {
+        try {
+          const savedVariables: EmailVariable[] = JSON.parse(storedVars);
+          const savedByKey = new Map(savedVariables.map(variable => [variable.key, variable]));
+          const mergedVariables = [
+            ...DEFAULT_EMAIL_VARIABLES.map(variable => savedByKey.get(variable.key) || variable),
+            ...savedVariables.filter(variable => !DEFAULT_EMAIL_VARIABLES.some(defaultVariable => defaultVariable.key === variable.key))
+          ];
+          if (!cancelled) setVariables(mergedVariables);
+          localStorage.setItem('ft_email_variables', JSON.stringify(mergedVariables));
+        } catch (e) {
+          if (!cancelled) setVariables(DEFAULT_EMAIL_VARIABLES);
+        }
+      } else {
+        if (!cancelled) setVariables(DEFAULT_EMAIL_VARIABLES);
+        localStorage.setItem('ft_email_variables', JSON.stringify(DEFAULT_EMAIL_VARIABLES));
+      }
+    };
+
+    initAsync();
 
     // Popstate route listener inside builder
     const handlePopState = () => {
       const p = new URLSearchParams(window.location.search);
       const tId = p.get('id');
-      if (tId && loaded.some(t => t.id === tId)) {
+      const currentTemplates = templatesRef.current;
+      if (tId && currentTemplates.some(t => t.id === tId)) {
         setActiveTemplateIdState(tId);
         setEditorMode('edit');
       } else {
@@ -109,34 +184,19 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
     };
     window.addEventListener('popstate', handlePopState);
 
-    // Variables
-    const storedVars = localStorage.getItem('ft_email_variables');
-    if (storedVars) {
-      try {
-        const savedVariables: EmailVariable[] = JSON.parse(storedVars);
-        const savedByKey = new Map(savedVariables.map(variable => [variable.key, variable]));
-        const mergedVariables = [
-          ...DEFAULT_EMAIL_VARIABLES.map(variable => savedByKey.get(variable.key) || variable),
-          ...savedVariables.filter(variable => !DEFAULT_EMAIL_VARIABLES.some(defaultVariable => defaultVariable.key === variable.key))
-        ];
-        setVariables(mergedVariables);
-        localStorage.setItem('ft_email_variables', JSON.stringify(mergedVariables));
-      } catch (e) {
-        setVariables(DEFAULT_EMAIL_VARIABLES);
-      }
-    } else {
-      setVariables(DEFAULT_EMAIL_VARIABLES);
-      localStorage.setItem('ft_email_variables', JSON.stringify(DEFAULT_EMAIL_VARIABLES));
-    }
-
-    return () => window.removeEventListener('popstate', handlePopState);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('popstate', handlePopState);
+    };
   }, []);
 
-  // Save templates list automatically on changes
+  // Save templates list automatically on changes (async: server + localStorage cache)
   const updateTemplatesList = (newList: EmailTemplate[]) => {
     templatesRef.current = newList;
     setTemplates(newList);
-    saveTemplates(newList);
+    // Lưu localStorage ngay (sync), đồng thời gọi API server background
+    saveTemplates(newList); // localStorage
+    saveTemplatesAsync(newList); // server (background)
   };
 
   // Helper: Find active template
@@ -266,8 +326,14 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   };
-  useEffect(() => { localStorage.setItem('ft_email_left_panel_width', String(leftPanelWidth)); }, [leftPanelWidth]);
-  useEffect(() => { localStorage.setItem('ft_email_right_panel_width', String(rightPanelWidth)); }, [rightPanelWidth]);
+  useEffect(() => {
+    if (panelWidthSyncTimer.current) clearTimeout(panelWidthSyncTimer.current);
+    panelWidthSyncTimer.current = setTimeout(() => {
+      saveUserPrefsAsync({ leftPanelWidth, rightPanelWidth });
+      localStorage.setItem('ft_email_left_panel_width', String(leftPanelWidth));
+      localStorage.setItem('ft_email_right_panel_width', String(rightPanelWidth));
+    }, 1500);
+  }, [leftPanelWidth, rightPanelWidth]);
 
   const getBlockLabel = (type?: BlockType) => {
     switch (type) {
@@ -512,6 +578,28 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
     t.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
     t.subject.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // LOADING SKELETON khi đang fetch templates từ server
+  if (isLoading) {
+    return (
+      <div className="flex flex-col h-screen bg-slate-50 font-sans items-center justify-center gap-4">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-12 h-12 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg animate-pulse">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <div className="text-sm font-bold text-slate-600">Đang tải mẫu email...</div>
+          <div className="text-xs text-slate-400 font-medium">Đồng bộ từ server</div>
+        </div>
+        <div className="flex gap-2 mt-2">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="w-48 h-24 bg-slate-200 rounded-2xl animate-pulse" style={{ animationDelay: `${i * 100}ms` }} />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   // RENDER LIST MODE
   if (editorMode === 'list') {

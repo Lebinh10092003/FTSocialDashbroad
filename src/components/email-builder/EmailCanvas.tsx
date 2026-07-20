@@ -408,7 +408,7 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     },
     flushPendingChanges: () => {
       let changed = false;
-      Object.values(editableCommitRefs.current).forEach(commit => {
+      (Object.values(editableCommitRefs.current) as Array<(() => boolean) | undefined>).forEach(commit => {
         if (commit?.()) changed = true;
       });
       Object.entries(editableRefs.current).forEach(([blockId, editableValue]) => {
@@ -720,7 +720,7 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     <div ref={selectionOverlayRef} aria-hidden="true" className="pointer-events-none fixed inset-0 z-[9999]" />
     <div className="flex w-full max-w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg" style={{ maxWidth: emailSettings.maxWidth + 72 }}>
       <div className="flex items-center justify-between border-b px-4 py-3"><div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Email canvas</p><p className="mt-0.5 text-xs font-bold text-slate-700">Kéo khối từ trái hoặc thả trực tiếp vào từng Section/ô</p></div><span className="rounded border bg-slate-50 px-2.5 py-1 text-[10px] font-black text-slate-500">{emailSettings.maxWidth}px</span></div>
-      <div onClick={() => onSelectBlock('')} onDragOver={event => { if (event.dataTransfer.types.includes('application/x-ft-email-block') || event.dataTransfer.types.includes('application/x-ft-email-block-id')) { event.preventDefault(); setRootDragOver(true); } }} onDragLeave={event => { if (event.currentTarget === event.target) setRootDragOver(false); }} onDrop={rootDrop} className="relative flex min-h-[520px] justify-start overflow-x-auto bg-[#f5f6f8] p-5 md:p-8">
+      <div onClick={() => onSelectBlock('')} onDragOver={event => { if (event.dataTransfer.types.includes('application/x-ft-email-block') || event.dataTransfer.types.includes('application/x-ft-email-block-id')) { event.preventDefault(); setRootDragOver(true); } }} onDragLeave={event => { if (event.currentTarget === event.target) setRootDragOver(false); }} onDrop={rootDrop} className="relative flex min-h-[520px] justify-start overflow-x-auto p-5 md:p-8" style={{ backgroundColor: emailSettings.externalBg || '#f5f6f8' }}>
         {rootDragOver && <div className="pointer-events-none absolute inset-5 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-blue-500 bg-blue-50/90 text-sm font-black text-blue-700">Thả khối vào cuối email</div>}
         <div className="mx-auto shrink-0 bg-white shadow-sm ring-1 ring-slate-200" style={{ width: emailSettings.maxWidth, backgroundColor: emailSettings.contentBg, borderRadius: emailSettings.borderRadius, fontFamily: emailSettings.fontFamily || 'Arial', color: emailSettings.textColor || '#1e293b' }}><div style={{ padding: emailSettings.contentPadding }} >{blocks.map((block, index, siblings) => renderBlock(block, index, siblings))}<div className="relative border-t border-dashed pt-5">{renderInserter({ placement: 'root' })}</div></div></div>
       </div>

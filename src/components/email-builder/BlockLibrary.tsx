@@ -16,7 +16,7 @@ export default function BlockLibrary({ onAddBlock, width }: BlockLibraryProps) {
   // Grow cards to their comfortable size before introducing another column.
   // The same thresholds are used in reverse while shrinking, avoiding asymmetric jumps.
   const contentWidth = Math.max(72, width - 16);
-  const columns = contentWidth >= 448 ? 4 : contentWidth >= 324 ? 3 : contentWidth >= 174 ? 2 : 1;
+  const columns = 4;
   const maximumCardWidth = 104;
   const cardWidth = Math.min(maximumCardWidth, contentWidth / (columns + 0.12 * Math.max(0, columns - 1)));
   const gap = cardWidth * 0.12;
