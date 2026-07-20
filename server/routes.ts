@@ -209,6 +209,29 @@ apiRouter.get('/auth/me', authenticateUser, (req: AuthenticatedRequest, res: Res
 });
 
 const EXAMINATION_COLLECTIONS = { competitions: 'examinationCompetitions', sessions: 'examinationSessions', candidates: 'examinationCandidates' } as const;
+const candidateIdentityFields = ['name', 'birthDate', 'identity', 'email'] as const;
+const candidateFields = ['code', 'name', 'school', 'className', 'city', 'contests', 'achievement', 'email', 'parent', 'phone', 'identity', 'address', 'birthDate', 'sessionIds'] as const;
+const candidateText = (value: unknown) => String(value ?? '').trim();
+const normaliseCandidateIdentity = (value: unknown) => candidateText(value).toLocaleLowerCase('vi-VN').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]/g, '');
+const contestCodes = (value: unknown) => candidateText(value).split(',').map(code => code.trim().toUpperCase()).filter(Boolean);
+const mergeContestCodes = (...values: unknown[]) => [...new Set(values.flatMap(contestCodes))].join(', ');
+async function syncSessionCandidateTotals() {
+  const [sessionSnap, candidateSnap] = await Promise.all([
+    adminDb.collection(EXAMINATION_COLLECTIONS.sessions).get(),
+    adminDb.collection(EXAMINATION_COLLECTIONS.candidates).get(),
+  ]);
+  const totals = new Map<string, number>();
+  const sessionsByCode = new Map<string, string[]>();
+  sessionSnap.docs.forEach(doc => { const code = String(doc.data().code || '').toUpperCase(); sessionsByCode.set(code, [...(sessionsByCode.get(code) || []), doc.id]); });
+  candidateSnap.docs.forEach(doc => {
+    const sessionIds = Array.isArray(doc.data().sessionIds) ? doc.data().sessionIds.filter(Boolean).map(String) : [];
+    const linked = sessionIds.length ? sessionIds : contestCodes(doc.data().contests).flatMap(code => sessionsByCode.get(code) || []);
+    linked.forEach(id => totals.set(id, (totals.get(id) || 0) + 1));
+  });
+  const batch = adminDb.batch();
+  sessionSnap.docs.forEach(doc => batch.set(adminDb.collection(EXAMINATION_COLLECTIONS.sessions).doc(doc.id), { candidates: totals.get(doc.id) || 0 }, { merge: true }));
+  await batch.commit();
+}
 const EXAMINATION_SEED = {
   competitions: [
     { id: 'aysbc', code: 'AYSBC', name: 'Huy hiệu các Nhà khoa học trẻ Châu Á', parent: 'AYSBC', organizer: 'SCS và META Knowledge' },
@@ -219,7 +242,7 @@ const EXAMINATION_SEED = {
     { id: 'fieo', code: 'FIEO', name: 'FermatTech International English Olympiad', parent: 'FIEO - Tiếng Anh', organizer: 'FermatTech' },
   ],
   sessions: [
-    { id: 'aysbc', code: 'AYSBC', name: 'Huy hiệu các Nhà khoa học trẻ Châu Á', parent: 'AYSBC', organizer: 'SCS và META Knowledge', time: 'T7/2026', candidates: 1284, national: '26/7/2026', nationalDate: '2026-07-26', international: 'Dự kiến T10/2026', phase: 'Tuyển sinh', note: 'Thí sinh hoàn thành tích lũy sao đến hết ngày 28/7.' },
+    { id: 'aysbc', code: 'AYSBC', name: 'Huy hiệu các Nhà khoa học trẻ Châu Á', parent: 'AYSBC', organizer: 'SCS và META Knowledge', time: 'T7/2026', candidates: 2, national: '26/7/2026', nationalDate: '2026-07-26', international: 'Dự kiến T10/2026', phase: 'Tuyển sinh', note: 'Thí sinh hoàn thành tích lũy sao đến hết ngày 28/7.' },
     { id: 'imo', code: 'IMO', name: 'International Maths Olympiad', parent: 'IMO', organizer: 'SCO', time: 'T6–T8/2026', candidates: 862, national: '21/6/2026', nationalDate: '2026-06-21', international: '9/8/2026', internationalDate: '2026-08-09', phase: 'Ôn tập vòng Quốc tế', note: 'Đang tổ chức lớp ôn tập.' },
     { id: 'ieo', code: 'IEO', name: 'International English Olympiad', parent: 'IEO - English', organizer: 'SCO', time: 'T6–T8/2026', candidates: 735, national: '21/6/2026', nationalDate: '2026-06-21', international: '9/8/2026', internationalDate: '2026-08-09', phase: 'Ôn tập vòng Quốc tế', note: 'Đang tổ chức lớp ôn tập.' },
     { id: 'iso', code: 'ISO', name: 'International Science Olympiad', parent: 'ISO - Science', organizer: 'SCO', time: 'T6–T8/2026', candidates: 691, national: '21/6/2026', nationalDate: '2026-06-21', international: '9/8/2026', internationalDate: '2026-08-09', phase: 'Ôn tập vòng Quốc tế', note: 'Đang tổ chức lớp ôn tập.' },
@@ -248,7 +271,7 @@ async function listExamination(collection: string, limit: number, cursor?: strin
   return { items: docs.map((doc: any) => ({ id: doc.id, ...doc.data() })), nextCursor: snap.docs.length > limit ? docs[docs.length - 1]?.data().sortKey : null };
 }
 apiRouter.get('/examination/bootstrap', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
-  try { await ensureExaminationSeed(); const [competitions, sessions, candidates] = await Promise.all([listExamination(EXAMINATION_COLLECTIONS.competitions, 100), listExamination(EXAMINATION_COLLECTIONS.sessions, 100), listExamination(EXAMINATION_COLLECTIONS.candidates, 100)]); res.json({ competitions: competitions.items, sessions: sessions.items, candidates: candidates.items }); } catch (error: any) { res.status(500).json({ error: error.message || 'Không thể tải dữ liệu khảo thí.' }); }
+  try { await ensureExaminationSeed(); await syncSessionCandidateTotals(); const [competitions, sessions, candidates] = await Promise.all([listExamination(EXAMINATION_COLLECTIONS.competitions, 100), listExamination(EXAMINATION_COLLECTIONS.sessions, 100), listExamination(EXAMINATION_COLLECTIONS.candidates, 100)]); res.json({ competitions: competitions.items, sessions: sessions.items, candidates: candidates.items }); } catch (error: any) { res.status(500).json({ error: error.message || 'Không thể tải dữ liệu khảo thí.' }); }
 });
 apiRouter.get('/examination/:resource', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
   const collection = (EXAMINATION_COLLECTIONS as any)[req.params.resource]; if (!collection) return res.status(404).json({ error: 'Nguồn dữ liệu không hợp lệ.' });
@@ -259,38 +282,136 @@ apiRouter.post('/examination/competitions', authenticateUser, requireManagerOrAd
   const id = `comp-${uuidv4()}`; const item = examinationRecord({ id, code: code.trim().toUpperCase(), name: name.trim(), organizer: organizer.trim(), parent: typeof parent === 'string' && parent.trim() ? parent.trim() : code.trim().toUpperCase(), createdBy: req.user?.email }); await adminDb.collection(EXAMINATION_COLLECTIONS.competitions).doc(id).set(item); res.status(201).json(item);
 });
 apiRouter.put('/examination/competitions/:id', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
-  const allowed = ['code', 'name', 'organizer', 'parent']; const updates: any = { updatedAt: new Date().toISOString(), updatedBy: req.user?.email };
+  const allowed = ['code', 'name', 'organizer', 'parent'];
+  const updates: any = { updatedAt: new Date().toISOString(), updatedBy: req.user?.email };
   for (const key of allowed) if (typeof req.body?.[key] === 'string' && req.body[key].trim()) updates[key] = key === 'code' ? req.body[key].trim().toUpperCase() : req.body[key].trim();
   if (Object.keys(updates).length === 2) return res.status(400).json({ error: 'Không có thông tin hợp lệ để cập nhật.' });
-  const ref = adminDb.collection(EXAMINATION_COLLECTIONS.competitions).doc(req.params.id); const existing = await ref.get(); if (!existing.exists) return res.status(404).json({ error: 'Không tìm thấy cuộc thi.' });
-  await ref.update(updates); const latest = await ref.get(); res.json({ id: latest.id, ...latest.data() });
+  const ref = adminDb.collection(EXAMINATION_COLLECTIONS.competitions).doc(req.params.id);
+  const existing = await ref.get();
+  if (!existing.exists) return res.status(404).json({ error: 'Không tìm thấy cuộc thi.' });
+  const before = existing.data() || {};
+  const next = { ...before, ...updates };
+  const batch = adminDb.batch();
+  batch.set(ref, updates, { merge: true });
+  const sessionSnap = await adminDb.collection(EXAMINATION_COLLECTIONS.sessions).where('competitionId', '==', req.params.id).get();
+  sessionSnap.docs.forEach(doc => batch.set(adminDb.collection(EXAMINATION_COLLECTIONS.sessions).doc(doc.id), {
+    code: next.code,
+    parent: next.parent,
+    organizer: next.organizer,
+    time: `${doc.data().national || ''} · ${doc.data().international || ''}`.trim(),
+    updatedAt: new Date().toISOString(),
+  }, { merge: true }));
+  if (before.code !== next.code) {
+    const candidateSnap = await adminDb.collection(EXAMINATION_COLLECTIONS.candidates).get();
+    candidateSnap.docs.forEach(doc => {
+      const codes = contestCodes(doc.data().contests);
+      if (codes.includes(String(before.code || '').toUpperCase())) batch.set(adminDb.collection(EXAMINATION_COLLECTIONS.candidates).doc(doc.id), { contests: codes.map(code => code === String(before.code).toUpperCase() ? next.code : code).join(', '), updated: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) }, { merge: true });
+    });
+  }
+  await batch.commit();
+  await syncSessionCandidateTotals();
+  const latest = await ref.get();
+  res.json({ id: latest.id, ...latest.data() });
 });
-apiRouter.post('/examination/sessions', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
+apiRouter.delete('/examination/competitions/:id', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const ref = adminDb.collection(EXAMINATION_COLLECTIONS.competitions).doc(req.params.id);
+  if (!(await ref.get()).exists) return res.status(404).json({ error: 'Không tìm thấy cuộc thi.' });
+  const sessions = await adminDb.collection(EXAMINATION_COLLECTIONS.sessions).where('competitionId', '==', req.params.id).get();
+  if (!sessions.empty) return res.status(400).json({ error: 'Hãy xóa các kỳ tổ chức thuộc cuộc thi trước.' });
+  await ref.delete();
+  res.json({ success: true });
+});apiRouter.post('/examination/sessions', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const { competitionId, name, national, international, note, rounds } = req.body || {}; if (!competitionId || !name || !national || !international) return res.status(400).json({ error: 'Tên kỳ, cuộc thi và thời gian hai vòng là bắt buộc.' }); const competition = await adminDb.collection(EXAMINATION_COLLECTIONS.competitions).doc(String(competitionId)).get(); if (!competition.exists) return res.status(404).json({ error: 'Không tìm thấy cuộc thi.' });
   const parent = competition.data(); if (!parent) return res.status(404).json({ error: 'Không tìm thấy dữ liệu cuộc thi.' }); const id = `session-${uuidv4()}`; const item = examinationRecord({ id, competitionId, code: parent.code, name: String(name).trim(), parent: parent.parent, organizer: parent.organizer, time: `${national.label} · ${international.label}`, candidates: 0, national: national.label, nationalDate: national.date, international: international.label, internationalDate: international.date, phase: 'Chuẩn bị', note: typeof note === 'string' && note.trim() ? note.trim() : 'Kỳ tổ chức mới tạo.', rounds: Array.isArray(rounds) ? rounds.filter((round: any) => round && typeof round.name === 'string' && typeof round.label === 'string').map((round: any) => ({ id: String(round.id || uuidv4()), name: round.name.trim(), label: round.label.trim(), date: typeof round.date === 'string' ? round.date : undefined })) : [], createdBy: req.user?.email }); await adminDb.collection(EXAMINATION_COLLECTIONS.sessions).doc(id).set(item); res.status(201).json(item);
 });
 apiRouter.put('/examination/sessions/:id', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const allowed = ['name', 'phase', 'note', 'national', 'nationalDate', 'international', 'internationalDate'];
   const updates: any = { updatedAt: new Date().toISOString(), updatedBy: req.user?.email };
-  for (const key of allowed) if (typeof req.body?.[key] === 'string') updates[key] = req.body[key].trim(); if (Array.isArray(req.body?.rounds)) updates.rounds = req.body.rounds.filter((round: any) => round && typeof round.name === 'string' && typeof round.label === 'string').map((round: any) => ({ id: String(round.id || uuidv4()), name: round.name.trim(), label: round.label.trim(), date: typeof round.date === 'string' ? round.date : undefined }));
-  if (Object.keys(updates).length === 2) return res.status(400).json({ error: 'Không có thông tin hợp lệ để cập nhật.' });
+  for (const key of allowed) if (typeof req.body?.[key] === 'string') updates[key] = req.body[key].trim();
+  if (Array.isArray(req.body?.rounds)) updates.rounds = req.body.rounds.filter((round: any) => round && typeof round.name === 'string' && typeof round.label === 'string').map((round: any) => ({ id: String(round.id || uuidv4()), name: round.name.trim(), label: round.label.trim(), date: typeof round.date === 'string' ? round.date : undefined }));
   const ref = adminDb.collection(EXAMINATION_COLLECTIONS.sessions).doc(req.params.id);
-  const existing = await ref.get(); if (!existing.exists) return res.status(404).json({ error: 'Không tìm thấy kỳ tổ chức.' });
-  await ref.update(updates); const latest = await ref.get(); res.json({ id: latest.id, ...latest.data() });
+  const existing = await ref.get();
+  if (!existing.exists) return res.status(404).json({ error: 'Không tìm thấy kỳ tổ chức.' });
+  if (typeof req.body?.competitionId === 'string' && req.body.competitionId && req.body.competitionId !== existing.data()?.competitionId) {
+    const competition = await adminDb.collection(EXAMINATION_COLLECTIONS.competitions).doc(req.body.competitionId).get();
+    if (!competition.exists) return res.status(404).json({ error: 'Không tìm thấy cuộc thi được chọn.' });
+    const parent = competition.data() || {};
+    updates.competitionId = req.body.competitionId;
+    updates.code = parent.code;
+    updates.parent = parent.parent;
+    updates.organizer = parent.organizer;
+  }
+  const next = { ...(existing.data() || {}), ...updates };
+  updates.time = `${next.national || ''} · ${next.international || ''}`.trim();
+  if (Object.keys(updates).length === 3) return res.status(400).json({ error: 'Không có thông tin hợp lệ để cập nhật.' });
+  await ref.update(updates);
+  await syncSessionCandidateTotals();
+  const latest = await ref.get();
+  res.json({ id: latest.id, ...latest.data() });
+});apiRouter.put('/examination/candidates/:id', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const updates: any = {};
+  for (const key of candidateFields) if (key !== 'code' && typeof req.body?.[key] === 'string') updates[key] = req.body[key].trim();
+  if (typeof updates.contests === 'string') updates.contests = mergeContestCodes(updates.contests); if (Array.isArray(req.body?.sessionIds)) updates.sessionIds = [...new Set(req.body.sessionIds.filter((id: unknown) => typeof id === 'string' && id.trim()))];
+  if (!Object.keys(updates).length) return res.status(400).json({ error: 'Không có thông tin hợp lệ để cập nhật.' });
+  updates.updated = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+  updates.updatedBy = req.user?.email;
+  const ref = adminDb.collection(EXAMINATION_COLLECTIONS.candidates).doc(req.params.id);
+  if (!(await ref.get()).exists) return res.status(404).json({ error: 'Không tìm thấy thí sinh.' });
+  await ref.update(updates);
+  await syncSessionCandidateTotals();
+  const latest = await ref.get();
+  res.json({ id: latest.id, ...latest.data() });
 });
-apiRouter.put('/examination/candidates/:id', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
-  const allowed = ['email', 'parent', 'phone', 'identity', 'address']; const updates: any = {}; for (const key of allowed) if (typeof req.body?.[key] === 'string') updates[key] = req.body[key].trim(); if (Array.isArray(req.body?.rounds)) updates.rounds = req.body.rounds.filter((round: any) => round && typeof round.name === 'string' && typeof round.label === 'string').map((round: any) => ({ id: String(round.id || uuidv4()), name: round.name.trim(), label: round.label.trim(), date: typeof round.date === 'string' ? round.date : undefined })); if (!Object.keys(updates).length) return res.status(400).json({ error: 'Không có thông tin hợp lệ để cập nhật.' }); updates.updated = new Date().toISOString(); updates.updatedBy = req.user?.email; await adminDb.collection(EXAMINATION_COLLECTIONS.candidates).doc(req.params.id).update(updates); const latest = await adminDb.collection(EXAMINATION_COLLECTIONS.candidates).doc(req.params.id).get(); res.json({ id: latest.id, ...latest.data() });
+apiRouter.delete('/examination/candidates/:id/sessions/:sessionId', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const ref = adminDb.collection(EXAMINATION_COLLECTIONS.candidates).doc(req.params.id);
+  const candidateSnap = await ref.get();
+  if (!candidateSnap.exists) return res.status(404).json({ error: 'Không tìm thấy thí sinh.' });
+  const allSessions = await adminDb.collection(EXAMINATION_COLLECTIONS.sessions).get();
+  const current = candidateSnap.data() || {};
+  const derived = Array.isArray(current.sessionIds) && current.sessionIds.length ? current.sessionIds : allSessions.docs.filter(doc => contestCodes(current.contests).includes(String(doc.data().code || '').toUpperCase())).map(doc => doc.id);
+  await ref.set({ sessionIds: derived.filter((id: string) => id !== req.params.sessionId), updated: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }), updatedBy: req.user?.email }, { merge: true });
+  await syncSessionCandidateTotals();
+  const latest = await ref.get();
+  res.json({ id: latest.id, ...latest.data() });
 });
-function examinationSheetId(url: unknown) {
+apiRouter.delete('/examination/candidates/:id', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const ref = adminDb.collection(EXAMINATION_COLLECTIONS.candidates).doc(req.params.id);
+  if (!(await ref.get()).exists) return res.status(404).json({ error: 'Không tìm thấy thí sinh.' });
+  await ref.delete();
+  await syncSessionCandidateTotals();
+  res.json({ success: true });
+});
+apiRouter.delete('/examination/sessions/:id', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const ref = adminDb.collection(EXAMINATION_COLLECTIONS.sessions).doc(req.params.id);
+  if (!(await ref.get()).exists) return res.status(404).json({ error: 'Không tìm thấy kỳ tổ chức.' });
+  const candidates = await adminDb.collection(EXAMINATION_COLLECTIONS.candidates).get();
+  const batch = adminDb.batch();
+  batch.delete(ref);
+  candidates.docs.forEach(doc => { if (Array.isArray(doc.data().sessionIds) && doc.data().sessionIds.includes(req.params.id)) batch.set(adminDb.collection(EXAMINATION_COLLECTIONS.candidates).doc(doc.id), { sessionIds: doc.data().sessionIds.filter((id: string) => id !== req.params.id) }, { merge: true }); });
+  await batch.commit();
+  await syncSessionCandidateTotals();
+  res.json({ success: true });
+});function examinationSheetId(url: unknown) {
   const source = String(url || '').trim();
   const match = source.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/) || source.match(/[?&]id=([a-zA-Z0-9-_]+)/);
   return match?.[1] || '';
 }
 function importText(value: unknown) { return typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''; }
 function importedCandidate(record: any, index: number) {
-  const code = importText(record.code).replace(/[\/#?]/g, '-').toUpperCase() || `IMPORT-${Date.now()}-${index + 1}`;
+  const code = importText(record.code).replace(/[\/#?]/g, '-').toUpperCase();
   const name = importText(record.name);
-  return { id: code, code, name, school: importText(record.school), className: importText(record.className), city: importText(record.city), contests: importText(record.contests), achievement: importText(record.achievement), email: importText(record.email), parent: importText(record.parent), phone: importText(record.phone), identity: importText(record.identity), address: importText(record.address), updated: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) };
+  return { id: code, code, name, school: importText(record.school), className: importText(record.className), city: importText(record.city), contests: importText(record.contests), achievement: importText(record.achievement), email: importText(record.email), parent: importText(record.parent), phone: importText(record.phone), identity: importText(record.identity), address: importText(record.address), birthDate: importText(record.birthDate), updated: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) };
+}
+function sameCandidateIdentity(left: any, right: any) {
+  return candidateIdentityFields.every(field => normaliseCandidateIdentity(left?.[field]) && normaliseCandidateIdentity(left?.[field]) === normaliseCandidateIdentity(right?.[field]));
+}
+function nextCandidateCode(existing: any[], preferred: string, index: number) {
+  const used = new Set(existing.map(item => String(item.code || '').toUpperCase()));
+  if (preferred && !used.has(preferred)) return preferred;
+  const year = new Date().getFullYear().toString().slice(-2);
+  let sequence = 1;
+  while (used.has(`FT${year}-${String(sequence).padStart(4, '0')}`)) sequence += 1;
+  return `FT${year}-${String(sequence + index).padStart(4, '0')}`;
 }
 apiRouter.post('/examination/import/google-sheet', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -311,15 +432,40 @@ apiRouter.post('/examination/import/candidates', authenticateUser, requireManage
     const input = Array.isArray(req.body?.records) ? req.body.records : [];
     if (!input.length) return res.status(400).json({ error: 'Không có hồ sơ để nhập.' });
     if (input.length > 1_000) return res.status(400).json({ error: 'Mỗi lần chỉ được nhập tối đa 1.000 hồ sơ.' });
-    const candidates = input.map(importedCandidate).filter(candidate => candidate.name);
-    if (!candidates.length) return res.status(400).json({ error: 'Mỗi hồ sơ phải có Họ và tên.' });
+    const requestedSessionId = importText(req.body?.sessionId); if (requestedSessionId && !(await adminDb.collection(EXAMINATION_COLLECTIONS.sessions).doc(requestedSessionId).get()).exists) return res.status(404).json({ error: 'Không tìm thấy kỳ thi cần thêm thí sinh.' });
+    const incoming = input.map(importedCandidate).filter(candidate => candidate.name);
+    if (!incoming.length) return res.status(400).json({ error: 'Mỗi hồ sơ phải có Họ và tên.' });
     await ensureExaminationSeed();
     const collection = adminDb.collection(EXAMINATION_COLLECTIONS.candidates);
-    const existing = await Promise.all(candidates.map(candidate => collection.doc(candidate.id).get()));
+    const existingSnap = await collection.get();
+    const existing: any[] = existingSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     const batch = adminDb.batch();
-    candidates.forEach((candidate, index) => { const fields = Object.fromEntries(Object.entries(candidate).filter(([key, value]) => ['id', 'code', 'name', 'updated'].includes(key) || Boolean(value))); batch.set(collection.doc(candidate.id), examinationRecord({ ...(existing[index].exists ? existing[index].data() : {}), ...fields, importSource: importText(req.body?.source), importedBy: req.user?.email }), { merge: true }); });
+    const items: any[] = [];
+    let created = 0;
+    let updated = 0;
+    incoming.forEach((candidate, index) => {
+      const matched = existing.find(item => sameCandidateIdentity(item, candidate));
+      const sameCode = candidate.code ? existing.find(item => String(item.code || '').toUpperCase() === candidate.code) : undefined;
+      const base = matched || sameCode;
+      const code = matched ? String(matched.code) : nextCandidateCode(existing, candidate.code, index);
+      const merged = {
+        ...(base || {}),
+        ...Object.fromEntries(Object.entries(candidate).filter(([key, value]) => key === 'name' || Boolean(value))),
+        id: base?.id || code,
+        code,
+        contests: mergeContestCodes(base?.contests, candidate.contests),
+        sessionIds: [...new Set([...(Array.isArray(base?.sessionIds) ? base.sessionIds : []), ...(requestedSessionId ? [requestedSessionId] : [])])],
+        updated: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
+        importSource: importText(req.body?.source),
+        importedBy: req.user?.email,
+      };
+      batch.set(collection.doc(String(merged.id)), examinationRecord(merged), { merge: true });
+      if (base) updated += 1; else { created += 1; existing.push(merged); }
+      items.push(merged);
+    });
     await batch.commit();
-    res.json({ created: existing.filter(doc => !doc.exists).length, updated: existing.filter(doc => doc.exists).length, items: candidates });
+    await syncSessionCandidateTotals();
+    res.json({ created, updated, items });
   } catch (error: any) { res.status(500).json({ error: error.message || 'Không thể nhập dữ liệu thí sinh.' }); }
 });
 /**
