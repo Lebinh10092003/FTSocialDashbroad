@@ -28,7 +28,7 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
   const isGuest = user?.email === 'guest@ftsocial.com';
   const menuItems = [
     { id: 'dashboard', label: 'Biểu đồ tổng quan', icon: LayoutDashboard },
-    { id: 'media', label: 'Tổng hợp truyền thông', icon: Radio },
+    { id: 'media', label: 'Báo cáo tổng hợp', icon: Radio },
     { id: 'posts', label: 'Bài đăng', icon: FileText },
     { id: 'sync', label: 'Đồng bộ dữ liệu', icon: RefreshCw },
     ...(isGuest ? [] : [{ id: 'config', label: 'Cấu hình hệ thống', icon: Settings }]),
@@ -42,7 +42,7 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
         <img src="/logo.png" alt="FermatTech Logo" className="h-8 object-contain" />
         <div className="border-l border-slate-200 pl-3">
           <h1 className="font-extrabold text-slate-900 text-sm leading-none tracking-tight">Fermat Workspace</h1>
-          <p className="text-[9px] uppercase font-extrabold text-blue-600 tracking-widest mt-1">Dashboard</p>
+          <p className="text-[9px] uppercase font-extrabold text-blue-600 tracking-widest mt-1">Phân tích MXH</p>
         </div>
       </div>
 

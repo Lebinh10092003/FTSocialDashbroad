@@ -281,6 +281,47 @@ apiRouter.put('/examination/sessions/:id', authenticateUser, requireManagerOrAdm
 apiRouter.put('/examination/candidates/:id', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const allowed = ['email', 'parent', 'phone', 'identity', 'address']; const updates: any = {}; for (const key of allowed) if (typeof req.body?.[key] === 'string') updates[key] = req.body[key].trim(); if (Array.isArray(req.body?.rounds)) updates.rounds = req.body.rounds.filter((round: any) => round && typeof round.name === 'string' && typeof round.label === 'string').map((round: any) => ({ id: String(round.id || uuidv4()), name: round.name.trim(), label: round.label.trim(), date: typeof round.date === 'string' ? round.date : undefined })); if (!Object.keys(updates).length) return res.status(400).json({ error: 'Không có thông tin hợp lệ để cập nhật.' }); updates.updated = new Date().toISOString(); updates.updatedBy = req.user?.email; await adminDb.collection(EXAMINATION_COLLECTIONS.candidates).doc(req.params.id).update(updates); const latest = await adminDb.collection(EXAMINATION_COLLECTIONS.candidates).doc(req.params.id).get(); res.json({ id: latest.id, ...latest.data() });
 });
+function examinationSheetId(url: unknown) {
+  const source = String(url || '').trim();
+  const match = source.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/) || source.match(/[?&]id=([a-zA-Z0-9-_]+)/);
+  return match?.[1] || '';
+}
+function importText(value: unknown) { return typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''; }
+function importedCandidate(record: any, index: number) {
+  const code = importText(record.code).replace(/[\/#?]/g, '-').toUpperCase() || `IMPORT-${Date.now()}-${index + 1}`;
+  const name = importText(record.name);
+  return { id: code, code, name, school: importText(record.school), className: importText(record.className), city: importText(record.city), contests: importText(record.contests), achievement: importText(record.achievement), email: importText(record.email), parent: importText(record.parent), phone: importText(record.phone), identity: importText(record.identity), address: importText(record.address), updated: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) };
+}
+apiRouter.post('/examination/import/google-sheet', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const spreadsheetId = examinationSheetId(req.body?.url);
+    if (!spreadsheetId) return res.status(400).json({ error: 'Liên kết Google Sheets không hợp lệ.' });
+    const oauthToken = typeof req.headers['x-google-oauth-token'] === 'string' ? req.headers['x-google-oauth-token'] : null;
+    const auth = await getGoogleSheetsAuth(oauthToken);
+    if (!auth) return res.status(400).json({ error: 'Chưa có cấu hình Google Sheets. Hãy kết nối tài khoản Google hoặc cấu hình service account.' });
+    const source = new SheetsService(auth, spreadsheetId);
+    const result = await source.readFirstSheet(typeof req.body?.sheetName === 'string' ? req.body.sheetName : undefined);
+    res.json(result);
+  } catch (error: any) {
+    res.status(400).json({ error: `Không thể đọc Google Sheets: ${error.message || 'kiểm tra lại quyền chia sẻ tệp.'}` });
+  }
+});
+apiRouter.post('/examination/import/candidates', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const input = Array.isArray(req.body?.records) ? req.body.records : [];
+    if (!input.length) return res.status(400).json({ error: 'Không có hồ sơ để nhập.' });
+    if (input.length > 1_000) return res.status(400).json({ error: 'Mỗi lần chỉ được nhập tối đa 1.000 hồ sơ.' });
+    const candidates = input.map(importedCandidate).filter(candidate => candidate.name);
+    if (!candidates.length) return res.status(400).json({ error: 'Mỗi hồ sơ phải có Họ và tên.' });
+    await ensureExaminationSeed();
+    const collection = adminDb.collection(EXAMINATION_COLLECTIONS.candidates);
+    const existing = await Promise.all(candidates.map(candidate => collection.doc(candidate.id).get()));
+    const batch = adminDb.batch();
+    candidates.forEach((candidate, index) => { const fields = Object.fromEntries(Object.entries(candidate).filter(([key, value]) => ['id', 'code', 'name', 'updated'].includes(key) || Boolean(value))); batch.set(collection.doc(candidate.id), examinationRecord({ ...(existing[index].exists ? existing[index].data() : {}), ...fields, importSource: importText(req.body?.source), importedBy: req.user?.email }), { merge: true }); });
+    await batch.commit();
+    res.json({ created: existing.filter(doc => !doc.exists).length, updated: existing.filter(doc => doc.exists).length, items: candidates });
+  } catch (error: any) { res.status(500).json({ error: error.message || 'Không thể nhập dữ liệu thí sinh.' }); }
+});
 /**
  * GET /api/dashboard - Tổng hợp KPIs, xu hướng và thống kê kênh
  */
@@ -467,6 +508,18 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
     }).sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)).slice(0, 10);
 
     // Thời điểm đồng bộ gần nhất
+    // 5 posts with the highest views in the past 12 months, independent of the KPI date window.
+    const topViewedStartDate = new Date();
+    topViewedStartDate.setUTCFullYear(topViewedStartDate.getUTCFullYear() - 1);
+    const topViewedStart = topViewedStartDate.toISOString().slice(0, 10);
+    const topViewedEnd = getTodayDate();
+    const topViewedPostsSnap = await adminDb.collection('posts').where('publishedAt', '>=', topViewedStart).where('publishedAt', '<=', `${topViewedEnd}T23:59:59.999Z`).get();
+    const topViewedCandidates = topViewedPostsSnap.docs.map(doc => doc.data() as Post).filter(post => activeChannelIds.has(post.channelId) && (!postType || postType === 'all' || post.postType === postType));
+    const topViewedKeys = new Set(topViewedCandidates.map(post => post.postKey));
+    const topViewedSnapshotsSnap = await adminDb.collection('dailySnapshots').where('snapshotDate', '>=', topViewedStart).where('snapshotDate', '<=', topViewedEnd).get();
+    const topViewedLatest = new Map<string, DailySnapshot>();
+    topViewedSnapshotsSnap.docs.forEach(doc => { const snapshot = doc.data() as DailySnapshot; if (!topViewedKeys.has(snapshot.postKey)) return; const current = topViewedLatest.get(snapshot.postKey); if (!current || snapshot.snapshotDate > current.snapshotDate) topViewedLatest.set(snapshot.postKey, snapshot); });
+    const topViewedPosts = topViewedCandidates.map(post => { const snapshot = topViewedLatest.get(post.postKey); return { ...post, engagement: snapshot?.totalEngagement || 0, likes: snapshot?.likes || 0, comments: snapshot?.comments || 0, shares: snapshot?.shares || 0, views: effectiveViews(snapshot) }; }).sort((a, b) => b.views - a.views).slice(0, 5);
     const lastSyncChannel = channels
       .filter(c => c.lastSyncAt)
       .sort((a, b) => (b.lastSyncAt || '').localeCompare(a.lastSyncAt || ''))[0];
@@ -532,6 +585,7 @@ apiRouter.get('/dashboard', authenticateUser, async (req: AuthenticatedRequest, 
       trends,
       channelStats,
       topPosts,
+      topViewedPosts,
       typeStats,
       platformStats,
       lastSync: lastSyncChannel?.lastSyncAt || null,
@@ -557,6 +611,9 @@ apiRouter.get('/followers/trend', authenticateUser, async (req: AuthenticatedReq
     const requestedChannelId = typeof req.query.channelId === 'string' && req.query.channelId !== 'all'
       ? req.query.channelId
       : null;
+    const requestedPlatform = typeof req.query.platform === 'string' && req.query.platform !== 'all' ? req.query.platform : null;
+    const activeChannelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
+    const allowedChannelIds = new Set(activeChannelsSnap.docs.map(doc => doc.data() as Channel).filter(channel => (!requestedPlatform || channel.platform === requestedPlatform) && (!requestedChannelId || channel.id === requestedChannelId)).map(channel => channel.id));
     const periodStart = getRecentStartDate(rawDays);
     const periodEnd = getTodayDate();
     const snapshotsSnap = await adminDb.collection('followerSnapshots')
@@ -571,7 +628,7 @@ apiRouter.get('/followers/trend', authenticateUser, async (req: AuthenticatedReq
         channelId: string;
         followersCount: number;
       };
-      if (requestedChannelId && snapshot.channelId !== requestedChannelId) return;
+      if (!allowedChannelIds.has(snapshot.channelId)) return;
       trendByDate.set(
         snapshot.snapshotDate,
         (trendByDate.get(snapshot.snapshotDate) || 0) + Number(snapshot.followersCount || 0),
@@ -609,6 +666,63 @@ apiRouter.get('/channels', authenticateUser, async (req: AuthenticatedRequest, r
   }
 });
 
+
+type SummaryPeriod = 'month' | 'quarter' | 'year';
+function isoDate(value: Date) { return value.toISOString().slice(0, 10); }
+function getSummaryBuckets(groupBy: SummaryPeriod) {
+  const now = new Date();
+  const count = groupBy === 'month' ? 13 : groupBy === 'quarter' ? 8 : 5;
+  const buckets: { key: string; label: string; start: string; end: string }[] = [];
+  for (let offset = count - 1; offset >= 0; offset--) {
+    if (groupBy === 'month') {
+      const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, 1));
+      const end = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
+      buckets.push({ key: `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`, label: `T${date.getUTCMonth() + 1}/${date.getUTCFullYear()}`, start: isoDate(date), end: isoDate(end) });
+    } else if (groupBy === 'quarter') {
+      const currentQuarter = Math.floor(now.getUTCMonth() / 3);
+      const date = new Date(Date.UTC(now.getUTCFullYear(), currentQuarter * 3 - offset * 3, 1));
+      const quarter = Math.floor(date.getUTCMonth() / 3) + 1;
+      const end = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 3, 0));
+      buckets.push({ key: `${date.getUTCFullYear()}-Q${quarter}`, label: `Q${quarter}/${date.getUTCFullYear()}`, start: isoDate(date), end: isoDate(end) });
+    } else {
+      const year = now.getUTCFullYear() - offset;
+      buckets.push({ key: String(year), label: String(year), start: `${year}-01-01`, end: `${year}-12-31` });
+    }
+  }
+  return buckets;
+}
+function findSummaryBucket(date: string, buckets: ReturnType<typeof getSummaryBuckets>) { return buckets.find(bucket => date >= bucket.start && date <= bucket.end); }
+apiRouter.get('/media-summary/trend', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const groupBy: SummaryPeriod = req.query.groupBy === 'quarter' || req.query.groupBy === 'year' ? req.query.groupBy : 'month';
+    const platform = typeof req.query.platform === 'string' && req.query.platform !== 'all' ? req.query.platform : null;
+    const channelId = typeof req.query.channelId === 'string' && req.query.channelId !== 'all' ? req.query.channelId : null;
+    const buckets = getSummaryBuckets(groupBy);
+    const periodStart = buckets[0].start;
+    const periodEnd = buckets[buckets.length - 1].end;
+    const channelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
+    const channels = channelsSnap.docs.map(doc => doc.data() as Channel).filter(channel => (!platform || channel.platform === platform) && (!channelId || channel.id === channelId));
+    const channelIds = new Set(channels.map(channel => channel.id));
+    const postsSnap = await adminDb.collection('posts').where('publishedAt', '>=', periodStart).where('publishedAt', '<=', `${periodEnd}T23:59:59.999Z`).get();
+    const posts = postsSnap.docs.map(doc => doc.data() as Post).filter(post => channelIds.has(post.channelId));
+    const postKeys = new Set(posts.map(post => post.postKey));
+    const snapshotsSnap = await adminDb.collection('dailySnapshots').where('snapshotDate', '>=', periodStart).where('snapshotDate', '<=', periodEnd).get();
+    const latestSnapshots = new Map<string, DailySnapshot>();
+    snapshotsSnap.docs.forEach(doc => { const snapshot = doc.data() as DailySnapshot; if (!channelIds.has(snapshot.channelId) || !postKeys.has(snapshot.postKey)) return; const current = latestSnapshots.get(snapshot.postKey); if (!current || snapshot.snapshotDate > current.snapshotDate) latestSnapshots.set(snapshot.postKey, snapshot); });
+    const followerSnap = await adminDb.collection('followerSnapshots').where('snapshotDate', '>=', periodStart).where('snapshotDate', '<=', periodEnd).get();
+    const followerUpdates = followerSnap.docs.map(doc => doc.data() as { snapshotDate: string; channelId: string; followersCount: number }).filter(snapshot => channelIds.has(snapshot.channelId)).sort((a, b) => a.snapshotDate.localeCompare(b.snapshotDate));
+    const followerByBucket = new Map<string, Map<string, number>>();
+    const latestFollowerByChannel = new Map<string, number>();
+    let followerIndex = 0;
+    buckets.forEach(bucket => { while (followerIndex < followerUpdates.length && followerUpdates[followerIndex].snapshotDate <= bucket.end) { const snapshot = followerUpdates[followerIndex++]; latestFollowerByChannel.set(snapshot.channelId, Number(snapshot.followersCount || 0)); } followerByBucket.set(bucket.key, new Map(latestFollowerByChannel)); });
+    const trend = buckets.map(bucket => {
+      const bucketPosts = posts.filter(post => post.publishedAt.slice(0, 10) >= bucket.start && post.publishedAt.slice(0, 10) <= bucket.end);
+      const followerValues = followerByBucket.get(bucket.key) || new Map<string, number>();
+      return { period: bucket.key, label: bucket.label, views: bucketPosts.reduce((total, post) => { const snapshot = latestSnapshots.get(post.postKey); return total + Number(snapshot?.views || snapshot?.impressions || snapshot?.reach || 0); }, 0), engagement: bucketPosts.reduce((total, post) => total + Number(latestSnapshots.get(post.postKey)?.totalEngagement || 0), 0), postsCount: bucketPosts.length, followers: Array.from(followerValues.values()).reduce((total, value) => total + value, 0) };
+    });
+    res.json({ groupBy, trend });
+  } catch (error: any) { res.status(500).json({ error: `Không thể tải xu hướng báo cáo: ${error.message}` }); }
+});
 /**
  * GET /api/media-summary - Bảng tổng hợp dùng số bài viết thực tế theo postKey,
  * không dùng channel.totalPosts vì trường legacy này có thể từng bị cộng dồn qua nhiều lần sync.
@@ -616,8 +730,10 @@ apiRouter.get('/channels', authenticateUser, async (req: AuthenticatedRequest, r
 apiRouter.get('/media-summary', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { periodStart, periodEnd } = resolveReportingPeriod(req.query);
+    const platform = typeof req.query.platform === 'string' && req.query.platform !== 'all' ? req.query.platform : null;
+    const channelId = typeof req.query.channelId === 'string' && req.query.channelId !== 'all' ? req.query.channelId : null;
     const channelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
-    const channels = channelsSnap.docs.map(doc => doc.data() as Channel);
+    const channels = channelsSnap.docs.map(doc => doc.data() as Channel).filter(channel => (!platform || channel.platform === platform) && (!channelId || channel.id === channelId));
     const activeChannelIds = new Set(channels.map(channel => channel.id));
 
     const postsSnap = await adminDb.collection('posts').where('publishedAt', '>=', periodStart).where('publishedAt', '<=', `${periodEnd}T23:59:59.999Z`).get();
@@ -672,8 +788,10 @@ apiRouter.get('/media-summary', authenticateUser, async (req: AuthenticatedReque
 apiRouter.get('/reports/media-summary.xlsx', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { periodStart, periodEnd } = resolveReportingPeriod(req.query);
+    const platform = typeof req.query.platform === 'string' && req.query.platform !== 'all' ? req.query.platform : null;
+    const channelId = typeof req.query.channelId === 'string' && req.query.channelId !== 'all' ? req.query.channelId : null;
     const channelsSnap = await adminDb.collection('channels').where('status', '==', 'active').get();
-    const channels = channelsSnap.docs.map(doc => doc.data() as Channel);
+    const channels = channelsSnap.docs.map(doc => doc.data() as Channel).filter(channel => (!platform || channel.platform === platform) && (!channelId || channel.id === channelId));
     const activeChannelIds = new Set(channels.map(channel => channel.id));
     const postsSnap = await adminDb.collection('posts').where('publishedAt', '>=', periodStart).where('publishedAt', '<=', `${periodEnd}T23:59:59.999Z`).get();
     const posts = postsSnap.docs

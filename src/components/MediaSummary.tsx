@@ -1,185 +1,58 @@
-import { useEffect, useState } from 'react';
-import { AlertCircle, BarChart3, Calendar, Download, FileSpreadsheet, RefreshCw } from 'lucide-react';
-import { Platform } from '../types';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertCircle, BarChart3, Calendar, Download, FileSpreadsheet, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react';
+import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Channel, Platform } from '../types';
+import SearchableSelect from './SearchableSelect';
 
-interface MediaSummaryRow {
-  id: string;
-  platform: Platform;
-  name: string;
-  externalId: string;
-  lastSyncAt: string | null;
-  lastSyncStatus: 'success' | 'failed' | null;
-  followersCount: number;
-  postsCount: number;
-  views: number;
-  totalEngagement: number;
-}
-
-interface MediaSummaryProps {
-  idToken: string;
-}
-
+interface MediaSummaryRow { id: string; platform: Platform; name: string; externalId: string; lastSyncAt: string | null; lastSyncStatus: 'success' | 'failed' | null; followersCount: number; postsCount: number; views: number; totalEngagement: number; }
+interface TrendPoint { period: string; label: string; views: number; engagement: number; postsCount: number; followers: number; }
+interface MediaSummaryProps { idToken: string; channels: Channel[]; }
 type DatePreset = 'custom' | '7days' | '30days' | '3months';
+type PeriodGroup = 'month' | 'quarter' | 'year';
+const getPastDateStr = (days: number) => { const date = new Date(); date.setDate(date.getDate() - days); return date.toISOString().slice(0, 10); };
+const getTodayStr = () => new Date().toISOString().slice(0, 10);
+const percentChange = (current: number, previous?: number) => previous === undefined || previous === 0 ? null : ((current - previous) / previous) * 100;
+const metricRows = [{ key: 'views', label: 'Lượt xem', color: '#0891b2' }, { key: 'engagement', label: 'Lượt tương tác', color: '#2563eb' }, { key: 'postsCount', label: 'Số bài đăng', color: '#10b981' }, { key: 'followers', label: 'Lượt follow', color: '#7c3aed' }] as const;
 
-function getPastDateStr(days: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return date.toISOString().slice(0, 10);
-}
-
-function getTodayStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-export default function MediaSummary({ idToken }: MediaSummaryProps) {
+export default function MediaSummary({ idToken, channels }: MediaSummaryProps) {
   const [rows, setRows] = useState<MediaSummaryRow[]>([]);
+  const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [startDate, setStartDate] = useState(getPastDateStr(29));
   const [endDate, setEndDate] = useState(getTodayStr());
   const [datePreset, setDatePreset] = useState<DatePreset>('30days');
+  const [periodGroup, setPeriodGroup] = useState<PeriodGroup>('month');
+  const [platformFilter, setPlatformFilter] = useState('all');
+  const [channelFilter, setChannelFilter] = useState('all');
+  const filteredChannels = useMemo(() => channels.filter(channel => channel.status === 'active' && (platformFilter === 'all' || channel.platform === platformFilter)), [channels, platformFilter]);
+  const deltaRows = useMemo(() => trend.map((point, index) => ({ point, index })).reverse(), [trend]);
 
+  const params = () => { const search = new URLSearchParams({ startDate, endDate, groupBy: periodGroup }); if (platformFilter !== 'all') search.set('platform', platformFilter); if (channelFilter !== 'all') search.set('channelId', channelFilter); return search; };
   const loadSummary = async () => {
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     try {
-      const params = new URLSearchParams({ startDate, endDate });
-      const response = await fetch(`/api/media-summary?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${idToken}` },
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.error || 'Không thể tải tổng hợp truyền thông.');
-      }
-      setRows(await response.json());
-    } catch (loadError: any) {
-      setError(loadError.message || 'Không thể kết nối tới hệ thống.');
-    } finally {
-      setLoading(false);
-    }
+      const search = params();
+      const headers = { Authorization: `Bearer ${idToken}` };
+      const [summaryResponse, trendResponse] = await Promise.all([fetch(`/api/media-summary?${search.toString()}`, { headers }), fetch(`/api/media-summary/trend?${search.toString()}`, { headers })]);
+      const [summaryBody, trendBody] = await Promise.all([summaryResponse.json(), trendResponse.json()]);
+      if (!summaryResponse.ok) throw new Error(summaryBody.error || 'Không thể tải báo cáo tổng hợp.');
+      if (!trendResponse.ok) throw new Error(trendBody.error || 'Không thể tải xu hướng báo cáo.');
+      setRows(summaryBody); setTrend(trendBody.trend || []);
+    } catch (loadError: any) { setError(loadError.message || 'Không thể kết nối tới hệ thống.'); }
+    finally { setLoading(false); }
   };
+  useEffect(() => { if (idToken) loadSummary(); }, [idToken, startDate, endDate, periodGroup, platformFilter, channelFilter]);
+  const updatePreset = (preset: DatePreset) => { setDatePreset(preset); if (preset === 'custom') return; const end = new Date(); const start = new Date(); if (preset === '7days') start.setDate(end.getDate() - 6); if (preset === '30days') start.setDate(end.getDate() - 29); if (preset === '3months') start.setMonth(end.getMonth() - 3); setStartDate(start.toISOString().slice(0, 10)); setEndDate(end.toISOString().slice(0, 10)); };
+  const downloadXlsx = async () => { try { const response = await fetch(`/api/reports/media-summary.xlsx?${params().toString()}`, { headers: { Authorization: `Bearer ${idToken}` } }); if (!response.ok) throw new Error('Không thể tạo file Excel.'); const url = URL.createObjectURL(await response.blob()); const link = document.createElement('a'); link.href = url; link.download = `bao_cao_tong_hop_${getTodayStr()}.xlsx`; link.click(); URL.revokeObjectURL(url); } catch (downloadError: any) { alert(downloadError.message || 'Không thể tải file Excel.'); } };
 
-  const updatePreset = (preset: DatePreset) => {
-    setDatePreset(preset);
-    if (preset === 'custom') return;
-
-    const end = new Date();
-    const start = new Date();
-    if (preset === '7days') start.setDate(end.getDate() - 6);
-    if (preset === '30days') start.setDate(end.getDate() - 29);
-    if (preset === '3months') start.setMonth(end.getMonth() - 3);
-
-    setStartDate(start.toISOString().slice(0, 10));
-    setEndDate(end.toISOString().slice(0, 10));
-  };
-  useEffect(() => {
-    if (idToken) loadSummary();
-  }, [idToken, startDate, endDate]);
-
-  const downloadXlsx = async () => {
-    try {
-      const params = new URLSearchParams({ startDate, endDate });
-      const response = await fetch(`/api/reports/media-summary.xlsx?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${idToken}` },
-      });
-      if (!response.ok) throw new Error('Không thể tạo file Excel.');
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `tong_hop_truyen_thong_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch (downloadError: any) {
-      alert(downloadError.message || 'Không thể tải file Excel.');
-    }
-  };
-
-  return (
-    <div className="space-y-7 pb-10">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-200/70 pb-6">
-        <div>
-          <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Tổng hợp truyền thông</h2>
-          <p className="text-sm text-slate-500 mt-1">Theo dõi số bài đăng, người theo dõi và hiệu quả tương tác của từng trang trong 30 ngày gần nhất.</p>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          <div className="flex flex-wrap items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm">
-            <Calendar className="w-4 h-4 text-slate-400" />
-            <select value={datePreset} onChange={event => updatePreset(event.target.value as DatePreset)} className="text-sm font-bold text-slate-700 bg-transparent outline-none">
-              <option value="custom">Tùy chọn</option>
-              <option value="7days">7 ngày qua</option>
-              <option value="30days">30 ngày qua</option>
-              <option value="3months">3 tháng qua</option>
-            </select>
-            <input type="date" value={startDate} min={getPastDateStr(365)} max={endDate} onChange={event => { setStartDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none" />
-            <span className="text-sm text-slate-400">đến</span>
-            <input type="date" value={endDate} min={startDate} max={getTodayStr()} onChange={event => { setEndDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none" />
-          </div>
-          <button onClick={loadSummary} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-extrabold text-slate-700 hover:bg-slate-50">
-            <RefreshCw className="w-4 h-4" /> Làm mới
-          </button>
-          <button onClick={downloadXlsx} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-extrabold hover:bg-emerald-700 shadow-sm">
-            <Download className="w-4 h-4" /> Xuất Excel
-          </button>
-        </div>
-      </div>
-
-      <div className="bg-white border border-slate-200/70 rounded-3xl shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-slate-100 flex items-start gap-3">
-          <div className="p-3 rounded-xl bg-blue-50 text-blue-700"><BarChart3 className="w-6 h-6" /></div>
-          <div>
-            <h3 className="text-lg font-extrabold text-slate-800">Hiệu quả hoạt động theo kênh</h3>
-            <p className="text-sm text-slate-500 mt-1">Mặc định chỉ lấy dữ liệu trong 30 ngày gần nhất; số bài đăng được đếm theo bài viết duy nhất.</p>
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="py-24 text-center"><RefreshCw className="w-9 h-9 text-blue-500 animate-spin mx-auto" /><p className="text-sm text-slate-500 mt-3">Đang tải dữ liệu...</p></div>
-        ) : error ? (
-          <div className="m-6 p-6 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center gap-3"><AlertCircle className="w-6 h-6" />{error}</div>
-        ) : rows.length === 0 ? (
-          <div className="py-24 text-center text-slate-500"><FileSpreadsheet className="w-10 h-10 mx-auto text-slate-300 mb-3" />Chưa có kênh đang hoạt động.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1160px] text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-xs font-extrabold uppercase tracking-wide text-slate-500">
-                  <th className="px-6 py-4 text-center w-20">STT</th>
-                  <th className="px-6 py-4">Nền tảng</th>
-                  <th className="px-6 py-4">Tên trang</th>
-                  <th className="px-6 py-4 font-mono">ID</th>
-                  <th className="px-6 py-4">Đồng bộ lần cuối</th>
-                  <th className="px-6 py-4 text-right">Người theo dõi</th>
-                  <th className="px-6 py-4 text-center">Số bài đăng</th>
-                  <th className="px-6 py-4 text-right">Lượt xem</th>
-                  <th className="px-6 py-4 text-right">Tổng tương tác</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-sm">
-                {rows.map((row, index) => (
-                  <tr key={row.id} className="hover:bg-slate-50/70">
-                    <td className="px-6 py-5 text-center font-semibold text-slate-500">{index + 1}</td>
-                    <td className="px-6 py-5"><span className={`inline-flex px-3 py-1 rounded-full border text-xs font-extrabold ${row.platform === 'facebook' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-teal-50 text-teal-700 border-teal-100'}`}>{row.platform === 'facebook' ? 'Facebook' : 'Zalo OA'}</span></td>
-                    <td className="px-6 py-5 font-bold text-slate-800">{row.name}</td>
-                    <td className="px-6 py-5 font-mono text-slate-500">{row.externalId}</td>
-                    <td className="px-6 py-5">
-                      {row.lastSyncAt ? <div><p className="font-semibold text-slate-700">{new Date(row.lastSyncAt).toLocaleString('vi-VN')}</p><p className={`text-xs font-bold mt-1 ${row.lastSyncStatus === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}>{row.lastSyncStatus === 'success' ? 'Thành công' : 'Thất bại'}</p></div> : <span className="text-slate-400">Chưa đồng bộ</span>}
-                    </td>
-                    <td className="px-6 py-5 text-right font-extrabold text-slate-700">{row.followersCount.toLocaleString('vi-VN')}</td>
-                    <td className="px-6 py-5 text-center font-extrabold text-slate-700">{row.postsCount.toLocaleString('vi-VN')}</td>
-                    <td className="px-6 py-5 text-right font-extrabold text-slate-700">{row.views.toLocaleString('vi-VN')}</td>
-                    <td className="px-6 py-5 text-right font-extrabold text-slate-900">{row.totalEngagement.toLocaleString('vi-VN')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <p className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4">Bảng và tệp Excel mặc định chỉ gồm dữ liệu trong 30 ngày gần nhất; Excel có thêm Người theo dõi và Lượt xem. ID và thời điểm đồng bộ được giữ trên giao diện để tra cứu.</p>
-    </div>
-  );
+  return <div className="space-y-7 pb-10">
+    <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-200/70 pb-6"><div><h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Báo cáo tổng hợp</h2><p className="text-sm text-slate-500 mt-1">Theo dõi diễn biến hiệu quả đa kênh và so sánh biến động theo từng kỳ.</p></div><div className="flex flex-wrap items-center justify-end gap-3"><div className="flex flex-wrap items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm"><Calendar className="w-4 h-4 text-slate-400"/><select value={datePreset} onChange={event => updatePreset(event.target.value as DatePreset)} className="text-sm font-bold text-slate-700 bg-transparent outline-none"><option value="custom">Tùy chọn</option><option value="7days">7 ngày qua</option><option value="30days">30 ngày qua</option><option value="3months">3 tháng qua</option></select><input type="date" value={startDate} min={getPastDateStr(365)} max={endDate} onChange={event => { setStartDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none"/><span className="text-sm text-slate-400">đến</span><input type="date" value={endDate} min={startDate} max={getTodayStr()} onChange={event => { setEndDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none"/></div><button onClick={loadSummary} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-extrabold text-slate-700 hover:bg-slate-50"><RefreshCw className="w-4 h-4"/>Làm mới</button><button onClick={downloadXlsx} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-extrabold hover:bg-emerald-700 shadow-sm"><Download className="w-4 h-4"/>Xuất Excel</button></div></div>
+    <section className="flex flex-wrap items-center gap-3 bg-slate-50 border border-slate-200/70 p-3 rounded-xl"><span className="text-sm font-bold text-slate-600">Lọc báo cáo:</span><SearchableSelect value={platformFilter} onChange={value => { setPlatformFilter(value); setChannelFilter('all'); }} options={[{value:'all',label:'Tất cả nền tảng'},{value:'facebook',label:'Facebook Pages'},{value:'zalo',label:'Zalo OA'}]} className="min-w-[190px]"/><SearchableSelect value={channelFilter} onChange={setChannelFilter} options={[{value:'all',label:'Tất cả các kênh'},...filteredChannels.map(channel => ({value:channel.id,label:channel.name}))]} className="min-w-[230px]"/><div className="ml-auto flex rounded-lg border border-slate-200 bg-white p-1">{([{ value: 'month', label: 'Theo tháng' }, { value: 'quarter', label: 'Theo quý' }, { value: 'year', label: 'Theo năm' }] as const).map(item => <button key={item.value} onClick={() => setPeriodGroup(item.value)} className={`rounded-md px-3 py-1.5 text-xs font-bold ${periodGroup === item.value ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>{item.label}</button>)}</div></section>
+    {loading ? <div className="py-24 text-center bg-white border border-slate-200 rounded-3xl"><RefreshCw className="w-9 h-9 text-blue-500 animate-spin mx-auto"/><p className="text-sm text-slate-500 mt-3">Đang tải dữ liệu báo cáo...</p></div> : error ? <div className="p-6 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center gap-3"><AlertCircle className="w-6 h-6"/>{error}</div> : <>
+      <section className="bg-white p-5 rounded-3xl border border-slate-200/70 shadow-sm"><div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3"><div><h3 className="text-lg font-extrabold text-slate-800">Xu hướng chỉ số theo {periodGroup === 'month' ? '13 tháng gần nhất' : periodGroup === 'quarter' ? '8 quý gần nhất' : '5 năm gần nhất'}</h3><p className="text-sm text-slate-500 mt-1">Bốn đường cùng dùng bộ lọc báo cáo phía trên; đưa chuột vào điểm dữ liệu để xem giá trị chi tiết.</p></div><BarChart3 className="w-6 h-6 text-blue-600"/></div><div className="h-[360px] mt-5"><ResponsiveContainer width="100%" height="100%"><LineChart data={trend} margin={{ top: 12, right: 24, left: 0, bottom: 8 }}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0"/><XAxis dataKey="label" tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false}/><YAxis yAxisId="activity" tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false}/><YAxis yAxisId="followers" orientation="right" tick={{ fontSize: 12, fill: '#7c3aed' }} tickLine={false} axisLine={false}/><Tooltip formatter={(value: number, name: string) => [Number(value).toLocaleString('vi-VN'), name]} contentStyle={{ borderRadius: 12, fontSize: 12 }}/><Legend/><Line yAxisId="activity" type="monotone" dataKey="views" name="Lượt xem" stroke="#0891b2" strokeWidth={2.5} dot={{ r: 3 }}/><Line yAxisId="activity" type="monotone" dataKey="engagement" name="Lượt tương tác" stroke="#2563eb" strokeWidth={2.5} dot={{ r: 3 }}/><Line yAxisId="activity" type="monotone" dataKey="postsCount" name="Số bài đăng" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }}/><Line yAxisId="followers" type="monotone" dataKey="followers" name="Lượt follow" stroke="#7c3aed" strokeWidth={2.5} dot={{ r: 3 }}/></LineChart></ResponsiveContainer></div></section>
+      <section className="bg-white rounded-3xl border border-slate-200/70 shadow-sm overflow-hidden"><div className="p-5 border-b border-slate-100"><h3 className="text-lg font-extrabold text-slate-800">Tỷ lệ tăng/giảm theo kỳ</h3><p className="text-sm text-slate-500 mt-1">So sánh mỗi kỳ với kỳ liền trước trong biểu đồ.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left"><thead><tr className="bg-slate-50 text-xs font-bold uppercase tracking-wide text-slate-500"><th className="px-5 py-4">Kỳ báo cáo</th>{metricRows.map(metric => <th key={metric.key} className="px-5 py-4 text-right">{metric.label}</th>)}</tr></thead><tbody className="divide-y divide-slate-100 text-sm">{deltaRows.map(({ point, index }) => <tr key={point.period} className="hover:bg-slate-50/70"><td className="px-5 py-4 font-bold text-slate-800">{point.label}</td>{metricRows.map(metric => { const change = percentChange(point[metric.key], trend[index - 1]?.[metric.key]); return <td key={metric.key} className="px-5 py-4 text-right"><span className={`inline-flex items-center gap-1 font-bold ${change === null ? 'text-slate-400' : change >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{change === null ? '—' : <>{change >= 0 ? <TrendingUp className="w-3.5 h-3.5"/> : <TrendingDown className="w-3.5 h-3.5"/>}{Math.abs(change).toFixed(1)}%</>}</span></td>; })}</tr>)}</tbody></table></div></section>
+      <section className="bg-white border border-slate-200/70 rounded-3xl shadow-sm overflow-hidden"><div className="p-6 border-b border-slate-100 flex items-start gap-3"><div className="p-3 rounded-xl bg-blue-50 text-blue-700"><FileSpreadsheet className="w-6 h-6"/></div><div><h3 className="text-lg font-extrabold text-slate-800">Hiệu quả hoạt động theo kênh</h3><p className="text-sm text-slate-500 mt-1">Giữ nguyên bảng kênh và tự hiển thị các kênh mới sau khi đồng bộ.</p></div></div>{rows.length === 0 ? <div className="py-20 text-center text-slate-500">Chưa có kênh phù hợp với bộ lọc.</div> : <div className="overflow-x-auto"><table className="w-full min-w-[1160px] text-left border-collapse"><thead><tr className="bg-slate-50 border-b border-slate-200 text-xs font-extrabold uppercase tracking-wide text-slate-500"><th className="px-6 py-4 text-center">STT</th><th className="px-6 py-4">Nền tảng</th><th className="px-6 py-4">Tên trang</th><th className="px-6 py-4 font-mono">ID</th><th className="px-6 py-4">Đồng bộ lần cuối</th><th className="px-6 py-4 text-right">Người theo dõi</th><th className="px-6 py-4 text-center">Số bài đăng</th><th className="px-6 py-4 text-right">Lượt xem</th><th className="px-6 py-4 text-right">Tổng tương tác</th></tr></thead><tbody className="divide-y divide-slate-100 text-sm">{rows.map((row, index) => <tr key={row.id} className="hover:bg-slate-50/70"><td className="px-6 py-5 text-center font-semibold text-slate-500">{index + 1}</td><td className="px-6 py-5"><span className={`inline-flex px-3 py-1 rounded-full border text-xs font-extrabold ${row.platform === 'facebook' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-teal-50 text-teal-700 border-teal-100'}`}>{row.platform === 'facebook' ? 'Facebook' : 'Zalo OA'}</span></td><td className="px-6 py-5 font-bold text-slate-800">{row.name}</td><td className="px-6 py-5 font-mono text-slate-500">{row.externalId}</td><td className="px-6 py-5">{row.lastSyncAt ? <div><p className="font-semibold text-slate-700">{new Date(row.lastSyncAt).toLocaleString('vi-VN')}</p><p className={`text-xs font-bold mt-1 ${row.lastSyncStatus === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}>{row.lastSyncStatus === 'success' ? 'Thành công' : 'Thất bại'}</p></div> : <span className="text-slate-400">Chưa đồng bộ</span>}</td><td className="px-6 py-5 text-right font-extrabold text-slate-700">{row.followersCount.toLocaleString('vi-VN')}</td><td className="px-6 py-5 text-center font-extrabold text-slate-700">{row.postsCount.toLocaleString('vi-VN')}</td><td className="px-6 py-5 text-right font-extrabold text-slate-700">{row.views.toLocaleString('vi-VN')}</td><td className="px-6 py-5 text-right font-extrabold text-slate-900">{row.totalEngagement.toLocaleString('vi-VN')}</td></tr>)}</tbody></table></div>}</section>
+    </>}
+  </div>;
 }

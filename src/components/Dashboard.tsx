@@ -29,6 +29,7 @@ import {
   Users,
 } from 'lucide-react';
 import { Channel, DashboardData } from '../types';
+import SearchableSelect from './SearchableSelect';
 
 const COLORS = ['#2563eb', '#0f766e', '#f59e0b', '#ef4444', '#7c3aed', '#ec4899', '#0891b2', '#ea580c'];
 const DEFAULT_AUTO_SCALE_STEPS = 8;
@@ -128,7 +129,6 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   const [syncingSelectedPeriod, setSyncingSelectedPeriod] = useState(false);
   const [data, setData] = useState<DashboardData | null>(null);
   const [followerTrend, setFollowerTrend] = useState<FollowerTrendPoint[]>([]);
-  const [followerTrendChannelId, setFollowerTrendChannelId] = useState('all');
   const [followerTrendLoading, setFollowerTrendLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -170,7 +170,8 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
     setFollowerTrendLoading(true);
     try {
       const params = new URLSearchParams({ startDate, endDate });
-      if (followerTrendChannelId !== 'all') params.set('channelId', followerTrendChannelId);
+      if (channelFilter !== 'all') params.set('channelId', channelFilter);
+      if (platformFilter !== 'all') params.set('platform', platformFilter);
       const response = await fetch(`/api/followers/trend?${params.toString()}`, {
         headers: { Authorization: `Bearer ${idToken}` },
       });
@@ -188,7 +189,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   }, [idToken, googleAccessToken, platformFilter, channelFilter, postTypeFilter, startDate, endDate, channels]);
   useEffect(() => {
     fetchFollowerTrend();
-  }, [idToken, followerTrendChannelId, startDate, endDate]);
+  }, [idToken, channelFilter, platformFilter, startDate, endDate]);
 
   useEffect(() => {
     if (data) setSelectedChannels(new Set(data.channelStats.map(stat => stat.channelName)));
@@ -387,15 +388,8 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
       <section className="flex flex-wrap items-center gap-3 bg-slate-50 border border-slate-200/70 p-3 rounded-xl">
         <Filter className="w-5 h-5 text-slate-400" />
         <span className="text-sm font-bold text-slate-600">Lọc nhanh:</span>
-        <select value={platformFilter} onChange={event => { setPlatformFilter(event.target.value); setChannelFilter('all'); }} className="bg-white border border-slate-200 text-sm font-bold text-slate-700 rounded-lg px-3 py-1.5">
-          <option value="all">Tất cả nền tảng</option>
-          <option value="facebook">Facebook Pages</option>
-          <option value="zalo">Zalo OA</option>
-        </select>
-        <select value={channelFilter} onChange={event => setChannelFilter(event.target.value)} className="bg-white border border-slate-200 text-sm font-bold text-slate-700 rounded-lg px-3 py-1.5 max-w-sm">
-          <option value="all">Tất cả các kênh</option>
-          {filteredChannels.map(channel => <option key={channel.id} value={channel.id}>{channel.name}</option>)}
-        </select>
+        <SearchableSelect value={platformFilter} onChange={value => { setPlatformFilter(value); setChannelFilter('all'); }} options={[{value:'all',label:'Tất cả nền tảng'},{value:'facebook',label:'Facebook Pages'},{value:'zalo',label:'Zalo OA'}]} className="min-w-[190px]"/>
+        <SearchableSelect value={channelFilter} onChange={setChannelFilter} options={[{value:'all',label:'Tổng tất cả trang'},...filteredChannels.map(channel => ({value:channel.id,label:channel.name}))]} className="min-w-[220px]"/>
         <button onClick={syncSelectedPeriod} disabled={syncingSelectedPeriod} className="ml-auto inline-flex items-center gap-2 bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-sm font-extrabold text-slate-700 hover:bg-slate-100 disabled:opacity-60">
           <RefreshCw className={`w-4 h-4 ${syncingSelectedPeriod ? 'animate-spin' : ''}`} /> Đồng bộ lại
         </button>
@@ -470,16 +464,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                   {manualScaleSteps && <button type="button" onClick={() => setManualScaleSteps(null)} className="text-[11px] font-bold text-blue-700 hover:text-blue-900">Tự động</button>}
                 </div>
                 {isFollowerMetric ? (
-                  <select
-                    value={followerTrendChannelId}
-                    onChange={event => setFollowerTrendChannelId(event.target.value)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm"
-                  >
-                    <option value="all">Tổng tất cả trang</option>
-                    {channels.filter(channel => channel.status === 'active').map(channel => (
-                      <option key={channel.id} value={channel.id}>{channel.name}</option>
-                    ))}
-                  </select>
+                  <SearchableSelect value={channelFilter} onChange={setChannelFilter} options={[{value:'all',label:'Tổng tất cả trang'},...filteredChannels.map(channel => ({value:channel.id,label:channel.name}))]} className="min-w-[220px]"/>
                 ) : (
                   <>
                     <div className="relative">
@@ -620,7 +605,17 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
               })}
             </div>
           </section>
-        </>
+          <section className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm">
+            <h3 className="text-lg font-extrabold text-slate-800">Các bài viết có lượt xem cao nhất</h3>
+            <p className="text-sm text-slate-500 mt-1">05 bài có lượt xem cao nhất trong 12 tháng gần nhất, theo bộ lọc trang hiện tại.</p>
+            <div className="flex overflow-x-auto gap-4 pt-4 pb-2">
+              {(data.topViewedPosts || []).map(post => {
+                const channel = channels.find(item => item.id === post.channelId);
+                return <a key={post.postKey} href={post.postUrl} target="_blank" rel="noreferrer" className="flex-none w-64 border border-slate-200 rounded-xl p-3 bg-white hover:border-cyan-400 hover:shadow-lg transition-all group"><div className="w-full h-32 rounded-lg bg-gradient-to-br from-cyan-600 to-blue-700 grid place-items-center text-white relative overflow-hidden"><ImageIcon className="w-11 h-11 opacity-60" />{post.imageUrl && <img src={post.imageUrl} alt="" onError={event => { event.currentTarget.style.display = 'none'; }} className="absolute inset-0 w-full h-full object-cover" />}<span className="absolute top-2 right-2 px-2 py-1 rounded-lg text-xs font-extrabold bg-slate-950/50">{post.platform === 'facebook' ? 'FB' : 'Zalo'}</span></div><div className="mt-4 space-y-2"><p className="text-xs font-bold uppercase tracking-wide text-slate-400">{new Date(post.publishedAt).toLocaleDateString('vi-VN')}</p><p className="text-sm font-extrabold text-slate-800 truncate" title={channel?.name}>{channel?.name || 'Kênh ẩn'}</p><p className="text-sm text-slate-600 leading-relaxed line-clamp-2 h-11">{post.message || <em>Không có nội dung văn bản</em>}</p></div><div className="flex items-center justify-between border-t border-slate-100 mt-4 pt-3 text-sm"><span className="font-bold uppercase text-slate-500">{post.postType || 'Khác'}</span><span className="font-extrabold text-cyan-700">{post.views.toLocaleString('vi-VN')} lượt xem</span></div><ChevronRight className="w-5 h-5 text-cyan-600 ml-auto mt-3 opacity-0 group-hover:opacity-100" /></a>;
+              })}
+              {!(data.topViewedPosts || []).length && <p className="py-8 text-sm text-slate-400">Chưa có dữ liệu lượt xem trong 12 tháng gần nhất.</p>}
+            </div>
+          </section>        </>
       )}
     </div>
   );

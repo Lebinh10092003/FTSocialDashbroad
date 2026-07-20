@@ -133,6 +133,14 @@ export interface DashboardData {
     likes: number;
     comments: number;
     shares: number;
+    views: number;
+  })[];
+  topViewedPosts?: (Post & {
+    engagement: number;
+    likes: number;
+    comments: number;
+    shares: number;
+    views: number;
   })[];
   typeStats?: {
     type: string;

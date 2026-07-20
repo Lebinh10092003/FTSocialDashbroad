@@ -366,6 +366,14 @@ export class SheetsService {
   /**
    * Đọc toàn bộ dữ liệu của một Sheet và parse thành Objects
    */
+  /** Read the first visible tab, or a caller-selected tab, as row objects. */
+  async readFirstSheet(preferredSheet?: string): Promise<{ title: string; rows: any[] }> {
+    const metadata = await this.sheetsClient.spreadsheets.get({ spreadsheetId: this.spreadsheetId });
+    const titles = (metadata.data.sheets || []).map((sheet: any) => sheet.properties?.title).filter(Boolean) as string[];
+    const title = preferredSheet && titles.includes(preferredSheet) ? preferredSheet : titles[0];
+    if (!title) throw new Error('Google Sheets không có trang dữ liệu.');
+    return { title, rows: await this.readSheet(title) };
+  }
   async readSheet(sheetName: string): Promise<any[]> {
     const response = await this.sheetsClient.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId,

@@ -3,6 +3,7 @@ import {
   Search, Radio, Layers, ExternalLink, Download, ArrowUpDown, ChevronLeft, ChevronRight, AlertCircle, FileText, Calendar
 } from 'lucide-react';
 import { Channel, Post, Platform } from '../types';
+import SearchableSelect from './SearchableSelect';
 
 interface PostsProps {
   idToken: string;
@@ -163,29 +164,12 @@ export default function Posts({ idToken, channels }: PostsProps) {
 
         <div>
           <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Nền tảng</label>
-          <select
-            value={platform}
-            onChange={(e) => handlePlatformChange(e.target.value)}
-            className="bg-white border border-slate-200 text-xs font-medium text-slate-700 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          >
-            <option value="all">Tất cả</option>
-            <option value="facebook">Facebook</option>
-            <option value="zalo">Zalo OA</option>
-          </select>
+          <SearchableSelect value={platform} onChange={handlePlatformChange} options={[{value:'all',label:'Tất cả'},{value:'facebook',label:'Facebook'},{value:'zalo',label:'Zalo OA'}]} className="min-w-[150px]"/>
         </div>
 
         <div>
           <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Kênh lọc</label>
-          <select
-            value={channelId}
-            onChange={(e) => { setChannelId(e.target.value); setPage(1); }}
-            className="bg-white border border-slate-200 text-xs font-medium text-slate-700 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          >
-            <option value="all">Tất cả kênh</option>
-            {filteredChannels.map(chan => (
-              <option key={chan.id} value={chan.id}>{chan.name} ({chan.platform.toUpperCase()})</option>
-            ))}
-          </select>
+          <SearchableSelect value={channelId} onChange={value => { setChannelId(value); setPage(1); }} options={[{value:'all',label:'Tất cả kênh'},...filteredChannels.map(chan => ({value:chan.id,label:`${chan.name} (${chan.platform.toUpperCase()})`}))]} className="min-w-[220px]"/>
         </div>
 
         <div>

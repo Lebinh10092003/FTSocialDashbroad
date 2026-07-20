@@ -438,7 +438,7 @@ export default function App() {
                 </div>
                 <div className="space-y-1.5">
                   <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-                    Social Analytics Dashboard
+                    Bảng điều khiển Phân tích Mạng xã hội
                     <span className="text-[9px] bg-emerald-50 text-emerald-700 font-extrabold px-1.5 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wide">Đang chạy</span>
                   </h3>
                   <p className="text-xs text-slate-500 leading-relaxed">
@@ -539,6 +539,8 @@ export default function App() {
             onBackToWorkspace={() => setViewMode('workspace')}
             userName={user?.displayName}
             userEmail={user?.email}
+            idToken={idToken}
+            googleAccessToken={googleAccessToken}
             userRole={userRole}
             isGuest={isGuest}
             onAccountClick={() => { if (isGuest) { setViewMode('workspace'); setShowLoginModal(true); } else { handleLogout(); } }}
@@ -583,7 +585,7 @@ export default function App() {
                   channels={channels}
                 />
               )}
-              {activeTab === 'media' && <MediaSummary idToken={idToken || ''} />}
+              {activeTab === 'media' && <MediaSummary idToken={idToken || ''} channels={channels} />}
               {activeTab === 'posts' && (
                 <Posts 
                   idToken={idToken || ''}
