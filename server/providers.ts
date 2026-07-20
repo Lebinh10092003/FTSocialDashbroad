@@ -40,14 +40,37 @@ async function fetchWithRetry(url: string, options: any = {}, retries = 3, delay
     }
 
     if (!res.ok) {
-      const text = await res.text();
+      const contentType = res.headers.get('content-type') || '';
+      let text = '';
+      if (contentType.includes('text/html')) {
+        text = `Phản hồi lỗi dạng HTML từ máy chủ API (HTTP status ${res.status}). Vui lòng kiểm tra cấu hình kết nối hoặc API tokens.`;
+      } else {
+        text = await res.text();
+        if (text.length > 150) text = text.slice(0, 150) + '...';
+      }
       throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const text = await res.text();
+      if (text.trim().startsWith('<html') || text.trim().startsWith('<!DOCTYPE')) {
+        throw new Error(`Máy chủ API trả về HTML không mong muốn (HTTP status ${res.status}).`);
+      }
+      throw new Error(`Định dạng phản hồi không hợp lệ (${contentType}): ${text.slice(0, 100)}`);
     }
 
     return await res.json();
   } catch (error: any) {
     clearTimeout(id);
-    if (retries > 0 && error.name !== 'AbortError') {
+    // Không retry nếu đó là lỗi cấu hình / HTTP status do người dùng cấu hình sai tokens (400, 401, 403, 404)
+    const isClientError = error.message && (
+      error.message.includes('HTTP 400') ||
+      error.message.includes('HTTP 401') ||
+      error.message.includes('HTTP 403') ||
+      error.message.includes('HTTP 404')
+    );
+    if (retries > 0 && error.name !== 'AbortError' && !isClientError) {
       await new Promise(resolve => setTimeout(resolve, delay));
       return fetchWithRetry(url, options, retries - 1, delay * 2);
     }
@@ -319,14 +342,13 @@ export class ZaloOAProvider implements SocialProvider {
     // Zalo OA API: get profile of OA
     const url = `https://openapi.zalo.me/v2.0/oa/getprofile`;
     try {
-      const res = await fetch(url, {
+      const data = await fetchWithRetry(url, {
         method: 'GET',
         headers: {
           'access_token': token,
           'Content-Type': 'application/json'
         }
       });
-      const data = await res.json();
       return data.error === 0;
     } catch (error) {
       console.error(`Validate Zalo OA ${externalId} thất bại:`, error);
@@ -336,10 +358,9 @@ export class ZaloOAProvider implements SocialProvider {
 
   async getFollowers(channelId: string, externalId: string): Promise<number> {
     const token = await this.getToken(externalId);
-    const res = await fetch('https://openapi.zalo.me/v2.0/oa/getprofile', {
+    const data = await fetchWithRetry('https://openapi.zalo.me/v2.0/oa/getprofile', {
       headers: { access_token: token, 'Content-Type': 'application/json' }
     });
-    const data = await res.json();
     if (data.error !== 0) throw new Error(`Zalo API error ${data.error}: ${data.message}`);
     return Number(data.data?.followers ?? data.data?.follower ?? data.data?.followers_count ?? 0);
   }
@@ -349,10 +370,9 @@ export class ZaloOAProvider implements SocialProvider {
     // OA API to list broadcast/article posts
     const url = `https://openapi.zalo.me/v2.0/article/getslice?offset=0&limit=50`;
     try {
-      const res = await fetch(url, {
+      const data = await fetchWithRetry(url, {
         headers: { access_token: token }
       });
-      const data = await res.json();
 
       if (data.error !== 0) {
         throw new Error(`Zalo API error ${data.error}: ${data.message}`);
@@ -401,8 +421,7 @@ export class ZaloOAProvider implements SocialProvider {
       try {
         // Zalo OA API lấy thông tin chi tiết bài viết (bao gồm view, share...)
         const url = `https://openapi.zalo.me/v2.0/article/getdetail?id=${post.id}`;
-        const res = await fetch(url, { headers: { access_token: token } });
-        const data = await res.json();
+        const data = await fetchWithRetry(url, { headers: { access_token: token } });
 
         if (data.error === 0 && data.data) {
           // Zalo OA trả về số lượt xem, chia sẻ
