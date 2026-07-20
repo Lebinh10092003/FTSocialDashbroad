@@ -364,9 +364,41 @@ export default function App() {
   // Loading screen
   if (authChecking) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-slate-50 space-y-3">
-        <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-sm font-semibold text-slate-500">Đang khởi chạy FT Social Analytics...</p>
+      <div className="fixed inset-0 bg-gradient-to-br from-slate-50 via-blue-50/40 to-indigo-50/30 flex flex-col items-center justify-center z-50">
+        {/* Background glow */}
+        <div className="absolute top-1/4 left-1/3 w-80 h-80 rounded-full bg-blue-400/8 blur-3xl pointer-events-none" />
+        <div className="absolute bottom-1/4 right-1/3 w-96 h-96 rounded-full bg-violet-400/6 blur-3xl pointer-events-none" />
+
+        <div className="relative flex flex-col items-center gap-5 animate-fade-in">
+          {/* Logo + spinner */}
+          <div className="relative">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-600 flex items-center justify-center shadow-xl shadow-blue-500/25">
+              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+            {/* Spinner ring */}
+            <div className="absolute -inset-2 rounded-3xl border-2 border-blue-500/20 animate-spin" style={{ animationDuration: '3s' }} />
+          </div>
+
+          <div className="text-center space-y-1.5">
+            <h1 className="ft-heading ft-heading-sm" style={{ fontFamily: 'Plus Jakarta Sans, Be Vietnam Pro, sans-serif' }}>FT Workspace</h1>
+            <p className="ft-body-sm text-slate-400">Đang khởi chạy hệ thống...</p>
+          </div>
+
+          {/* Progress bar */}
+          <div className="w-40 h-1 bg-slate-200 rounded-full overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-blue-500 to-violet-500 rounded-full"
+              style={{ animation: 'progress-indeterminate 1.5s ease infinite', width: '40%' }} />
+          </div>
+        </div>
+
+        <style>{`
+          @keyframes progress-indeterminate {
+            0%   { transform: translateX(-250%); width: 40%; }
+            100% { transform: translateX(500%); width: 40%; }
+          }
+        `}</style>
       </div>
     );
   }
@@ -374,145 +406,167 @@ export default function App() {
   // Render Workspace Portal
   if (viewMode === 'workspace') {
     return (
-      <div className="min-h-screen liquid-bg flex flex-col justify-between text-slate-700 font-sans relative">
-        <div className="glow-sphere-1"></div>
-        <div className="glow-sphere-2"></div>
-        
-        {/* Header */}
-        <header className="w-full max-w-6xl mx-auto px-6 py-6 flex justify-between items-center z-10">
-          <div className="flex items-center gap-4">
-            <img src="/logo.png" alt="FermatTech Logo" className="h-9 object-contain" />
-            <div className="border-l border-slate-200 pl-4">
-              <h1 className="font-extrabold text-slate-950 text-base leading-none tracking-tight">Fermat Workspace Dashboard</h1>
-              <p className="text-[9px] uppercase font-bold text-amber-600 tracking-wider mt-1">Workspace</p>
+      <div className="min-h-dvh liquid-bg flex flex-col font-sans relative overflow-x-hidden">
+        <div className="glow-sphere-1" />
+        <div className="glow-sphere-2" />
+        <div className="glow-sphere-3" />
+
+        {/* ── Header ────────────────────────────────────────────── */}
+        <header className="sticky top-0 z-30 w-full glass-panel border-0 border-b border-white/50">
+          <div className="max-w-6xl mx-auto px-5 sm:px-8 py-4 flex justify-between items-center">
+            <div className="flex items-center gap-3.5">
+              <img src="/logo.png" alt="FermatTech Logo" className="h-8 object-contain" />
+              <div className="hidden sm:block border-l border-slate-200 pl-3.5">
+                <h1 className="font-extrabold text-slate-900 text-sm leading-none tracking-tight"
+                    style={{ fontFamily: 'Plus Jakarta Sans, Be Vietnam Pro, sans-serif' }}>Fermat Workspace</h1>
+                <p className="text-[10px] uppercase font-bold text-indigo-600 tracking-widest mt-0.5">Platform</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2 bg-white/80 backdrop-blur-sm px-3.5 py-2 rounded-xl border border-white/70 shadow-sm">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                </span>
+                <span className="text-xs font-semibold text-slate-600 hidden sm:block">
+                  {user?.email === 'guest@ftsocial.com' ? 'Chế độ xem' : user?.displayName || 'Quản trị viên'}
+                </span>
+              </div>
+              {user?.email === 'guest@ftsocial.com' ? (
+                <button onClick={() => setShowLoginModal(true)} className="ft-btn ft-btn-primary">
+                  <LogIn className="w-4 h-4" />Đăng nhập
+                </button>
+              ) : (
+                <button onClick={handleLogout} className="ft-btn ft-btn-secondary" style={{ color: '#E11D48' }}>
+                  <LogOut className="w-4 h-4" />Đăng xuất
+                </button>
+              )}
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-4 bg-white/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-slate-200/80 shadow-sm">
-              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
-              <span className="text-[11px] font-bold text-slate-600">
-                {user?.email === 'guest@ftsocial.com' ? 'Chế độ xem' : 'Quản trị viên'}
-              </span>
-            </div>
-            {user?.email === 'guest@ftsocial.com' ? (
-              <button 
-                onClick={() => setShowLoginModal(true)} 
-                className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-650 text-white font-bold text-xs px-4 py-2 rounded-2xl shadow-md cursor-pointer hover:from-blue-700 hover:to-indigo-700 active:scale-[0.98] transition-all"
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                Đăng nhập
-              </button>
-            ) : (
-              <button 
-                onClick={handleLogout} 
-                className="flex items-center gap-2 bg-slate-100 hover:bg-rose-50 text-slate-650 hover:text-rose-600 font-bold text-xs px-4 py-2 rounded-2xl border border-slate-200/60 hover:border-rose-100 cursor-pointer active:scale-[0.98] transition-all"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                Đăng xuất
-              </button>
-            )}
-      </div>
-    </header>
+        </header>
 
-        {/* Main Portal View */}
-        <main className="flex-1 w-full max-w-6xl mx-auto px-6 py-10 flex flex-col justify-center z-10">
-          <div className="text-center max-w-2xl mx-auto mb-12 space-y-3">
-            <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight leading-none">
-              Không gian làm việc <span className="text-gold-gradient">FT Workspace</span>
+        {/* ── Hero & Cards ──────────────────────────────────────── */}
+        <main className="flex-1 w-full max-w-6xl mx-auto px-5 sm:px-8 py-12 sm:py-16 flex flex-col z-10">
+          <div className="text-center max-w-2xl mx-auto mb-14 space-y-4 animate-slide-up">
+            <div className="inline-flex items-center gap-2 bg-blue-50 border border-blue-100 text-blue-700 text-xs font-bold px-3.5 py-1.5 rounded-full mb-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+              Hệ thống hoạt động bình thường
+            </div>
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-slate-900 tracking-tight leading-[1.1]"
+                style={{ fontFamily: 'Plus Jakarta Sans, Be Vietnam Pro, sans-serif' }}>
+              Không gian làm việc{' '}
+              <span className="ft-gradient-text">FT Workspace</span>
             </h2>
-            <p className="text-xs text-slate-500 max-w-md mx-auto">
-              Cổng quản trị hợp nhất các công cụ đồng bộ dữ liệu, phân tích mạng xã hội và tự động hóa quy trình chăm sóc khách hàng.
+            <p className="text-base text-slate-500 max-w-lg mx-auto leading-relaxed">
+              Cổng quản trị hợp nhất: đồng bộ dữ liệu, phân tích mạng xã hội và tự động hóa quy trình.
             </p>
           </div>
 
           {/* Apps Bento Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto w-full">
-            {/* Card 1: Active Social Analytics app */}
-            <div 
-              onClick={() => {
-                setViewMode('social-dashboard');
-                setActiveTab('dashboard');
-              }}
-              className="glass-card p-6.5 rounded-3xl cursor-pointer group flex flex-col justify-between min-h-[220px]"
-            >
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 max-w-4xl mx-auto w-full stagger-children">
+
+            {/* Card 1: Social Analytics */}
+            <div onClick={() => { setViewMode('social-dashboard'); setActiveTab('dashboard'); }}
+              className="glass-card p-7 rounded-3xl cursor-pointer group flex flex-col justify-between min-h-[230px] animate-fade-in"
+              role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && (setViewMode('social-dashboard'), setActiveTab('dashboard'))}>
               <div className="space-y-4">
-                <div className="w-12 h-12 bg-gradient-to-tr from-blue-500 to-indigo-650 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="w-14 h-14 bg-gradient-to-tr from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-500/25 group-hover:scale-110 transition-transform duration-300">
+                  <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2" />
                   </svg>
                 </div>
-                <div className="space-y-1.5">
-                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-                    Bảng điều khiển Phân tích Mạng xã hội
-                    <span className="text-[9px] bg-emerald-50 text-emerald-700 font-extrabold px-1.5 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wide">Đang chạy</span>
-                  </h3>
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    Hệ thống tích hợp dữ liệu, theo dõi tương tác thời gian thực từ Facebook Page, Zalo OA và đồng bộ tự động báo cáo Google Sheets.
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="ft-heading ft-heading-sm">Phân tích Mạng xã hội</h3>
+                    <span className="ft-badge ft-badge-green">Đang chạy</span>
+                  </div>
+                  <p className="ft-body-sm text-slate-500 leading-relaxed">
+                    Tích hợp dữ liệu, theo dõi tương tác thời gian thực từ Facebook Page, Zalo OA và đồng bộ báo cáo Google Sheets.
                   </p>
                 </div>
               </div>
-              <div className="pt-4 flex items-center text-xs font-bold text-amber-600 group-hover:translate-x-1 transition-transform">
-                Truy cập ứng dụng &rarr;
+              <div className="pt-5 flex items-center gap-1.5 text-sm font-semibold text-amber-600 group-hover:gap-3 transition-all duration-200">
+                Truy cập ứng dụng
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
               </div>
             </div>
 
-            {/* Card 2: Active Email Builder app */}
-            <div 
-              onClick={() => {
-                setViewMode('email-builder');
-              }}
-              className="glass-card p-6.5 rounded-3xl cursor-pointer group flex flex-col justify-between min-h-[220px]"
-            >
+            {/* Card 2: Email Builder */}
+            <div onClick={() => setViewMode('email-builder')}
+              className="glass-card p-7 rounded-3xl cursor-pointer group flex flex-col justify-between min-h-[230px] animate-fade-in"
+              role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setViewMode('email-builder')}>
               <div className="space-y-4">
-                <div className="w-12 h-12 bg-gradient-to-tr from-blue-600 to-indigo-650 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">
-                  <Mail className="w-6 h-6" />
+                <div className="w-14 h-14 bg-gradient-to-tr from-indigo-500 to-violet-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-500/25 group-hover:scale-110 transition-transform duration-300">
+                  <Mail className="w-7 h-7" />
                 </div>
-                <div className="space-y-1.5">
-                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-                    Trình tạo Email
-                    <span className="text-[9px] bg-emerald-50 text-emerald-700 font-extrabold px-1.5 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wide">Đang hoạt động</span>
-                  </h3>
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    Thiết kế email có hình ảnh, nội dung cá nhân hóa và copy trực tiếp vào Gmail.
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="ft-heading ft-heading-sm">Trình tạo Email</h3>
+                    <span className="ft-badge ft-badge-green">Đang chạy</span>
+                  </div>
+                  <p className="ft-body-sm text-slate-500 leading-relaxed">
+                    Thiết kế email có hình ảnh, nội dung cá nhân hóa và copy trực tiếp vào Gmail — đồng bộ đa máy.
                   </p>
                 </div>
               </div>
-              <div className="pt-4 flex items-center text-xs font-bold text-amber-600 group-hover:translate-x-1 transition-transform">
-                Truy cập ứng dụng &rarr;
+              <div className="pt-5 flex items-center gap-1.5 text-sm font-semibold text-amber-600 group-hover:gap-3 transition-all duration-200">
+                Truy cập ứng dụng
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
               </div>
             </div>
 
-
-
-            {/* Card 5: Examination */}
-            <div
-              onClick={() => setViewMode('examination')}
-              className="glass-card p-6.5 rounded-3xl cursor-pointer group flex flex-col justify-between min-h-[220px]"
-            >
+            {/* Card 3: Examination */}
+            <div onClick={() => setViewMode('examination')}
+              className="glass-card p-7 rounded-3xl cursor-pointer group flex flex-col justify-between min-h-[230px] animate-fade-in"
+              role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setViewMode('examination')}>
               <div className="space-y-4">
-                <div className="w-12 h-12 bg-gradient-to-tr from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-500/10 group-hover:scale-110 transition-transform">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <div className="w-14 h-14 bg-gradient-to-tr from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-500/20 group-hover:scale-110 transition-transform duration-300">
+                  <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
                 </div>
-                <div className="space-y-1.5">
-                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">Khảo thí <span className="text-[9px] bg-emerald-50 text-emerald-700 font-extrabold px-1.5 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wide">Đang chạy</span></h3>
-                  <p className="text-xs text-slate-500 leading-relaxed">Quản lý cuộc thi, kỳ tổ chức, thí sinh và quy trình nhập dữ liệu tại FermatTech.</p>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="ft-heading ft-heading-sm">Khảo thí</h3>
+                    <span className="ft-badge ft-badge-green">Đang chạy</span>
+                  </div>
+                  <p className="ft-body-sm text-slate-500 leading-relaxed">
+                    Quản lý cuộc thi, kỳ tổ chức, thí sinh và quy trình nhập dữ liệu tại FermatTech.
+                  </p>
                 </div>
               </div>
-              <div className="pt-4 flex items-center text-xs font-bold text-amber-600 group-hover:translate-x-1 transition-transform">Truy cập ứng dụng →</div>
+              <div className="pt-5 flex items-center gap-1.5 text-sm font-semibold text-amber-600 group-hover:gap-3 transition-all duration-200">
+                Truy cập ứng dụng
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
+              </div>
             </div>
-            {/* Card 6: Digital Training */}
-            <div onClick={() => setViewMode('digital-training')} className="glass-card p-6.5 rounded-3xl relative group flex flex-col justify-between min-h-[220px] cursor-pointer">
+
+            {/* Card 4: Digital Training */}
+            <div onClick={() => setViewMode('digital-training')}
+              className="glass-card p-7 rounded-3xl cursor-pointer group flex flex-col justify-between min-h-[230px] animate-fade-in"
+              role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setViewMode('digital-training')}>
               <div className="space-y-4">
-                <div className="w-12 h-12 bg-gradient-to-tr from-cyan-500 to-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-cyan-500/10">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v11.494m-9-5.747h18M4.5 8.5h15M4.5 15.5h15M12 3a9 9 0 100 18 9 9 0 000-18z" /></svg>
+                <div className="w-14 h-14 bg-gradient-to-tr from-cyan-500 to-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-cyan-500/20 group-hover:scale-110 transition-transform duration-300">
+                  <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v11.494m-9-5.747h18M4.5 8.5h15M4.5 15.5h15M12 3a9 9 0 100 18 9 9 0 000-18z" />
+                  </svg>
                 </div>
-                <div className="space-y-1.5">
-                  <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">Đào tạo số <span className="text-[9px] bg-slate-100 text-slate-500 font-extrabold px-1.5 py-0.5 rounded-full border border-slate-200 uppercase tracking-wide">Đang chạy</span></h3>
-                  <p className="text-xs text-slate-500 leading-relaxed">Công tác đào tạo Chuyển đổi số, Đào tạo Ứng dụng AI trong công việc.</p>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="ft-heading ft-heading-sm">Đào tạo số</h3>
+                    <span className="ft-badge ft-badge-blue">Đang chạy</span>
+                  </div>
+                  <p className="ft-body-sm text-slate-500 leading-relaxed">
+                    Đào tạo Chuyển đổi số và Ứng dụng AI trong công việc cho toàn bộ nhân viên FermatTech.
+                  </p>
                 </div>
               </div>
-              <div className="pt-4 text-xs font-bold text-slate-400">Truy cập ứng dụng →</div>
-            </div>          </div>
+              <div className="pt-5 flex items-center gap-1.5 text-sm font-semibold text-amber-600 group-hover:gap-3 transition-all duration-200">
+                Truy cập ứng dụng
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
+              </div>
+            </div>
+          </div>
         </main>
 
         {/* Footer */}
@@ -527,8 +581,10 @@ export default function App() {
   if (viewMode === 'email-builder') {
     return (
       <Suspense fallback={
-        <div className="flex flex-col items-center justify-center h-screen bg-slate-50 space-y-3">
-          <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        <div className="flex flex-col items-center justify-center h-screen bg-slate-50 gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg animate-pulse">
+            <Mail className="w-5 h-5 text-white" />
+          </div>
           <p className="text-sm font-semibold text-slate-500">Đang nạp Trình tạo Email...</p>
         </div>
       }>
@@ -589,9 +645,29 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto px-5 py-6 md:px-7 md:py-7">
         {loading ? (
-          <div className="flex flex-col items-center justify-center h-full space-y-2">
-            <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-            <p className="text-xs font-semibold text-slate-400">Đang đồng bộ danh mục kênh...</p>
+          <div className="flex flex-col items-center justify-center h-full gap-4">
+            {/* Skeleton loader */}
+            <div className="w-full max-w-[1600px] mx-auto space-y-5">
+              {/* Header skeleton */}
+              <div className="flex items-center justify-between">
+                <div className="skeleton-shimmer h-8 w-48 rounded-xl" />
+                <div className="flex gap-2">
+                  <div className="skeleton-shimmer h-8 w-24 rounded-lg" />
+                  <div className="skeleton-shimmer h-8 w-24 rounded-lg" />
+                </div>
+              </div>
+              {/* Stats row skeleton */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="skeleton-shimmer h-24 rounded-2xl" style={{ animationDelay: `${i * 80}ms` }} />
+                ))}
+              </div>
+              {/* Charts skeleton */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="skeleton-shimmer h-56 rounded-2xl" />
+                <div className="skeleton-shimmer h-56 rounded-2xl" style={{ animationDelay: '100ms' }} />
+              </div>
+            </div>
           </div>
         ) : (
           <div className="max-w-[1600px] mx-auto">

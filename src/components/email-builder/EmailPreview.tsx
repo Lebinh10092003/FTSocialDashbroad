@@ -17,8 +17,8 @@ export default function EmailPreview({
   const [viewMode, setViewMode] = useState<'desktop' | 'mobile'>('desktop');
   const [useMock, setUseMock] = useState(false);
 
-  // Compile layout
-  const { html, subject, warnings } = generateEmailHtml(template, variables, useMock);
+  // Dùng previewHtml (WYSIWYG) thay vì html (email export)
+  const { previewHtml, subject, warnings } = generateEmailHtml(template, variables, useMock);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const lastHeightRef = useRef<number>(0);
@@ -51,26 +51,20 @@ export default function EmailPreview({
     if (!iframe) return;
 
     let timers: NodeJS.Timeout[] = [];
+    lastHeightRef.current = 0; // Reset khi nội dung thay đổi
 
-    const triggerHeightUpdate = () => {
-      updateIframeHeight();
-    };
+    const triggerHeightUpdate = () => updateIframeHeight();
 
     const handleLoad = () => {
       triggerHeightUpdate();
-      
-      // Schedule sequential updates to ensure late-loading content (like images) is accounted for
       const t1 = setTimeout(triggerHeightUpdate, 100);
       const t2 = setTimeout(triggerHeightUpdate, 400);
       const t3 = setTimeout(triggerHeightUpdate, 1000);
       const t4 = setTimeout(triggerHeightUpdate, 2000);
-      
       timers.push(t1, t2, t3, t4);
     };
 
     iframe.addEventListener('load', handleLoad);
-    
-    // Trigger immediately
     triggerHeightUpdate();
     const tStart = setTimeout(triggerHeightUpdate, 250);
     timers.push(tStart);
@@ -78,16 +72,17 @@ export default function EmailPreview({
     return () => {
       iframe.removeEventListener('load', handleLoad);
       timers.forEach(t => clearTimeout(t));
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [html, viewMode]);
+  }, [previewHtml, viewMode]);
+
+  // Màu nền ngoài để container preview khớp với iframe
+  const externalBg = template.settings?.externalBg || '#f1f5f9';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4">
       <div className="relative w-full max-w-7xl bg-slate-100 rounded-3xl border border-slate-200 shadow-2xl flex flex-col h-[90vh] overflow-hidden animate-fade-in">
-        
+
         {/* Header Toolbar */}
         <div className="p-4 bg-white border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3">
@@ -95,14 +90,14 @@ export default function EmailPreview({
             <div className="flex bg-slate-100 border border-slate-200 p-0.5 rounded-xl">
               <button
                 onClick={() => setViewMode('desktop')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${viewMode === 'desktop' ? 'bg-white text-blue-650 shadow-sm' : 'text-slate-500'}`}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${viewMode === 'desktop' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}
               >
                 <Monitor className="w-3.5 h-3.5" />
                 Máy tính (Desktop)
               </button>
               <button
                 onClick={() => setViewMode('mobile')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${viewMode === 'mobile' ? 'bg-white text-blue-650 shadow-sm' : 'text-slate-500'}`}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${viewMode === 'mobile' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}
               >
                 <Smartphone className="w-3.5 h-3.5" />
                 Điện thoại (Mobile)
@@ -112,7 +107,7 @@ export default function EmailPreview({
 
           <div className="flex items-center gap-3 self-end sm:self-auto">
             {/* Toggle Mock Data */}
-            <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-750 font-bold select-none bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl hover:bg-slate-100/70 transition-all">
+            <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700 font-bold select-none bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl hover:bg-slate-100/70 transition-all">
               <input
                 type="checkbox"
                 checked={useMock}
@@ -148,34 +143,39 @@ export default function EmailPreview({
           </div>
         )}
 
-        {/* Dynamic Frame container */}
-        <div className="flex flex-1 items-start justify-start overflow-auto bg-slate-200/40 p-6">
+        {/* Subject preview bar */}
+        <div
+          className="shrink-0 border-b px-5 py-2 flex items-center gap-2 text-xs select-none"
+          style={{ background: externalBg }}
+        >
+          <span className="font-bold text-slate-700 shrink-0">Tiêu đề:</span>
+          <span className="truncate text-slate-900 font-semibold">{subject || '[Trống]'}</span>
+        </div>
+
+        {/* Email preview frame - màu nền ngoài khớp với externalBg */}
+        <div
+          className="flex flex-1 overflow-auto"
+          style={{ background: externalBg }}
+        >
+          {/* Desktop: căn giữa email trong khung, Mobile: giới hạn 390px căn giữa */}
           <div
-            className="mx-auto flex shrink-0 flex-col border border-slate-200 bg-white transition-all duration-300"
+            className="mx-auto w-full shrink-0 flex flex-col transition-all duration-300"
             style={{
-              width: viewMode === 'mobile'
-                ? '390px'
-                : 'min(1100px, calc(100vw - 96px))'
+              maxWidth: viewMode === 'mobile' ? '390px' : `${template.settings?.maxWidth || 680}px`,
+              width: viewMode === 'mobile' ? '390px' : '100%',
             }}
           >
-            {/* Subject preview */}
-            <div className="bg-slate-50 border-b border-slate-200 px-4 py-3 text-xs text-slate-500 font-medium select-none flex gap-2 shrink-0">
-              <span className="font-bold text-slate-750">Tiêu đề:</span>
-              <span className="truncate text-slate-900 font-semibold">{subject || '[Trống]'}</span>
-            </div>
-
-            {/* Iframe container with no scrollbar */}
-            <div className="w-full bg-white relative">
-              <iframe
-                ref={iframeRef}
-                key={viewMode}
-                title="Email Preview Frame"
-                srcDoc={html}
-                width="100%"
-                scrolling="no"
-                className="w-full border-0 block min-h-[300px]"
-              />
-            </div>
+            {/* Iframe không có thanh cuộn, tự giãn chiều cao theo nội dung */}
+            <iframe
+              ref={iframeRef}
+              key={`${viewMode}-${previewHtml.length}`}
+              title="Email Preview Frame"
+              srcDoc={previewHtml}
+              width="100%"
+              scrolling="no"
+              className="w-full border-0 block min-h-[400px]"
+              style={{ background: externalBg }}
+            />
           </div>
         </div>
 

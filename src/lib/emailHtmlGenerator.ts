@@ -6,8 +6,12 @@ import { renderEmailIconDataUri } from './emailIcon';
 
 interface GeneratedEmail {
   subject: string;
+  /** HTML dùng để gửi/copy email (tối ưu cho email clients, body trắng) */
   html: string;
+  /** HTML dùng để copy vào Gmail/Outlook (không có <!DOCTYPE>) */
   copyHtml: string;
+  /** HTML dùng cho iframe preview trong app (có externalBg, padding đúng) */
+  previewHtml: string;
   plainText: string;
   variables: string[];
   warnings: string[];
@@ -535,7 +539,7 @@ export function generateEmailHtml(
     }
   </style>`;
 
-  // Wrapper template
+  // ── Export HTML (tối ưu cho email clients: body trắng, không có externalBg) ──
   const html = `<!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -544,8 +548,8 @@ export function generateEmailHtml(
   ${responsiveStyle}
   <title>${processedSubject}</title>
 </head>
-<body style="margin: 0; padding: 0; background-color: #ffffff; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;">
-  <table role="presentation" class="ft-email-root" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; table-layout: fixed; border-collapse: collapse; background-color: #ffffff;">
+<body style="margin: 0; padding: 0; background-color: ${settings.externalBg || '#f1f5f9'}; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;">
+  <table role="presentation" class="ft-email-root" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; table-layout: fixed; border-collapse: collapse; background-color: ${settings.externalBg || '#f1f5f9'};">
     <tr>
       <td align="center" style="padding: 0;">
         <table role="presentation" class="ft-email-content" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
@@ -558,6 +562,60 @@ export function generateEmailHtml(
       </td>
     </tr>
   </table>
+</body>
+</html>`;
+
+  // ── Preview HTML (WYSIWYG - hiển thị đúng như giao diện edit: externalBg, padding top/bottom) ──
+  // Dùng cho iframe preview trong app, không dùng để gửi email
+  const previewExternalBg = settings.externalBg || '#f1f5f9';
+  const previewHtml = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  ${responsiveStyle}
+  <style type="text/css">
+    html { background-color: ${previewExternalBg}; }
+    body {
+      margin: 0;
+      padding: 32px 0;
+      background-color: ${previewExternalBg};
+      -webkit-text-size-adjust: 100%;
+      -ms-text-size-adjust: 100%;
+      min-height: 100vh;
+    }
+    .ft-email-preview-wrapper {
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+      padding: 0 16px;
+      box-sizing: border-box;
+    }
+    .ft-email-preview-card {
+      width: 100%;
+      max-width: ${settings.maxWidth}px;
+      background-color: ${settings.contentBg};
+      font-family: ${fontFamily};
+      color: ${textColor};
+    }
+    @media only screen and (max-width: 480px) {
+      body { padding: 0; }
+      .ft-email-preview-wrapper { padding: 0; }
+    }
+  </style>
+  <title>${processedSubject}</title>
+</head>
+<body>
+  <div class="ft-email-preview-wrapper">
+    <table role="presentation" class="ft-email-content ft-email-preview-card" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
+      <tr>
+        <td class="ft-email-content-cell" width="100%" style="width: 100%; max-width: 100%; box-sizing: border-box; padding: ${settings.contentPadding}px;">
+          ${blockHtmls}
+        </td>
+      </tr>
+    </table>
+  </div>
 </body>
 </html>`;
 
@@ -642,6 +700,7 @@ export function generateEmailHtml(
   return {
     subject: processedSubject,
     html,
+    previewHtml,
     copyHtml,
     plainText,
     variables: allVars,
