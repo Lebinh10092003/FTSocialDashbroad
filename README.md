@@ -12,7 +12,13 @@ Hệ thống phân tích tương tác Facebook và Zalo OA, đồng bộ dữ li
 
 ## Chạy local
 
-Trên Windows PowerShell, dùng `npm.cmd` nếu PowerShell chặn `npm.ps1`:
+Chạy nhanh trên **1 dòng duy nhất** (tự động cài đặt và chạy):
+
+```powershell
+npm install && npm run dev
+```
+
+Hoặc chạy chi tiết từng bước:
 
 ```powershell
 cd C:\FermatTech\FTSocialDashbroad-main
@@ -141,6 +147,26 @@ npm run deploy
 > 7. Khởi động lại ứng dụng PM2 và tự động lưu trạng thái (`pm2 save`).
 
 Ứng dụng sẽ hoạt động đồng bộ ngay lập tức mà không cần bất kỳ thao tác thủ công nào trên server.
+
+### Bảng lệnh nhanh 1 dòng (Quick Commands)
+
+Để thuận tiện cho quá trình vận hành nhanh, dưới đây là các câu lệnh gộp trên 1 dòng:
+
+1. **Chạy local trên 1 dòng**:
+   ```bash
+   npm install && npm run dev
+   ```
+
+2. **Cập nhật & Reset VPS từ xa bằng SSH trên 1 dòng** (Thực thi tại máy local):
+   ```bash
+   ssh root@103.142.27.69 "cd /var/www/ft-social-dashboard && git pull && npm install --omit=dev && pm2 restart all"
+   ```
+
+3. **Cập nhật & Reset trực tiếp trên VPS bằng Git Pull trên 1 dòng** (Thực thi sau khi đã SSH vào VPS):
+   ```bash
+   cd /var/www/ft-social-dashboard && git pull && npm install --omit=dev && pm2 restart all
+   ```
+
 
 ## Kết nối GitHub Pages với backend
 
