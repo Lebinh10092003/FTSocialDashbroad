@@ -1,0 +1,63 @@
+[TAILING] Tailing last 100 lines for [ft-social-dashboard] process (change the value with --lines option)
+/var/www/workspace.fermat.vn/server-error.log last 100 lines:
+/var/www/workspace.fermat.vn/server.log last 100 lines:
+2026-07-20T16:46:24: [SQLite] Đã kết nối cơ sở dữ liệu SQLite tại server/data/app.db
+2026-07-20T16:46:26: [AutoSync] Đã thiết lập lịch đồng bộ tự động hàng ngày lúc 7:00 AM (giờ Việt Nam/Bangkok).
+2026-07-20T16:46:26: Khởi chạy server ở chế độ PRODUCTION...
+2026-07-20T16:46:26: Server đang chạy nội bộ tại http://127.0.0.1:5500
+2026-07-20T16:47:03: [SQLite] Đã kết nối cơ sở dữ liệu SQLite tại server/data/app.db
+2026-07-20T16:47:05: [AutoSync] Đã thiết lập lịch đồng bộ tự động hàng ngày lúc 7:00 AM (giờ Việt Nam/Bangkok).
+2026-07-20T16:47:05: Khởi chạy server ở chế độ PRODUCTION...
+2026-07-20T16:47:05: Server đang chạy nội bộ tại http://127.0.0.1:5500
+2026-07-20T16:47:52: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:47:52: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:47:57: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:47:57: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:47:59: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:48:00: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:48:02: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:48:02: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:48:02: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:48:05: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:48:06: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:48:06: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:48:08: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:48:36: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+2026-07-20T16:48:36: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+2026-07-20T16:49:15: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:49:15: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:49:15: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:49:15: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:49:25: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:49:29: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+2026-07-20T16:49:29: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+2026-07-20T16:49:42: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+2026-07-20T16:49:42: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+2026-07-20T16:49:45: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:49:52: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+2026-07-20T16:49:52: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+2026-07-20T16:50:13: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:50:17: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:50:19: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:50:19: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:50:23: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:50:26: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:50:26: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:50:27: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:50:27: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+2026-07-20T16:50:27: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+2026-07-20T16:50:30: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:50:30: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:50:30: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:50:31: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:50:35: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:50:35: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:50:36: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:50:55: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+2026-07-20T16:50:55: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+2026-07-20T16:51:04: [Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.
+2026-07-20T16:51:08: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+2026-07-20T16:51:08: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+2026-07-20T16:51:20: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+2026-07-20T16:51:20: [Sheets] Sử dụng OAuth 2.0 User Access Token tạm thời.
+
