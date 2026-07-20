@@ -333,7 +333,7 @@ export function generateEmailHtml(
           const minWidth = Math.max(0, Number(button.minWidth) || 0);
           const fontSize = Number(button.fontSize) || 14;
           const renderedButtonText = preserveRichTextLineBreaks(rep(sanitizeHtml(button.html || escapePlainTextHtml(button.text || ''))));
-          return `<td class="ft-email-button-cell" align="center" bgcolor="${button.bg || '#0F3A72'}"${minWidth ? ` width="${minWidth}"` : ''} style="border-radius:${button.radius ?? 8}px;padding:${paddingY}px ${paddingX}px;background-color:${button.bg || '#0F3A72'};${minWidth ? `min-width:${minWidth}px;` : ''}"><a class="ft-email-button-text" href="${rep(button.link || '')}" target="_blank" style="display:inline-block;font-family:${fontFamily};color:${button.color || '#ffffff'};font-size:${fontSize}px;line-height:1.2;font-weight:bold;text-decoration:none;white-space:normal;overflow-wrap:anywhere;">${renderedButtonText}</a></td>${index < buttons.length - 1 ? `<td width="${gap}" style="width:${gap}px;font-size:1px;line-height:1px;">&nbsp;</td>` : ''}`;
+          return `<td class="ft-email-button-cell" align="center" bgcolor="${button.bg || '#0F3A72'}"${minWidth ? ` width="${minWidth}"` : ''} style="border-radius:${button.radius ?? 8}px;padding:${paddingY}px ${paddingX}px;background-color:${button.bg || '#0F3A72'};${minWidth ? `min-width:${minWidth}px;` : ''}"><a class="ft-email-button-text" href="${rep(button.link || '')}" target="_blank" style="display:inline-block;font-family:${fontFamily};color:${button.color || '#ffffff'};font-size:${fontSize}px;line-height:1.2;font-weight:bold;text-decoration:none;white-space:normal;overflow-wrap:anywhere;">${renderedButtonText}</a></td>${index < buttons.length - 1 ? `<td class="ft-email-button-gap" width="${gap}" style="width:${gap}px;font-size:1px;line-height:1px;padding:0;margin:0;">&nbsp;</td>` : ''}`;
         }).join('');
         return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr><td align="${align}" style="padding:0;"><table role="presentation" class="ft-email-button-group" border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;display:inline-table;"><tr>${cells}</tr></table></td></tr></table>`;
       }
@@ -533,9 +533,11 @@ export function generateEmailHtml(
       .ft-email-rich-table td, .ft-email-rich-table th { min-width: 0 !important; max-width: 100% !important; }
       .ft-email-button-table, .ft-email-button-group { max-width: 100% !important; }
       .ft-email-button-table { min-width: 0 !important; }
-      .ft-email-button-group { width: 100% !important; table-layout: fixed !important; }
-      .ft-email-button-cell { width: auto !important; min-width: 0 !important; padding-left: 8px !important; padding-right: 8px !important; }
-      .ft-email-button-text { white-space: normal !important; overflow-wrap: anywhere !important; word-break: break-word !important; }
+      .ft-email-button-group { width: 100% !important; display: table !important; }
+      .ft-email-button-group tr { display: block !important; width: 100% !important; }
+      .ft-email-button-cell { display: block !important; width: 100% !important; box-sizing: border-box !important; margin-bottom: 12px !important; min-width: 0 !important; padding-left: 12px !important; padding-right: 12px !important; }
+      .ft-email-button-gap { display: none !important; }
+      .ft-email-button-text { display: block !important; width: 100% !important; white-space: normal !important; overflow-wrap: anywhere !important; word-break: break-word !important; }
     }
   </style>`;
 
