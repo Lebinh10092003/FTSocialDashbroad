@@ -166,11 +166,10 @@ export default function BlockLibrary({ onAddBlock, width }: BlockLibraryProps) {
   const longPress = useRef(false);
   const didDrag = useRef(false);
 
-  const contentWidth = Math.max(72, width - 16);
-  const columns = 4;
-  const maximumCardWidth = 104;
-  const cardWidth = Math.min(maximumCardWidth, contentWidth / (columns + 0.12 * Math.max(0, columns - 1)));
-  const gap = cardWidth * 0.12;
+  const contentWidth = Math.max(40, width - 28);
+  const minCardWidth = 66;
+  const gap = 8;
+  const columns = Math.max(1, Math.floor((contentWidth + gap) / (minCardWidth + gap)));
 
   const showTooltip = (id: string, label: string, description: string, target: HTMLElement) => {
     const rect = target.getBoundingClientRect();
@@ -194,7 +193,7 @@ export default function BlockLibrary({ onAddBlock, width }: BlockLibraryProps) {
         const blocks = Object.values(EMAIL_BLOCK_REGISTRY).filter(item => item.category === category.id);
         return <section key={category.id} className="bg-white rounded-2xl border border-slate-100 p-2.5 shadow-sm">
           <h3 className="mb-2.5 px-1.5 text-[9px] font-black uppercase tracking-[0.15em] text-slate-450" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>{category.label}</h3>
-          <div className="grid w-full transition-[grid-template-columns,gap] duration-150 ease-out" style={{ gridTemplateColumns: `repeat(${columns}, ${cardWidth}px)`, columnGap: `${gap}px`, rowGap: `${gap}px` }}>
+          <div className="grid w-full transition-[grid-template-columns,gap] duration-150 ease-out" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, columnGap: `${gap}px`, rowGap: `${gap}px` }}>
             {blocks.map(item => {
               const Icon = (Icons as any)[item.icon] || Icons.Square;
               const vis = getBlockVisuals(item.id);
