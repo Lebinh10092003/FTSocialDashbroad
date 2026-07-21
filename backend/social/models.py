@@ -1,0 +1,85 @@
+from django.db import models
+
+class Channel(models.Model):
+    id = models.CharField(max_length=255, primary_key=True)
+    platform = models.CharField(max_length=50)
+    name = models.CharField(max_length=255)
+    external_id = models.CharField(max_length=255)
+    status = models.CharField(max_length=50, default='active')
+    timezone = models.CharField(max_length=100, default='Asia/Bangkok')
+    created_at = models.DateTimeField()
+    updated_at = models.DateTimeField()
+    last_sync_at = models.DateTimeField(null=True, blank=True)
+    last_sync_status = models.CharField(max_length=50, null=True, blank=True)
+    total_posts = models.IntegerField(default=0)
+    followers_count = models.IntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.name} ({self.platform})"
+
+class Post(models.Model):
+    post_key = models.CharField(max_length=255, primary_key=True)
+    platform = models.CharField(max_length=50)
+    channel_id = models.CharField(max_length=255)
+    external_post_id = models.CharField(max_length=255)
+    post_url = models.CharField(max_length=1000)
+    image_url = models.CharField(max_length=1000, blank=True, null=True)
+    post_type = models.CharField(max_length=50)
+    message = models.TextField(blank=True, null=True)
+    published_at = models.DateTimeField()
+    imported_at = models.DateTimeField()
+    updated_at = models.DateTimeField()
+    is_deleted = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.platform} post {self.post_key}"
+
+class DailySnapshot(models.Model):
+    snapshot_key = models.CharField(max_length=255, primary_key=True)
+    snapshot_date = models.CharField(max_length=50)  # yyyy-MM-dd
+    platform = models.CharField(max_length=50)
+    channel_id = models.CharField(max_length=255)
+    post_key = models.CharField(max_length=255)
+    reactions = models.IntegerField(default=0)
+    likes = models.IntegerField(default=0)
+    comments = models.IntegerField(default=0)
+    shares = models.IntegerField(default=0)
+    views = models.IntegerField(default=0)
+    reach = models.IntegerField(default=0)
+    impressions = models.IntegerField(default=0)
+    clicks = models.IntegerField(default=0)
+    total_engagement = models.IntegerField(default=0)
+    engagement_rate = models.FloatField(null=True, blank=True)
+    fetched_at = models.DateTimeField()
+
+    def __str__(self):
+        return f"Snapshot {self.snapshot_key}"
+
+class FollowerSnapshot(models.Model):
+    snapshot_key = models.CharField(max_length=255, primary_key=True)
+    snapshot_date = models.CharField(max_length=50)
+    channel_id = models.CharField(max_length=255)
+    channel_name = models.CharField(max_length=255)
+    followers_count = models.IntegerField(default=0)
+    fetched_at = models.DateTimeField()
+
+    def __str__(self):
+        return f"{self.channel_name} on {self.snapshot_date}"
+
+class ApiLog(models.Model):
+    log_id = models.CharField(max_length=255, primary_key=True)
+    started_at = models.DateTimeField()
+    ended_at = models.DateTimeField(null=True, blank=True)
+    platform = models.CharField(max_length=50)
+    action = models.CharField(max_length=100)
+    channel_id = models.CharField(max_length=255, null=True, blank=True)
+    status = models.CharField(max_length=50, default='running')
+    records_received = models.IntegerField(default=0)
+    records_inserted = models.IntegerField(default=0)
+    records_updated = models.IntegerField(default=0)
+    error_code = models.CharField(max_length=100, null=True, blank=True)
+    error_message = models.TextField(null=True, blank=True)
+    request_id = models.CharField(max_length=255)
+
+    def __str__(self):
+        return f"Log {self.log_id} ({self.status})"

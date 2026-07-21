@@ -181,7 +181,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
       if (!res.ok) throw new Error(body.error || 'Không thể đọc Google Sheets.');
       
       setMessage(`✅ ${body.message}`);
-      onImported([]);
+      onImported(body.candidates || []);
     } catch (err: any) { setMessage(`❌ ${err.message || 'Không thể đọc Google Sheets.'}`); }
     finally { setLoading(false); }
   };
@@ -278,7 +278,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
       
       setMessage(`✅ Đồng bộ thành công nguồn "${sheet.name}": ${body.message}`);
       await loadSheets();
-      onImported([]);
+      onImported(body.candidates || []);
     } catch (err: any) {
       const errMsg = err.message || 'Lỗi không xác định.';
       setMessage(`❌ Lỗi đồng bộ nguồn "${sheet.name}": ${errMsg}`);
@@ -304,7 +304,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
       
       setMessage(`✅ ${body.message}`);
       await loadSheets();
-      onImported([]);
+      onImported(body.candidates || []);
     } catch (err: any) {
       const errMsg = err.message || 'Lỗi không xác định.';
       setMessage(`❌ Lỗi đồng bộ tất cả nguồn: ${errMsg}`);

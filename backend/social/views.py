@@ -1,0 +1,872 @@
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.response import Response
+from rest_framework import status
+from django.utils import timezone
+import datetime
+from .models import Channel, Post, DailySnapshot, FollowerSnapshot
+from authentication.permissions import IsAuthenticated, IsManagerOrAdmin
+from .sync import SyncEngine
+
+def get_today_date():
+    return timezone.now().strftime('%Y-%m-%d')
+
+def get_recent_start_date(days):
+    return (timezone.now() - datetime.timedelta(days=days)).strftime('%Y-%m-%d')
+
+def resolve_reporting_period(query):
+    start_date = query.get('startDate')
+    end_date = query.get('endDate')
+    
+    if start_date and end_date:
+        return start_date, end_date
+    return get_recent_start_date(30), get_today_date()
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def channels_list(request):
+    if request.method == 'GET':
+        channels = Channel.objects.all().order_by('name')
+        
+        # Calculate post count for each channel
+        post_counts = {}
+        for post in Post.objects.all():
+            post_counts[post.channel_id] = post_counts.get(post.channel_id, 0) + 1
+            
+        result = []
+        for c in channels:
+            result.append({
+                "id": c.id,
+                "platform": c.platform,
+                "name": c.name,
+                "externalId": c.external_id,
+                "status": c.status,
+                "timezone": c.timezone,
+                "createdAt": c.created_at.isoformat(),
+                "updatedAt": c.updated_at.isoformat(),
+                "lastSyncAt": c.last_sync_at.isoformat() if c.last_sync_at else None,
+                "lastSyncStatus": c.last_sync_status,
+                "followersCount": c.followers_count,
+                "totalPosts": post_counts.get(c.id, 0)
+            })
+        return Response(result)
+        
+    elif request.method == 'POST':
+        # Add new channel
+        if getattr(request, 'user_role', 'EMPLOYEE') not in ['ADMIN', 'MANAGER']:
+            return Response({"error": "Quyền truy cập bị từ chối."}, status=status.HTTP_403_FORBIDDEN)
+            
+        data = request.data or {}
+        channel_id = data.get('id')
+        platform = data.get('platform')
+        name = data.get('name')
+        external_id = data.get('externalId') or data.get('external_id')
+        
+        if not channel_id or not platform or not name or not external_id:
+            return Response({"error": "Thiếu thông tin kênh."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        channel, created = Channel.objects.update_or_create(
+            id=channel_id,
+            defaults={
+                'platform': platform,
+                'name': name,
+                'external_id': external_id,
+                'status': data.get('status', 'active'),
+                'timezone': data.get('timezone', 'Asia/Bangkok'),
+                'created_at': timezone.now(),
+                'updated_at': timezone.now()
+            }
+        )
+        return Response({
+            "id": channel.id,
+            "name": channel.name,
+            "platform": channel.platform,
+            "externalId": channel.external_id
+        })
+
+@api_view(['PUT', 'DELETE'])
+@permission_classes([IsManagerOrAdmin])
+def channel_detail(request, channel_id):
+    try:
+        channel = Channel.objects.get(id=channel_id)
+    except Channel.DoesNotExist:
+        return Response({"error": "Không tìm thấy kênh."}, status=status.HTTP_404_NOT_FOUND)
+        
+    if request.method == 'PUT':
+        data = request.data or {}
+        if 'name' in data:
+            channel.name = data['name']
+        if 'externalId' in data or 'external_id' in data:
+            channel.external_id = data.get('externalId') or data.get('external_id')
+        if 'status' in data:
+            channel.status = data['status']
+        if 'timezone' in data:
+            channel.timezone = data['timezone']
+            
+        channel.updated_at = timezone.now()
+        channel.save()
+        return Response({
+            "id": channel.id,
+            "name": channel.name,
+            "platform": channel.platform,
+            "externalId": channel.external_id
+        })
+        
+    elif request.method == 'DELETE':
+        # Delete channel and associated posts and snapshots
+        channel.delete()
+        Post.objects.filter(channel_id=channel_id).delete()
+        DailySnapshot.objects.filter(channel_id=channel_id).delete()
+        FollowerSnapshot.objects.filter(channel_id=channel_id).delete()
+        return Response({"success": True, "id": channel_id})
+
+@api_view(['POST'])
+@permission_classes([IsManagerOrAdmin])
+def channel_test_connection(request, channel_id):
+    try:
+        channel = Channel.objects.get(id=channel_id)
+        provider = SyncEngine.get_provider(channel.platform)
+        valid = provider.validate_credentials(channel.id, channel.external_id)
+        return Response({"success": valid})
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsManagerOrAdmin])
+def channel_sync(request, channel_id):
+    success, message = SyncEngine.sync_channel(channel_id)
+    if success:
+        return Response({"success": True, "message": message})
+    return Response({"error": message}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def media_summary_trend(request):
+    group_by = request.query_params.get('groupBy', 'month')
+    platform_filter = request.query_params.get('platform')
+    channel_id_filter = request.query_params.get('channelId')
+    
+    if platform_filter == 'all':
+        platform_filter = None
+    if channel_id_filter == 'all':
+        channel_id_filter = None
+        
+    # Build list of active channels
+    channels = Channel.objects.filter(status='active')
+    if platform_filter:
+        channels = channels.filter(platform=platform_filter)
+    if channel_id_filter:
+        channels = channels.filter(id=channel_id_filter)
+        
+    channel_ids = [c.id for c in channels]
+    
+    # Calculate buckets
+    now = timezone.now()
+    buckets = []
+    
+    # We want 13 months, 8 quarters, or 5 years
+    if group_by == 'month':
+        for i in range(12, -1, -1):
+            # Calculate offset month
+            year = now.year
+            month = now.month - i
+            while month <= 0:
+                month += 12
+                year -= 1
+            # start/end of that month
+            start_date = f"{year}-{month:02d}-01"
+            # end date: get last day
+            if month == 12:
+                end_date = f"{year}-12-31"
+            else:
+                next_month = datetime.date(year, month + 1, 1)
+                last_day = next_month - datetime.timedelta(days=1)
+                end_date = last_day.strftime('%Y-%m-%d')
+                
+            buckets.append({
+                'key': f"{year}-{month:02d}",
+                'label': f"T{month}/{year}",
+                'start': start_date,
+                'end': end_date
+            })
+    elif group_by == 'quarter':
+        for i in range(7, -1, -1):
+            curr_q = (now.month - 1) // 3
+            # offset quarter
+            q_offset = curr_q - i
+            year = now.year
+            while q_offset < 0:
+                q_offset += 4
+                year -= 1
+            q_num = q_offset + 1
+            start_month = q_offset * 3 + 1
+            start_date = f"{year}-{start_month:02d}-01"
+            end_month = start_month + 2
+            if end_month == 12:
+                end_date = f"{year}-12-31"
+            else:
+                next_month = datetime.date(year, end_month + 1, 1)
+                last_day = next_month - datetime.timedelta(days=1)
+                end_date = last_day.strftime('%Y-%m-%d')
+                
+            buckets.append({
+                'key': f"{year}-Q{q_num}",
+                'label': f"Q{q_num}/{year}",
+                'start': start_date,
+                'end': end_date
+            })
+    else: # year
+        for i in range(4, -1, -1):
+            y = now.year - i
+            buckets.append({
+                'key': str(y),
+                'label': str(y),
+                'start': f"{y}-01-01",
+                'end': f"{y}-12-31"
+            })
+            
+    period_start = buckets[0]['start']
+    period_end = buckets[-1]['end']
+    
+    # Query posts
+    posts = Post.objects.filter(
+        channel_id__in=channel_ids,
+        published_at__gte=period_start,
+        published_at__lte=f"{period_end}T23:59:59.999Z"
+    )
+    
+    # Query snapshots
+    snapshots = DailySnapshot.objects.filter(
+        channel_id__in=channel_ids,
+        snapshot_date__gte=period_start,
+        snapshot_date__lte=period_end
+    )
+    
+    # Get latest snapshot for each postKey
+    latest_snaps = {}
+    for snap in snapshots:
+        existing = latest_snaps.get(snap.post_key)
+        if not existing or snap.snapshot_date > existing.snapshot_date:
+            latest_snaps[snap.post_key] = snap
+            
+    # Query follower snapshots
+    follower_snaps = FollowerSnapshot.objects.filter(
+        channel_id__in=channel_ids,
+        snapshot_date__gte=period_start,
+        snapshot_date__lte=period_end
+    ).order_by('snapshot_date')
+    
+    # Process follower snapshot trend by bucket
+    follower_by_bucket = {}
+    latest_followers = {}
+    f_index = 0
+    follower_list = list(follower_snaps)
+    
+    for bucket in buckets:
+        while f_index < len(follower_list) and follower_list[f_index].snapshot_date <= bucket['end']:
+            snap = follower_list[f_index]
+            latest_followers[snap.channel_id] = snap.followers_count
+            f_index += 1
+        follower_by_bucket[bucket['key']] = dict(latest_followers)
+        
+    trend = []
+    for bucket in buckets:
+        b_start = bucket['start']
+        b_end = bucket['end']
+        
+        # Filter posts in this bucket range
+        b_posts = [p for p in posts if p.published_at[:10] >= b_start and p.published_at[:10] <= b_end]
+        
+        views_sum = 0
+        engagement_sum = 0
+        
+        for p in b_posts:
+            snap = latest_snaps.get(p.post_key)
+            if snap:
+                views_sum += getattr(snap, 'views', 0) or getattr(snap, 'impressions', 0) or getattr(snap, 'reach', 0) or 0
+                engagement_sum += getattr(snap, 'total_engagement', 0) or 0
+                
+        # Followers count
+        followers_map = follower_by_bucket.get(bucket['key'], {})
+        followers_sum = sum(followers_map.values())
+        
+        trend.append({
+            'period': bucket['key'],
+            'label': bucket['label'],
+            'views': views_sum,
+            'engagement': engagement_sum,
+            'postsCount': len(b_posts),
+            'followers': followers_sum
+        })
+        
+    return Response({'groupBy': group_by, 'trend': trend})
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def media_summary(request):
+    period_start, period_end = resolve_reporting_period(request.query_params)
+    platform_filter = request.query_params.get('platform')
+    channel_id_filter = request.query_params.get('channelId')
+    
+    if platform_filter == 'all':
+        platform_filter = None
+    if channel_id_filter == 'all':
+        channel_id_filter = None
+        
+    # Get active channels
+    channels = Channel.objects.filter(status='active')
+    if platform_filter:
+        channels = channels.filter(platform=platform_filter)
+    if channel_id_filter:
+        channels = channels.filter(id=channel_id_filter)
+        
+    channel_ids = [c.id for c in channels]
+    
+    posts = Post.objects.filter(
+        channel_id__in=channel_ids,
+        published_at__gte=period_start,
+        published_at__lte=f"{period_end}T23:59:59.999Z"
+    )
+    
+    snapshots = DailySnapshot.objects.filter(
+        channel_id__in=channel_ids,
+        snapshot_date__gte=period_start,
+        snapshot_date__lte=period_end
+    )
+    
+    # Get latest snapshot for each postKey
+    latest_snaps = {}
+    for snap in snapshots:
+        existing = latest_snaps.get(snap.post_key)
+        if not existing or snap.snapshot_date > existing.snapshot_date:
+            latest_snaps[snap.post_key] = snap
+            
+    # Group by channels
+    result = []
+    for c in channels:
+        c_posts = [p for p in posts if p.channel_id == c.id]
+        
+        reactions = 0
+        comments = 0
+        shares = 0
+        clicks = 0
+        views = 0
+        reach = 0
+        impressions = 0
+        
+        for p in c_posts:
+            snap = latest_snaps.get(p.post_key)
+            if snap:
+                reactions += snap.reactions
+                comments += snap.comments
+                shares += snap.shares
+                clicks += snap.clicks
+                views += snap.views or snap.impressions or snap.reach or 0
+                reach += snap.reach
+                impressions += snap.impressions
+                
+        total_engagement = reactions + comments + shares + clicks
+        engagement_rate = None
+        if reach > 0:
+            engagement_rate = round((total_engagement / reach) * 100, 2)
+        elif impressions > 0:
+            engagement_rate = round((total_engagement / impressions) * 100, 2)
+            
+        result.append({
+            'channelId': c.id,
+            'channelName': c.name,
+            'platform': c.platform,
+            'postsCount': len(c_posts),
+            'followersCount': c.followers_count,
+            'views': views,
+            'reactions': reactions,
+            'comments': comments,
+            'shares': shares,
+            'clicks': clicks,
+            'totalEngagement': total_engagement,
+            'engagementRate': engagement_rate
+        })
+        
+    return Response(result)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def followers_trend(request):
+    raw_days = int(request.query_params.get('days', 30))
+    if not (1 <= raw_days <= 365):
+        return Response({"error": "Tham số days phải nằm trong khoảng từ 1 đến 365."}, status=status.HTTP_400_BAD_REQUEST)
+        
+    channel_id_filter = request.query_params.get('channelId')
+    platform_filter = request.query_params.get('platform')
+    
+    if channel_id_filter == 'all':
+        channel_id_filter = None
+    if platform_filter == 'all':
+        platform_filter = None
+        
+    channels = Channel.objects.filter(status='active')
+    if platform_filter:
+        channels = channels.filter(platform=platform_filter)
+    if channel_id_filter:
+        channels = channels.filter(id=channel_id_filter)
+        
+    channel_ids = [c.id for c in channels]
+    period_start = get_recent_start_date(raw_days)
+    period_end = get_today_date()
+    
+    snapshots = FollowerSnapshot.objects.filter(
+        channel_id__in=channel_ids,
+        snapshot_date__gte=period_start,
+        snapshot_date__lte=period_end
+    )
+    
+    trend_by_date = {}
+    for snap in snapshots:
+        trend_by_date[snap.snapshot_date] = trend_by_date.get(snap.snapshot_date, 0) + snap.followers_count
+        
+    trend = [{'date': d, 'followersCount': count} for d, count in trend_by_date.items()]
+    trend.sort(key=lambda x: x['date'])
+    
+    return Response(trend)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def dashboard_view(request):
+    platform_filter = request.query_params.get('platform')
+    channel_id_filter = request.query_params.get('channelId')
+    post_type_filter = request.query_params.get('postType')
+    start_date = request.query_params.get('startDate')
+    end_date = request.query_params.get('endDate')
+    
+    if platform_filter == 'all':
+        platform_filter = None
+    if channel_id_filter == 'all':
+        channel_id_filter = None
+    if post_type_filter == 'all':
+        post_type_filter = None
+        
+    period_start, period_end = resolve_reporting_period({'startDate': start_date, 'endDate': end_date})
+    
+    # 1. Fetch active channels
+    channels = Channel.objects.filter(status='active')
+    if platform_filter:
+        channels = channels.filter(platform=platform_filter)
+    if channel_id_filter:
+        channels = channels.filter(id=channel_id_filter)
+        
+    channel_ids = [c.id for c in channels]
+    
+    # 2. Fetch posts
+    posts = Post.objects.filter(channel_id__in=channel_ids)
+    if platform_filter:
+        posts = posts.filter(platform=platform_filter)
+    if post_type_filter:
+        posts = posts.filter(post_type=post_type_filter)
+        
+    # Filter by date window
+    posts = [p for p in posts if period_start <= p.published_at[:10] <= period_end]
+    post_keys = [p.post_key for p in posts]
+    
+    # 3. Fetch snapshots
+    snapshots = DailySnapshot.objects.filter(
+        channel_id__in=channel_ids,
+        snapshot_date__gte=period_start,
+        snapshot_date__lte=period_end
+    )
+    if platform_filter:
+        snapshots = snapshots.filter(platform=platform_filter)
+        
+    # Get latest snapshots
+    latest_snaps = {}
+    for snap in snapshots:
+        if snap.post_key not in post_keys:
+            continue
+        existing = latest_snaps.get(snap.post_key)
+        if not existing or snap.snapshot_date > existing.snapshot_date:
+            latest_snaps[snap.post_key] = snap
+            
+    # Calculate KPIs
+    posts_count = len(posts)
+    reactions = 0
+    comments = 0
+    shares = 0
+    views = 0
+    reach = 0
+    impressions = 0
+    clicks = 0
+    
+    for snap in latest_snaps.values():
+        reactions += snap.reactions
+        comments += snap.comments
+        shares += snap.shares
+        views += snap.views or snap.impressions or snap.reach or 0
+        reach += snap.reach
+        impressions += snap.impressions
+        clicks += snap.clicks
+        
+    total_engagement = reactions + comments + shares + clicks
+    engagement_rate = None
+    if reach > 0:
+        engagement_rate = round((total_engagement / reach) * 100, 2)
+    elif impressions > 0:
+        engagement_rate = round((total_engagement / impressions) * 100, 2)
+        
+    # 4. Generate Trends
+    channel_map = {c.id: c.name for c in channels}
+    trend_map = {}
+    
+    for p in posts:
+        date_str = p.published_at[:10]
+        snap = latest_snaps.get(p.post_key)
+        chan_name = channel_map.get(p.channel_id, 'Kênh ẩn')
+        
+        curr = trend_map.get(date_str) or {
+            'date': date_str,
+            'engagement': 0,
+            'postsCount': 0,
+            'likes': 0,
+            'comments': 0,
+            'shares': 0,
+            'views': 0,
+            'reach': 0
+        }
+        
+        v_count = (snap.views or snap.impressions or snap.reach or 0) if snap else 0
+        eng_count = snap.total_engagement if snap else 0
+        likes_count = snap.reactions if snap else 0
+        comments_count = snap.comments if snap else 0
+        shares_count = snap.shares if snap else 0
+        reach_count = snap.reach if snap else 0
+        
+        curr['engagement'] += eng_count
+        curr['postsCount'] += 1
+        curr['likes'] += likes_count
+        curr['comments'] += comments_count
+        curr['shares'] += shares_count
+        curr['views'] += v_count
+        curr['reach'] += reach_count
+        
+        # Add channel metrics
+        curr[f"{chan_name}_engagement"] = curr.get(f"{chan_name}_engagement", 0) + eng_count
+        curr[f"{chan_name}_postsCount"] = curr.get(f"{chan_name}_postsCount", 0) + 1
+        curr[f"{chan_name}_likes"] = curr.get(f"{chan_name}_likes", 0) + likes_count
+        curr[f"{chan_name}_comments"] = curr.get(f"{chan_name}_comments", 0) + comments_count
+        curr[f"{chan_name}_shares"] = curr.get(f"{chan_name}_shares", 0) + shares_count
+        curr[f"{chan_name}_views"] = curr.get(f"{chan_name}_views", 0) + v_count
+        curr[f"{chan_name}_reach"] = curr.get(f"{chan_name}_reach", 0) + reach_count
+        
+        trend_map[date_str] = curr
+        
+    trends = []
+    for point in trend_map.values():
+        for c in channels:
+            metrics = ['engagement', 'postsCount', 'likes', 'comments', 'shares', 'views', 'reach']
+            for m in metrics:
+                key = f"{c.name}_{m}"
+                if key not in point:
+                    point[key] = 0
+                    
+        point['engagementRate'] = round((point['engagement'] / point['reach']) * 100, 2) if point['reach'] > 0 else 0
+        for c in channels:
+            c_eng = point.get(f"{c.name}_engagement", 0)
+            c_reach = point.get(f"{c.name}_reach", 0)
+            point[f"{c.name}_engagementRate"] = round((c_eng / c_reach) * 100, 2) if c_reach > 0 else 0
+            
+        trends.append(point)
+    trends.sort(key=lambda x: x['date'])
+    
+    # 5. Channel Stats
+    channel_stats = []
+    for c in channels:
+        c_posts = [p for p in posts if p.channel_id == c.id]
+        c_eng = sum(latest_snaps.get(p.post_key).total_engagement for p in c_posts if latest_snaps.get(p.post_key))
+        channel_stats.append({
+            'channelName': c.name,
+            'platform': c.platform,
+            'postsCount': len(c_posts),
+            'engagement': c_eng
+        })
+        
+    # 6. Top Posts
+    top_posts = []
+    for p in posts:
+        snap = latest_snaps.get(p.post_key)
+        top_posts.append({
+            'postKey': p.post_key,
+            'platform': p.platform,
+            'channelId': p.channel_id,
+            'externalPostId': p.external_post_id,
+            'postUrl': p.post_url,
+            'imageUrl': p.image_url,
+            'postType': p.post_type,
+            'message': p.message,
+            'publishedAt': p.published_at,
+            'importedAt': p.imported_at,
+            'updatedAt': p.updated_at,
+            'isDeleted': p.is_deleted,
+            'engagement': snap.total_engagement if snap else 0,
+            'likes': snap.reactions if snap else 0,
+            'comments': snap.comments if snap else 0,
+            'shares': snap.shares if snap else 0,
+            'views': (snap.views or snap.impressions or snap.reach or 0) if snap else 0
+        })
+    top_posts.sort(key=lambda x: x['publishedAt'], reverse=True)
+    top_posts = top_posts[:10]
+    
+    # 7. Top Viewed Posts (past 12 months)
+    top_viewed_start = (timezone.now() - datetime.timedelta(days=365)).strftime('%Y-%m-%d')
+    top_viewed_end = get_today_date()
+    
+    tv_posts = Post.objects.filter(
+        channel_id__in=channel_ids,
+        published_at__gte=top_viewed_start,
+        published_at__lte=f"{top_viewed_end}T23:59:59.999Z"
+    )
+    if post_type_filter:
+        tv_posts = tv_posts.filter(post_type=post_type_filter)
+        
+    tv_post_keys = [p.post_key for p in tv_posts]
+    
+    tv_snapshots = DailySnapshot.objects.filter(
+        channel_id__in=channel_ids,
+        snapshot_date__gte=top_viewed_start,
+        snapshot_date__lte=top_viewed_end
+    )
+    
+    tv_latest_snaps = {}
+    for snap in tv_snapshots:
+        if snap.post_key not in tv_post_keys:
+            continue
+        existing = tv_latest_snaps.get(snap.post_key)
+        if not existing or snap.snapshot_date > existing.snapshot_date:
+            tv_latest_snaps[snap.post_key] = snap
+            
+    top_viewed_candidates = []
+    for p in tv_posts:
+        snap = tv_latest_snaps.get(p.post_key)
+        v_count = (snap.views or snap.impressions or snap.reach or 0) if snap else 0
+        top_viewed_candidates.append({
+            'postKey': p.post_key,
+            'platform': p.platform,
+            'channelId': p.channel_id,
+            'externalPostId': p.external_post_id,
+            'postUrl': p.post_url,
+            'imageUrl': p.image_url,
+            'postType': p.post_type,
+            'message': p.message,
+            'publishedAt': p.published_at,
+            'importedAt': p.imported_at,
+            'updatedAt': p.updated_at,
+            'isDeleted': p.is_deleted,
+            'engagement': snap.total_engagement if snap else 0,
+            'likes': snap.reactions if snap else 0,
+            'comments': snap.comments if snap else 0,
+            'shares': snap.shares if snap else 0,
+            'views': v_count
+        })
+    top_viewed_candidates.sort(key=lambda x: x['views'], reverse=True)
+    top_viewed_posts = top_viewed_candidates[:5]
+    
+    # 8. Last Sync At
+    last_sync_channel = channels.filter(last_sync_at__isnull=False).order_by('-last_sync_at').first()
+    
+    errors = []
+    for c in channels:
+        if c.last_sync_status == 'failed':
+            errors.append(f"Kênh \"{c.name}\" ({c.platform.upper()}) bị lỗi token hoặc kết nối.")
+            
+    # 9. Type Stats
+    type_stats_map = {}
+    for p in posts:
+        raw_type = p.post_type or 'Khác'
+        mapped_type = ('Ảnh / Album' if raw_type.lower() == 'photo'
+                       else 'Video / Reel' if raw_type.lower() == 'video'
+                       else 'Liên kết' if raw_type.lower() == 'link'
+                       else 'Khác')
+        snap = latest_snaps.get(p.post_key)
+        v_count = (snap.views or snap.impressions or snap.reach or 0) if snap else 0
+        eng = snap.total_engagement if snap else 0
+        
+        curr = type_stats_map.get(mapped_type) or {
+            'type': mapped_type,
+            'count': 0,
+            'views': 0,
+            'engagement': 0,
+            'engagementRate': None
+        }
+        curr['count'] += 1
+        curr['views'] += v_count
+        curr['engagement'] += eng
+        type_stats_map[mapped_type] = curr
+        
+    type_stats = []
+    for stat in type_stats_map.values():
+        stat['engagementRate'] = round((stat['engagement'] / stat['views']) * 100, 2) if stat['views'] > 0 else None
+        type_stats.append(stat)
+        
+    # 10. Platform Stats
+    platform_stats_map = {}
+    for p in posts:
+        raw_plat = p.platform or 'facebook'
+        mapped_plat = 'Facebook' if raw_plat.lower() == 'facebook' else 'Zalo OA'
+        snap = latest_snaps.get(p.post_key)
+        eng = snap.total_engagement if snap else 0
+        
+        curr = platform_stats_map.get(mapped_plat) or {
+            'platform': mapped_plat,
+            'count': 0,
+            'engagement': 0
+        }
+        curr['count'] += 1
+        curr['engagement'] += eng
+        platform_stats_map[mapped_plat] = curr
+        
+    platform_stats = list(platform_stats_map.values())
+    
+    return Response({
+        'kpis': {
+            'postsCount': posts_count,
+            'reactions': reactions,
+            'comments': comments,
+            'shares': shares,
+            'views': views,
+            'reach': reach,
+            'totalEngagement': total_engagement,
+            'engagementRate': engagement_rate,
+            'followers': sum(c.followers_count for c in channels),
+            'followersAvailable': True
+        },
+        'trends': trends,
+        'channelStats': channel_stats,
+        'topPosts': top_posts,
+        'topViewedPosts': top_viewed_posts,
+        'typeStats': type_stats,
+        'platformStats': platform_stats,
+        'lastSync': last_sync_channel.last_sync_at.isoformat() if last_sync_channel else None,
+        'errors': errors
+    })
+
+@api_view(['POST'])
+@permission_classes([IsManagerOrAdmin])
+def sync_all(request):
+    """POST /api/sync/all - Đồng bộ tất cả kênh"""
+    try:
+        google_token = getattr(request, 'google_access_token', None)
+        results = SyncEngine.sync_all_channels(google_token)
+        return Response(results)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def sync_history(request):
+    """GET /api/sync/history - Lịch sử đồng bộ"""
+    from .models import ApiLog
+    logs = ApiLog.objects.all().order_by('-started_at')[:100]
+    result = []
+    for log in logs:
+        result.append({
+            'id': log.log_id,
+            'startedAt': log.started_at.isoformat(),
+            'endedAt': log.ended_at.isoformat() if log.ended_at else None,
+            'platform': log.platform,
+            'action': log.action,
+            'channelId': log.channel_id,
+            'status': log.status,
+            'recordsReceived': log.records_received,
+            'recordsInserted': log.records_inserted,
+            'recordsUpdated': log.records_updated,
+            'errorCode': log.error_code,
+            'errorMessage': log.error_message,
+            'requestId': log.request_id
+        })
+    return Response(result)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def posts_list(request):
+    """GET /api/posts - Danh sách bài viết có phân trang"""
+    try:
+        page = int(request.query_params.get('page', 1))
+        limit = int(request.query_params.get('limit', 20))
+        start_date = request.query_params.get('startDate', get_recent_start_date(30))
+        end_date = request.query_params.get('endDate', get_today_date())
+        platform_filter = request.query_params.get('platform')
+        channel_id_filter = request.query_params.get('channelId')
+        post_type_filter = request.query_params.get('postType')
+        sort_by = request.query_params.get('sortBy', 'publishedAt')
+        sort_dir = request.query_params.get('sortDir', 'desc')
+        
+        queryset = Post.objects.filter(is_deleted=False)
+        if start_date:
+            queryset = queryset.filter(published_at__date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(published_at__date__lte=end_date)
+        if platform_filter:
+            queryset = queryset.filter(platform=platform_filter)
+        if channel_id_filter:
+            queryset = queryset.filter(channel_id=channel_id_filter)
+        if post_type_filter and post_type_filter != 'all':
+            queryset = queryset.filter(post_type=post_type_filter)
+            
+        # Active channels only
+        active_channel_ids = list(Channel.objects.filter(status='active').values_list('id', flat=True))
+        queryset = queryset.filter(channel_id__in=active_channel_ids)
+        
+        # Sort
+        order = '-published_at' if sort_dir == 'desc' else 'published_at'
+        if sort_by == 'engagement':
+            order = '-published_at'  # Will sort by engagement after snapshot join
+        queryset = queryset.order_by(order)
+        
+        total = queryset.count()
+        offset = (page - 1) * limit
+        posts = list(queryset[offset:offset + limit])
+        
+        # Get snapshots for these posts
+        post_keys = [p.post_key for p in posts]
+        snapshots = DailySnapshot.objects.filter(post_key__in=post_keys)
+        latest_snaps = {}
+        for s in snapshots:
+            existing = latest_snaps.get(s.post_key)
+            if not existing or s.snapshot_date > existing.snapshot_date:
+                latest_snaps[s.post_key] = s
+                
+        # Channel name map
+        channels = {c.id: c.name for c in Channel.objects.all()}
+        
+        result = []
+        for p in posts:
+            snap = latest_snaps.get(p.post_key)
+            result.append({
+                'postKey': p.post_key,
+                'platform': p.platform,
+                'channelId': p.channel_id,
+                'channelName': channels.get(p.channel_id, ''),
+                'externalPostId': p.external_post_id,
+                'postUrl': p.post_url,
+                'imageUrl': p.image_url,
+                'postType': p.post_type,
+                'message': p.message or '',
+                'publishedAt': p.published_at.isoformat(),
+                'reactions': snap.reactions if snap else 0,
+                'likes': snap.likes if snap else 0,
+                'comments': snap.comments if snap else 0,
+                'shares': snap.shares if snap else 0,
+                'views': snap.views if snap else 0,
+                'reach': snap.reach if snap else 0,
+                'impressions': snap.impressions if snap else 0,
+                'clicks': snap.clicks if snap else 0,
+                'totalEngagement': snap.total_engagement if snap else 0,
+                'engagementRate': snap.engagement_rate if snap else None,
+            })
+            
+        return Response({
+            'posts': result,
+            'total': total,
+            'page': page,
+            'limit': limit,
+            'totalPages': (total + limit - 1) // limit
+        })
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+

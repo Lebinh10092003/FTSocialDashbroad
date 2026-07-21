@@ -55,7 +55,7 @@ export class SyncEngine {
     syncLocks.set(channelId, now);
     const startedAt = new Date().toISOString();
 
-    // 1. Đọc kênh từ Firestore
+    // 1. Đọc kênh từ SQLite
     const channelRef = adminDb.collection('channels').doc(channelId);
     const channelSnap = await channelRef.get();
     if (!channelSnap.exists) {
@@ -107,8 +107,8 @@ export class SyncEngine {
           snapshotsToUpsert.push(normalizedSnapshot);
         }
 
-        // 4. Upsert vào Firestore DB
-        // Firestore batch upsert bài viết
+        // 4. Upsert vào SQLite DB
+        // SQLite batch upsert bài viết
         const batch = adminDb.batch();
         for (const post of postsToUpsert) {
           const postRef = adminDb.collection('posts').doc(post.postKey);
@@ -116,7 +116,7 @@ export class SyncEngine {
         }
         await batch.commit();
 
-        // Firestore batch upsert snapshot ngày
+        // SQLite batch upsert snapshot ngày
         const snapBatch = adminDb.batch();
         for (const snapshot of snapshotsToUpsert) {
           const snapRef = adminDb.collection('dailySnapshots').doc(snapshot.snapshotKey);
@@ -176,7 +176,7 @@ export class SyncEngine {
         try {
           const sheetsService = new SheetsService(googleAuth, spreadsheetId);
           
-          // Tính tổng tương tác tích lũy của kênh này từ Firestore
+          // Tính tổng tương tác tích lũy của kênh này từ SQLite
           let totalReactions = 0;
           let totalComments = 0;
           let totalShares = 0;
@@ -316,7 +316,7 @@ export class SyncEngine {
         requestId
       };
 
-      // Lưu Log vào Firestore
+      // Lưu Log vào SQLite
       await adminDb.collection('apiLogs').doc(logId).set(apiLog).catch(console.error);
 
       // Ghi log vào Google Sheets nếu có thể

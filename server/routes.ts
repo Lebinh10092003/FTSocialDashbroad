@@ -70,18 +70,18 @@ async function authenticateUser(req: AuthenticatedRequest, res: Response, next: 
       console.warn('Lỗi lưu Google Access Token dự phòng:', err.message);
     });
   } else {
-    // Thử lấy token dự phòng từ Firestore nếu headers không gửi lên hoặc trống
+    // Thử lấy token dự phòng từ SQLite nếu headers không gửi lên hoặc trống
     try {
       const configSnap = await adminDb.collection('systemConfig').doc('main').get();
       if (configSnap.exists) {
         const configData = configSnap.data();
         if (configData?.lastGoogleAccessToken) {
           req.googleAccessToken = configData.lastGoogleAccessToken;
-          console.log('[Middleware] Khôi phục Google Access Token từ Firestore dự phòng thành công.');
+          console.log('[Middleware] Khôi phục Google Access Token từ SQLite thành công.');
         }
       }
     } catch (dbErr: any) {
-      console.warn('[Middleware] Không thể lấy Google Access Token dự phòng từ Firestore:', dbErr.message);
+      console.warn('[Middleware] Không thể lấy Google Access Token dự phòng từ SQLite:', dbErr.message);
     }
   }
 
@@ -122,7 +122,7 @@ async function authenticateUser(req: AuthenticatedRequest, res: Response, next: 
       return res.status(403).json({ error: 'Email không hợp lệ.' });
     }
 
-    // 1. Đọc danh sách admin emails từ Firestore (hoặc biến môi trường ENV)
+    // 1. Đọc danh sách admin emails từ SQLite (hoặc biến môi trường ENV)
     let adminEmailsList: string[] = [];
     try {
       const configSnap = await adminDb.collection('systemConfig').doc('main').get();
@@ -134,7 +134,7 @@ async function authenticateUser(req: AuthenticatedRequest, res: Response, next: 
         }
       }
     } catch (e: any) {
-      console.warn('Lỗi đọc adminEmails từ Firestore:', e.message);
+      console.warn('Lỗi đọc adminEmails từ SQLite:', e.message);
     }
 
     if (adminEmailsList.length === 0) {
@@ -197,16 +197,118 @@ apiRouter.get('/health', (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/auth/me - Lấy thông tin user hiện tại và vai trò
+ * GET /api/auth/me - Lấy thông tin user hiện tại và vai trò, đồng thời cập nhật SQLite
  */
-apiRouter.get('/auth/me', authenticateUser, (req: AuthenticatedRequest, res: Response) => {
-  res.json({
-    uid: req.user.uid,
-    email: req.user.email,
-    name: req.user.name,
-    picture: req.user.picture,
-    role: req.userRole,
-  });
+apiRouter.get('/auth/me', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userRef = adminDb.collection('users').doc(req.user.email);
+    const now = new Date().toISOString();
+    await userRef.set(
+      {
+        email: req.user.email,
+        name: req.user.name || req.user.email.split('@')[0],
+        picture: req.user.picture || '',
+        role: req.userRole,
+        lastLogin: now,
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+    res.json({
+      uid: req.user.uid,
+      email: req.user.email,
+      name: req.user.name,
+      picture: req.user.picture,
+      role: req.userRole,
+      lastLogin: now,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/auth/sync - Lưu thông tin đăng nhập và phiên làm việc vào SQLite
+ */
+apiRouter.post('/auth/sync', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { email, displayName, photoURL } = req.body || {};
+    const userEmail = req.user?.email || email;
+    if (!userEmail) return res.status(400).json({ error: 'Email không hợp lệ.' });
+
+    const now = new Date().toISOString();
+    const userRef = adminDb.collection('users').doc(userEmail);
+    const profile = {
+      email: userEmail,
+      name: displayName || req.user?.name || userEmail.split('@')[0],
+      photoURL: photoURL || req.user?.picture || '',
+      role: req.userRole || 'EMPLOYEE',
+      lastLogin: now,
+      updatedAt: now,
+    };
+    await userRef.set(profile, { merge: true });
+
+    // Lưu phiên đăng nhập vào SQLite
+    const logId = `login_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    await adminDb.collection('userLogins').doc(logId).set({
+      id: logId,
+      email: userEmail,
+      name: profile.name,
+      role: profile.role,
+      loginAt: now,
+      userAgent: req.headers['user-agent'] || '',
+      ip: req.ip || req.socket.remoteAddress || '',
+    });
+
+    res.json({ success: true, user: profile });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/examination/lognotes/:entityKey - Tải nhật ký ghi chú từ SQLite
+ */
+apiRouter.get('/examination/lognotes/:entityKey', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const key = req.params.entityKey;
+    const doc = await adminDb.collection('examinationLogNotes').doc(key).get();
+    const notes = doc.exists ? (doc.data()?.notes || []) : [];
+    res.json(notes);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/examination/lognotes/:entityKey - Lưu nhật ký ghi chú vào SQLite
+ */
+apiRouter.post('/examination/lognotes/:entityKey', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const key = req.params.entityKey;
+    const { content, actor, system } = req.body || {};
+    if (!content) return res.status(400).json({ error: 'Nội dung không được để trống.' });
+
+    const docRef = adminDb.collection('examinationLogNotes').doc(key);
+    const existingSnap = await docRef.get();
+    const currentNotes: any[] = existingSnap.exists ? (existingSnap.data()?.notes || []) : [];
+
+    const newNote = {
+      id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      time: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }),
+      actor: actor || req.user?.name || req.user?.email || 'Nhân viên FT Workspace',
+      content: String(content).trim(),
+      system: !!system,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedNotes = [newNote, ...currentNotes];
+    await docRef.set({ entityKey: key, notes: updatedNotes, updatedAt: new Date().toISOString() }, { merge: true });
+
+    res.json({ success: true, note: newNote, notes: updatedNotes });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 const EXAMINATION_COLLECTIONS = { competitions: 'examinationCompetitions', sessions: 'examinationSessions', candidates: 'examinationCandidates' } as const;
@@ -272,7 +374,7 @@ async function listExamination(collection: string, limit: number, cursor?: strin
   return { items: docs.map((doc: any) => ({ id: doc.id, ...doc.data() })), nextCursor: snap.docs.length > limit ? docs[docs.length - 1]?.data().sortKey : null };
 }
 apiRouter.get('/examination/bootstrap', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
-  try { await ensureExaminationSeed(); await syncSessionCandidateTotals(); const [competitions, sessions, candidates] = await Promise.all([listExamination(EXAMINATION_COLLECTIONS.competitions, 100), listExamination(EXAMINATION_COLLECTIONS.sessions, 100), listExamination(EXAMINATION_COLLECTIONS.candidates, 100)]); res.json({ competitions: competitions.items, sessions: sessions.items, candidates: candidates.items }); } catch (error: any) { res.status(500).json({ error: error.message || 'Không thể tải dữ liệu khảo thí.' }); }
+  try { await ensureExaminationSeed(); await syncSessionCandidateTotals(); const [competitions, sessions, candidates] = await Promise.all([listExamination(EXAMINATION_COLLECTIONS.competitions, 1000), listExamination(EXAMINATION_COLLECTIONS.sessions, 1000), listExamination(EXAMINATION_COLLECTIONS.candidates, 1000)]); res.json({ competitions: competitions.items, sessions: sessions.items, candidates: candidates.items }); } catch (error: any) { res.status(500).json({ error: error.message || 'Không thể tải dữ liệu khảo thí.' }); }
 });
 apiRouter.get('/examination/:resource', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
   const collection = (EXAMINATION_COLLECTIONS as any)[req.params.resource]; if (!collection) return res.status(404).json({ error: 'Nguồn dữ liệu không hợp lệ.' });
@@ -1433,7 +1535,7 @@ apiRouter.post('/setup/sheets', authenticateUser, requireAdmin, async (req: Auth
       }
     }
 
-    // 1. Lưu cấu trúc vào Firestore
+    // 1. Lưu cấu trúc vào SQLite
     await adminDb.collection('systemConfig').doc('main').set({
       spreadsheetId: extractedId,
       updatedAt: new Date().toISOString()
@@ -1475,7 +1577,7 @@ apiRouter.post('/jobs/daily-sync', async (req: Request, res: Response) => {
       }
     }
   } catch (e: any) {
-    console.warn('Không thể đọc cron secret từ Firestore, dùng biến môi trường:', e.message);
+    console.warn('Không thể đọc cron secret từ SQLite, dùng biến môi trường:', e.message);
   }
 
   if (!expectedSecret || cronSecretHeader !== expectedSecret) {
@@ -1484,10 +1586,10 @@ apiRouter.post('/jobs/daily-sync', async (req: Request, res: Response) => {
 
   try {
     // Để đồng bộ định kỳ không bị lỗi token Sheets, ta chạy không truyền access token.
-    // Việc này sẽ cập nhật cơ sở dữ liệu Firestore trước. Nếu có token Sheets được lưu hoặc refresh token,
+    // Việc này sẽ cập nhật cơ sở dữ liệu SQLite trước. Nếu có token Sheets được lưu hoặc refresh token,
     // ta có thể lưu cấu hình, nhưng theo thiết kế bảo mật của chúng ta,
-    // đồng bộ tự động sẽ cập nhật Firestore, còn người dùng vào giao diện đồng bộ sẽ đẩy lên Sheets,
-    // hoặc nếu chúng ta không có token Sheets lúc này, chúng ta chỉ đồng bộ Firestore.
+    // đồng bộ tự động sẽ cập nhật SQLite, còn người dùng vào giao diện đồng bộ sẽ đẩy lên Sheets,
+    // hoặc nếu chúng ta không có token Sheets lúc này, chúng ta chỉ đồng bộ SQLite.
     const requestId = `cron-${uuidv4()}`;
     const results = await SyncEngine.syncAllChannels(null, undefined, undefined, requestId);
     res.json({ success: true, message: 'Đồng bộ tự động hoàn tất.', results });
@@ -1551,7 +1653,7 @@ apiRouter.post('/admin/create-user', authenticateUser, requireManagerOrAdmin, as
       });
     }
 
-    // 2. Lưu thông tin hồ sơ và vai trò phân quyền vào Firestore collection 'users'
+    // 2. Lưu thông tin hồ sơ và vai trò phân quyền vào SQLite collection 'users'
     const newUserProfile: UserProfile = {
       email: cleanEmail,
       name: cleanName,
@@ -1605,7 +1707,7 @@ apiRouter.post('/admin/delete-user', authenticateUser, requireManagerOrAdmin, as
       }
     }
 
-    // 2. Xóa tài liệu phân quyền trong Firestore collection 'users'
+    // 2. Xóa tài liệu phân quyền trong SQLite collection 'users'
     await adminDb.collection('users').doc(cleanEmail).delete();
 
     res.json({
@@ -1620,7 +1722,7 @@ apiRouter.post('/admin/delete-user', authenticateUser, requireManagerOrAdmin, as
 });
 
 /**
- * GET /api/admin/config - Lấy cấu hình hệ thống từ Firestore (Dành cho người dùng đã đăng nhập)
+ * GET /api/admin/config - Lấy cấu hình hệ thống từ SQLite (Dành cho người dùng đã đăng nhập)
  */
 apiRouter.get('/admin/config', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -1675,7 +1777,7 @@ apiRouter.get('/admin/config', authenticateUser, async (req: AuthenticatedReques
         updatedAt: new Date().toISOString()
       };
 
-      // Lưu xuống Database (sẽ tự động ghi file local và sync Firestore)
+      // Lưu xuống Database (sẽ tự động ghi file local và sync SQLite)
       await adminDb.collection('systemConfig').doc('main').set(seedConfig);
       console.log('[AutoSeed] Đã tự động tạo dữ liệu cấu hình hệ thống ban đầu thành công.');
       res.json(seedConfig);
@@ -1783,7 +1885,7 @@ apiRouter.get('/admin/users', authenticateUser, requireManagerOrAdmin, async (re
 });
 
 // =====================================================================
-// EMAIL TEMPLATES API - Đồng bộ template email giữa các máy qua Firestore
+// EMAIL TEMPLATES API - Đồng bộ template email giữa các máy qua SQLite
 // =====================================================================
 
 /**
@@ -1794,7 +1896,7 @@ apiRouter.get('/email-templates', authenticateUser, async (req: AuthenticatedReq
     const snap = await adminDb.collection('emailTemplates').orderBy('lastUpdated', 'desc').get();
     const templates = snap.docs.map(doc => {
       const data = doc.data();
-      // Giải mã blocks từ JSON string nếu cần (Firestore có giới hạn document size)
+      // Giải mã blocks từ JSON string nếu cần (SQLite có giới hạn document size)
       if (typeof data.blocksJson === 'string') {
         try { data.blocks = JSON.parse(data.blocksJson); } catch {}
         delete data.blocksJson;
@@ -1829,7 +1931,7 @@ apiRouter.post('/email-templates', authenticateUser, async (req: AuthenticatedRe
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    // Lưu blocks dạng JSON string để tránh giới hạn nesting của Firestore
+    // Lưu blocks dạng JSON string để tránh giới hạn nesting của SQLite
     templateData.blocksJson = JSON.stringify(blocks || []);
 
     await adminDb.collection('emailTemplates').doc(id).set(templateData);

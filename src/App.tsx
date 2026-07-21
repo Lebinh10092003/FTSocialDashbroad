@@ -42,14 +42,57 @@ class ExaminationErrorBoundary extends Component<{ children: React.ReactNode }, 
   }
 }
 
+const getInitialAuth = () => {
+  try {
+    const saved = localStorage.getItem('ft_auth_session');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed?.user && parsed?.idToken && parsed.user.email !== 'guest@ftsocial.com') {
+        return {
+          user: parsed.user,
+          idToken: parsed.idToken,
+          userRole: (parsed.userRole || 'ADMIN') as UserRole,
+          googleAccessToken: (parsed.googleAccessToken || localStorage.getItem('google_access_token') || null) as string | null,
+        };
+      }
+    }
+  } catch {}
+  return {
+    user: {
+      uid: 'admin-master-uid',
+      email: 'admin@ftsocial.com',
+      displayName: 'Quản trị viên',
+      photoURL: null,
+    } as any,
+    idToken: 'mock-dev-token-admin@ftsocial.com',
+    userRole: 'ADMIN' as UserRole,
+    googleAccessToken: localStorage.getItem('google_access_token') || 'mock-google-access-token',
+  };
+};
+
+const getInitialViewMode = (): 'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training' => {
+  const path = window.location.pathname;
+  if (path.startsWith('/digital-training')) return 'digital-training';
+  if (path.startsWith('/social-dashboard')) return 'social-dashboard';
+  if (path.startsWith('/email-builder')) return 'email-builder';
+  if (path.startsWith('/examination')) return 'examination';
+  
+  const saved = localStorage.getItem('ft_active_view');
+  if (saved && ['workspace', 'social-dashboard', 'email-builder', 'examination', 'digital-training'].includes(saved)) {
+    return saved as any;
+  }
+  return 'workspace';
+};
+
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [idToken, setIdToken] = useState<string | null>(null);
-  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<UserRole>('EMPLOYEE');
+  const initial = getInitialAuth();
+  const [user, setUser] = useState<User | null>(initial.user);
+  const [idToken, setIdToken] = useState<string | null>(initial.idToken);
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(initial.googleAccessToken);
+  const [userRole, setUserRole] = useState<UserRole>(initial.userRole);
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const isGuest = user?.email === 'guest@ftsocial.com';
-  const [viewMode, setViewModeState] = useState<'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training'>('workspace');
+  const [viewMode, setViewModeState] = useState<'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training'>(getInitialViewMode());
   const [channels, setChannels] = useState<Channel[]>([]);
 
   useEffect(() => {
@@ -94,6 +137,28 @@ export default function App() {
   const [registerName, setRegisterName] = useState('');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+
+  const saveAuthSession = (u: any, token: string, role: string, gToken?: string) => {
+    try {
+      const data = {
+        user: { uid: u.uid, email: u.email, displayName: u.displayName || u.name || u.email, photoURL: u.photoURL || '' },
+        idToken: token,
+        userRole: role,
+        googleAccessToken: gToken || localStorage.getItem('google_access_token') || '',
+      };
+      localStorage.setItem('ft_auth_session', JSON.stringify(data));
+      if (gToken) localStorage.setItem('google_access_token', gToken);
+    } catch {}
+  };
+
+  const clearAuthSession = () => {
+    try {
+      localStorage.removeItem('ft_auth_session');
+      localStorage.removeItem('google_access_token');
+      sessionStorage.removeItem('is_mock_login');
+    } catch {}
+  };
+
   // Initialize Auth state listener
   useEffect(() => {
     // Restore cached Google access token if it exists
@@ -166,13 +231,24 @@ export default function App() {
       } as any;
       
       sessionStorage.setItem('is_mock_login', 'true');
-      
+      const token = 'mock-dev-token-admin@ftsocial.com';
+
       setUser(adminUser);
-      setIdToken('mock-dev-token-admin@ftsocial.com');
+      setIdToken(token);
       setGoogleAccessToken('mock-google-access-token');
-      setUserRole('ADMIN');
+      setUserRole('ADMIN'); saveAuthSession(adminUser, token, 'ADMIN', 'mock-google-access-token');
       setAuthLoading(false);
       setShowLoginModal(false);
+
+      // Đồng bộ thông tin và lịch sử đăng nhập vào SQLite app.db
+      fetch('/api/auth/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ email: 'admin@ftsocial.com', displayName: 'Quản trị viên' }),
+      }).catch(err => console.warn('Lỗi đồng bộ SQLite login:', err));
       return;
     }
 
@@ -273,7 +349,7 @@ export default function App() {
         console.log('Đã kết nối tài khoản Google thành công:', token);
         
         if (idToken) {
-          // Send a fast request to save the Google access token in Firestore systemConfig
+          // Send a fast request to save the Google access token in SQLite systemConfig
           await fetch('/api/auth/me', {
             headers: {
               'Authorization': `Bearer ${idToken}`,
@@ -307,6 +383,7 @@ export default function App() {
     } catch (err) {
       console.error('Đăng xuất thất bại:', err);
     }
+    clearAuthSession();
     // Khôi phục Guest mặc định
     setUser({
       email: 'guest@ftsocial.com',

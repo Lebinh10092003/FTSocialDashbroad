@@ -101,7 +101,7 @@ export class FacebookProvider implements SocialProvider {
         }
       }
     } catch (e: any) {
-      console.warn('Lỗi đọc token Facebook từ Firestore, chuyển sang biến môi trường:', e.message);
+      console.warn('Lỗi đọc token Facebook từ SQLite, chuyển sang biến môi trường:', e.message);
     }
 
     const tokensJson = process.env.META_PAGE_TOKENS_JSON;
@@ -318,7 +318,7 @@ export class ZaloOAProvider implements SocialProvider {
         }
       }
     } catch (e: any) {
-      console.warn('Lỗi đọc token Zalo từ Firestore, chuyển sang biến môi trường:', e.message);
+      console.warn('Lỗi đọc token Zalo từ SQLite, chuyển sang biến môi trường:', e.message);
     }
 
     const tokensJson = process.env.ZALO_OA_TOKENS_JSON;

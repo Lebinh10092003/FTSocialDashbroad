@@ -279,6 +279,40 @@ export interface SyncResult {
 const DEFAULT_SHEET_URL =
   'https://docs.google.com/spreadsheets/d/1kqztN_iCeZ9uR1mO7gz9j1TcUt8ZmCdpEv0TagTf4VA/edit?usp=sharing';
 
+function getGoogleSheetCsvUrls(spreadsheetUrl: string): string[] {
+  const urls: string[] = [];
+
+  if (spreadsheetUrl.includes('/d/e/')) {
+    let pubUrl = spreadsheetUrl;
+    if (pubUrl.endsWith('/pubhtml') || pubUrl.endsWith('/pub')) {
+      pubUrl = pubUrl.replace(/\/pub(html)?$/, '/pub?output=csv');
+    } else if (!pubUrl.includes('output=csv')) {
+      pubUrl = pubUrl.split('?')[0] + '/pub?output=csv';
+    }
+    urls.push(pubUrl);
+  }
+
+  const idMatch =
+    spreadsheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/) ??
+    spreadsheetUrl.match(/[?&]id=([a-zA-Z0-9-_]+)/);
+  const sheetId = idMatch?.[1] ?? '';
+
+  if (sheetId && sheetId !== 'e') {
+    const gidMatch = spreadsheetUrl.match(/[?&#]gid=([0-9]+)/);
+    const gidParam = gidMatch ? `&gid=${gidMatch[1]}` : '';
+
+    urls.push(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gidParam}`);
+    urls.push(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv${gidParam ? `&gid=${gidMatch[1]}` : ''}`);
+    urls.push(`https://docs.google.com/spreadsheets/d/${sheetId}/pub?output=csv${gidParam ? `&gid=${gidMatch[1]}` : ''}`);
+  }
+
+  if (urls.length === 0 && (spreadsheetUrl.startsWith('http://') || spreadsheetUrl.startsWith('https://'))) {
+    urls.push(spreadsheetUrl);
+  }
+
+  return urls;
+}
+
 async function syncSingleSheet(
   spreadsheetUrl: string,
   tsVN: string,
@@ -294,20 +328,62 @@ async function syncSingleSheet(
   };
 
   try {
-    const idMatch =
-      spreadsheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/) ??
-      spreadsheetUrl.match(/[?&]id=([a-zA-Z0-9-_]+)/);
-    const sheetId = idMatch?.[1] ?? '';
-    if (!sheetId) throw new Error('Đường dẫn Google Sheets không hợp lệ.');
+    const candidateUrls = getGoogleSheetCsvUrls(spreadsheetUrl);
+    if (candidateUrls.length === 0) throw new Error('Đường dẫn Google Sheets không hợp lệ.');
 
-    const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
-    console.log(`[ExamSync] ⬇ Tải CSV cho sheet nguồn: ${csvUrl}`);
+    let raw = '';
+    let lastError: Error | null = null;
 
-    const res = await fetch(csvUrl, { headers: { 'User-Agent': 'FTSocialDashboard/1.0' } });
-    if (!res.ok) throw new Error(`HTTP ${res.status} – ${res.statusText}`);
+    for (const csvUrl of candidateUrls) {
+      console.log(`[ExamSync] ⬇ Tải CSV cho sheet nguồn: ${csvUrl}`);
+      try {
+        const res = await fetch(csvUrl, {
+          redirect: 'follow',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          },
+        });
 
-    const raw = await res.text();
-    if (!raw.trim()) throw new Error('Google Sheets trả về nội dung trống.');
+        if (res.status === 401 || res.status === 403) {
+          throw new Error(
+            `HTTP ${res.status} – Sheet chưa mở quyền truy cập công khai. Vui lòng vào Google Sheet -> Nhấp nút "Chia sẻ" (Share) -> Đổi quyền thành "Bất kỳ ai có đường link" (Anyone with the link can view) hoặc chọn Tệp > Chia sẻ > Xuất bản lên web (Publish to web).`
+          );
+        }
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status} – ${res.statusText}`);
+        }
+
+        const text = await res.text();
+        const trimmed = text.trim();
+
+        if (
+          res.url.includes('accounts.google.com') ||
+          res.url.includes('ServiceLogin') ||
+          trimmed.startsWith('<!DOCTYPE html') ||
+          trimmed.startsWith('<html')
+        ) {
+          throw new Error(
+            `HTTP 401 – Sheet yêu cầu đăng nhập Google (Chưa mở quyền công khai). Vui lòng vào Google Sheet -> Nhấp nút "Chia sẻ" (Share) -> Đổi quyền thành "Bất kỳ ai có đường link" (Anyone with the link can view).`
+          );
+        }
+
+        if (!trimmed) {
+          throw new Error('Google Sheets trả về nội dung trống.');
+        }
+
+        raw = text;
+        lastError = null;
+        break;
+      } catch (err: any) {
+        lastError = err;
+        if (err.message.includes('401') || err.message.includes('403') || err.message.includes('Chia sẻ')) {
+          break;
+        }
+      }
+    }
+
+    if (!raw && lastError) throw lastError;
 
     const grid = parseCSV(raw);
     if (grid.length < 2) throw new Error('Không tìm thấy dữ liệu trong tệp (cần ít nhất 1 dòng tiêu đề + 1 dòng dữ liệu).');

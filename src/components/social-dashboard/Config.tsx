@@ -1089,7 +1089,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
                 Hành động hệ thống
               </h3>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                Nhấn lưu bên dưới để cập nhật danh sách các trang cấu hình trong bảng, khóa Cron và email admin vào Firestore.
+                Nhấn lưu bên dưới để cập nhật danh sách các trang cấu hình trong bảng, khóa Cron và email admin vào SQLite.
               </p>
 
               {isAdmin ? (

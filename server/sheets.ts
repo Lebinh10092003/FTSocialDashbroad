@@ -4,7 +4,7 @@ import { adminDb } from './firebase';
 /**
  * Hàm helper tự động lấy thông tin xác thực Google Sheets theo thứ tự ưu tiên:
  * 1. Biến môi trường GOOGLE_SERVICE_ACCOUNT_JSON
- * 2. Cấu hình googleServiceAccountJson lưu trong Firestore (systemConfig/main)
+ * 2. Cấu hình googleServiceAccountJson lưu trong SQLite (systemConfig/main)
  * 3. Fallback: User Access Token tạm thời
  */
 export async function getGoogleSheetsAuth(userToken: string | null): Promise<any> {
@@ -21,7 +21,7 @@ export async function getGoogleSheetsAuth(userToken: string | null): Promise<any
     }
   }
 
-  // 2. Kiểm tra tài liệu cấu hình Firestore
+  // 2. Kiểm tra tài liệu cấu hình SQLite
   try {
     const configSnap = await adminDb.collection('systemConfig').doc('main').get();
     if (configSnap.exists) {
@@ -30,16 +30,16 @@ export async function getGoogleSheetsAuth(userToken: string | null): Promise<any
         try {
           const sa = JSON.parse(configData.googleServiceAccountJson);
           if (sa.client_email && sa.private_key) {
-            console.log('[Sheets] Sử dụng Google Service Account từ Firestore systemConfig/main.');
+            console.log('[Sheets] Sử dụng Google Service Account từ SQLite systemConfig/main.');
             return sa;
           }
         } catch (e: any) {
-          console.error('[Sheets] Lỗi parse googleServiceAccountJson từ Firestore:', e.message);
+          console.error('[Sheets] Lỗi parse googleServiceAccountJson từ SQLite:', e.message);
         }
       }
     }
   } catch (e: any) {
-    console.warn('[Sheets] Không thể đọc googleServiceAccountJson từ Firestore:', e.message);
+    console.warn('[Sheets] Không thể đọc googleServiceAccountJson từ SQLite:', e.message);
   }
 
   // 3. Fallback

@@ -106,7 +106,7 @@ export const adminAuth = {
   }
 };
 
-// Wrapper classes để map API SQLite giống hệt Firestore SDK (không cần đổi code ở client/server routes)
+// Wrapper classes để map API SQLite giống hệt SQLite SDK (không cần đổi code ở client/server routes)
 type DatabaseRecord = Record<string, any>;
 
 interface WrappedDocumentSnapshot {
@@ -223,6 +223,13 @@ class WrappedQuery {
     return new WrappedDocRef(this.colName, id || 'main');
   }
 
+  public async add(data: any): Promise<WrappedDocRef> {
+    const id = 'doc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+    const docRef = new WrappedDocRef(this.colName, id);
+    await docRef.set(data);
+    return docRef;
+  }
+
   public where(field: string, op: string, val: any): WrappedQuery {
     this.filters.push({ field, op, val });
     return this;
@@ -279,10 +286,8 @@ class WrappedQuery {
         const field = this.orderField;
         const dirMultiplier = this.orderDir === 'asc' ? 1 : -1;
         items.sort((a, b) => {
-          const valA = a[field];
-          const valB = b[field];
-          if (valA === undefined || valA === null) return 1;
-          if (valB === undefined || valB === null) return -1;
+          const valA = a[field] ?? (field === 'sortKey' ? `${String(a.code || a.name || a.id || '').toLowerCase()}_${a.id}` : '');
+          const valB = b[field] ?? (field === 'sortKey' ? `${String(b.code || b.name || b.id || '').toLowerCase()}_${b.id}` : '');
           if (valA < valB) return -1 * dirMultiplier;
           if (valA > valB) return 1 * dirMultiplier;
           return 0;
@@ -350,7 +355,7 @@ class WrappedBatch {
   }
 }
 
-class WrappedFirestore {
+class WrappedSQLite {
   public collection(name: string): WrappedQuery {
     return new WrappedQuery(name);
   }
@@ -360,6 +365,6 @@ class WrappedFirestore {
   }
 }
 
-export const adminDb = new WrappedFirestore();
+export const adminDb = new WrappedSQLite();
 const mockApp = {} as any;
 export default mockApp;

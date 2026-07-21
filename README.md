@@ -5,7 +5,7 @@ Hệ thống phân tích tương tác Facebook và Zalo OA, đồng bộ dữ li
 ## 1. Chạy local trên 1 dòng (Windows PowerShell)
 
 ```powershell
-npm install; npm run dev
+
 ```
 
 ## 2. Cập nhật & Reset VPS qua Git Pull bằng 1 dòng SSH (Chạy tại máy local - Tự động sửa lỗi xung đột file trên VPS)

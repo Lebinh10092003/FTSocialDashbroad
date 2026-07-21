@@ -39,7 +39,7 @@ function setupAutoSyncScheduler() {
             console.log('[AutoSync] Lấy Google Access Token dự phòng:', googleTokenToUse ? 'Thành công' : 'Không có token');
           }
         } catch (dbErr: any) {
-          console.error('[AutoSync] Không thể lấy cấu hình từ Firestore:', dbErr.message);
+          console.error('[AutoSync] Không thể lấy cấu hình từ SQLite:', dbErr.message);
         }
 
         const results = await SyncEngine.syncAllChannels(googleTokenToUse, undefined, undefined, `auto-${dayStr}`);

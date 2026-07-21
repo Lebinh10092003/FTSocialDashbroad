@@ -23,7 +23,7 @@ export default function Reports({ idToken, channels }: ReportsProps) {
       const configRes = await fetch('/api/setup/sheets', {
         headers: { 'Authorization': `Bearer ${idToken}` }
       });
-      // Fallback: system config is fetched on mount if admin or from local state, we can query our standard systemConfig via Firestore on client
+      // Fallback: system config is fetched on mount if admin or from local state, we can query our standard systemConfig via SQLite on client
       
       const dashboardRes = await fetch('/api/dashboard', {
         headers: { 'Authorization': `Bearer ${idToken}` }
@@ -45,7 +45,7 @@ export default function Reports({ idToken, channels }: ReportsProps) {
     // Fetch google sheets spreadsheet config
     const fetchConfig = async () => {
       try {
-        // Query config from firestore if possible, or simple get
+        // Query config from sqlite if possible, or simple get
         const res = await fetch('/api/channels', {
           headers: { 'Authorization': `Bearer ${idToken}` }
         });
