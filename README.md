@@ -1,71 +1,228 @@
-# FT Social Dashboard
+# FT Workspace
 
-FT Workspace gồm frontend React/Vite và backend Django REST Framework. Hệ thống không sử dụng Firebase cho đăng nhập hoặc lưu trữ dữ liệu.
+FT Workspace là hệ thống quản trị nội bộ của FermatTech, gồm frontend React/Vite và backend Django REST Framework.
 
-## Kiến trúc
+Hệ thống sử dụng:
 
-- Frontend: React 19, Vite, Tailwind CSS.
-- Backend: Django 5, Django REST Framework.
-- Xác thực: Django User + DRF Token Authentication.
-- Dữ liệu: PostgreSQL trong production; SQLite có thể dùng khi phát triển local.
-- Tích hợp: Facebook Graph API, Zalo OA, Google Sheets và Gemini.
+- React 19, Vite và Tailwind CSS cho giao diện.
+- Django 5 và Django REST Framework cho backend.
+- Django User và DRF Token Authentication để đăng nhập.
+- PostgreSQL trên production.
+- SQLite khi phát triển local.
+- Nginx và Gunicorn trên VPS.
+
+Hệ thống không sử dụng Firebase để đăng nhập hoặc lưu trữ dữ liệu.
+
+---
 
 ## Chạy local
 
-### 1. Backend Django
+### Yêu cầu
+
+Máy tính cần cài sẵn:
+
+- Node.js 22 trở lên.
+- npm.
+- Python 3.12 trở lên.
+- Git.
+
+### Chạy hệ thống bằng một câu lệnh
+
+Mở Terminal hoặc PowerShell tại thư mục dự án và chạy:
 
 ```powershell
-Copy-Item .env.example .env
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r backend\requirements.txt
-python backend\manage.py migrate
-python backend\manage.py runserver 127.0.0.1:8000
+npm start
 ```
 
-Khi cơ sở dữ liệu chưa có tài khoản, khai báo `BOOTSTRAP_ADMIN_EMAIL` và `BOOTSTRAP_ADMIN_PASSWORD` trong `.env`. Đăng nhập lần đầu sẽ tạo tài khoản quản trị Django và sau đó không tự tạo lại.
+Không cần tạo môi trường Python, cài dependency, chạy migration hoặc mở hai cửa sổ Terminal riêng.
 
-### 2. Frontend React
+Lệnh `npm start` tự động thực hiện:
 
-Mở cửa sổ PowerShell khác:
+1. Tạo file `.env` nếu chưa tồn tại.
+2. Tự sinh `DJANGO_SECRET_KEY`, mật khẩu Admin và `CRON_SECRET`.
+3. Tạo môi trường Python `.venv`.
+4. Cài dependency backend từ `backend/requirements.txt`.
+5. Cài dependency frontend từ `package.json`.
+6. Chạy Django migration.
+7. Kiểm tra cấu hình Django.
+8. Khởi động backend Django.
+9. Khởi động frontend React.
+
+Sau khi khởi động thành công:
+
+- Frontend: `http://127.0.0.1:5173`
+- Backend API: `http://127.0.0.1:8000`
+- Kiểm tra API: `http://127.0.0.1:8000/api/health`
+
+### Tài khoản quản trị lần đầu
+
+Khi file `.env` được tạo lần đầu, Terminal sẽ hiển thị:
+
+```text
+Tài khoản quản trị khởi tạo: admin@ftsocial.com
+Mật khẩu quản trị khởi tạo: <mật khẩu tự sinh>
+```
+
+Hãy lưu lại mật khẩu này. Mật khẩu chỉ được hiển thị trong lần tạo `.env` đầu tiên.
+
+### Dừng hệ thống
+
+Nhấn:
+
+```text
+Ctrl + C
+```
+
+Frontend và backend sẽ cùng dừng.
+
+### Chạy lại những lần sau
+
+Vẫn chỉ cần chạy:
 
 ```powershell
-npm install
-npm run dev
+npm start
 ```
 
-Vite chuyển tiếp `/api` và `/uploads` tới Django tại `127.0.0.1:8000`.
+Script chỉ cài lại dependency khi `package.json` hoặc `backend/requirements.txt` thay đổi.
 
-## Kiểm tra trước khi triển khai
+---
+
+## Cấu hình môi trường
+
+File cấu hình được đặt tại:
+
+```text
+.env
+```
+
+Môi trường local mặc định sử dụng SQLite nên không cần cài PostgreSQL.
+
+Các biến chính:
+
+```env
+DJANGO_DEBUG="true"
+DJANGO_SECRET_KEY="chuoi-bi-mat"
+DJANGO_ALLOWED_HOSTS="localhost,127.0.0.1,workspace.fermat.vn"
+CORS_ALLOWED_ORIGINS="http://localhost:5173,https://workspace.fermat.vn"
+CSRF_TRUSTED_ORIGINS="https://workspace.fermat.vn"
+
+ADMIN_EMAILS="admin@ftsocial.com"
+BOOTSTRAP_ADMIN_EMAIL="admin@ftsocial.com"
+BOOTSTRAP_ADMIN_PASSWORD="mat-khau-admin-ban-dau"
+```
+
+Cấu hình PostgreSQL trên production:
+
+```env
+DATABASE_URL="postgresql://ft_user:mat_khau@127.0.0.1:5432/ft_social_db"
+```
+
+Google Sheets sử dụng Service Account:
+
+```env
+GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account","project_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n","client_email":"..."}'
+```
+
+Không đưa file `.env`, mật khẩu, token hoặc Service Account lên GitHub.
+
+---
+
+## Kiểm tra dự án
+
+Kiểm tra frontend:
 
 ```powershell
 npm run lint
 npm run build
-python backend\manage.py check
-python backend\manage.py makemigrations --check --dry-run
 ```
 
-## Triển khai VPS
-
-Quy trình khuyến nghị:
-
-1. Nginx phục vụ thư mục `dist` của Vite.
-2. Nginx chuyển tiếp `/api/` và `/uploads/` tới Gunicorn.
-3. Gunicorn chạy `ft_backend.wsgi:application` với thư mục làm việc là `backend`.
-4. Chạy `python backend/manage.py migrate` sau mỗi lần cập nhật model.
-5. Lưu biến môi trường production ngoài Git và đặt `DJANGO_DEBUG=false`.
-
-Ví dụ lệnh chạy Gunicorn:
-
-```bash
-cd /var/www/ft-social-dashboard/backend
-../.venv/bin/gunicorn ft_backend.wsgi:application --bind 127.0.0.1:8000 --workers 3
-```
-
-## Tạo quản trị viên thủ công
+Kiểm tra backend trên Windows:
 
 ```powershell
-python backend\manage.py createsuperuser
+.\.venv\Scripts\python.exe backend\manage.py check
+.\.venv\Scripts\python.exe backend\manage.py makemigrations --check --dry-run
 ```
 
-Email quản trị cũng có thể được khai báo trong `ADMIN_EMAILS`. Không sử dụng tài khoản hoặc token giả trong production.
+Kiểm tra backend trên Linux hoặc macOS:
+
+```bash
+./.venv/bin/python backend/manage.py check
+./.venv/bin/python backend/manage.py makemigrations --check --dry-run
+```
+
+---
+
+## Cập nhật VPS bằng một câu lệnh
+
+Dự án trên VPS được đặt tại:
+
+```text
+/var/www/ft-social-dashboard
+```
+
+Từ máy local, chạy:
+
+```powershell
+ssh root@103.142.27.69 "cd /var/www/ft-social-dashboard && git fetch origin main && git reset --hard origin/main && bash scripts/update-vps.sh"
+```
+
+Script tự động:
+
+1. Đồng bộ mã nguồn mới nhất từ nhánh `main`.
+2. Tạo `.venv` nếu chưa có.
+3. Cài dependency backend.
+4. Cài dependency frontend.
+5. Kiểm tra TypeScript.
+6. Build frontend.
+7. Chạy Django migration.
+8. Thu thập static files.
+9. Kiểm tra cấu hình Django.
+10. Khởi động lại dịch vụ Gunicorn.
+11. Kiểm tra API `/api/health`.
+
+VPS phải có file `.env` production trước khi chạy lệnh cập nhật.
+
+Các biến mặc định của script:
+
+```text
+FT_BRANCH=main
+FT_SERVICE_NAME=ft-workspace
+FT_BIND_ADDRESS=127.0.0.1:8000
+FT_GUNICORN_WORKERS=3
+```
+
+Có thể thay đổi khi cần, ví dụ:
+
+```bash
+FT_SERVICE_NAME=ft-social-dashboard bash scripts/update-vps.sh
+```
+
+---
+
+## Tạo tài khoản quản trị thủ công
+
+Windows:
+
+```powershell
+.\.venv\Scripts\python.exe backend\manage.py createsuperuser
+```
+
+Linux hoặc macOS:
+
+```bash
+./.venv/bin/python backend/manage.py createsuperuser
+```
+
+---
+
+## Các lệnh thường dùng
+
+```powershell
+npm start
+npm run lint
+npm run build
+```
+
+- `npm start`: tự chuẩn bị và chạy toàn bộ hệ thống local.
+- `npm run lint`: kiểm tra TypeScript.
+- `npm run build`: build frontend production.
