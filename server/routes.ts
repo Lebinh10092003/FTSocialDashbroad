@@ -414,16 +414,97 @@ function nextCandidateCode(existing: any[], preferred: string, index: number) {
   while (used.has(`FT${year}-${String(sequence).padStart(4, '0')}`)) sequence += 1;
   return `FT${year}-${String(sequence + index).padStart(4, '0')}`;
 }
+apiRouter.get('/examination/sheets', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const sheetsSnap = await adminDb.collection('examinationSheets').orderBy('createdAt', 'desc').get();
+    let sheets = sheetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    if (sheets.length === 0) {
+      // Seed default sheet
+      const defaultSheet = {
+        name: 'Google Sheets Khảo thí FT (Mặc định)',
+        url: 'https://docs.google.com/spreadsheets/d/1kqztN_iCeZ9uR1mO7gz9j1TcUt8ZmCdpEv0TagTf4VA/edit?usp=sharing',
+        status: 'idle',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      const docRef = await adminDb.collection('examinationSheets').add(defaultSheet);
+      sheets = [{ id: docRef.id, ...defaultSheet }];
+    }
+    res.json(sheets);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Không thể tải danh sách sheets.' });
+  }
+});
+
+apiRouter.post('/examination/sheets', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { name, url } = req.body || {};
+    if (!name || !url) {
+      return res.status(400).json({ error: 'Tên nguồn và đường dẫn Google Sheets là bắt buộc.' });
+    }
+    const item = {
+      name: name.trim(),
+      url: url.trim(),
+      status: 'idle',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      createdBy: req.user?.email
+    };
+    const docRef = await adminDb.collection('examinationSheets').add(item);
+    res.status(201).json({ id: docRef.id, ...item });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Không thể thêm nguồn sheets.' });
+  }
+});
+
+apiRouter.put('/examination/sheets/:id', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { name, url } = req.body || {};
+    const updates: any = { updatedAt: new Date().toISOString(), updatedBy: req.user?.email };
+    if (typeof name === 'string' && name.trim()) updates.name = name.trim();
+    if (typeof url === 'string' && url.trim()) updates.url = url.trim();
+
+    const ref = adminDb.collection('examinationSheets').doc(req.params.id);
+    const existing = await ref.get();
+    if (!existing.exists) return res.status(404).json({ error: 'Không tìm thấy nguồn sheets.' });
+
+    await ref.update(updates);
+    const latest = await ref.get();
+    res.json({ id: latest.id, ...latest.data() });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Không thể cập nhật nguồn sheets.' });
+  }
+});
+
+apiRouter.delete('/examination/sheets/:id', authenticateUser, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const ref = adminDb.collection('examinationSheets').doc(req.params.id);
+    if (!(await ref.get()).exists) return res.status(404).json({ error: 'Không tìm thấy nguồn sheets.' });
+    await ref.delete();
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Không thể xóa nguồn sheets.' });
+  }
+});
+
 apiRouter.post('/examination/sync/google-sheet', authenticateUser, requireManagerOrAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const url = typeof req.body?.url === 'string' && req.body.url.trim() ? req.body.url.trim() : undefined;
-    const result = await syncExaminationFromGoogleSheet(url);
+    const { url, id } = req.body || {};
+    let targetUrl = typeof url === 'string' && url.trim() ? url.trim() : undefined;
+    if (id) {
+      const sheetSnap = await adminDb.collection('examinationSheets').doc(id).get();
+      if (sheetSnap.exists) {
+        targetUrl = sheetSnap.data()?.url;
+      }
+    }
+    const result = await syncExaminationFromGoogleSheet(targetUrl);
     if (!result.success) return res.status(400).json({ error: result.message });
     res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message || 'Không thể đồng bộ Google Sheets.' });
   }
 });
+
 apiRouter.get('/examination/sync/status', authenticateUser, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const configSnap = await adminDb.collection('systemConfig').doc('examination_sync_state').get();

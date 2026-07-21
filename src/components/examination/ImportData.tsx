@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import {
   CheckCircle2, Download, FileSpreadsheet, Link2, LoaderCircle,
   UploadCloud, RefreshCw, Clock, AlertCircle, Zap, CalendarCheck,
+  Trash2, Pencil, Plus,
 } from 'lucide-react';
 import type { Candidate } from './types';
 
@@ -22,8 +23,21 @@ interface SyncState {
   created?: number;
   updated?: number;
   total?: number;
-  message?: string;
   error?: string;
+}
+
+interface SheetSource {
+  id: string;
+  name: string;
+  url: string;
+  status?: 'success' | 'failed' | 'running' | 'idle';
+  lastSyncTime?: string;
+  created?: number;
+  updated?: number;
+  total?: number;
+  error?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 // ─── Cột & alias cho import từ file ──────────────────────────────────────────
@@ -93,10 +107,17 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   const [rows, setRows] = useState<Candidate[]>([]);
   const [source, setSource] = useState('');
   const [loading, setLoading] = useState(false);
-  const [syncLoading, setSyncLoading] = useState(false);
   const [message, setMessage] = useState('');
-  const [syncState, setSyncState] = useState<SyncState>({});
   const sample = useMemo(() => rows.slice(0, 5), [rows]);
+
+  // States mới cho việc quản lý đa nguồn Google Sheets
+  const [sheets, setSheets] = useState<SheetSource[]>([]);
+  const [loadingSheets, setLoadingSheets] = useState(false);
+  const [syncingSheetId, setSyncingSheetId] = useState<string | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newSheetName, setNewSheetName] = useState('');
+  const [newSheetUrl, setNewSheetUrl] = useState('');
+  const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
 
   const authHeaders = {
     'Content-Type': 'application/json',
@@ -104,20 +125,28 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     'X-Google-OAuth-Token': googleAccessToken || '',
   };
 
-  // Load trạng thái đồng bộ khi mở tab
-  const loadSyncState = useCallback(async () => {
+  // Load danh sách sheet nguồn từ DB
+  const loadSheets = useCallback(async () => {
+    if (!idToken) return;
+    setLoadingSheets(true);
     try {
-      const res = await fetch('/api/examination/sync/status', {
-        headers: { Authorization: `Bearer ${idToken || ''}` },
+      const res = await fetch('/api/examination/sheets', {
+        headers: { Authorization: `Bearer ${idToken}` },
       });
       if (res.ok) {
         const data = await res.json();
-        setSyncState(data as SyncState);
+        setSheets(data);
       }
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.warn('Lỗi tải danh sách nguồn Google Sheets:', err);
+    } finally {
+      setLoadingSheets(false);
+    }
   }, [idToken]);
 
-  useEffect(() => { loadSyncState(); }, [loadSyncState]);
+  useEffect(() => {
+    loadSheets();
+  }, [loadSheets]);
 
   const setParsedRows = (rawRows: ImportRow[], sourceName: string) => {
     const parsed = mapRows(rawRows);
@@ -144,28 +173,18 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     if (!sourceUrl.trim()) return setMessage('Hãy dán liên kết Google Sheets có quyền xem.');
     setLoading(true); setMessage('');
     try {
-      // Gọi endpoint đồng bộ CSV công khai — không cần OAuth
       const res = await fetch('/api/examination/sync/google-sheet', {
         method: 'POST', headers: authHeaders,
         body: JSON.stringify({ url: sourceUrl.trim() }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Không thể đọc Google Sheets.');
-      // Sau khi sync, hiển thị kết quả dạng thông báo (không cần preview riêng)
-      setSyncState({
-        status: 'success',
-        lastSyncTime: body.timestamp,
-        created: body.created,
-        updated: body.updated,
-        total: body.total,
-        message: body.message,
-      });
+      
       setMessage(`✅ ${body.message}`);
       onImported([]);
     } catch (err: any) { setMessage(`❌ ${err.message || 'Không thể đọc Google Sheets.'}`); }
     finally { setLoading(false); }
   };
-
 
   const importRows = async () => {
     if (!rows.length) return;
@@ -183,34 +202,116 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     finally { setLoading(false); }
   };
 
-  // Đồng bộ trực tiếp từ Google Sheets mặc định của hệ thống
-  const syncFromDefaultSheet = async () => {
-    if (!canImport) return;
-    setSyncLoading(true);
-    setSyncState(prev => ({ ...prev, status: 'running' }));
+  // Quản lý CRUD cho sheets nguồn
+  const handleAddSheet = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSheetName.trim() || !newSheetUrl.trim()) return;
+    setLoading(true);
     setMessage('');
     try {
+      const url = `/api/examination/sheets${editingSheetId ? `/${editingSheetId}` : ''}`;
+      const method = editingSheetId ? 'PUT' : 'POST';
+      const res = await fetch(url, {
+        method,
+        headers: authHeaders,
+        body: JSON.stringify({ name: newSheetName.trim(), url: newSheetUrl.trim() }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Có lỗi xảy ra.');
+      
+      await loadSheets();
+      setNewSheetName('');
+      setNewSheetUrl('');
+      setEditingSheetId(null);
+      setShowAddModal(false);
+      setMessage(editingSheetId ? '✅ Cập nhật nguồn dữ liệu thành công.' : '✅ Thêm nguồn dữ liệu mới thành công.');
+    } catch (err: any) {
+      setMessage(`❌ Lỗi: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditSheet = (sheet: SheetSource) => {
+    setEditingSheetId(sheet.id);
+    setNewSheetName(sheet.name);
+    setNewSheetUrl(sheet.url);
+    setShowAddModal(true);
+  };
+
+  const handleDeleteSheet = async (id: string) => {
+    if (!window.confirm('Bạn có chắc chắn muốn xóa nguồn Google Sheets này?')) return;
+    setLoading(true);
+    setMessage('');
+    try {
+      const res = await fetch(`/api/examination/sheets/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Có lỗi xảy ra.');
+      
+      await loadSheets();
+      setMessage('✅ Xóa nguồn dữ liệu thành công.');
+    } catch (err: any) {
+      setMessage(`❌ Lỗi: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSyncSheet = async (sheet: SheetSource) => {
+    if (!canImport) return;
+    setSyncingSheetId(sheet.id);
+    setMessage('');
+    setSheets(prev =>
+      prev.map(s => (s.id === sheet.id ? { ...s, status: 'running' } : s))
+    );
+    try {
       const res = await fetch('/api/examination/sync/google-sheet', {
-        method: 'POST', headers: authHeaders,
-        body: JSON.stringify({ url: DEFAULT_SYNC_URL }),
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ id: sheet.id }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Đồng bộ thất bại.');
-      setSyncState({
-        status: 'success',
-        lastSyncTime: body.timestamp,
-        created: body.created,
-        updated: body.updated,
-        total: body.total,
-        message: body.message,
-      });
-      setMessage(`✅ ${body.message}`);
-      onImported([]); // trigger refresh
+      
+      setMessage(`✅ Đồng bộ thành công nguồn "${sheet.name}": ${body.message}`);
+      await loadSheets();
+      onImported([]);
     } catch (err: any) {
       const errMsg = err.message || 'Lỗi không xác định.';
-      setSyncState(prev => ({ ...prev, status: 'failed', error: errMsg }));
-      setMessage(`❌ Lỗi đồng bộ: ${errMsg}`);
-    } finally { setSyncLoading(false); }
+      setMessage(`❌ Lỗi đồng bộ nguồn "${sheet.name}": ${errMsg}`);
+      await loadSheets();
+    } finally {
+      setSyncingSheetId(null);
+    }
+  };
+
+  const handleSyncAll = async () => {
+    if (!canImport) return;
+    setSyncingSheetId('all');
+    setMessage('');
+    setSheets(prev => prev.map(s => ({ ...s, status: 'running' })));
+    try {
+      const res = await fetch('/api/examination/sync/google-sheet', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({}),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Đồng bộ thất bại.');
+      
+      setMessage(`✅ ${body.message}`);
+      await loadSheets();
+      onImported([]);
+    } catch (err: any) {
+      const errMsg = err.message || 'Lỗi không xác định.';
+      setMessage(`❌ Lỗi đồng bộ tất cả nguồn: ${errMsg}`);
+      await loadSheets();
+    } finally {
+      setSyncingSheetId(null);
+    }
   };
 
   const downloadTemplate = () => {
@@ -224,20 +325,6 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     XLSX.utils.book_append_sheet(wb, sheet, 'Danh sách thí sinh');
     XLSX.writeFile(wb, 'Mau_nhap_thi_sinh_khao_thi.xlsx');
   };
-
-  const syncStatusColor = {
-    success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
-    failed: 'border-red-200 bg-red-50 text-red-800',
-    running: 'border-blue-200 bg-blue-50 text-blue-800',
-    idle: 'border-slate-200 bg-slate-50 text-slate-600',
-  }[syncState.status ?? 'idle'];
-
-  const syncStatusIcon = {
-    success: <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />,
-    failed: <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />,
-    running: <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-blue-500" />,
-    idle: <Clock className="h-4 w-4 shrink-0 text-slate-400" />,
-  }[syncState.status ?? 'idle'];
 
   return (
     <>
@@ -262,62 +349,169 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
         </div>
       )}
 
-      {/* ── Đồng bộ tự động từ Google Sheets FT ──────────────────── */}
-      <section className="mb-5 rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-blue-50 p-5 shadow-sm">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 shadow">
-              <Zap className="h-5 w-5 text-white" />
-            </div>
-            <div>
-              <h2 className="font-bold text-indigo-900">Đồng bộ tự động từ Google Sheets FT</h2>
-              <p className="mt-0.5 text-xs text-indigo-700">
-                Nguồn chính thức · Tự động chạy mỗi ngày lúc <strong>7:00 sáng</strong> (giờ VN)
-              </p>
-              {syncState.lastSyncTime && (
-                <p className="mt-1 flex items-center gap-1 text-xs text-indigo-600">
-                  <CalendarCheck className="h-3 w-3" />
-                  Đồng bộ gần nhất: {syncState.lastSyncTime}
-                  {syncState.total !== undefined && ` · ${syncState.total} thí sinh`}
-                </p>
-              )}
-            </div>
+      {/* ── Quản lý các nguồn Google Sheets ──────────────────── */}
+      <section className="mb-5 rounded-2xl border border-indigo-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-indigo-900 flex items-center gap-2">
+              <Zap className="h-5 w-5 text-indigo-600 animate-pulse" />
+              Danh sách nguồn Google Sheets đang đồng bộ
+            </h2>
+            <p className="mt-1 text-xs text-indigo-700">
+              Cấu hình các sheet đăng ký thi của từng kỳ thi và đồng bộ tự động hàng ngày lúc 7:00 sáng.
+            </p>
           </div>
-          <div className="flex gap-2">
-            <button onClick={loadSyncState} disabled={syncLoading}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 transition-colors">
-              <RefreshCw className={`h-3.5 w-3.5 ${syncLoading ? 'animate-spin' : ''}`} />
-              Kiểm tra
+          <div className="flex flex-wrap gap-2">
+            <button onClick={loadSheets} disabled={loadingSheets || syncingSheetId !== null}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-[#001e40] hover:bg-slate-50 disabled:opacity-50 transition-colors">
+              <RefreshCw className={`h-3.5 w-3.5 ${loadingSheets ? 'animate-spin' : ''}`} />
+              Tải lại danh sách
             </button>
             {canImport && (
-              <button onClick={syncFromDefaultSheet} disabled={syncLoading || loading}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm">
-                {syncLoading
-                  ? <><LoaderCircle className="h-4 w-4 animate-spin" />Đang đồng bộ…</>
-                  : <><RefreshCw className="h-4 w-4" />Đồng bộ ngay</>
-                }
-              </button>
+              <>
+                <button onClick={handleSyncAll} disabled={loadingSheets || syncingSheetId !== null}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 transition-colors">
+                  <RefreshCw className={`h-3.5 w-3.5 ${syncingSheetId === 'all' ? 'animate-spin' : ''}`} />
+                  Đồng bộ tất cả
+                </button>
+                <button onClick={() => { setEditingSheetId(null); setNewSheetName(''); setNewSheetUrl(''); setShowAddModal(true); }}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 transition-colors shadow-sm">
+                  <Plus className="h-4 w-4" />
+                  Thêm nguồn mới
+                </button>
+              </>
             )}
           </div>
         </div>
 
-        {/* Trạng thái đồng bộ */}
-        {(syncState.status || syncState.message || syncState.error) && (
-          <div className={`mt-4 flex items-start gap-2 rounded-xl border p-3 text-sm ${syncStatusColor}`}>
-            {syncStatusIcon}
-            <div>
-              {syncState.status === 'success' && syncState.total !== undefined
-                ? <><strong>Thành công</strong> · Thêm mới: {syncState.created ?? 0}, Cập nhật: {syncState.updated ?? 0}, Tổng: {syncState.total}</>
-                : syncState.status === 'failed'
-                  ? <><strong>Thất bại</strong> · {syncState.error || syncState.message}</>
-                  : syncState.status === 'running'
-                    ? 'Đang đồng bộ dữ liệu từ Google Sheets…'
-                    : 'Chưa có thông tin đồng bộ. Nhấn "Đồng bộ ngay" để bắt đầu.'
-              }
-            </div>
+        {/* Danh sách các sheet */}
+        {loadingSheets && sheets.length === 0 ? (
+          <div className="flex items-center justify-center py-8">
+            <LoaderCircle className="h-8 w-8 animate-spin text-indigo-600" />
+          </div>
+        ) : sheets.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
+            Chưa có nguồn Google Sheets nào. Nhấn "Thêm nguồn mới" để bắt đầu.
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-slate-100">
+            <table className="min-w-full divide-y divide-slate-100 text-sm">
+              <thead className="bg-slate-50 text-slate-500 font-semibold">
+                <tr>
+                  <th className="px-4 py-3 text-left">Tên nguồn</th>
+                  <th className="px-4 py-3 text-left">Đường dẫn Google Sheets</th>
+                  <th className="px-4 py-3 text-center">Trạng thái đồng bộ</th>
+                  <th className="px-4 py-3 text-left">Chi tiết đồng bộ gần nhất</th>
+                  <th className="px-4 py-3 text-right">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {sheets.map(sheet => {
+                  const statusInfo = {
+                    success: { text: 'Thành công', color: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> },
+                    failed: { text: 'Thất bại', color: 'bg-rose-50 text-rose-700 border-rose-200', icon: <AlertCircle className="h-3.5 w-3.5 text-rose-500" /> },
+                    running: { text: 'Đang chạy', color: 'bg-blue-50 text-blue-700 border-blue-200', icon: <LoaderCircle className="h-3.5 w-3.5 animate-spin text-blue-500" /> },
+                    idle: { text: 'Chờ đồng bộ', color: 'bg-slate-50 text-slate-600 border-slate-200', icon: <Clock className="h-3.5 w-3.5 text-slate-400" /> }
+                  }[sheet.status || 'idle'];
+
+                  return (
+                    <tr key={sheet.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-4 py-3 font-bold text-slate-900 max-w-[200px] truncate">{sheet.name}</td>
+                      <td className="px-4 py-3 text-slate-600 max-w-[320px] truncate">
+                        <a href={sheet.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-indigo-600 hover:underline">
+                          {sheet.url}
+                          <Download className="h-3 w-3 shrink-0" />
+                        </a>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${statusInfo.color}`}>
+                          {statusInfo.icon}
+                          {statusInfo.text}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-500">
+                        {sheet.status === 'success' && (
+                          <div>
+                            <div>Thời gian: {sheet.lastSyncTime}</div>
+                            <div className="font-semibold text-slate-700">
+                              +Mới: {sheet.created ?? 0} · ~Cập nhật: {sheet.updated ?? 0} · Tổng: {sheet.total ?? 0}
+                            </div>
+                          </div>
+                        )}
+                        {sheet.status === 'failed' && (
+                          <div className="text-rose-600 font-medium max-w-[240px] truncate" title={sheet.error}>
+                            Lỗi: {sheet.error}
+                          </div>
+                        )}
+                        {sheet.status === 'running' && <div className="text-blue-600 animate-pulse">Đang cập nhật dữ liệu...</div>}
+                        {sheet.status === 'idle' && <div>Chưa thực hiện đồng bộ</div>}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="inline-flex items-center gap-1">
+                          <button disabled={syncingSheetId !== null} onClick={() => handleSyncSheet(sheet)}
+                            className="rounded p-1.5 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50 transition-colors" title="Đồng bộ riêng nguồn này">
+                            <RefreshCw className={`h-4 w-4 ${syncingSheetId === sheet.id ? 'animate-spin' : ''}`} />
+                          </button>
+                          {canImport && (
+                            <>
+                              <button disabled={syncingSheetId !== null} onClick={() => handleEditSheet(sheet)}
+                                className="rounded p-1.5 text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors" title="Chỉnh sửa">
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                              <button disabled={syncingSheetId !== null} onClick={() => handleDeleteSheet(sheet.id)}
+                                className="rounded p-1.5 text-rose-600 hover:bg-rose-50 disabled:opacity-50 transition-colors" title="Xóa">
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </section>
+
+      {/* Modal Thêm/Sửa nguồn dữ liệu */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="text-xl font-bold text-slate-900">
+              {editingSheetId ? 'Chỉnh sửa nguồn Google Sheets' : 'Thêm nguồn Google Sheets mới'}
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Cung cấp tên gợi nhớ và liên kết Google Sheets có quyền xem công khai (Anyone with the link).
+            </p>
+            <form onSubmit={handleAddSheet} className="mt-4 space-y-4">
+              <label className="block">
+                <span className="mb-1 block text-sm font-bold text-slate-700">Tên nguồn dữ liệu *</span>
+                <input required type="text" value={newSheetName} onChange={e => setNewSheetName(e.target.value)}
+                  placeholder="Ví dụ: Kỳ thi IMO 2026, Young Food Scientist..."
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-sm font-bold text-slate-700">Liên kết Google Sheets *</span>
+                <input required type="url" value={newSheetUrl} onChange={e => setNewSheetUrl(e.target.value)}
+                  placeholder="https://docs.google.com/spreadsheets/d/..."
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
+              </label>
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setShowAddModal(false)}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 transition-colors">
+                  Hủy
+                </button>
+                <button type="submit" disabled={loading}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm">
+                  {loading ? 'Đang lưu...' : 'Lưu lại'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ── Import thủ công ───────────────────────────────────────── */}
       <div className="grid gap-5 lg:grid-cols-2">
