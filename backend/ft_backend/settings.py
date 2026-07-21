@@ -9,8 +9,6 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BASE_DIR.parent
-
-# Read the repository-level .env file when it exists.
 load_dotenv(PROJECT_ROOT / ".env")
 
 
@@ -26,8 +24,6 @@ def env_list(name: str, default: str = "") -> list[str]:
 
 
 DEBUG = env_bool("DJANGO_DEBUG", False)
-ENABLE_MOCK_AUTH = env_bool("ENABLE_MOCK_AUTH", False)
-
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "").strip()
 if not SECRET_KEY:
     if DEBUG:
@@ -46,6 +42,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "corsheaders",
     "rest_framework",
+    "rest_framework.authtoken",
     "authentication",
     "examination",
     "social",
@@ -85,7 +82,6 @@ TEMPLATES = [
 WSGI_APPLICATION = "ft_backend.wsgi.application"
 ASGI_APPLICATION = "ft_backend.asgi.application"
 
-# DATABASE_URL is preferred in production. Local development falls back to SQLite.
 database_url = os.getenv("DATABASE_URL", "").strip()
 if database_url:
     DATABASES = {
@@ -130,11 +126,9 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = PROJECT_ROOT / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
-
 MEDIA_URL = "/uploads/"
 MEDIA_ROOT = PROJECT_ROOT / "uploads"
 MAX_UPLOAD_SIZE = int(os.getenv("MAX_UPLOAD_SIZE", str(3 * 1024 * 1024)))
-
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 CORS_ALLOWED_ORIGINS = env_list(
@@ -146,12 +140,11 @@ CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS")
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "authentication.auth.FirebaseTokenAuthentication",
+        "authentication.auth.DjangoTokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "authentication.permissions.IsAuthenticated",
     ],
-    "EXCEPTION_HANDLER": "rest_framework.views.exception_handler",
 }
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
