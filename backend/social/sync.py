@@ -15,12 +15,32 @@ class SyncEngine:
             return MockProvider()
 
     @classmethod
-    def sync_channel(cls, channel_id, request_id=None):
+    def sync_channel(cls, channel_id, request_id=None, since=None, until=None):
         if not request_id:
             request_id = f"req_{uuid.uuid4().hex[:10]}"
             
         started_at = timezone.now()
         log_id = f"sync_{int(started_at.timestamp() * 1000)}_{uuid.uuid4().hex[:5]}"
+        
+        # Convert since and until to datetime if they are strings
+        from django.utils.dateparse import parse_date
+        import datetime
+        
+        if isinstance(since, str):
+            d = parse_date(since)
+            if d:
+                dt = datetime.datetime.combine(d, datetime.time.min)
+                since = timezone.make_aware(dt)
+        if isinstance(until, str):
+            d = parse_date(until)
+            if d:
+                dt = datetime.datetime.combine(d, datetime.time.max)
+                until = timezone.make_aware(dt)
+                
+        if not since:
+            since = timezone.now() - datetime.timedelta(days=90)
+        if not until:
+            until = timezone.now()
         
         try:
             channel = Channel.objects.get(id=channel_id)
@@ -69,7 +89,7 @@ class SyncEngine:
             )
 
             # 2. Fetch posts
-            raw_posts = provider.list_posts(channel.id, channel.external_id)
+            raw_posts = provider.list_posts(channel.id, channel.external_id, since=since, until=until)
             api_log.records_received = len(raw_posts)
             
             inserted = 0
@@ -159,3 +179,30 @@ class SyncEngine:
             api_log.ended_at = timezone.now()
             api_log.save()
             return False, f"Lỗi đồng bộ: {str(e)}"
+
+    @classmethod
+    def sync_all_channels(cls, google_token=None, since=None, until=None):
+        request_id = f"req_{uuid.uuid4().hex[:10]}"
+        active_channels = Channel.objects.filter(status='active')
+        
+        success_count = 0
+        total_count = active_channels.count()
+        results = []
+        
+        for channel in active_channels:
+            success, msg = cls.sync_channel(channel.id, request_id, since=since, until=until)
+            if success:
+                success_count += 1
+            results.append({
+                'channel_id': channel.id,
+                'name': channel.name,
+                'success': success,
+                'message': msg
+            })
+            
+        return {
+            'success': True,
+            'message': f"Đã đồng bộ thành công {success_count}/{total_count} kênh đang hoạt động.",
+            'results': results
+        }
+

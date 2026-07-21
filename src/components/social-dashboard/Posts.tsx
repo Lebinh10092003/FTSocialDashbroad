@@ -36,6 +36,7 @@ export default function Posts({ idToken, channels }: PostsProps) {
   const [datePreset, setDatePreset] = useState<DatePreset>('30days');
   const [page, setPage] = useState(1);
   const [limit] = useState(15);
+  const [postType, setPostType] = useState<string>('all');
 
   const fetchPosts = async () => {
     setLoading(true);
@@ -45,6 +46,7 @@ export default function Posts({ idToken, channels }: PostsProps) {
       if (search) url += `&search=${encodeURIComponent(search)}`;
       if (platform !== 'all') url += `&platform=${platform}`;
       if (channelId !== 'all') url += `&channelId=${channelId}`;
+      if (postType !== 'all') url += `&postType=${postType}`;
 
       const res = await fetch(url, {
         headers: {
@@ -66,7 +68,7 @@ export default function Posts({ idToken, channels }: PostsProps) {
 
   useEffect(() => {
     fetchPosts();
-  }, [idToken, platform, channelId, startDate, endDate, page, channels]);
+  }, [idToken, platform, channelId, startDate, endDate, page, channels, postType]);
 
   // Handle manual trigger when pressing Enter or clicking Search button
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -196,6 +198,34 @@ export default function Posts({ idToken, channels }: PostsProps) {
           </button>
         </div>
       </form>
+
+      {/* Category Tabs */}
+      <div className="flex border-b border-slate-200 gap-1 overflow-x-auto pb-px">
+        {[
+          { key: 'all', label: 'Tất cả bài viết' },
+          { key: 'photo', label: 'Ảnh / Album' },
+          { key: 'video', label: 'Video / Reel' },
+          { key: 'link', label: 'Liên kết' },
+          { key: 'status', label: 'Văn bản' },
+          { key: 'other', label: 'Khác' },
+        ].map((tab) => {
+          const isActive = postType === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => { setPostType(tab.key); setPage(1); }}
+              className={`px-4 py-2.5 border-b-2 font-bold text-xs whitespace-nowrap transition-all cursor-pointer ${
+                isActive 
+                  ? 'border-blue-600 text-blue-650' 
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
 
       {/* Main Table view */}
       {loading ? (

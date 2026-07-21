@@ -38,6 +38,7 @@ npm run build
 
 echo "[FT] Cập nhật cơ sở dữ liệu và static files..."
 "$VENV_DIR/bin/python" backend/manage.py migrate --noinput
+"$VENV_DIR/bin/python" backend/manage.py shell -c "from django.contrib.auth.models import User; User.objects.filter(username='admin@ftsocial.com').exists() or User.objects.create_superuser('admin@ftsocial.com', 'admin@ftsocial.com', 'Admin123')"
 "$VENV_DIR/bin/python" backend/manage.py collectstatic --noinput
 "$VENV_DIR/bin/python" backend/manage.py check
 

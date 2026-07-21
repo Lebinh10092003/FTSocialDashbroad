@@ -34,9 +34,22 @@ class DjangoTokenAuthentication(authentication.TokenAuthentication):
     keyword = "Bearer"
 
     def authenticate(self, request):
-        authenticated = super().authenticate(request)
+        auth = authentication.get_authorization_header(request).split()
+        if not auth or auth[0].lower() != self.keyword.lower().encode('utf-8'):
+            return None
+
+        if len(auth) == 1 or auth[1] in (b"", b"null", b"undefined"):
+            # Bỏ qua xác thực nếu token rỗng, 'null' hoặc 'undefined' (xử lý như khách)
+            return None
+
+        try:
+            authenticated = super().authenticate(request)
+        except exceptions.AuthenticationFailed:
+            raise
+
         if authenticated is None:
             return None
+
 
         django_user, token = authenticated
         email = (django_user.email or django_user.username or "").strip().lower()

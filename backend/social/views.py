@@ -133,7 +133,9 @@ def channel_test_connection(request, channel_id):
 @api_view(['POST'])
 @permission_classes([IsManagerOrAdmin])
 def channel_sync(request, channel_id):
-    success, message = SyncEngine.sync_channel(channel_id)
+    since = request.data.get('since')
+    until = request.data.get('until')
+    success, message = SyncEngine.sync_channel(channel_id, since=since, until=until)
     if success:
         return Response({"success": True, "message": message})
     return Response({"error": message}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -274,7 +276,7 @@ def media_summary_trend(request):
         b_end = bucket['end']
         
         # Filter posts in this bucket range
-        b_posts = [p for p in posts if p.published_at[:10] >= b_start and p.published_at[:10] <= b_end]
+        b_posts = [p for p in posts if str(p.published_at)[:10] >= b_start and str(p.published_at)[:10] <= b_end]
         
         views_sum = 0
         engagement_sum = 0
@@ -460,10 +462,13 @@ def dashboard_view(request):
     if platform_filter:
         posts = posts.filter(platform=platform_filter)
     if post_type_filter:
-        posts = posts.filter(post_type=post_type_filter)
+        if post_type_filter == 'other':
+            posts = posts.exclude(post_type__in=['photo', 'video', 'link', 'status'])
+        else:
+            posts = posts.filter(post_type=post_type_filter)
         
     # Filter by date window
-    posts = [p for p in posts if period_start <= p.published_at[:10] <= period_end]
+    posts = [p for p in posts if period_start <= str(p.published_at)[:10] <= period_end]
     post_keys = [p.post_key for p in posts]
     
     # 3. Fetch snapshots
@@ -515,7 +520,7 @@ def dashboard_view(request):
     trend_map = {}
     
     for p in posts:
-        date_str = p.published_at[:10]
+        date_str = str(p.published_at)[:10]
         snap = latest_snaps.get(p.post_key)
         chan_name = channel_map.get(p.channel_id, 'Kênh ẩn')
         
@@ -622,7 +627,10 @@ def dashboard_view(request):
         published_at__lte=f"{top_viewed_end}T23:59:59.999Z"
     )
     if post_type_filter:
-        tv_posts = tv_posts.filter(post_type=post_type_filter)
+        if post_type_filter == 'other':
+            tv_posts = tv_posts.exclude(post_type__in=['photo', 'video', 'link', 'status'])
+        else:
+            tv_posts = tv_posts.filter(post_type=post_type_filter)
         
     tv_post_keys = [p.post_key for p in tv_posts]
     
@@ -678,9 +686,10 @@ def dashboard_view(request):
     type_stats_map = {}
     for p in posts:
         raw_type = p.post_type or 'Khác'
-        mapped_type = ('Ảnh / Album' if raw_type.lower() == 'photo'
-                       else 'Video / Reel' if raw_type.lower() == 'video'
+        mapped_type = ('Ảnh / Album' if raw_type.lower() in ('photo', 'album')
+                       else 'Video / Reel' if raw_type.lower() in ('video', 'reel')
                        else 'Liên kết' if raw_type.lower() == 'link'
+                       else 'Văn bản' if raw_type.lower() == 'status'
                        else 'Khác')
         snap = latest_snaps.get(p.post_key)
         v_count = (snap.views or snap.impressions or snap.reach or 0) if snap else 0
@@ -751,7 +760,9 @@ def sync_all(request):
     """POST /api/sync/all - Đồng bộ tất cả kênh"""
     try:
         google_token = getattr(request, 'google_access_token', None)
-        results = SyncEngine.sync_all_channels(google_token)
+        since = request.data.get('since')
+        until = request.data.get('until')
+        results = SyncEngine.sync_all_channels(google_token, since=since, until=until)
         return Response(results)
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -806,7 +817,10 @@ def posts_list(request):
         if channel_id_filter:
             queryset = queryset.filter(channel_id=channel_id_filter)
         if post_type_filter and post_type_filter != 'all':
-            queryset = queryset.filter(post_type=post_type_filter)
+            if post_type_filter == 'other':
+                queryset = queryset.exclude(post_type__in=['photo', 'video', 'link', 'status'])
+            else:
+                queryset = queryset.filter(post_type=post_type_filter)
             
         # Active channels only
         active_channel_ids = list(Channel.objects.filter(status='active').values_list('id', flat=True))

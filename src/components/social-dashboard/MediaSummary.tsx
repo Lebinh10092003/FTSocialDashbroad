@@ -45,7 +45,7 @@ export default function MediaSummary({ idToken, channels }: MediaSummaryProps) {
     } catch (loadError: any) { setError(loadError.message || 'Không thể kết nối tới hệ thống.'); }
     finally { setLoading(false); }
   };
-  useEffect(() => { if (idToken) loadSummary(); }, [idToken, startDate, endDate, periodGroup, platformFilter, channelFilter]);
+  useEffect(() => { loadSummary(); }, [idToken, startDate, endDate, periodGroup, platformFilter, channelFilter]);
   const updatePreset = (preset: DatePreset) => { setDatePreset(preset); if (preset === 'custom') return; const end = new Date(); const start = new Date(); if (preset === '7days') start.setDate(end.getDate() - 6); if (preset === '30days') start.setDate(end.getDate() - 29); if (preset === '3months') start.setMonth(end.getMonth() - 3); setStartDate(start.toISOString().slice(0, 10)); setEndDate(end.toISOString().slice(0, 10)); };
   const downloadXlsx = async () => { try { const response = await fetch(`/api/reports/media-summary.xlsx?${params().toString()}`, { headers: { Authorization: `Bearer ${idToken}` } }); if (!response.ok) throw new Error('Không thể tạo file Excel.'); const url = URL.createObjectURL(await response.blob()); const link = document.createElement('a'); link.href = url; link.download = `bao_cao_tong_hop_${getTodayStr()}.xlsx`; link.click(); URL.revokeObjectURL(url); } catch (downloadError: any) { alert(downloadError.message || 'Không thể tải file Excel.'); } };
 

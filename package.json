@@ -9,7 +9,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "git-push": "node scripts/git-push.mjs",
+    "deploy": "node scripts/deploy-git.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -28,6 +30,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.21",
+    "ssh2": "^1.15.0",
     "tailwindcss": "^4.1.14",
     "typescript": "~5.8.2"
   }

@@ -117,7 +117,7 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
-  const [viewMode, setViewModeState] = useState<ViewMode>(initialSession ? getInitialViewMode() : 'workspace');
+  const [viewMode, setViewModeState] = useState<ViewMode>(getInitialViewMode());
   const [activeTab, setActiveTab] = useState('dashboard');
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(false);
@@ -172,15 +172,11 @@ export default function App() {
 
   useEffect(() => {
     const handleLocationChange = () => {
-      if (!idToken) {
-        setViewModeState('workspace');
-        return;
-      }
       setViewModeState(getInitialViewMode());
     };
     window.addEventListener('popstate', handleLocationChange);
     return () => window.removeEventListener('popstate', handleLocationChange);
-  }, [idToken]);
+  }, []);
 
   const setViewMode = (mode: ViewMode) => {
     setViewModeState(mode);
@@ -189,11 +185,6 @@ export default function App() {
   };
 
   const openProtectedView = (mode: ViewMode, tab?: string) => {
-    if (isGuest) {
-      setAuthError('Vui lòng đăng nhập để truy cập mô-đun này.');
-      setShowLoginModal(true);
-      return;
-    }
     if (tab) setActiveTab(tab);
     setViewMode(mode);
   };
@@ -251,12 +242,15 @@ export default function App() {
   };
 
   const handleRefreshChannels = async () => {
-    if (!idToken) return;
-    const response = await fetch('/api/channels', {
-      headers: { Authorization: `Bearer ${idToken}` },
-    });
+    const headers: HeadersInit = {};
+    if (idToken) {
+      headers['Authorization'] = `Bearer ${idToken}`;
+    }
+    const response = await fetch('/api/channels', { headers });
     if (response.status === 401) {
-      await handleLogout();
+      if (idToken) {
+        await handleLogout();
+      }
       return;
     }
     if (!response.ok) throw new Error('Không thể tải danh sách kênh.');
@@ -265,10 +259,6 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!idToken) {
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     handleRefreshChannels()
       .catch(error => console.error('Lỗi lấy danh sách kênh:', error))
@@ -300,7 +290,7 @@ export default function App() {
     );
   }
 
-  if (viewMode === 'workspace' || isGuest) {
+  if (viewMode === 'workspace') {
     const apps: Array<{ mode: ViewMode; title: string; description: string; gradient: string }> = [
       {
         mode: 'social-dashboard',
@@ -396,8 +386,8 @@ export default function App() {
         <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp Trình tạo Email...</div>}>
           <EmailTemplateBuilder
             onBackToWorkspace={() => setViewMode('workspace')}
-            onAccountClick={handleLogout}
-            isGuest={false}
+            onAccountClick={isGuest ? () => { setAuthError(''); setShowLoginModal(true); } : handleLogout}
+            isGuest={isGuest}
             userName={user.displayName}
           />
         </Suspense>
@@ -412,8 +402,8 @@ export default function App() {
         <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp mô-đun Đào tạo số...</div>}>
           <DigitalTraining
             onBackToWorkspace={() => setViewMode('workspace')}
-            onAccountClick={handleLogout}
-            isGuest={false}
+            onAccountClick={isGuest ? () => { setAuthError(''); setShowLoginModal(true); } : handleLogout}
+            isGuest={isGuest}
             userName={user.displayName}
           />
         </Suspense>
@@ -434,8 +424,8 @@ export default function App() {
               idToken={idToken}
               googleAccessToken={googleAccessToken}
               userRole={userRole}
-              isGuest={false}
-              onAccountClick={handleLogout}
+              isGuest={isGuest}
+              onAccountClick={isGuest ? () => { setAuthError(''); setShowLoginModal(true); } : handleLogout}
             />
           </Suspense>
         </ExaminationErrorBoundary>

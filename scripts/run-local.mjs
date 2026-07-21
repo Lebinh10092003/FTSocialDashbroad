@@ -120,6 +120,7 @@ async function main() {
   });
 
   run(venvPython, ['backend/manage.py', 'migrate', '--noinput'], 'Cập nhật cơ sở dữ liệu');
+  run(venvPython, ['backend/manage.py', 'shell', '-c', "from django.contrib.auth.models import User; User.objects.filter(username='admin@ftsocial.com').exists() or User.objects.create_superuser('admin@ftsocial.com', 'admin@ftsocial.com', 'Admin123')"], 'Khởi tạo tài khoản Admin mặc định (admin/Admin123)');
   run(venvPython, ['backend/manage.py', 'check'], 'Kiểm tra cấu hình Django');
 
   console.log('\n[FT] Backend:  http://127.0.0.1:8000');

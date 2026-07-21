@@ -13,18 +13,19 @@ import { EmailTemplate } from '../types/emailBuilder';
 const LOCAL_CACHE_KEY = 'ft_email_templates';
 const LOCAL_PREFS_KEY = 'ft_email_user_prefs';
 
-// Lấy ID Token hiện tại từ Firebase Auth để gọi API
+// Lấy ID Token hiện tại từ Django Session để gọi API
 async function getAuthHeader(): Promise<Record<string, string>> {
   try {
-    const { auth } = await import('../firebase-config');
-    const user = auth.currentUser;
-    if (!user) return {};
-    const token = await user.getIdToken();
-    return { Authorization: `Bearer ${token}` };
+    const raw = localStorage.getItem('ft_auth_session');
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed?.token) return {};
+    return { Authorization: `Bearer ${parsed.token}` };
   } catch {
     return {};
   }
 }
+
 
 // Helper gọi API
 async function apiCall<T>(

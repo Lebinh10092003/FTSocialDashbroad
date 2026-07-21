@@ -15,6 +15,31 @@ Hệ thống không sử dụng Firebase để đăng nhập hoặc lưu trữ d
 
 ---
 
+## ⚡ Các lệnh nhanh (Một dòng lệnh)
+
+Dự án hỗ trợ 3 lệnh nhanh bằng npm để chạy local, commit code và deploy VPS:
+
+1. **Chạy local toàn bộ dự án (Frontend + Backend):**
+   ```powershell
+   npm start
+   ```
+   *Lệnh này tự động tạo môi trường ảo `.venv`, cài đặt dependencies cho cả backend và frontend, chạy migrations của PostgreSQL local, kiểm tra cấu hình và khởi động cả 2 server.*
+
+2. **Commit và Push git nhanh:**
+   ```powershell
+   npm run git-push "Thông điệp commit của bạn"
+   ```
+   *Ví dụ: `npm run git-push "sửa lỗi giao diện"`. Lệnh này tự động chạy `git add .`, commit với thông điệp bạn nhập và push lên Github. Nếu không điền thông điệp commit, mặc định sẽ là "Auto update".*
+
+3. **Commit, Push git và tự động cập nhật, reset server trên VPS:**
+   ```powershell
+   npm run deploy "Thông điệp commit của bạn"
+   ```
+   *Ví dụ: `npm run deploy "cập nhật tính năng"`. Lệnh này tự động: commit & push code lên GitHub ở máy local -> SSH vào VPS -> tự động pull code mới -> chạy script nâng cấp -> reset server Gunicorn/systemd trên VPS. (Cấu hình SSH VPS lấy từ file `.env` local của bạn).*
+
+---
+
+
 ## Chạy local
 
 ### Yêu cầu
@@ -219,10 +244,15 @@ Linux hoặc macOS:
 
 ```powershell
 npm start
+npm run git-push "Commit message"
+npm run deploy "Commit message"
 npm run lint
 npm run build
 ```
 
-- `npm start`: tự chuẩn bị và chạy toàn bộ hệ thống local.
-- `npm run lint`: kiểm tra TypeScript.
-- `npm run build`: build frontend production.
+- `npm start`: Tự chuẩn bị môi trường, chạy migrations và khởi động hệ thống local.
+- `npm run git-push "msg"`: Commit toàn bộ thay đổi local và push lên Github qua 1 dòng lệnh.
+- `npm run deploy "msg"`: Commit, push Github và SSH vào VPS để pull code và restart server qua 1 dòng lệnh.
+- `npm run lint`: Kiểm tra lỗi TypeScript.
+- `npm run build`: Build frontend production ở local.
+

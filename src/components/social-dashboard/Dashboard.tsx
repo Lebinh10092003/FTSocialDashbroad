@@ -166,7 +166,6 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   };
 
   const fetchFollowerTrend = async () => {
-    if (!idToken) return;
     setFollowerTrendLoading(true);
     try {
       const params = new URLSearchParams({ startDate, endDate });
@@ -185,7 +184,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
     }
   };
   useEffect(() => {
-    if (idToken) fetchDashboardData();
+    fetchDashboardData();
   }, [idToken, googleAccessToken, platformFilter, channelFilter, postTypeFilter, startDate, endDate, channels]);
   useEffect(() => {
     fetchFollowerTrend();
@@ -354,17 +353,19 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
           <p className="text-sm text-slate-500 mt-1">Theo dõi hiệu quả nội dung đa kênh theo thời gian thực.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200/60">
+          <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200/60 overflow-x-auto max-w-full">
             {[
               ['all', 'Tất cả'],
-              ['photo', 'Ảnh'],
+              ['photo', 'Ảnh / Album'],
               ['video', 'Video / Reel'],
               ['link', 'Liên kết'],
+              ['status', 'Văn bản'],
+              ['other', 'Khác'],
             ].map(([value, label]) => (
               <button
                 key={value}
                 onClick={() => setPostTypeFilter(value)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${postTypeFilter === value ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${postTypeFilter === value ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
               >
                 {label}
               </button>
