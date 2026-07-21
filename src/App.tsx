@@ -1,5 +1,5 @@
 import React, { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { LogIn, LogOut, Mail } from 'lucide-react';
+import { LogIn, LogOut } from 'lucide-react';
 
 import { Channel, UserRole } from './types';
 import Sidebar from './components/social-dashboard/Sidebar';
@@ -117,7 +117,7 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
-  const [viewMode, setViewModeState] = useState<ViewMode>(getInitialViewMode());
+  const [viewMode, setViewModeState] = useState<ViewMode>(initialSession ? getInitialViewMode() : 'workspace');
   const [activeTab, setActiveTab] = useState('dashboard');
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(false);
@@ -171,10 +171,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const handleLocationChange = () => setViewModeState(getInitialViewMode());
+    const handleLocationChange = () => {
+      if (!idToken) {
+        setViewModeState('workspace');
+        return;
+      }
+      setViewModeState(getInitialViewMode());
+    };
     window.addEventListener('popstate', handleLocationChange);
     return () => window.removeEventListener('popstate', handleLocationChange);
-  }, []);
+  }, [idToken]);
 
   const setViewMode = (mode: ViewMode) => {
     setViewModeState(mode);
@@ -294,7 +300,7 @@ export default function App() {
     );
   }
 
-  if (viewMode === 'workspace') {
+  if (viewMode === 'workspace' || isGuest) {
     const apps: Array<{ mode: ViewMode; title: string; description: string; gradient: string }> = [
       {
         mode: 'social-dashboard',
@@ -382,11 +388,6 @@ export default function App() {
         {loginModal}
       </div>
     );
-  }
-
-  if (isGuest) {
-    setViewMode('workspace');
-    return null;
   }
 
   if (viewMode === 'email-builder') {
