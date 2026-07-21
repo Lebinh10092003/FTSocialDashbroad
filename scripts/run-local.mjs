@@ -1,13 +1,16 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
-const rootDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const rootDir = path.resolve(scriptDir, '..');
 process.chdir(rootDir);
 
 const isWindows = process.platform === 'win32';
+const npmCommand = isWindows ? 'npm.cmd' : 'npm';
 const venvDir = path.join(rootDir, '.venv');
 const venvPython = isWindows
   ? path.join(venvDir, 'Scripts', 'python.exe')
@@ -15,8 +18,8 @@ const venvPython = isWindows
 const markerDir = path.join(venvDir, '.ft-markers');
 const envPath = path.join(rootDir, '.env');
 
-function commandExists(command, args = ['--version']) {
-  const result = spawnSync(command, args, { stdio: 'ignore', shell: false });
+function commandExists(command, args = ['--version'], useShell = false) {
+  const result = spawnSync(command, args, { stdio: 'ignore', shell: useShell });
   return result.status === 0;
 }
 
@@ -30,12 +33,12 @@ function detectPython() {
   throw new Error('Không tìm thấy Python 3. Hãy cài Python 3.12 trở lên và chạy lại.');
 }
 
-function run(command, args, label) {
+function run(command, args, label, useShell = false) {
   console.log(`\n[FT] ${label}`);
   const result = spawnSync(command, args, {
     cwd: rootDir,
     stdio: 'inherit',
-    shell: false,
+    shell: useShell,
   });
   if (result.status !== 0) {
     throw new Error(`${label} thất bại với mã ${result.status ?? 'không xác định'}.`);
@@ -46,13 +49,13 @@ function fileHash(filePath) {
   return createHash('sha256').update(readFileSync(filePath)).digest('hex');
 }
 
-function installWhenChanged(sourceFile, markerName, command, args, label) {
+function installWhenChanged({ sourceFile, markerName, requiredPath, command, args, label, useShell = false }) {
   mkdirSync(markerDir, { recursive: true });
   const markerPath = path.join(markerDir, markerName);
   const currentHash = fileHash(sourceFile);
   const previousHash = existsSync(markerPath) ? readFileSync(markerPath, 'utf8').trim() : '';
-  if (currentHash !== previousHash) {
-    run(command, args, label);
+  if (currentHash !== previousHash || (requiredPath && !existsSync(requiredPath))) {
+    run(command, args, label, useShell);
     writeFileSync(markerPath, currentHash, 'utf8');
   } else {
     console.log(`[FT] Bỏ qua ${label.toLowerCase()}: dependency không thay đổi.`);
@@ -63,9 +66,7 @@ function createLocalEnv() {
   if (existsSync(envPath)) return;
 
   const examplePath = path.join(rootDir, '.env.example');
-  if (!existsSync(examplePath)) {
-    throw new Error('Không tìm thấy .env.example.');
-  }
+  if (!existsSync(examplePath)) throw new Error('Không tìm thấy .env.example.');
 
   const secretKey = randomBytes(48).toString('hex');
   const initialPassword = `FT-${randomBytes(9).toString('base64url')}!`;
@@ -79,7 +80,7 @@ function createLocalEnv() {
   console.log('\n[FT] Đã tạo .env cho môi trường local.');
   console.log('[FT] Tài khoản quản trị khởi tạo: admin@ftsocial.com');
   console.log(`[FT] Mật khẩu quản trị khởi tạo: ${initialPassword}`);
-  console.log('[FT] Hãy lưu lại mật khẩu này. Nó chỉ được hiển thị trong lần tạo .env đầu tiên.\n');
+  console.log('[FT] Hãy lưu lại mật khẩu này. Mật khẩu chỉ được hiển thị khi .env được tạo lần đầu.\n');
 }
 
 function stopChild(child) {
@@ -99,21 +100,24 @@ async function main() {
     run(python.command, [...python.prefix, '-m', 'venv', '.venv'], 'Tạo môi trường Python .venv');
   }
 
-  installWhenChanged(
-    path.join(rootDir, 'backend', 'requirements.txt'),
-    'requirements.sha256',
-    venvPython,
-    ['-m', 'pip', 'install', '-r', 'backend/requirements.txt'],
-    'Cài dependency backend',
-  );
+  installWhenChanged({
+    sourceFile: path.join(rootDir, 'backend', 'requirements.txt'),
+    markerName: 'requirements.sha256',
+    requiredPath: venvPython,
+    command: venvPython,
+    args: ['-m', 'pip', 'install', '-r', 'backend/requirements.txt'],
+    label: 'Cài dependency backend',
+  });
 
-  installWhenChanged(
-    path.join(rootDir, 'package.json'),
-    'package.sha256',
-    isWindows ? 'npm.cmd' : 'npm',
-    ['install', '--no-audit', '--no-fund'],
-    'Cài dependency frontend',
-  );
+  installWhenChanged({
+    sourceFile: path.join(rootDir, 'package.json'),
+    markerName: 'package.sha256',
+    requiredPath: path.join(rootDir, 'node_modules'),
+    command: npmCommand,
+    args: ['install', '--no-audit', '--no-fund'],
+    label: 'Cài dependency frontend',
+    useShell: isWindows,
+  });
 
   run(venvPython, ['backend/manage.py', 'migrate', '--noinput'], 'Cập nhật cơ sở dữ liệu');
   run(venvPython, ['backend/manage.py', 'check'], 'Kiểm tra cấu hình Django');
@@ -127,10 +131,10 @@ async function main() {
     stdio: 'inherit',
     shell: false,
   });
-  const frontend = spawn(isWindows ? 'npm.cmd' : 'npm', ['run', 'dev', '--', '--host', '127.0.0.1'], {
+  const frontend = spawn(npmCommand, ['run', 'dev', '--', '--host', '127.0.0.1'], {
     cwd: rootDir,
     stdio: 'inherit',
-    shell: false,
+    shell: isWindows,
   });
 
   let shuttingDown = false;
