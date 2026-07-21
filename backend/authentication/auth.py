@@ -1,104 +1,175 @@
-import base64
 import json
+import logging
 import os
-from rest_framework import authentication
-from rest_framework import exceptions
-from .models import UserProfile, SystemConfig
+from functools import lru_cache
+
+import firebase_admin
+from django.conf import settings
+from django.utils import timezone
+from firebase_admin import auth as firebase_auth
+from firebase_admin import credentials
+from rest_framework import authentication, exceptions
+
+from .models import SystemConfig, UserProfile
+
+logger = logging.getLogger(__name__)
+VALID_ROLES = {"ADMIN", "MANAGER", "EMPLOYEE"}
+
+
+def _admin_emails() -> set[str]:
+    configured: set[str] = set()
+    try:
+        config = SystemConfig.objects.filter(key="main").only("admin_emails").first()
+        if config and config.admin_emails:
+            configured.update(
+                email.strip().lower()
+                for email in config.admin_emails.split(",")
+                if email.strip()
+            )
+    except Exception:
+        logger.exception("Unable to read admin emails from the database.")
+
+    configured.update(
+        email.strip().lower()
+        for email in os.getenv("ADMIN_EMAILS", "").split(",")
+        if email.strip()
+    )
+    return configured
+
+
+def _firebase_options() -> dict[str, str]:
+    project_id = os.getenv("FIREBASE_PROJECT_ID", "").strip()
+    return {"projectId": project_id} if project_id else {}
+
+
+@lru_cache(maxsize=1)
+def get_firebase_app():
+    """Initialize Firebase Admin once, using a JSON credential when provided."""
+    try:
+        return firebase_admin.get_app()
+    except ValueError:
+        pass
+
+    credential_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+    options = _firebase_options()
+
+    if credential_json:
+        try:
+            info = json.loads(credential_json)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON.") from exc
+        return firebase_admin.initialize_app(credentials.Certificate(info), options=options or None)
+
+    # Token verification can work with Application Default Credentials when the
+    # project ID is configured on the VPS. User-management APIs additionally
+    # require a service account with Firebase Auth permissions.
+    return firebase_admin.initialize_app(options=options or None)
+
+
+def _verify_token(id_token: str) -> dict:
+    if id_token.startswith("mock-dev-token-"):
+        if not (settings.DEBUG and settings.ENABLE_MOCK_AUTH):
+            raise exceptions.AuthenticationFailed("Mock authentication is disabled.")
+        email = id_token.removeprefix("mock-dev-token-").strip().lower()
+        if not email or "@" not in email:
+            raise exceptions.AuthenticationFailed("Mock token email is invalid.")
+        return {
+            "uid": f"mock-uid-{email}",
+            "email": email,
+            "name": email.split("@", 1)[0],
+            "picture": "",
+        }
+
+    try:
+        return firebase_auth.verify_id_token(
+            id_token,
+            app=get_firebase_app(),
+            check_revoked=False,
+            clock_skew_seconds=5,
+        )
+    except Exception as exc:
+        logger.warning("Firebase token verification failed: %s", exc)
+        raise exceptions.AuthenticationFailed("ID Token is invalid or expired.") from exc
+
+
+def _persist_google_token(token: str, role: str) -> None:
+    if role not in {"ADMIN", "MANAGER"}:
+        return
+    try:
+        config, _ = SystemConfig.objects.get_or_create(key="main")
+        config.last_google_access_token = token
+        config.last_google_access_token_time = timezone.now()
+        config.save(
+            update_fields=["last_google_access_token", "last_google_access_token_time"]
+        )
+    except Exception:
+        logger.exception("Unable to persist the Google OAuth access token.")
+
 
 class FirebaseTokenAuthentication(authentication.BaseAuthentication):
+    keyword = "Bearer"
+
     def authenticate(self, request):
-        auth_header = request.META.get('HTTP_AUTHORIZATION')
-        if not auth_header or not auth_header.startswith('Bearer '):
+        auth_header = authentication.get_authorization_header(request).decode("utf-8")
+        if not auth_header:
             return None
 
-        id_token = auth_header.split('Bearer ')[1].strip()
+        parts = auth_header.split()
+        if len(parts) != 2 or parts[0].lower() != self.keyword.lower():
+            raise exceptions.AuthenticationFailed("Authorization header must use Bearer token.")
+
+        id_token = parts[1].strip()
         if not id_token:
-            return None
+            raise exceptions.AuthenticationFailed("ID Token is missing.")
 
-        # Extract google token if sent
-        google_token = request.META.get('HTTP_X_GOOGLE_OAUTH_TOKEN')
-        if google_token and google_token.strip():
-            # Update system config with last google access token
-            try:
-                config, _ = SystemConfig.objects.get_or_create(key='main')
-                config.last_google_access_token = google_token
-                from django.utils import timezone
-                config.last_google_access_token_time = timezone.now()
-                # If config data doesn't have it, merge
-                if not config.data:
-                    config.data = {}
-                config.data['lastGoogleAccessToken'] = google_token
-                config.data['lastGoogleAccessTokenTime'] = timezone.now().isoformat()
-                config.save()
-            except Exception as e:
-                print('Error saving backup Google Access Token:', e)
-
-        email = None
-        if id_token.startswith('mock-dev-token-'):
-            email = id_token.replace('mock-dev-token-', '')
-        else:
-            parts = id_token.split('.')
-            if len(parts) == 3:
-                try:
-                    # Decode base64 payload
-                    payload_b64 = parts[1]
-                    # Add padding if necessary
-                    payload_b64 += '=' * (-len(payload_b64) % 4)
-                    payload_str = base64.b64decode(payload_b64).decode('utf-8')
-                    payload = json.loads(payload_str)
-                    email = payload.get('email')
-                except Exception as err:
-                    raise exceptions.AuthenticationFailed(f'Lỗi giải mã token JWT: {str(err)}')
-            else:
-                raise exceptions.AuthenticationFailed('Định dạng token không hợp lệ.')
-
+        payload = _verify_token(id_token)
+        email = str(payload.get("email") or "").strip().lower()
         if not email:
-            raise exceptions.AuthenticationFailed('Email không hợp lệ.')
+            raise exceptions.AuthenticationFailed("Verified token does not contain an email.")
 
-        # 1. Determine admin emails
-        admin_emails_list = []
-        try:
-            config = SystemConfig.objects.filter(key='main').first()
-            if config and config.admin_emails:
-                admin_emails_list = [e.strip().lower() for e in config.admin_emails.split(',') if e.strip()]
-        except Exception:
-            pass
+        user_profile, created = UserProfile.objects.get_or_create(
+            email=email,
+            defaults={
+                "name": payload.get("name") or email.split("@", 1)[0],
+                "photo_url": payload.get("picture") or "",
+                "role": "EMPLOYEE",
+            },
+        )
 
-        if not admin_emails_list:
-            admin_emails_env = os.getenv('ADMIN_EMAILS', '')
-            admin_emails_list = [e.strip().lower() for e in admin_emails_env.split(',') if e.strip()]
+        is_admin = email in _admin_emails()
+        stored_role = user_profile.role if user_profile.role in VALID_ROLES else "EMPLOYEE"
+        role = "ADMIN" if is_admin else ("EMPLOYEE" if stored_role == "ADMIN" else stored_role)
 
-        normalized_email = email.lower()
-        is_admin = (normalized_email in admin_emails_list or 
-                    normalized_email == 'admin' or 
-                    normalized_email == 'admin@ftsocial.com')
-
-        # 2. Get or create UserProfile
-        user_profile, created = UserProfile.objects.get_or_create(email=email)
-        
-        # Determine the role
-        stored_role = user_profile.role
-        if stored_role == 'VIEWER':
-            stored_role = 'EMPLOYEE'
-            
-        role = 'ADMIN' if is_admin else (stored_role or 'EMPLOYEE')
-        
-        if created or user_profile.role != role:
+        changed_fields: list[str] = []
+        display_name = payload.get("name") or user_profile.name or email.split("@", 1)[0]
+        picture = payload.get("picture") or user_profile.photo_url or ""
+        if user_profile.name != display_name:
+            user_profile.name = display_name
+            changed_fields.append("name")
+        if user_profile.photo_url != picture:
+            user_profile.photo_url = picture
+            changed_fields.append("photo_url")
+        if user_profile.role != role:
             user_profile.role = role
-            user_profile.name = user_profile.name or email.split('@')[0]
+            changed_fields.append("role")
+        if changed_fields:
+            user_profile.save(update_fields=[*changed_fields, "updated_at"])
+        elif created:
             user_profile.save()
 
-        # Attach custom attributes for roles checks
-        request.user_role = role
-        request.google_access_token = google_token or None
-        
-        if not request.google_access_token:
-            # Fallback to config backup token
-            try:
-                config = SystemConfig.objects.filter(key='main').first()
-                if config and config.last_google_access_token:
-                    request.google_access_token = config.last_google_access_token
-            except Exception:
-                pass
+        google_token = str(request.META.get("HTTP_X_GOOGLE_OAUTH_TOKEN") or "").strip()
+        if google_token:
+            _persist_google_token(google_token, role)
 
-        return (user_profile, id_token)
+        request.user_role = role
+        request.auth_payload = payload
+        request.google_access_token = google_token or None
+
+        if request.google_access_token is None and role in {"ADMIN", "MANAGER"}:
+            config = SystemConfig.objects.filter(key="main").only(
+                "last_google_access_token"
+            ).first()
+            if config and config.last_google_access_token:
+                request.google_access_token = config.last_google_access_token
+
+        return user_profile, id_token
