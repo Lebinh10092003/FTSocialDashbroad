@@ -1,11 +1,36 @@
+# Node / frontend
 node_modules/
 build/
 dist/
 coverage/
-.DS_Store
 *.log
+
+# Python / Django
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+*.sqlite3
+backend/db.sqlite3
+staticfiles/
+
+# Runtime data and uploaded files
+server/data/
+uploads/
+media/
+
+# Local environment and editor files
 .env*
 !.env.example
-
-# Runtime database: may contain access tokens and generated analytics data
-server/data/
+.DS_Store
+.vscode/
+.idea/
