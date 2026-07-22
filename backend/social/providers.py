@@ -144,45 +144,60 @@ class FacebookProvider:
             "page_daily_follows_unique": "daily_follows_unique",
             "page_daily_unfollows_unique": "daily_unfollows_unique",
         }
-        by_date = {}
-        for metric_name, field in metric_fields.items():
-            params = {"metric": metric_name, "period": "day"}
-            if since:
-                # Page Insights accepts calendar boundaries reliably. Unix
-                # timestamps can yield an empty data set for these metrics.
-                params["since"] = timezone.localtime(since).date().isoformat()
-            if until:
-                params["until"] = timezone.localtime(until).date().isoformat()
-            try:
-                payload = fetch_with_retry(
-                    f"https://graph.facebook.com/{self.api_version}/{external_id}/insights",
-                    headers={"Authorization": f"Bearer {token}"},
-                    params=params,
-                )
-            except requests.RequestException as exc:
-                # Insights require Page analysis permissions. Keep post syncing
-                # available for a Page that has not yet granted this scope.
-                logger.warning(
-                    "Page Insight %s unavailable for Facebook Page %s: %s",
-                    metric_name,
-                    external_id,
-                    exc,
-                )
-                continue
+        start_date = timezone.localtime(since).date() if since else None
+        end_date = timezone.localtime(until).date() if until else None
+        ranges = [(start_date, end_date)]
+        if start_date and end_date:
+            # Meta returns an empty result for these Page metrics when the
+            # queried date range is too large. Keep each call within 90 days;
+            # overlapping boundaries are safely merged by snapshot date.
+            ranges = []
+            range_start = start_date
+            while range_start <= end_date:
+                range_end = min(range_start + datetime.timedelta(days=89), end_date)
+                ranges.append((range_start, range_end))
+                range_start = range_end + datetime.timedelta(days=1)
 
-            for metric in payload.get("data", []):
-                for point in metric.get("values", []) or []:
-                    snapshot_date = self._insight_snapshot_date(point.get("end_time"))
-                    if not snapshot_date:
-                        continue
-                    raw_value = point.get("value")
-                    if isinstance(raw_value, dict):
-                        raw_value = raw_value.get("value")
-                    try:
-                        value = int(raw_value)
-                    except (TypeError, ValueError):
-                        continue
-                    by_date.setdefault(snapshot_date, {"snapshot_date": snapshot_date})[field] = value
+        by_date = {}
+        for range_start, range_end in ranges:
+            for metric_name, field in metric_fields.items():
+                params = {"metric": metric_name, "period": "day"}
+                if range_start:
+                    # Page Insights accepts calendar boundaries reliably. Unix
+                    # timestamps can yield an empty data set for these metrics.
+                    params["since"] = range_start.isoformat()
+                if range_end:
+                    params["until"] = range_end.isoformat()
+                try:
+                    payload = fetch_with_retry(
+                        f"https://graph.facebook.com/{self.api_version}/{external_id}/insights",
+                        headers={"Authorization": f"Bearer {token}"},
+                        params=params,
+                    )
+                except requests.RequestException as exc:
+                    # Insights require Page analysis permissions. Keep post syncing
+                    # available for a Page that has not yet granted this scope.
+                    logger.warning(
+                        "Page Insight %s unavailable for Facebook Page %s: %s",
+                        metric_name,
+                        external_id,
+                        exc,
+                    )
+                    continue
+
+                for metric in payload.get("data", []):
+                    for point in metric.get("values", []) or []:
+                        snapshot_date = self._insight_snapshot_date(point.get("end_time"))
+                        if not snapshot_date:
+                            continue
+                        raw_value = point.get("value")
+                        if isinstance(raw_value, dict):
+                            raw_value = raw_value.get("value")
+                        try:
+                            value = int(raw_value)
+                        except (TypeError, ValueError):
+                            continue
+                        by_date.setdefault(snapshot_date, {"snapshot_date": snapshot_date})[field] = value
 
         return [by_date[key] for key in sorted(by_date)]
 

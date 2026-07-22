@@ -111,6 +111,31 @@ class FacebookPaginationTests(TestCase):
             ["page_follows", "page_daily_follows_unique", "page_daily_unfollows_unique"],
         )
         self.assertTrue(all("access_token" not in call.kwargs["params"] for call in fetch.call_args_list))
+    @patch("social.providers.fetch_with_retry")
+    def test_follower_insights_chunks_a_year_into_90_day_windows(self, fetch):
+        fetch.side_effect = [{"data": []}] * 15
+        provider = FacebookProvider()
+        end = timezone.now()
+
+        with patch.object(provider, "get_token", return_value="test-token"):
+            provider.get_follower_insights(
+                "channel",
+                "page",
+                since=end - timedelta(days=365),
+                until=end,
+            )
+
+        self.assertEqual(fetch.call_count, 15)
+        windows = {
+            (call.kwargs["params"]["since"], call.kwargs["params"]["until"])
+            for call in fetch.call_args_list
+        }
+        self.assertEqual(len(windows), 5)
+        for start, finish in windows:
+            self.assertLessEqual(
+                (datetime.date.fromisoformat(finish) - datetime.date.fromisoformat(start)).days,
+                89,
+            )
 
 
 class SyncQueueTests(TestCase):
