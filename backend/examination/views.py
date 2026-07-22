@@ -19,25 +19,42 @@ from .sync import (
 
 EXAMINATION_SEED = {
     'competitions': [
-        { 'id': 'aysbc', 'code': 'AYSBC', 'name': 'Huy hi?u c?c Nh? khoa h?c tr? Ch?u ?', 'parent': 'AYSBC', 'organizer': 'SCS v? META Knowledge' },
+        { 'id': 'aysbc', 'code': 'AYSBC', 'name': 'Huy hiệu các Nhà khoa học trẻ Châu Á', 'parent': 'AYSBC', 'organizer': 'SCS và META Knowledge' },
         { 'id': 'imo', 'code': 'SIMO', 'name': 'International Maths Olympiad', 'parent': 'SCO - IMO', 'organizer': 'SCO' },
         { 'id': 'ieo', 'code': 'SIEO', 'name': 'International English Olympiad', 'parent': 'SCO - IEO', 'organizer': 'SCO' },
         { 'id': 'iso', 'code': 'SISO', 'name': 'International Science Olympiad', 'parent': 'SCO - ISO', 'organizer': 'SCO' },
         { 'id': 'fimo', 'code': 'FIMO', 'name': 'FermatTech International Mathematics Olympiad', 'parent': 'FIMO', 'organizer': 'FermatTech' },
-        { 'id': 'fieo', 'code': 'FIEO', 'name': 'FermatTech International English Olympiad', 'parent': 'FIEO - Ti?ng Anh', 'organizer': 'FermatTech' },
+        { 'id': 'fieo', 'code': 'FIEO', 'name': 'FermatTech International English Olympiad', 'parent': 'FIEO - Tiếng Anh', 'organizer': 'FermatTech' },
     ],
     'sessions': [
-        { 'id': 'aysbc', 'code': 'AYSBC', 'name': 'Huy hi?u c?c Nh? khoa h?c tr? Ch?u ?', 'parent': 'AYSBC', 'organizer': 'SCS v? META Knowledge', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Ch?a c?p nh?t', 'note': '' },
-        { 'id': 'imo', 'code': 'SIMO', 'name': 'International Maths Olympiad', 'parent': 'SCO - IMO', 'organizer': 'SCO', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Ch?a c?p nh?t', 'note': '' },
-        { 'id': 'ieo', 'code': 'SIEO', 'name': 'International English Olympiad', 'parent': 'SCO - IEO', 'organizer': 'SCO', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Ch?a c?p nh?t', 'note': '' },
-        { 'id': 'iso', 'code': 'SISO', 'name': 'International Science Olympiad', 'parent': 'SCO - ISO', 'organizer': 'SCO', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Ch?a c?p nh?t', 'note': '' },
-        { 'id': 'fimo', 'code': 'FIMO', 'name': 'FermatTech International Mathematics Olympiad', 'parent': 'FIMO', 'organizer': 'FermatTech', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Ch?a c?p nh?t', 'note': '' },
-        { 'id': 'fieo', 'code': 'FIEO', 'name': 'FermatTech International English Olympiad', 'parent': 'FIEO - Ti?ng Anh', 'organizer': 'FermatTech', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Ch?a c?p nh?t', 'note': '' },
+        { 'id': 'aysbc', 'code': 'AYSBC', 'name': 'Huy hiệu các Nhà khoa học trẻ Châu Á', 'parent': 'AYSBC', 'organizer': 'SCS và META Knowledge', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Chưa cập nhật', 'note': '' },
+        { 'id': 'imo', 'code': 'SIMO', 'name': 'International Maths Olympiad', 'parent': 'SCO - IMO', 'organizer': 'SCO', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Chưa cập nhật', 'note': '' },
+        { 'id': 'ieo', 'code': 'SIEO', 'name': 'International English Olympiad', 'parent': 'SCO - IEO', 'organizer': 'SCO', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Chưa cập nhật', 'note': '' },
+        { 'id': 'iso', 'code': 'SISO', 'name': 'International Science Olympiad', 'parent': 'SCO - ISO', 'organizer': 'SCO', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Chưa cập nhật', 'note': '' },
+        { 'id': 'fimo', 'code': 'FIMO', 'name': 'FermatTech International Mathematics Olympiad', 'parent': 'FIMO', 'organizer': 'FermatTech', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Chưa cập nhật', 'note': '' },
+        { 'id': 'fieo', 'code': 'FIEO', 'name': 'FermatTech International English Olympiad', 'parent': 'FIEO - Tiếng Anh', 'organizer': 'FermatTech', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Chưa cập nhật', 'note': '' },
     ],
     'candidates': [],
 }
 
+LEGACY_SEED_TEXT_CORRECTIONS = {
+    'Huy hi\u003fu c\u003fc Nh\u003f khoa h\u003fc tr\u003f Ch\u003fu \u003f': 'Huy hiệu các Nhà khoa học trẻ Châu Á',
+    'SCS v\u003f META Knowledge': 'SCS và META Knowledge',
+    'FIEO - Ti\u003fng Anh': 'FIEO - Tiếng Anh',
+    'Ch\u003fa c\u003fp nh\u003ft': 'Chưa cập nhật',
+}
+
+def repair_legacy_seed_text():
+    for model, fields in (
+        (Competition, ('name', 'parent', 'organizer')),
+        (ExamSession, ('name', 'parent', 'organizer', 'phase')),
+    ):
+        for field in fields:
+            for old, new in LEGACY_SEED_TEXT_CORRECTIONS.items():
+                model.objects.filter(**{field: old}).update(**{field: new})
+
 def ensure_examination_seed():
+    repair_legacy_seed_text()
     if ExamSession.objects.exists():
         return
         

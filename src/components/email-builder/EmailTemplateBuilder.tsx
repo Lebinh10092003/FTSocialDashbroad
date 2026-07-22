@@ -749,7 +749,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
               onClick={handleCreateTemplate}
               className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer transition-all"
             >
-              T?o m?u m?i
+              Tạo mẫu mới
             </button>
             <button onClick={onAccountClick} className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer transition-all">{isGuest ? 'Đăng nhập' : userName || 'Tài khoản'}</button>
             <button

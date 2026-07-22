@@ -11,6 +11,8 @@ HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8001/api/health/}"
 HEALTH_HOST="${HEALTH_HOST:-workspace.fermat.vn}"
 HEALTH_RETRIES="${HEALTH_RETRIES:-30}"
 HEALTH_DELAY_SECONDS="${HEALTH_DELAY_SECONDS:-1}"
+DATABASE_BACKUP_DIR="${DATABASE_BACKUP_DIR:-/var/lib/ft-workspace/backups}"
+DATABASE_BACKUP_KEEP="${DATABASE_BACKUP_KEEP:-30}"
 
 cd "$PROJECT_DIR"
 git pull --ff-only
@@ -23,6 +25,7 @@ fi
 "$VENV_DIR/bin/pip" install -r backend/requirements.txt
 (
   cd backend
+  "$VENV_DIR/bin/python" manage.py backup_workspace_db --destination "$DATABASE_BACKUP_DIR" --keep "$DATABASE_BACKUP_KEEP"
   "$VENV_DIR/bin/python" manage.py migrate --noinput
   "$VENV_DIR/bin/python" manage.py collectstatic --noinput
 )

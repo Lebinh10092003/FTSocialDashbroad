@@ -55,7 +55,15 @@ TEMPLATES = [{
     ]},
 }]
 
-DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3", "OPTIONS": {"timeout": 30}}}
+# Local development keeps the database in backend/db.sqlite3.  Production can set
+# DJANGO_DB_PATH in backend/.env to a durable directory outside the release tree.
+_default_database_path = BASE_DIR / "db.sqlite3"
+_configured_database_path = os.getenv("DJANGO_DB_PATH", "").strip()
+DATABASE_PATH = Path(_configured_database_path).expanduser() if _configured_database_path else _default_database_path
+if not DATABASE_PATH.is_absolute():
+    DATABASE_PATH = (PROJECT_ROOT / DATABASE_PATH).resolve()
+
+DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": DATABASE_PATH, "OPTIONS": {"timeout": 30}}}
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

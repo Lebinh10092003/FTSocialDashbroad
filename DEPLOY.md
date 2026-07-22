@@ -26,6 +26,11 @@ usermod -aG www-data workspace
 mkdir -p /var/www/ft-workspace
 chown -R workspace:www-data /var/www/ft-workspace
 
+# SQLite data and backups stay outside the Git checkout/release directory.
+mkdir -p /var/lib/ft-workspace/data /var/lib/ft-workspace/backups
+chown -R workspace:www-data /var/lib/ft-workspace
+chmod 750 /var/lib/ft-workspace /var/lib/ft-workspace/data /var/lib/ft-workspace/backups
+
 # Clone repository nếu thư mục chưa phải Git repository
 if [ ! -d /var/www/ft-workspace/.git ]; then
     rm -rf /var/www/ft-workspace
@@ -57,6 +62,9 @@ Các biến tối thiểu:
 DJANGO_DEBUG=false
 DJANGO_SECRET_KEY=THAY_BANG_CHUOI_BI_MAT_DAI_VA_NGAU_NHIEN
 DJANGO_ALLOWED_HOSTS=workspace.fermat.vn
+# Keep production data outside the Git checkout. This preserves tokens, expiry dates,
+# pages, sync history, users and all application data through every deployment.
+DJANGO_DB_PATH=/var/lib/ft-workspace/data/workspace.sqlite3
 CSRF_TRUSTED_ORIGINS=https://workspace.fermat.vn
 BOOTSTRAP_ADMIN_EMAIL=admin@fermat.vn
 BOOTSTRAP_ADMIN_PASSWORD=THAY_BANG_MAT_KHAU_MANH
@@ -135,6 +143,10 @@ sudo -u workspace -H bash -lc 'cd /var/www/ft-workspace && bash deploy.sh'
 ```
 
 Script sẽ tự động:
+
+- Back up SQLite online before migrations (keep the 30 newest copies in `/var/lib/ft-workspace/backups`);
+- On first use of `DJANGO_DB_PATH`, safely copy the existing `backend/db.sqlite3` to the durable location;
+
 
 - lấy code mới nhất bằng `git pull --ff-only`;
 - tạo hoặc dùng lại `.venv`;
