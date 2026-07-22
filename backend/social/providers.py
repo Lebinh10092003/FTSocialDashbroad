@@ -148,9 +148,11 @@ class FacebookProvider:
         for metric_name, field in metric_fields.items():
             params = {"metric": metric_name, "period": "day"}
             if since:
-                params["since"] = int(since.timestamp())
+                # Page Insights accepts calendar boundaries reliably. Unix
+                # timestamps can yield an empty data set for these metrics.
+                params["since"] = timezone.localtime(since).date().isoformat()
             if until:
-                params["until"] = int(until.timestamp())
+                params["until"] = timezone.localtime(until).date().isoformat()
             try:
                 payload = fetch_with_retry(
                     f"https://graph.facebook.com/{self.api_version}/{external_id}/insights",
