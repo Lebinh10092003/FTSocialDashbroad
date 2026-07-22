@@ -8,6 +8,7 @@ SERVICE_NAME="${SERVICE_NAME:-workspace-django.service}"
 SYNC_SERVICE_NAME="${SYNC_SERVICE_NAME:-workspace-social-sync.service}"
 SYNC_TIMER_NAME="${SYNC_TIMER_NAME:-workspace-social-sync.timer}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8001/api/health/}"
+HEALTH_HOST="${HEALTH_HOST:-workspace.fermat.vn}"
 HEALTH_RETRIES="${HEALTH_RETRIES:-30}"
 HEALTH_DELAY_SECONDS="${HEALTH_DELAY_SECONDS:-1}"
 
@@ -38,8 +39,8 @@ sudo systemctl enable --now "$SYNC_TIMER_NAME"
 sudo systemctl restart "$SERVICE_NAME"
 
 for attempt in $(seq 1 "$HEALTH_RETRIES"); do
-  if curl --fail --silent "$HEALTH_URL" >/dev/null 2>&1; then
-    curl --fail --silent --show-error "$HEALTH_URL"
+  if curl --fail --silent --header "Host: $HEALTH_HOST" "$HEALTH_URL" >/dev/null 2>&1; then
+    curl --fail --silent --show-error --header "Host: $HEALTH_HOST" "$HEALTH_URL"
     echo
     echo "Deploy completed successfully."
     exit 0
@@ -49,6 +50,6 @@ for attempt in $(seq 1 "$HEALTH_RETRIES"); do
   sleep "$HEALTH_DELAY_SECONDS"
 done
 
-echo "ERROR: Django API did not become ready at $HEALTH_URL" >&2
+echo "ERROR: Django API did not become ready at $HEALTH_URL (Host: $HEALTH_HOST)" >&2
 sudo systemctl --no-pager --full status "$SERVICE_NAME" || true
 exit 1
