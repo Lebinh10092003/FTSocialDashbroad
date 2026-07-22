@@ -461,9 +461,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                   onClick={() => {
                     if (!card.metric) return;
                     setActiveMetric(card.metric);
-                    // "Chỉ hiển đường tổng" chỉ là mặc định của Follow. Không để
-                    // trạng thái này làm ẩn toàn bộ đường biểu diễn ở KPI khác.
-                    setOnlyShowTotal(card.metric === 'followers');
+                    setOnlyShowTotal(false);
                   }}
                   className={`text-left p-4 rounded-xl border transition-all premium-card ${card.metric ? 'cursor-pointer' : 'cursor-default'} ${isActive ? `${card.accent} ring-2` : 'bg-white border-slate-200/70 hover:border-slate-300'}`}
                 >
@@ -516,7 +514,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                       <YAxis domain={yAxisScale.domain} ticks={yAxisScale.ticks} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
                       <Tooltip content={<FollowerTooltip />} cursor={{ stroke: '#c4b5fd', strokeDasharray: '3 3' }} />
                       <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" />
-                      <Line type="monotone" dataKey="followersCount" name="Tổng cộng" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
+                      <Line type="monotone" dataKey="followersCount" name={isSingleChannelScope ? 'Trang đang chọn' : 'Tổng cộng'} stroke={isSingleChannelScope ? COLORS[0] : '#94a3b8'} strokeWidth={isSingleChannelScope ? 2.5 : 1.5} strokeDasharray={isSingleChannelScope ? undefined : '4 4'} dot={isSingleChannelScope ? { r: 3 } : false} activeDot={isSingleChannelScope ? { r: 5 } : undefined} />
                       {!onlyShowTotal && !isSingleChannelScope && data.channelStats.filter(stat => selectedChannels.has(stat.channelName)).map((stat, index) => <Line key={stat.channelName} type="monotone" dataKey={`${stat.channelName}_followers`} name={stat.channelName} stroke={COLORS[index % COLORS.length]} strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />)}
                     </LineChart>
                   </ResponsiveContainer>
@@ -535,7 +533,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                     <YAxis domain={yAxisScale.domain} ticks={yAxisScale.ticks} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
                     <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: 10, color: '#fff', fontSize: 12 }} itemStyle={{ color: '#fff' }} labelStyle={{ color: '#fff', fontWeight: 700 }} wrapperStyle={{ zIndex: 30, outline: 'none', pointerEvents: 'none' }} formatter={(value: number, name: string) => [Number(value).toLocaleString('vi-VN'), name]} />
                     <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" />
-                    <Area type="monotone" dataKey={activeMetric} name="Tổng cộng" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 4" fill="url(#totalLine)" />
+                    <Area type="monotone" dataKey={activeMetric} name={isSingleChannelScope ? 'Trang đang chọn' : 'Tổng cộng'} stroke={isSingleChannelScope ? COLORS[0] : '#94a3b8'} strokeWidth={isSingleChannelScope ? 2.5 : 1.5} strokeDasharray={isSingleChannelScope ? undefined : '4 4'} fill="url(#totalLine)" />
                     {!onlyShowTotal && !isSingleChannelScope && data.channelStats.filter(stat => selectedChannels.has(stat.channelName)).map((stat, index) => <Area key={stat.channelName} type="monotone" dataKey={`${stat.channelName}_${activeMetric}`} name={stat.channelName} stroke={COLORS[index % COLORS.length]} strokeWidth={2.5} fill={`url(#channel-${index})`} />)}
                   </AreaChart>
                 </ResponsiveContainer>
