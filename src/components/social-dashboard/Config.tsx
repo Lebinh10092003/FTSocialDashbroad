@@ -121,7 +121,9 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
   const scanTokenLifetime = (accessToken: string, pages: { id: string; name: string }[], previous?: FacebookScanToken): FacebookScanToken => {
     const issuedAt = previous?.accessToken === accessToken && previous.issuedAt && previous.expiresAt ? previous.issuedAt : new Date().toISOString();
     const expiresAt = previous?.accessToken === accessToken && previous.expiresAt ? previous.expiresAt : new Date(new Date(issuedAt).getTime() + 60 * 86_400_000).toISOString();
-    return { id: previous?.id || `facebook-scan-${Date.now()}-${Math.random().toString(16).slice(2)}`, platform: 'facebook', label: 'Token quét Facebook', accessToken, issuedAt, expiresAt, pageIds: pages.map(page => page.id), pageNames: pages.map(page => page.name) };
+    const mergedPages = new Map<string, string>((previous?.pageIds || []).map((id, index) => [id, previous?.pageNames?.[index] || id]));
+    pages.forEach(page => mergedPages.set(page.id, page.name));
+    return { id: previous?.id || `facebook-scan-${Date.now()}-${Math.random().toString(16).slice(2)}`, platform: 'facebook', label: 'Token quét Facebook', accessToken, issuedAt, expiresAt, pageIds: [...mergedPages.keys()], pageNames: [...mergedPages.values()] };
   };
   const remainingDays = (expiresAt?: string) => expiresAt ? Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86_400_000)) : null;
 
@@ -379,8 +381,14 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
   const handleImportScannedPages = () => {
     const selected = scannedPages.filter(page => page.checked);
     if (selected.length === 0) { alert('Vui lòng chọn ít nhất một Trang để nhập!'); return; }
+    const selectedPageIds = new Set(selected.map(page => page.id));
     const existingScanToken = facebookScanTokens.find(token => token.accessToken === fbUserToken.trim());
-    const nextScanToken = scanTokenLifetime(fbUserToken.trim(), selected, existingScanToken);
+    // A replacement token for the same complete page group supersedes the old
+    // scan token. Tokens serving other groups remain stored independently.
+    const replacedScanToken = existingScanToken || facebookScanTokens.find(token =>
+      token.pageIds.length > 0 && token.pageIds.every(pageId => selectedPageIds.has(pageId))
+    );
+    const nextScanToken = scanTokenLifetime(fbUserToken.trim(), selected, replacedScanToken);
     const nextList = [...tokensList];
     selected.forEach(page => {
       const id = `facebook-${page.id}`;
@@ -390,7 +398,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
       row.expiresAt = nextScanToken.expiresAt;
       if (index >= 0) nextList[index] = row; else nextList.push(row);
     });
-    const nextScanTokens = existingScanToken ? facebookScanTokens.map(token => token.id === existingScanToken.id ? nextScanToken : token) : [...facebookScanTokens, nextScanToken];
+    const nextScanTokens = replacedScanToken ? facebookScanTokens.map(token => token.id === replacedScanToken.id ? nextScanToken : token) : [...facebookScanTokens, nextScanToken];
     setTokensList(nextList); setFacebookScanTokens(nextScanTokens); void autoSaveTokensList(nextList, nextScanTokens);
     alert(`Đã nạp thành công ${selected.length} trang Facebook vào bảng cấu hình!`);
     setShowAddForm(false); setFbUserToken(''); setScannedPages([]);

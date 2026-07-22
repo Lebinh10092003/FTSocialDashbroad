@@ -127,7 +127,7 @@ def _bootstrap_admin(email: str, password: str):
 
 
 
-TOKEN_LIFETIME_DAYS = 53
+TOKEN_LIFETIME_DAYS = 60
 TOKEN_WARNING_DAYS = 5
 
 
@@ -248,9 +248,9 @@ def _seed_config() -> dict:
     current_facebook_token = os.getenv("CURRENT_FACEBOOK_ACCESS_TOKEN", "").strip()
     if current_facebook_token:
         try:
-            ttl_days = max(1, int(os.getenv("CURRENT_FACEBOOK_TOKEN_TTL_DAYS", "53")))
+            ttl_days = max(1, int(os.getenv("CURRENT_FACEBOOK_TOKEN_TTL_DAYS", "60")))
         except ValueError:
-            ttl_days = 53
+            ttl_days = 60
         scan_tokens.append({
             "id": "facebook-scan-current",
             "platform": "facebook",
