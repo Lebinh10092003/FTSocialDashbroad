@@ -4,9 +4,11 @@ import re
 import requests
 import datetime
 import uuid
+import unicodedata
 from django.utils import timezone
-from .models import Candidate, ExamSession, Competition, ExaminationSheet
+from .models import Candidate, CandidateParticipation, RoundResult, ExamSession, Competition, ExaminationSheet
 from authentication.models import SystemConfig
+from integrations.google_sheets import build_sheets_service, extract_spreadsheet_id
 
 DEFAULT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1kqztN_iCeZ9uR1mO7gz9j1TcUt8ZmCdpEv0TagTf4VA/edit?usp=sharing'
 
@@ -16,22 +18,10 @@ def clean_txt(value):
     return str(value).strip()
 
 def normalise_str(value):
-    val = clean_txt(value).lower()
-    # Remove accents using a basic mapping or regex for Vietnamese
-    char_map = {
-        'à':'a','á':'a','ả':'a','ã':'a','ạ':'a','ă':'a','ằ':'a','ắ':'a','ẳ':'a','ẵ':'a','ặ':'a','â':'a','ầ':'a','ấ':'a','ẩ':'a','ẫ':'a','ậ':'a',
-        'è':'e','é':'e','ẻ':'e','ẽ':'e','ẹ':'e','ê':'e','ề':'e','ế':'e','ể':'e','ễ':'e','ệ':'e',
-        'ì':'i','í':'i','ỉ':'i','ĩ':'i','ị':'i',
-        'ò':'o','ó':'o','ỏ':'o','õ':'o','ọ':'o','ô':'o','ồ':'o','ố':'o','ổ':'o','ỗ':'o','ộ':'o','ơ':'o','ờ':'o','ớ':'o','ở':'o','ỡ':'o','ợ':'o',
-        'ù':'u','ú':'u','ủ':'u','ũ':'u','ụ':'u','ư':'u','ừ':'u','ứ':'u','ử':'u','ữ':'u','ự':'u',
-        'ỳ':'y','ý':'y','ỷ':'y','ỹ':'y','ỵ':'y',
-        'đ':'d',
-    }
-    for k, v in char_map.items():
-        val = val.replace(k, v)
-    # Remove non-alphanumeric
-    val = re.sub(r'[^a-z0-9]', '', val)
-    return val
+    text = clean_txt(value).casefold().replace(chr(273), 'd')
+    text = unicodedata.normalize('NFD', text)
+    text = ''.join(char for char in text if not unicodedata.combining(char))
+    return re.sub(r'[^a-z0-9]+', '', text)
 
 def get_contest_codes(value):
     val = clean_txt(value)
@@ -54,19 +44,25 @@ def merge_contest_codes(*values):
     return ', '.join(result)
 
 def same_candidate(a, b):
-    # Match by CCCD if both present
-    id_a = normalise_str(a.get('identity'))
-    id_b = normalise_str(b.get('identity'))
-    if id_a and id_b:
-        return id_a == id_b
-    
-    # Fallback: match by name, dob, identity, email
-    for field in ['name', 'birth_date', 'identity', 'email']:
-        val_a = normalise_str(a.get(field))
-        val_b = normalise_str(b.get(field))
-        if not val_a or val_a != val_b:
-            return False
-    return True
+    # Exact government ID is strongest identity key.
+    identity_a = normalise_str(a.get('identity'))
+    identity_b = normalise_str(b.get('identity'))
+    if identity_a and identity_b:
+        return identity_a == identity_b
+
+    name_a, name_b = normalise_str(a.get('name')), normalise_str(b.get('name'))
+    if not name_a or name_a != name_b:
+        return False
+
+    # Email plus the same name is safe enough to link a returning candidate.
+    email_a, email_b = normalise_str(a.get('email')), normalise_str(b.get('email'))
+    if email_a and email_b and email_a == email_b:
+        return True
+
+    # When there is no ID/email, require the three stable fields; never match by name alone.
+    dob_a, dob_b = normalise_str(a.get('birth_date')), normalise_str(b.get('birth_date'))
+    school_a, school_b = normalise_str(a.get('school')), normalise_str(b.get('school'))
+    return bool(dob_a and dob_b and school_a and school_b and dob_a == dob_b and school_a == school_b)
 
 def next_code(existing_codes_set, offset):
     yr = datetime.datetime.now().strftime('%y')
@@ -194,35 +190,247 @@ def resolve_column_indices(header):
         
     return idx
 
+ROUND_HISTORY_FIELD_MAP = {
+    'sbd': 'sbd',
+    'date': 'exam_date',
+    'time': 'time_slot',
+    'mode': 'mode',
+    'location': 'location',
+    'link': 'link',
+    'account': 'account',
+    'attendance': 'attendance',
+    'score': 'score',
+    'scoreRate': 'score_rate',
+    'rank': 'rank',
+    'result': 'result',
+    'note': 'note',
+}
+
+
+def merged_headers(grid, header_index):
+    group_row = grid[header_index - 1] if header_index > 0 else []
+    current_group = ''
+    headers = []
+    for index, label in enumerate(grid[header_index]):
+        group = clean_txt(group_row[index]) if index < len(group_row) else ''
+        if group:
+            current_group = group
+        title = clean_txt(label)
+        headers.append(f"{current_group}: {title}" if current_group and title else title)
+    return headers
+
+
+def history_from_sheet_row(headers, row):
+    field_aliases = {
+        'sbd': ['sobaodanh', 'sbd'],
+        'date': ['ngaythi'],
+        'time': ['giocathi', 'giothi'],
+        'mode': ['hinhthucthi'],
+        'location': ['diadiemphongthi', 'diadiemthi'],
+        'link': ['linkthi'],
+        'account': ['taikhoanmatruycap', 'taikhoan'],
+        'attendance': ['trangthaiduthi', 'trangthaithamgia'],
+        'scoreRate': ['tylediem'],
+        'score': ['diem'],
+        'rank': ['xephang'],
+        'result': ['ketquagiaithuong', 'ketqua'],
+        'note': ['ghichusuco', 'ghichu'],
+    }
+    rounds = []
+    for number in (1, 2, 3):
+        prefix = f"vong{number}"
+        values = {}
+        for index, header in enumerate(headers):
+            if index >= len(row):
+                continue
+            normalized = normalise_str(header)
+            if not normalized.startswith(prefix):
+                continue
+            value = clean_txt(row[index])
+            if not value:
+                continue
+            for key, aliases in field_aliases.items():
+                if any(alias in normalized for alias in aliases):
+                    values[key] = value
+                    break
+        if values:
+            values['round'] = 'V' + chr(242) + 'ng ' + str(number)
+            rounds.append(values)
+    return rounds
+
+
+def upsert_participation_history(candidate, session_id, history, source=''):
+    if not session_id:
+        return None
+    session = ExamSession.objects.filter(id=session_id).first()
+    if not session:
+        return None
+    participation, _ = CandidateParticipation.objects.get_or_create(
+        candidate=candidate,
+        session=session,
+        defaults={'source': source or ''},
+    )
+    if source and participation.source != source:
+        participation.source = source
+        participation.save(update_fields=['source', 'updated_at'])
+    for item in history or []:
+        if not isinstance(item, dict):
+            continue
+        round_name = clean_txt(item.get('round'))
+        if not round_name:
+            continue
+        values = {
+            model_field: clean_txt(item.get(payload_field))
+            for payload_field, model_field in ROUND_HISTORY_FIELD_MAP.items()
+        }
+        values['raw_data'] = {str(key): value for key, value in item.items() if value not in (None, '')}
+        RoundResult.objects.update_or_create(
+            participation=participation,
+            round_name=round_name,
+            defaults=values,
+        )
+    return participation
+
+
 def sync_session_candidate_totals():
     sessions = ExamSession.objects.all()
-    candidates = Candidate.objects.all()
-    
     totals = {}
-    sessions_by_code = {}
-    
-    for s in sessions:
-        code = clean_txt(s.code).upper()
-        if code:
-            if code not in sessions_by_code:
-                sessions_by_code[code] = []
-            sessions_by_code[code].append(s.id)
-            
-    for c in candidates:
-        session_ids = c.session_ids or []
-        linked = []
-        if session_ids:
-            linked = session_ids
+    for session_id in CandidateParticipation.objects.values_list('session_id', flat=True):
+        totals[session_id] = totals.get(session_id, 0) + 1
+
+    # Preserve older imports until their data migration has linked them.
+    if not totals:
+        sessions_by_code = {}
+        for session in sessions:
+            sessions_by_code.setdefault(clean_txt(session.code).upper(), []).append(session.id)
+        for candidate in Candidate.objects.all():
+            linked = list(candidate.session_ids or [])
+            if not linked:
+                for code in get_contest_codes(candidate.contests):
+                    linked.extend(sessions_by_code.get(code, []))
+            for session_id in set(linked):
+                totals[session_id] = totals.get(session_id, 0) + 1
+
+    for session in sessions:
+        session.candidates_count = totals.get(session.id, 0)
+        session.save(update_fields=['candidates_count', 'updated_at'])
+
+EXPORT_HEADERS = [
+    'Mã FT', 'Họ và tên thí sinh', 'Trường học', 'Lớp đang học', 'Tỉnh/Thành phố cư trú',
+    'Cuộc thi đăng ký tham gia', 'Ngày sinh', 'Email liên lạc', 'Họ tên phụ huynh',
+    'Số điện thoại liên lạc', 'Số CCCD/Hộ chiếu', 'Địa chỉ liên hệ',
+]
+for _round_number in (1, 2, 3):
+    _prefix = f'Vòng {_round_number}: '
+    EXPORT_HEADERS.extend([
+        _prefix + 'Số báo danh', _prefix + 'Ngày thi', _prefix + 'Giờ/ca thi',
+        _prefix + 'Hình thức thi', _prefix + 'Địa điểm/phòng thi', _prefix + 'Link thi',
+        _prefix + 'Tài khoản/mã truy cập', _prefix + 'Trạng thái dự thi', _prefix + 'Điểm',
+        _prefix + 'Tỷ lệ điểm', _prefix + 'Xếp hạng', _prefix + 'Kết quả/giải thưởng',
+        _prefix + 'Ghi chú/sự cố',
+    ])
+
+
+def _round_slots(round_results):
+    slots = {}
+    unnumbered = []
+    for item in round_results:
+        match = re.search(r'([1-3])', clean_txt(item.round_name))
+        if match and int(match.group(1)) not in slots:
+            slots[int(match.group(1))] = item
         else:
-            for code in get_contest_codes(c.contests):
-                linked.extend(sessions_by_code.get(code, []))
-                
-        for s_id in set(linked):
-            totals[s_id] = totals.get(s_id, 0) + 1
-            
-    for s in sessions:
-        s.candidates_count = totals.get(s.id, 0)
-        s.save()
+            unnumbered.append(item)
+    for number in (1, 2, 3):
+        if number not in slots and unnumbered:
+            slots[number] = unnumbered.pop(0)
+    return slots
+
+
+def session_export_rows(session_id):
+    """Build a re-importable flat export: one row per candidate/session, three round groups."""
+    rows = [EXPORT_HEADERS]
+    participations = (
+        CandidateParticipation.objects.filter(session_id=session_id)
+        .select_related('candidate')
+        .prefetch_related('round_results')
+        .order_by('candidate__sort_key', 'candidate__code')
+    )
+    for participation in participations:
+        candidate = participation.candidate
+        row = [
+            candidate.code, candidate.name, candidate.school or '', candidate.class_name or '',
+            candidate.city or '', candidate.contests or '', candidate.birth_date or '', candidate.email or '',
+            candidate.parent or '', candidate.phone or '', candidate.identity or '', candidate.address or '',
+        ]
+        slots = _round_slots(list(participation.round_results.all()))
+        for number in (1, 2, 3):
+            result = slots.get(number)
+            if not result:
+                row.extend([''] * 13)
+                continue
+            row.extend([
+                result.sbd, result.exam_date, result.time_slot, result.mode, result.location,
+                result.link, result.account, result.attendance, result.score, result.score_rate,
+                result.rank, result.result, result.note,
+            ])
+        rows.append(row)
+    return rows
+
+
+def _sheet_range_title(title):
+    return "'" + title.replace("'", "''") + "'"
+
+
+def export_session_to_google_sheet(sheet, google_access_token=None):
+    session = ExamSession.objects.filter(id=sheet.session_id).first()
+    if not session:
+        raise ValueError('Không tìm thấy kỳ tổ chức được gắn với nguồn Google Sheets.')
+    spreadsheet_id = extract_spreadsheet_id(sheet.url)
+    if not spreadsheet_id:
+        raise ValueError('Liên kết Google Sheets không hợp lệ.')
+
+    config = SystemConfig.objects.filter(key='main').first()
+    config_data = config.data if config else {}
+    saved_token = config.last_google_access_token if config else None
+    service = build_sheets_service(google_access_token or saved_token, config_data or {})
+    tab_name = clean_txt(sheet.sheet_tab) or f'{session.code} {session.time}'
+
+    metadata = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields='sheets(properties(sheetId,title))',
+    ).execute()
+    titles = {
+        item.get('properties', {}).get('title')
+        for item in metadata.get('sheets', [])
+        if item.get('properties', {}).get('title')
+    }
+    if tab_name not in titles:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={'requests': [{'addSheet': {'properties': {'title': tab_name}}}]},
+        ).execute()
+
+    values = session_export_rows(session.id)
+    range_title = _sheet_range_title(tab_name)
+    service.spreadsheets().values().clear(
+        spreadsheetId=spreadsheet_id,
+        range=range_title,
+        body={},
+    ).execute()
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f'{range_title}!A1',
+        valueInputOption='RAW',
+        body={'values': values},
+    ).execute()
+    return {
+        'success': True,
+        'sessionId': session.id,
+        'sheetTab': tab_name,
+        'exported': max(0, len(values) - 1),
+        'message': f'Đã xuất {max(0, len(values) - 1)} hồ sơ sang Google Sheets.',
+    }
+
 
 def get_google_sheet_csv_urls(spreadsheet_url):
     urls = []
@@ -254,7 +462,7 @@ def get_google_sheet_csv_urls(spreadsheet_url):
         
     return urls
 
-def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None):
+def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None):
     def update_state(data):
         if sheet_doc_id:
             try:
@@ -311,11 +519,12 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None):
         if len(grid) < 2:
             raise Exception('Không tìm thấy dữ liệu trong tệp (cần ít nhất 1 dòng tiêu đề + 1 dòng dữ liệu).')
             
-        header_row = grid[0]
+        header_index = next((index for index, row in enumerate(grid) if any('hovaten' in normalise_str(cell) or 'thisinh' in normalise_str(cell) for cell in row)), 0)
+        header_row = merged_headers(grid, header_index)
         col = resolve_column_indices(header_row)
         
         incoming = []
-        for ri in range(1, len(grid)):
+        for ri in range(header_index + 1, len(grid)):
             row = grid[ri]
             if not row or len(row) <= max(col.values()):
                 continue
@@ -369,7 +578,8 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None):
                 'achievement': achievement,
                 'note': note,
                 'parent': f"SĐT: {clean_txt(row[col['phone']])}" if phone else '',
-                'updated': ts_vn
+                'updated': ts_vn,
+                'exam_history': history_from_sheet_row(header_row, row),
             }
             incoming.append(cand)
             
@@ -399,7 +609,8 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None):
                     'name': e.name,
                     'birth_date': e.birth_date,
                     'identity': e.identity,
-                    'email': e.email
+                    'email': e.email,
+                    'school': e.school
                 }
                 if same_candidate(e_dict, cand):
                     matched = e
@@ -427,9 +638,15 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None):
                 # note is parsed but not stored on Candidate model
                     
                 matched.contests = merge_contest_codes(matched.contests, cand['contests'])
+                if session_id:
+                    linked_sessions = list(matched.session_ids or [])
+                    if session_id not in linked_sessions:
+                        linked_sessions.append(session_id)
+                    matched.session_ids = linked_sessions
                 matched.updated = ts_vn
                 matched.sort_key = f"{matched.name.lower()}_{matched.identity or matched.id}"
                 matched.save()
+                upsert_participation_history(matched, session_id, cand.get('exam_history'), spreadsheet_url)
                 updated += 1
             else:
                 code = next_code(existing_codes_set, len(existing) + i)
@@ -450,9 +667,11 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None):
                     achievement=cand['achievement'],
                     # note is not a Candidate model field
                     parent=cand['parent'],
+                    session_ids=[session_id] if session_id else [],
                     updated=ts_vn,
                     sort_key=f"{cand['name'].lower()}_{cand['identity'] or c_id}"
                 )
+                upsert_participation_history(new_cand, session_id, cand.get('exam_history'), spreadsheet_url)
                 existing.append(new_cand)
                 existing_codes_set.add(code)
                 created += 1
@@ -481,7 +700,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None):
             'timestamp': ts_vn
         }
 
-def sync_examination_from_google_sheet(spreadsheet_url=None):
+def sync_examination_from_google_sheet(spreadsheet_url=None, session_id=None, sheet_doc_id=None):
     ts_vn = datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
     
     # helper to update system config state
@@ -496,7 +715,7 @@ def sync_examination_from_google_sheet(spreadsheet_url=None):
             pass
 
     if spreadsheet_url:
-        result = sync_single_sheet(spreadsheet_url, ts_vn)
+        result = sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id, session_id)
         update_global_state({
             'status': 'success' if result['success'] else 'failed',
             'lastSyncDate': ts_vn.split(' ')[0],
@@ -514,15 +733,26 @@ def sync_examination_from_google_sheet(spreadsheet_url=None):
     try:
         sheets = list(ExaminationSheet.objects.all())
         if not sheets:
-            # Seed default sheet
-            default_sheet = ExaminationSheet.objects.create(
-                id=f"sheet-{uuid.uuid4().hex[:10]}",
-                name='Google Sheets Khảo thí FT (Mặc định)',
-                url=DEFAULT_SHEET_URL,
-                status='idle'
-            )
-            sheets = [default_sheet]
-            
+            return {
+                'success': False,
+                'message': 'Chưa có tab nguồn nào được cấu hình.',
+                'created': 0,
+                'updated': 0,
+                'total': 0,
+                'timestamp': ts_vn,
+            }
+
+        unassigned = [sheet.name for sheet in sheets if not sheet.session_id]
+        if unassigned:
+            return {
+                'success': False,
+                'message': 'Có tab nguồn chưa được gắn với kỳ tổ chức: ' + ', '.join(unassigned),
+                'created': 0,
+                'updated': 0,
+                'total': 0,
+                'timestamp': ts_vn,
+            }
+
         total_created = 0
         total_updated = 0
         total_candidates = 0
@@ -533,7 +763,7 @@ def sync_examination_from_google_sheet(spreadsheet_url=None):
             sheet.status = 'running'
             sheet.save()
             
-            res = sync_single_sheet(sheet.url, ts_vn, sheet.id)
+            res = sync_single_sheet(sheet.url, ts_vn, sheet.id, sheet.session_id or None)
             if res['success']:
                 total_created += res['created']
                 total_updated += res['updated']

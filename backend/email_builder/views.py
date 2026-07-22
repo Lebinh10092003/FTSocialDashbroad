@@ -57,7 +57,7 @@ def email_template_detail(request, template_id):
         template = EmailTemplate.objects.get(id=template_id)
     except EmailTemplate.DoesNotExist:
         if request.method == 'PUT':
-            # Support upsert like Express code did
+            # Support idempotent template upsert.
             data = request.data or {}
             user_email = request.user.email
             template = EmailTemplate.objects.create(

@@ -10,7 +10,7 @@ interface PostsProps {
   channels: Channel[];
 }
 
-type DatePreset = 'custom' | '7days' | '30days' | '3months';
+type DatePreset = 'custom' | '7days' | '30days' | '3months' | '6months' | '1year';
 
 function getPastDateStr(days: number): string {
   const date = new Date();
@@ -31,9 +31,9 @@ export default function Posts({ idToken, channels }: PostsProps) {
   const [search, setSearch] = useState('');
   const [platform, setPlatform] = useState<string>('all');
   const [channelId, setChannelId] = useState<string>('all');
-  const [startDate, setStartDate] = useState(getPastDateStr(29));
+  const [startDate, setStartDate] = useState(getPastDateStr(6));
   const [endDate, setEndDate] = useState(getTodayStr());
-  const [datePreset, setDatePreset] = useState<DatePreset>('30days');
+  const [datePreset, setDatePreset] = useState<DatePreset>('7days');
   const [page, setPage] = useState(1);
   const [limit] = useState(15);
   const [postType, setPostType] = useState<string>('all');
@@ -91,6 +91,7 @@ export default function Posts({ idToken, channels }: PostsProps) {
     if (preset === '7days') start.setDate(end.getDate() - 6);
     if (preset === '30days') start.setDate(end.getDate() - 29);
     if (preset === '3months') start.setMonth(end.getMonth() - 3);
+    if (preset === '6months') start.setMonth(end.getMonth() - 6); if (preset === '1year') start.setFullYear(end.getFullYear() - 1);
     setStartDate(start.toISOString().slice(0, 10));
     setEndDate(end.toISOString().slice(0, 10));
     setPage(1);
@@ -149,29 +150,15 @@ export default function Posts({ idToken, channels }: PostsProps) {
       </div>
 
       {/* Filter and search bar */}
-      <form onSubmit={handleSearchSubmit} className="flex flex-wrap items-center gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100">
-        <div className="flex-1 min-w-[200px]">
-          <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Tìm kiếm bài đăng</label>
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="Nhập nội dung bài đăng cần tìm..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-white border border-slate-200 text-xs rounded-lg pl-9 pr-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-          </div>
-        </div>
-
+      <form onSubmit={handleSearchSubmit} className="flex flex-wrap items-end gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100">
         <div>
           <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Nền tảng</label>
-          <SearchableSelect value={platform} onChange={handlePlatformChange} options={[{value:'all',label:'Tất cả'},{value:'facebook',label:'Facebook'},{value:'zalo',label:'Zalo OA'}]} className="min-w-[150px]"/>
+          <SearchableSelect value={platform} onChange={handlePlatformChange} options={[{ value: 'all', label: 'Tất cả nền tảng' }, { value: 'facebook', label: 'Facebook' }, { value: 'zalo', label: 'Zalo OA' }]} className="min-w-[170px]" />
         </div>
 
         <div>
-          <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Kênh lọc</label>
-          <SearchableSelect value={channelId} onChange={value => { setChannelId(value); setPage(1); }} options={[{value:'all',label:'Tất cả kênh'},...filteredChannels.map(chan => ({value:chan.id,label:`${chan.name} (${chan.platform.toUpperCase()})`}))]} className="min-w-[220px]"/>
+          <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Trang</label>
+          <SearchableSelect value={channelId} onChange={value => { setChannelId(value); setPage(1); }} options={[{ value: 'all', label: 'Tất cả trang' }, ...filteredChannels.map(chan => ({ value: chan.id, label: chan.name + ' (' + chan.platform.toUpperCase() + ')' }))]} className="min-w-[220px]" />
         </div>
 
         <div>
@@ -181,22 +168,34 @@ export default function Posts({ idToken, channels }: PostsProps) {
             <select value={datePreset} onChange={event => updatePreset(event.target.value as DatePreset)} className="text-xs font-medium text-slate-700 bg-transparent outline-none max-w-28">
               <option value="custom">Tùy chọn</option>
               <option value="7days">7 ngày qua</option>
-              <option value="30days">30 ngày qua</option>
+              <option value="30days">1 tháng qua</option>
               <option value="3months">3 tháng qua</option>
+              <option value="6months">6 tháng qua</option>
+              <option value="1year">1 năm qua</option>
             </select>
             <input type="date" value={startDate} min={getPastDateStr(365)} max={endDate} onChange={event => { setStartDate(event.target.value); setDatePreset('custom'); setPage(1); }} className="w-28 text-[11px] text-slate-600 outline-none" />
             <span className="text-slate-400 text-[11px]">đến</span>
             <input type="date" value={endDate} min={startDate} max={getTodayStr()} onChange={event => { setEndDate(event.target.value); setDatePreset('custom'); setPage(1); }} className="w-28 text-[11px] text-slate-600 outline-none" />
           </div>
         </div>
-        <div className="self-end pb-0.5">
-          <button
-            type="submit"
-            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs px-4 py-1.5 rounded-lg shadow-sm transition-colors"
-          >
-            Tìm kiếm
-          </button>
+
+        <div className="flex-1 min-w-[220px]">
+          <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Tìm kiếm bài đăng</label>
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Nhập nội dung bài đăng cần tìm..."
+              value={search}
+              onChange={event => setSearch(event.target.value)}
+              className="w-full bg-white border border-slate-200 text-xs rounded-lg pl-9 pr-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+          </div>
         </div>
+
+        <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-sm transition-colors">
+          Tìm kiếm
+        </button>
       </form>
 
       {/* Category Tabs */}

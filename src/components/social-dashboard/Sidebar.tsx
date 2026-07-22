@@ -1,12 +1,11 @@
 import React from 'react';
-import { 
-  LayoutDashboard, 
-  Radio, 
-  FileText, 
-  RefreshCw, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Radio,
+  FileText,
+  RefreshCw,
+  Settings,
   LogOut,
-  UserCog,
   ArrowLeft,
   LogIn
 } from 'lucide-react';
@@ -20,10 +19,11 @@ interface SidebarProps {
   userRole: UserRole;
   idToken: string;
   onLogout: () => void;
+  onLogin: () => void;
   onBackToWorkspace: () => void;
 }
 
-export default function Sidebar({ activeTab, setActiveTab, user, userRole, idToken, onLogout, onBackToWorkspace }: SidebarProps) {
+export default function Sidebar({ activeTab, setActiveTab, user, userRole, idToken, onLogout, onLogin, onBackToWorkspace }: SidebarProps) {
   const isGuest = user?.email === 'guest@ftsocial.com';
   const menuItems = [
     { id: 'dashboard', label: 'Biểu đồ tổng quan', icon: LayoutDashboard },
@@ -31,7 +31,6 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
     { id: 'posts', label: 'Bài đăng', icon: FileText },
     { id: 'sync', label: 'Đồng bộ dữ liệu', icon: RefreshCw },
     ...(isGuest ? [] : [{ id: 'config', label: 'Cấu hình hệ thống', icon: Settings }]),
-    ...(userRole === 'ADMIN' || userRole === 'MANAGER' ? [{ id: 'accounts', label: 'Quản lý tài khoản', icon: UserCog }] : []),
   ];
 
   return (
@@ -66,9 +65,9 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
               key={item.id}
               onClick={() => setActiveTab(item.id)}
               className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                isActive 
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white sidebar-glow-active' 
-                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                isActive
+                  ? 'border-l-4 border-[#ff6b00] bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm sidebar-glow-active'
+                  : 'border-l-4 border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800'
               }`}
             >
               <IconComponent className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
@@ -101,7 +100,7 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
         </div>
         {user?.email === 'guest@ftsocial.com' ? (
           <button
-            onClick={onLogout}
+            onClick={onLogin}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all cursor-pointer shadow-sm active:scale-[0.99]"
           >
             <LogIn className="w-3.5 h-3.5" />

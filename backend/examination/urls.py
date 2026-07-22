@@ -11,6 +11,7 @@ urlpatterns = [
     path('examination/candidates/<str:pk>/sessions/<str:session_id>', views.candidate_remove_from_session, name='candidate_remove_from_session'),
     path('examination/sheets', views.sheets_list, name='sheets_list'),
     path('examination/sheets/<str:pk>', views.sheet_detail, name='sheet_detail'),
+    path('examination/sheets/<str:pk>/export', views.sheet_export, name='sheet_export'),
     path('examination/sync/google-sheet', views.sheets_sync, name='sheets_sync'),
     path('examination/sync/status', views.sync_status, name='sync_status'),
     path('examination/import/candidates', views.import_candidates, name='import_candidates'),

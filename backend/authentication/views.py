@@ -5,6 +5,7 @@ import os
 import re
 import urllib.parse
 import uuid
+from datetime import timedelta
 from pathlib import Path
 
 from django.conf import settings
@@ -34,6 +35,7 @@ SENSITIVE_CONFIG_KEYS = {
     "metaPageTokensJson",
     "zaloOaTokensJson",
     "detailedTokensList",
+    "facebookScanTokens",
     "cronSecret",
     "googleServiceAccountJson",
     "lastGoogleAccessToken",
@@ -108,20 +110,162 @@ def _bootstrap_admin(email: str, password: str):
     configured_password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "")
     if not configured_email or not configured_password:
         return None
-    if User.objects.exists() or email != configured_email or password != configured_password:
+    if email != configured_email or password != configured_password:
         return None
-    return User.objects.create_superuser(
+    django_user, created = User.objects.get_or_create(
         username=configured_email,
-        email=configured_email,
-        password=configured_password,
+        defaults={"email": configured_email, "is_staff": True, "is_superuser": True, "is_active": True},
+    )
+    if created or not django_user.check_password(configured_password):
+        django_user.set_password(configured_password)
+    django_user.email = configured_email
+    django_user.is_staff = True
+    django_user.is_superuser = True
+    django_user.is_active = True
+    django_user.save()
+    return django_user
+
+
+
+TOKEN_LIFETIME_DAYS = 60
+TOKEN_WARNING_DAYS = 5
+
+
+def _token_dates(previous: dict | None, access_token: str, now) -> tuple[str, str]:
+    if previous and str(previous.get("accessToken") or "") == access_token:
+        issued_at = str(previous.get("issuedAt") or "").strip()
+        expires_at = str(previous.get("expiresAt") or "").strip()
+        if issued_at and expires_at:
+            return issued_at, expires_at
+    return now.isoformat(), (now + timedelta(days=TOKEN_LIFETIME_DAYS)).isoformat()
+
+
+def _is_placeholder_token(item: dict) -> bool:
+    return (
+        str(item.get("id") or "").strip() == "facebook-current-token"
+        or str(item.get("pageId") or "").strip() == "current-facebook-token"
     )
 
 
+def _normalise_token_rows(rows, previous_rows, now, scan_tokens=None):
+    previous_by_id = {
+        str(item.get("id") or ""): item
+        for item in previous_rows if isinstance(item, dict) and item.get("id")
+    }
+    scan_tokens = [item for item in (scan_tokens or []) if isinstance(item, dict)]
+    scans_by_id = {str(item.get("id") or ""): item for item in scan_tokens}
+    normalised = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        if _is_placeholder_token(item):
+            continue
+        token_id = str(item.get("id") or "").strip()
+        platform = str(item.get("platform") or "").strip().lower()
+        page_id = str(item.get("pageId") or "").strip()
+        access_token = str(item.get("accessToken") or "").strip()
+        if not token_id or platform not in {"facebook", "zalo", "mock"} or not page_id or not access_token:
+            continue
+
+        source_token = scans_by_id.get(str(item.get("sourceTokenId") or ""))
+        if source_token is None:
+            matching_scans = [
+                scan for scan in scan_tokens
+                if page_id in [str(value) for value in scan.get("pageIds", [])]
+            ]
+            if matching_scans:
+                source_token = max(matching_scans, key=lambda scan: str(scan.get("issuedAt") or ""))
+        if source_token and source_token.get("issuedAt") and source_token.get("expiresAt"):
+            issued_at = str(source_token["issuedAt"])
+            expires_at = str(source_token["expiresAt"])
+            source_token_id = str(source_token.get("id") or "")
+        else:
+            issued_at, expires_at = _token_dates(previous_by_id.get(token_id), access_token, now)
+            source_token_id = ""
+
+        item.update({
+            "id": token_id,
+            "platform": platform,
+            "pageId": page_id,
+            "pageName": str(item.get("pageName") or "").strip() or f"{platform} {page_id}",
+            "accessToken": access_token,
+            "issuedAt": issued_at,
+            "expiresAt": expires_at,
+        })
+        if source_token_id:
+            item["sourceTokenId"] = source_token_id
+        else:
+            item.pop("sourceTokenId", None)
+        normalised.append(item)
+    return normalised
+
+
+def _normalise_scan_tokens(rows, previous_rows, now):
+    previous_by_id = {
+        str(item.get("id") or ""): item
+        for item in previous_rows if isinstance(item, dict) and item.get("id")
+    }
+    normalised = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        token_id = str(item.get("id") or "").strip()
+        access_token = str(item.get("accessToken") or "").strip()
+        if not token_id or not access_token:
+            continue
+        issued_at, expires_at = _token_dates(previous_by_id.get(token_id), access_token, now)
+        page_names = [str(value).strip() for value in item.get("pageNames", []) if str(value).strip()]
+        page_ids = [str(value).strip() for value in item.get("pageIds", []) if str(value).strip()]
+        item.update({
+            "id": token_id,
+            "platform": "facebook",
+            "label": str(item.get("label") or "Token quet Facebook").strip(),
+            "accessToken": access_token,
+            "issuedAt": issued_at,
+            "expiresAt": expires_at,
+            "pageIds": page_ids,
+            "pageNames": page_names,
+        })
+        normalised.append(item)
+    return normalised
+
+
+def _days_remaining(expires_at: str, now) -> tuple[int, object] | None:
+    try:
+        parsed = timezone.datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed)
+        days = max(0, int(max(0, (parsed - now).total_seconds() + 86399) // 86400))
+        return days, parsed
+    except (TypeError, ValueError):
+        return None
+
 def _seed_config() -> dict:
+    now = timezone.now()
+    scan_tokens = []
+    current_facebook_token = os.getenv("CURRENT_FACEBOOK_ACCESS_TOKEN", "").strip()
+    if current_facebook_token:
+        try:
+            ttl_days = max(1, int(os.getenv("CURRENT_FACEBOOK_TOKEN_TTL_DAYS", "54")))
+        except ValueError:
+            ttl_days = 54
+        scan_tokens.append({
+            "id": "facebook-scan-current",
+            "platform": "facebook",
+            "label": "Token quét Facebook",
+            "accessToken": current_facebook_token,
+            "issuedAt": now.isoformat(),
+            "expiresAt": (now + timedelta(days=ttl_days)).isoformat(),
+            "pageIds": [],
+            "pageNames": [],
+        })
     return {
         "metaPageTokensJson": os.getenv("META_PAGE_TOKENS_JSON", "{}"),
         "zaloOaTokensJson": os.getenv("ZALO_OA_TOKENS_JSON", "{}"),
         "detailedTokensList": [],
+        "facebookScanTokens": scan_tokens,
         "cronSecret": os.getenv("CRON_SECRET", ""),
         "adminEmails": os.getenv("ADMIN_EMAILS", ""),
         "spreadsheetId": "",
@@ -137,6 +281,41 @@ def _get_config() -> SystemConfig:
         config.data = _seed_config()
         config.admin_emails = config.data.get("adminEmails") or ""
         config.save()
+    else:
+        data = dict(config.data or {})
+        rows = list(data.get("detailedTokensList") or [])
+        raw_scan_tokens = list(data.get("facebookScanTokens") or [])
+        now = timezone.now()
+        scan_tokens = _normalise_scan_tokens(raw_scan_tokens, raw_scan_tokens, now)
+        if not scan_tokens:
+            scan_source = next(
+                (item for item in rows if isinstance(item, dict) and _is_placeholder_token(item)),
+                None,
+            )
+            if scan_source:
+                facebook_pages = [
+                    item for item in rows
+                    if isinstance(item, dict)
+                    and item.get("platform") == "facebook"
+                    and not _is_placeholder_token(item)
+                ]
+                scan_tokens = _normalise_scan_tokens([{
+                    "id": "facebook-scan-current",
+                    "platform": "facebook",
+                    "label": "Token quét Facebook",
+                    "accessToken": scan_source.get("accessToken", ""),
+                    "issuedAt": scan_source.get("issuedAt", ""),
+                    "expiresAt": scan_source.get("expiresAt", ""),
+                    "pageIds": [item.get("pageId", "") for item in facebook_pages],
+                    "pageNames": [item.get("pageName", "") for item in facebook_pages],
+                }], [], now)
+        normalised_rows = _normalise_token_rows(rows, rows, now, scan_tokens)
+        data["facebookScanTokens"] = scan_tokens
+        if normalised_rows != rows or data != config.data:
+            data["detailedTokensList"] = normalised_rows
+            data["updatedAt"] = now.isoformat()
+            config.data = data
+            config.save(update_fields=["data"])
     return config
 
 
@@ -148,7 +327,7 @@ def _sync_channels(tokens: list[dict]) -> None:
     for token in tokens:
         platform = str(token.get("platform") or "").strip().lower()
         page_id = str(token.get("pageId") or "").strip()
-        if platform not in {"facebook", "zalo", "mock"} or not page_id:
+        if platform not in {"facebook", "zalo", "mock"} or not page_id or _is_placeholder_token(token):
             continue
         active_pairs.add((platform, page_id))
         name = str(token.get("pageName") or "").strip() or f"{platform} {page_id}"
@@ -180,7 +359,7 @@ def _sync_channels(tokens: list[dict]) -> None:
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def health(request):
-    return Response({"status": "ok", "backend": "django", "time": timezone.now().isoformat()})
+    return Response({"status": "ok"})
 
 
 @api_view(["POST"])
@@ -281,14 +460,14 @@ def manage_single_user(request, email):
 
 
 @api_view(["GET"])
-@permission_classes([IsManagerOrAdmin])
+@permission_classes([IsAdmin])
 def admin_users(request):
     users = UserProfile.objects.all().order_by("-updated_at")
     return Response([_user_payload(item) for item in users])
 
 
 @api_view(["POST"])
-@permission_classes([IsManagerOrAdmin])
+@permission_classes([IsAdmin])
 def admin_create_user(request):
     email = _normalise_email(request.data.get("email"))
     password = str(request.data.get("password") or "")
@@ -345,7 +524,7 @@ def _delete_account(email: str) -> Response:
 
 
 @api_view(["POST"])
-@permission_classes([IsManagerOrAdmin])
+@permission_classes([IsAdmin])
 def admin_delete_user(request):
     email = _normalise_email(request.data.get("email"))
     if not email:
@@ -374,6 +553,44 @@ def list_logins(request):
     ])
 
 
+@api_view(["GET"])
+@permission_classes([IsManagerOrAdmin])
+def token_notifications(request):
+    config = _get_config()
+    now = timezone.now()
+    notifications = []
+    data = config.data or {}
+    scan_tokens = [
+        item for item in data.get("facebookScanTokens", []) if isinstance(item, dict)
+    ]
+    scan_token_ids = {str(item.get("id") or "") for item in scan_tokens}
+    sources = [
+        (item, [item.get("pageName") or item.get("pageId") or "Facebook"])
+        for item in data.get("detailedTokensList", [])
+        if isinstance(item, dict) and str(item.get("sourceTokenId") or "") not in scan_token_ids
+    ]
+    sources.extend(
+        (item, item.get("pageNames") or item.get("pageIds") or [item.get("label") or "Facebook"])
+        for item in scan_tokens
+    )
+    for item, affected_pages in sources:
+        remaining = _days_remaining(str(item.get("expiresAt") or "").strip(), now)
+        if not remaining:
+            continue
+        days_remaining, parsed_expiry = remaining
+        if days_remaining <= TOKEN_WARNING_DAYS:
+            notifications.append({
+                "id": str(item.get("id") or ""),
+                "platform": item.get("platform", "facebook"),
+                "label": item.get("label") or item.get("pageName") or "Token Facebook",
+                "affectedPages": [str(page) for page in affected_pages if str(page).strip()],
+                "issuedAt": item.get("issuedAt") or "",
+                "expiresAt": parsed_expiry.isoformat(),
+                "daysRemaining": days_remaining,
+            })
+    return Response({"notifications": notifications, "warningDays": TOKEN_WARNING_DAYS})
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def system_config_view(request):
@@ -389,15 +606,32 @@ def system_config_view(request):
         return Response({"error": "Quyền truy cập bị từ chối."}, status=status.HTTP_403_FORBIDDEN)
     payload = dict(request.data or {})
     current = dict(config.data or {})
+    now = timezone.now()
+    previous_rows = list(current.get("detailedTokensList") or [])
+    previous_scan_tokens = list(current.get("facebookScanTokens") or [])
     current.update(payload)
-    current["updatedAt"] = timezone.now().isoformat()
+    scan_source = payload.get("facebookScanTokens") if isinstance(payload.get("facebookScanTokens"), list) else previous_scan_tokens
+    current["facebookScanTokens"] = _normalise_scan_tokens(scan_source, previous_scan_tokens, now)
+    row_source = payload.get("detailedTokensList") if isinstance(payload.get("detailedTokensList"), list) else previous_rows
+    current["detailedTokensList"] = _normalise_token_rows(
+        row_source,
+        previous_rows,
+        now,
+        current["facebookScanTokens"],
+    )
+    current["updatedAt"] = now.isoformat()
     config.data = current
     if "adminEmails" in payload:
         config.admin_emails = str(payload.get("adminEmails") or "")
     config.save()
     if isinstance(payload.get("detailedTokensList"), list):
-        _sync_channels(payload["detailedTokensList"])
-    return Response({"success": True, "message": "Đã lưu cấu hình hệ thống."})
+        _sync_channels(current["detailedTokensList"])
+    return Response({
+        "success": True,
+        "message": "Đã lưu cấu hình hệ thống.",
+        "detailedTokensList": current.get("detailedTokensList", []),
+        "facebookScanTokens": current.get("facebookScanTokens", []),
+    })
 
 
 @api_view(["GET", "POST"])

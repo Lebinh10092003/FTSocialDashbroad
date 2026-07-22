@@ -1,6 +1,7 @@
 import time
 import requests
 import datetime
+import os
 from django.utils import timezone
 import json
 import zlib
@@ -78,9 +79,9 @@ def fetch_with_retry(url, headers=None, params=None, method='GET', data=None, re
 class FacebookProvider:
     def __init__(self):
         config = SystemConfig.objects.filter(key='main').first()
-        self.api_version = 'v20.0'
+        self.api_version = 'v25.0'
         if config and config.data:
-            self.api_version = config.data.get('metaGraphApiVersion', 'v20.0')
+            self.api_version = config.data.get('metaGraphApiVersion', 'v25.0')
 
     def get_token(self, external_id):
         config = SystemConfig.objects.filter(key='main').first()
@@ -94,7 +95,7 @@ class FacebookProvider:
                         return token
                 except Exception:
                     pass
-        return "fb_mock_token_for_page"
+        return os.getenv("CURRENT_FACEBOOK_ACCESS_TOKEN", "").strip() or "fb_mock_token_for_page"
 
     def validate_credentials(self, channel_id, external_id):
         return True
@@ -102,128 +103,164 @@ class FacebookProvider:
     def get_followers(self, channel_id, external_id):
         token = self.get_token(external_id)
         if token == "fb_mock_token_for_page":
-            return 12500  # Mock follower count
-        try:
-            url = f"https://graph.facebook.com/{self.api_version}/{external_id}"
-            data = fetch_with_retry(url, params={'fields': 'followers_count', 'access_token': token})
-            return data.get('followers_count', 0)
-        except Exception:
             return 12500
+
+        url = f"https://graph.facebook.com/{self.api_version}/{external_id}"
+        data = fetch_with_retry(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            params={"fields": "followers_count"},
+        )
+        return int(data.get("followers_count", 0) or 0)
 
     def list_posts(self, channel_id, external_id, since=None, until=None):
         token = self.get_token(external_id)
         if token == "fb_mock_token_for_page":
-            # Return mock posts
             return [
                 {
-                    'id': 'fb_post_1',
-                    'message': 'Bài viết Facebook số 1 - Chào hè rực rỡ!',
-                    'created_time': timezone.now().isoformat(),
-                    'permalink_url': 'https://facebook.com/fb_post_1',
-                    'post_type': 'photo'
+                    "id": "fb_post_1",
+                    "message": "Bài viết Facebook số 1 - Chào hè rực rỡ!",
+                    "created_time": timezone.now().isoformat(),
+                    "permalink_url": "https://facebook.com/fb_post_1",
+                    "post_type": "photo",
                 },
                 {
-                    'id': 'fb_post_2',
-                    'message': 'Bài viết Facebook số 2 - Thông báo lịch thi khảo thí quốc tế',
-                    'created_time': (timezone.now() - datetime.timedelta(days=2)).isoformat(),
-                    'permalink_url': 'https://facebook.com/fb_post_2',
-                    'post_type': 'link'
-                }
+                    "id": "fb_post_2",
+                    "message": "Bài viết Facebook số 2 - Thông báo lịch thi khảo thí quốc tế",
+                    "created_time": (timezone.now() - datetime.timedelta(days=2)).isoformat(),
+                    "permalink_url": "https://facebook.com/fb_post_2",
+                    "post_type": "link",
+                },
             ]
-        try:
-            url = f"https://graph.facebook.com/{self.api_version}/{external_id}/published_posts"
-            params = {
-                'access_token': token,
-                'fields': 'id,message,created_time,permalink_url,full_picture,attachments{media_type,url,media{image{src}}}'
-            }
-            if since:
-                params['since'] = int(since.timestamp())
-            if until:
-                params['until'] = int(until.timestamp())
-                
-            res = fetch_with_retry(url, params=params)
-            posts = []
-            for item in res.get('data', []):
-                post_type = 'status'
-                image_url = item.get('full_picture')
-                attachments = item.get('attachments', {}).get('data', [])
+
+        url = f"https://graph.facebook.com/{self.api_version}/{external_id}/published_posts"
+        headers = {"Authorization": f"Bearer {token}"}
+        params = {
+            "fields": (
+                "id,message,created_time,permalink_url,full_picture,"
+                "attachments{media_type,url,media{image{src}}}"
+            ),
+            "limit": 100,
+        }
+        if since:
+            params["since"] = int(since.timestamp())
+        if until:
+            params["until"] = int(until.timestamp())
+
+        posts = []
+        seen_ids = set()
+        after = None
+
+        for _page_number in range(100):
+            if after:
+                params["after"] = after
+            response = fetch_with_retry(url, headers=headers, params=params)
+            items = response.get("data", [])
+
+            for item in items:
+                post_id = item.get("id")
+                if not post_id or post_id in seen_ids:
+                    continue
+                seen_ids.add(post_id)
+
+                post_type = "status"
+                image_url = item.get("full_picture")
+                attachments = item.get("attachments", {}).get("data", [])
                 if attachments:
-                    media_type = attachments[0].get('media_type', '').lower()
-                    if 'photo' in media_type or 'album' in media_type:
-                        post_type = 'photo'
-                    elif 'video' in media_type:
-                        post_type = 'video'
+                    media_type = attachments[0].get("media_type", "").lower()
+                    if "photo" in media_type or "album" in media_type:
+                        post_type = "photo"
+                    elif "video" in media_type:
+                        post_type = "video"
                     else:
-                        post_type = 'link'
+                        post_type = "link"
                     if not image_url:
-                        image_url = attachments[0].get('media', {}).get('image', {}).get('src')
-                posts.append({
-                    'id': item.get('id'),
-                    'message': item.get('message', ''),
-                    'created_time': item.get('created_time'),
-                    'permalink_url': item.get('permalink_url'),
-                    'post_type': post_type,
-                    'image_url': image_url
-                })
-            return posts
-        except Exception:
-            return []
+                        image_url = (
+                            attachments[0]
+                            .get("media", {})
+                            .get("image", {})
+                            .get("src")
+                        )
+
+                posts.append(
+                    {
+                        "id": post_id,
+                        "message": item.get("message", ""),
+                        "created_time": item.get("created_time"),
+                        "permalink_url": item.get("permalink_url"),
+                        "post_type": post_type,
+                        "image_url": image_url,
+                    }
+                )
+
+            after = (
+                response.get("paging", {})
+                .get("cursors", {})
+                .get("after")
+            )
+            if not items or not after:
+                break
+
+        return posts
 
     def get_post_metrics(self, channel_id, external_id, posts):
         token = self.get_token(external_id)
         if token == "fb_mock_token_for_page":
-            return [generate_deterministic_metrics(p['id'], 'facebook') for p in posts]
-        
+            return [generate_deterministic_metrics(post["id"], "facebook") for post in posts]
+
+        headers = {"Authorization": f"Bearer {token}"}
         result = []
+
         for post in posts:
-            post_id = post['id']
-            try:
-                # Get metrics
-                url = f"https://graph.facebook.com/{self.api_version}/{post_id}/insights"
-                params = {
-                    'access_token': token,
-                    'metric': 'post_impressions_unique,post_impressions,post_clicks_by_type_unique'
+            post_id = post["id"]
+            insights_url = f"https://graph.facebook.com/{self.api_version}/{post_id}/insights"
+            insights = fetch_with_retry(
+                insights_url,
+                headers=headers,
+                params={
+                    "metric": "post_media_view,post_total_media_view_unique"
+                },
+            )
+
+            reach = 0
+            impressions = 0
+            clicks = 0
+            for metric in insights.get("data", []):
+                if metric.get("period") not in (None, "lifetime"):
+                    continue
+                name = metric.get("name")
+                value = metric.get("values", [{}])[0].get("value", 0)
+                if name == "post_total_media_view_unique":
+                    reach = value
+                elif name == "post_media_view":
+                    impressions = value
+                elif name == "post_clicks_by_type_unique":
+                    clicks = sum(value.values()) if isinstance(value, dict) else value
+
+            detail_url = f"https://graph.facebook.com/{self.api_version}/{post_id}"
+            detail = fetch_with_retry(
+                detail_url,
+                headers=headers,
+                params={"fields": "reactions.summary(true),comments.summary(true),shares"},
+            )
+
+            reactions = detail.get("reactions", {}).get("summary", {}).get("total_count", 0)
+            comments = detail.get("comments", {}).get("summary", {}).get("total_count", 0)
+            shares = detail.get("shares", {}).get("count", 0)
+
+            result.append(
+                {
+                    "id": post_id,
+                    "reactions": reactions,
+                    "comments": comments,
+                    "shares": shares,
+                    "views": impressions,
+                    "reach": reach,
+                    "impressions": impressions,
+                    "clicks": clicks,
                 }
-                res = fetch_with_retry(url, params=params)
-                
-                # Default mock numbers or extract if exists
-                reach = 0
-                impressions = 0
-                clicks = 0
-                for m in res.get('data', []):
-                    name = m.get('name')
-                    val = m.get('values', [{}])[0].get('value', 0)
-                    if name == 'post_impressions_unique':
-                        reach = val
-                    elif name == 'post_impressions':
-                        impressions = val
-                    elif name == 'post_clicks_by_type_unique':
-                        clicks = sum(val.values()) if isinstance(val, dict) else val
-                
-                # Get reactions/comments/shares
-                url_detail = f"https://graph.facebook.com/{self.api_version}/{post_id}"
-                params_detail = {
-                    'access_token': token,
-                    'fields': 'reactions.summary(true),comments.summary(true),shares'
-                }
-                res_detail = fetch_with_retry(url_detail, params=params_detail)
-                
-                reactions = res_detail.get('reactions', {}).get('summary', {}).get('total_count', 0)
-                comments = res_detail.get('comments', {}).get('summary', {}).get('total_count', 0)
-                shares = res_detail.get('shares', {}).get('count', 0)
-                
-                result.append({
-                    'id': post_id,
-                    'reactions': reactions,
-                    'comments': comments,
-                    'shares': shares,
-                    'views': impressions,
-                    'reach': reach,
-                    'impressions': impressions,
-                    'clicks': clicks
-                })
-            except Exception:
-                result.append(generate_deterministic_metrics(post_id, 'facebook'))
+            )
+
         return result
 
     def normalize_post(self, raw, channel_id):

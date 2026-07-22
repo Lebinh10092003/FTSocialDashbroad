@@ -1,37 +1,33 @@
 {
-  "name": "ft-social-dashboard",
-  "private": true,
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "start": "node scripts/run-local.mjs",
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "lint": "tsc --noEmit",
-    "git-push": "node scripts/git-push.mjs",
-    "deploy": "node scripts/deploy-git.mjs"
-  },
-  "dependencies": {
-    "@google/genai": "^2.4.0",
-    "@tailwindcss/vite": "^4.1.14",
-    "@vitejs/plugin-react": "^5.0.4",
-    "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
-    "react": "^19.0.1",
-    "react-dom": "^19.0.1",
-    "recharts": "^3.9.2",
-    "vite": "^6.2.3",
-    "xlsx": "^0.18.5"
-  },
-  "devDependencies": {
-    "@types/node": "^22.14.0",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "autoprefixer": "^10.4.21",
-    "ssh2": "^1.15.0",
-    "tailwindcss": "^4.1.14",
-    "typescript": "~5.8.2"
-  }
+    "name":  "ft-workspace",
+    "private":  true,
+    "version":  "1.0.0",
+    "type":  "module",
+    "scripts":  {
+                    "dev":  "vite",
+                    "build":  "vite build",
+                    "preview":  "vite preview",
+                    "clean":  "node -e \"require(\u0027fs\u0027).rmSync(\u0027dist\u0027,{recursive:true,force:true})\"",
+                    "lint":  "tsc --noEmit"
+                },
+    "dependencies":  {
+                         "@google/genai":  "^2.4.0",
+                         "@tailwindcss/vite":  "^4.1.14",
+                         "@vitejs/plugin-react":  "^5.0.4",
+                         "lucide-react":  "^0.546.0",
+                         "motion":  "^12.23.24",
+                         "react":  "^19.0.1",
+                         "react-dom":  "^19.0.1",
+                         "recharts":  "^3.9.2",
+                         "vite":  "^6.2.3",
+                         "xlsx":  "^0.18.5"
+                     },
+    "devDependencies":  {
+                            "@types/node":  "^22.14.0",
+                            "@types/react":  "^19.2.17",
+                            "@types/react-dom":  "^19.2.3",
+                            "autoprefixer":  "^10.4.21",
+                            "tailwindcss":  "^4.1.14",
+                            "typescript":  "~5.8.2"
+                        }
 }

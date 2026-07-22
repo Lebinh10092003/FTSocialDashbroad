@@ -65,7 +65,7 @@ export interface ApiLog {
   platform: string;
   action: string;
   channelId?: string;
-  status: 'running' | 'success' | 'failed';
+  status: 'queued' | 'running' | 'success' | 'failed';
   recordsReceived: number;
   recordsInserted: number;
   recordsUpdated: number;

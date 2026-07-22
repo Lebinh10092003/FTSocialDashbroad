@@ -1,25 +1,18 @@
-FROM node:20-alpine AS build
-
+FROM node:22-alpine AS frontend-build
 WORKDIR /app
-
 COPY package*.json ./
 RUN npm ci
-
 COPY . .
+ARG VITE_API_URL=/api
+ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 
-FROM node:20-alpine AS runtime
-
+FROM python:3.12-slim
 WORKDIR /app
-ENV NODE_ENV=production
-
-COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
-
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/server/data ./server/data
-COPY --from=build /app/firebase-applet-config.json ./firebase-applet-config.json
-
-EXPOSE 3000
-
-CMD ["node", "dist/server.cjs"]
+COPY backend/requirements.txt ./backend/requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt
+COPY backend ./backend
+COPY --from=frontend-build /app/dist ./dist
+WORKDIR /app/backend
+EXPOSE 8001
+CMD ["gunicorn", "--bind", "0.0.0.0:8001", "config.wsgi:application"]

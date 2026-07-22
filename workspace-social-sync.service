@@ -1,0 +1,13 @@
+[Unit]
+Description=FT Workspace daily social metrics snapshot
+After=network-online.target workspace-django.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=workspace
+Group=www-data
+WorkingDirectory=/var/www/ft-workspace/backend
+EnvironmentFile=/var/www/ft-workspace/backend/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/var/www/ft-workspace/.venv/bin/python manage.py sync_social_daily --backfill-days 365 --recent-days 365

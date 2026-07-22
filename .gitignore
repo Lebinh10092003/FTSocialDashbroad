@@ -1,36 +1,31 @@
-# Node / frontend
 node_modules/
-build/
 dist/
+build/
 coverage/
 *.log
 
 # Python / Django
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
+**pycache**/
+*.pyc
+*.pyo
 .venv/
 venv/
-env/
-ENV/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-htmlcov/
+backend/.venv/
 *.sqlite3
 backend/db.sqlite3
 staticfiles/
 
-# Runtime data and uploaded files
-server/data/
+# Runtime data
 uploads/
 media/
 
-# Local environment and editor files
-.env*
+# Environment files
+.env
+backend/.env
+.env.local
+.env.production.local
 !.env.example
+
 .DS_Store
 .vscode/
 .idea/

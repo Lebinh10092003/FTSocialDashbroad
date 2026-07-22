@@ -16,7 +16,7 @@ interface SyncProps {
 
 function getDefaultSinceDate(): string {
   const date = new Date();
-  date.setMonth(date.getMonth() - 3);
+  date.setFullYear(date.getFullYear() - 1);
   return date.toISOString().slice(0, 10);
 }
 
@@ -25,6 +25,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
   const [until, setUntil] = useState('');
   const [syncHistory, setSyncHistory] = useState<ApiLog[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [channelSyncStates, setChannelSyncStates] = useState<Record<string, ApiLog['status']>>({});
 
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<{ status: 'success' | 'failed'; message: string } | null>(null);
@@ -45,29 +46,58 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
   });
 
   const canManage = userRole === 'ADMIN' || userRole === 'MANAGER';
+  const activeChannels = channels.filter(channel => channel.status === 'active');
+  const activeChannelIds = new Set(activeChannels.map(channel => channel.id));
+  const hasActiveChannelSync = Object.entries(channelSyncStates).some(
+    ([channelId, status]) => activeChannelIds.has(channelId) && (status === 'queued' || status === 'running'),
+  );
 
-  const fetchSyncHistory = async () => {
-    setLoadingHistory(true);
+  const applySyncStatesFromHistory = (logs: ApiLog[]) => {
+    const cutoff = Date.now() - 6 * 60 * 60 * 1000;
+    const latestByChannel: Record<string, ApiLog['status']> = {};
+
+    for (const log of logs) {
+      if (!log.channelId || latestByChannel[log.channelId]) continue;
+      if (new Date(log.startedAt).getTime() < cutoff) continue;
+      latestByChannel[log.channelId] = log.status;
+    }
+
+    if (Object.keys(latestByChannel).length) {
+      setChannelSyncStates(current => ({ ...current, ...latestByChannel }));
+    }
+  };
+
+  const fetchSyncHistory = async (silent = false) => {
+    if (!silent) setLoadingHistory(true);
     try {
       const res = await fetch('/api/sync/history', {
         headers: {
-          'Authorization': `Bearer ${idToken}`,
-        }
+          'Authorization': 'Bearer ' + idToken,
+        },
       });
       if (res.ok) {
-        const data = await res.json();
+        const data: ApiLog[] = await res.json();
         setSyncHistory(data || []);
+        applySyncStatesFromHistory(data || []);
       }
-    } catch (e) {
-      console.error('Không thể tải lịch sử đồng bộ:', e);
+    } catch (error) {
+      console.error('Không thể tải lịch sử đồng bộ:', error);
     } finally {
-      setLoadingHistory(false);
+      if (!silent) setLoadingHistory(false);
     }
   };
 
   useEffect(() => {
-    fetchSyncHistory();
+    void fetchSyncHistory();
   }, [idToken]);
+
+  useEffect(() => {
+    if (!hasActiveChannelSync && syncingId === null) return;
+    const intervalId = window.setInterval(() => {
+      void fetchSyncHistory(true);
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [hasActiveChannelSync, syncingId, idToken]);
 
   const handleSyncAll = () => {
     if (!canManage) return;
@@ -78,39 +108,48 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
       confirmText: 'Đồng bộ tất cả',
       type: 'info',
       onConfirm: async () => {
-        // Close before starting the long-running request. The result is shown
-        // in the sync page, so the confirmation dialog must not remain open.
         setConfirmState(current => ({ ...current, isOpen: false }));
         setSyncingId('all');
         setSyncResult(null);
+        setChannelSyncStates(current => ({
+          ...current,
+          ...Object.fromEntries(activeChannels.map(channel => [channel.id, 'queued' as const])),
+        }));
 
         try {
           const res = await fetch('/api/sync/all', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${idToken}`,
+              'Authorization': 'Bearer ' + idToken,
               'X-Google-OAuth-Token': googleAccessToken || '',
-            }
+            },
+            body: JSON.stringify({ since, until: until || undefined }),
           });
 
           const data = await res.json();
           if (data.success) {
             await onRefreshChannels();
-            await fetchSyncHistory();
             setSyncResult({
               status: 'success',
-              message: 'Kích hoạt đồng bộ tất cả các kênh hoàn tất. Xem chi tiết kết quả trong bảng lịch sử.'
+              message: 'Kích hoạt đồng bộ tất cả các kênh hoàn tất. Xem chi tiết kết quả trong bảng lịch sử.',
             });
           } else {
-            setSyncResult({ status: 'failed', message: data.error || 'Lỗi xảy ra trong quá trình đồng bộ.' });
+            setSyncResult({ status: 'failed', message: data.error || data.message || 'Lỗi xảy ra trong quá trình đồng bộ.' });
           }
         } catch (error: any) {
           setSyncResult({ status: 'failed', message: error.message || 'Lỗi đồng bộ.' });
+          setChannelSyncStates(current => Object.fromEntries(
+            Object.entries(current).map(([channelId, status]) => [
+              channelId,
+              status === 'queued' || status === 'running' ? 'failed' : status,
+            ]),
+          ));
         } finally {
+          await fetchSyncHistory(true);
           setSyncingId(null);
         }
-      }
+      },
     });
   };
 
@@ -118,40 +157,42 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
     if (!canManage) return;
     setSyncingId(channelId);
     setSyncResult(null);
+    setChannelSyncStates(current => ({ ...current, [channelId]: 'running' }));
 
     try {
-      const res = await fetch(`/api/channels/${channelId}/sync`, {
+      const res = await fetch('/api/channels/' + channelId + '/sync', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,
+          'Authorization': 'Bearer ' + idToken,
           'X-Google-OAuth-Token': googleAccessToken || '',
         },
         body: JSON.stringify({
           since: since || undefined,
           until: until || undefined,
-        })
+        }),
       });
 
       const data = await res.json();
       if (data.success) {
+        setChannelSyncStates(current => ({ ...current, [channelId]: 'success' }));
         await onRefreshChannels();
-        await fetchSyncHistory();
         setSyncResult({
           status: 'success',
-          message: `Đồng bộ kênh hoàn tất! Nhận được ${data.recordsReceived} bài đăng. Ghi mới: ${data.recordsInserted} dòng. Cập nhật: ${data.recordsUpdated} dòng.`
+          message: data.message || 'Đồng bộ kênh hoàn tất.',
         });
       } else {
+        setChannelSyncStates(current => ({ ...current, [channelId]: 'failed' }));
         setSyncResult({ status: 'failed', message: data.error || 'Đồng bộ thất bại.' });
       }
     } catch (error: any) {
+      setChannelSyncStates(current => ({ ...current, [channelId]: 'failed' }));
       setSyncResult({ status: 'failed', message: error.message || 'Đồng bộ thất bại.' });
     } finally {
+      await fetchSyncHistory(true);
       setSyncingId(null);
     }
   };
-
-  const activeChannels = channels.filter(c => c.status === 'active');
 
   return (
     <div className="space-y-6">
@@ -164,11 +205,11 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
         {canManage ? (
           <button
             onClick={handleSyncAll}
-            disabled={syncingId !== null || activeChannels.length === 0}
+            disabled={syncingId !== null || hasActiveChannelSync || activeChannels.length === 0}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs px-4 py-2.5 rounded-xl disabled:opacity-50 transition-colors shadow-sm cursor-pointer"
           >
-            <RefreshCw className={`w-4 h-4 ${syncingId === 'all' ? 'animate-spin' : ''}`} />
-            Đồng bộ toàn bộ các kênh
+            <RefreshCw className={'w-4 h-4 ' + (syncingId === 'all' || hasActiveChannelSync ? 'animate-spin' : '')} />
+            {syncingId === 'all' || hasActiveChannelSync ? 'Đang đồng bộ...' : 'Đồng bộ toàn bộ các kênh'}
           </button>
         ) : (
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 text-slate-500 rounded-lg text-xs font-semibold">
@@ -187,7 +228,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
             <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">Đồng bộ từ ngày (mặc định 3 tháng gần nhất)</label>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Đồng bộ từ ngày (mặc định 1 năm gần nhất)</label>
               <input 
                 type="date"
                 value={since}
@@ -215,24 +256,28 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {activeChannels.map(chan => {
-                  const isThisSyncing = syncingId === chan.id;
+                  const syncState = channelSyncStates[chan.id];
+                  const isQueued = syncState === 'queued';
+                  const isRunning = syncState === 'running' || syncingId === chan.id;
+                  const isThisSyncing = isQueued || isRunning;
                   return (
-                    <div key={chan.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50/50">
+                    <div key={chan.id} className={'flex items-center justify-between p-3 rounded-xl border transition-colors ' + (isRunning ? 'border-blue-200 bg-blue-50/60' : isQueued ? 'border-amber-200 bg-amber-50/60' : 'border-slate-100 bg-slate-50/50')}>
                       <div>
                         <span className="text-xs font-bold text-slate-800 block truncate max-w-[150px]">{chan.name}</span>
                         <span className="text-[10px] text-slate-400 uppercase font-semibold">{chan.platform}</span>
                       </div>
                       <button
                         onClick={() => handleSyncChannel(chan.id)}
-                        disabled={syncingId !== null}
-                        className="flex items-center gap-1.5 bg-white border border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-100 font-semibold text-[10px] px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                        disabled={syncingId !== null || hasActiveChannelSync}
+                        title={isRunning ? 'Đang đồng bộ' : isQueued ? 'Đang chờ đến lượt đồng bộ' : 'Đồng bộ kênh này'}
+                        className={'flex items-center gap-1.5 bg-white border font-semibold text-[10px] px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-80 ' + (isRunning ? 'border-blue-200 text-blue-700' : isQueued ? 'border-amber-200 text-amber-700' : 'border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-100')}
                       >
                         {isThisSyncing ? (
                           <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-500" />
                         ) : (
                           <Play className="w-3 h-3" />
                         )}
-                        Sync
+                        {isRunning ? 'Đang Sync' : isQueued ? 'Chờ Sync' : 'Sync'}
                       </button>
                     </div>
                   );
@@ -273,7 +318,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
             Nhật ký cuộc gọi API & Lịch sử đồng bộ hệ thống
           </h3>
           <button 
-            onClick={fetchSyncHistory}
+            onClick={() => fetchSyncHistory()}
             className="text-xs font-semibold text-slate-500 hover:text-slate-800 flex items-center gap-1.5"
           >
             <RefreshCw className="w-3 h-3" />
@@ -311,12 +356,17 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
                         {chan?.name || log.platform.toUpperCase()}
                       </td>
                       <td className="p-4">
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-sans font-semibold text-[10px] ${
-                          log.status === 'success' 
-                            ? 'bg-emerald-50 text-emerald-700' 
-                            : 'bg-red-50 text-red-700'
-                        }`}>
-                          {log.status === 'success' ? 'Thành công' : 'Thất bại'}
+                        <span className={'inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-sans font-semibold text-[10px] ' + (
+                          log.status === 'success'
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : log.status === 'running'
+                              ? 'bg-blue-50 text-blue-700'
+                              : log.status === 'queued'
+                                ? 'bg-amber-50 text-amber-700'
+                                : 'bg-red-50 text-red-700'
+                        )}>
+                          {(log.status === 'queued' || log.status === 'running') && <RefreshCw className="w-3 h-3 animate-spin" />}
+                          {log.status === 'success' ? 'Thành công' : log.status === 'running' ? 'Đang chạy' : log.status === 'queued' ? 'Đang chờ' : 'Thất bại'}
                         </span>
                       </td>
                       <td className="p-4 text-center text-slate-600 font-medium">{log.recordsReceived}</td>
@@ -325,6 +375,10 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
                       <td className="p-4 font-sans text-slate-500 truncate" title={log.errorMessage || ''}>
                         {log.status === 'success' ? (
                           <span className="text-slate-400 italic">Đồng bộ hoàn hảo</span>
+                        ) : log.status === 'running' ? (
+                          <span className="text-blue-600 font-medium">Đang lấy dữ liệu...</span>
+                        ) : log.status === 'queued' ? (
+                          <span className="text-amber-600 font-medium">Đang chờ đến lượt...</span>
                         ) : (
                           <span className="text-red-500 font-medium">{log.errorMessage}</span>
                         )}

@@ -3,11 +3,11 @@ import { ClipboardList, Send } from 'lucide-react';
 
 export type SystemEvent = string | { content: string; time?: string };
 type LogNote = { id: string; time: string; actor: string; content: string; system?: boolean };
-type Props = { entityKey: string; title?: string; systemEvents?: SystemEvent[]; actor?: string | null; canWrite: boolean };
+type Props = { entityKey: string; title?: string; systemEvents?: SystemEvent[]; actor?: string | null; canWrite: boolean; idToken?: string | null };
 
 const storageKey = (entityKey: string) => `ft-examination-lognotes:${entityKey}`;
 
-export function appendLogNote(entityKey: string, content: string, actor = 'Hệ thống FT Workspace', system = false) {
+export function appendLogNote(entityKey: string, content: string, actor = 'Hệ thống FT Workspace', system = false, idToken?: string | null) {
   const key = storageKey(entityKey);
   let current: LogNote[] = [];
   try { current = JSON.parse(localStorage.getItem(key) || '[]'); } catch { current = []; }
@@ -18,26 +18,29 @@ export function appendLogNote(entityKey: string, content: string, actor = 'Hệ 
   // Đồng bộ lên SQLite database
   fetch(`/api/examination/lognotes/${encodeURIComponent(entityKey)}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}) },
     body: JSON.stringify({ content, actor, system })
   }).catch(err => console.warn('Lỗi lưu lognote vào SQLite:', err));
 }
 
-export default function LogNotes({ entityKey, title = 'Lognote & lịch sử thay đổi', systemEvents = [], actor, canWrite }: Props) {
+export default function LogNotes({ entityKey, title = 'Lognote & lịch sử thay đổi', systemEvents = [], actor, canWrite, idToken }: Props) {
   const [draft, setDraft] = useState('');
   const [notes, setNotes] = useState<LogNote[]>(() => {
     try { return JSON.parse(localStorage.getItem(storageKey(entityKey)) || '[]'); } catch { return []; }
   });
-  const [renderTime] = useState(() => new Date().toLocaleString('vi-VN'));
 
   useEffect(() => {
     // Tải dữ liệu lognotes từ SQLite backend
     fetch(`/api/examination/lognotes/${encodeURIComponent(entityKey)}`)
       .then(res => res.ok ? res.json() : [])
       .then(data => {
-        if (Array.isArray(data) && data.length > 0) {
-          setNotes(data);
-          localStorage.setItem(storageKey(entityKey), JSON.stringify(data));
+        if (Array.isArray(data)) {
+          setNotes(current => {
+            // Keep a local entry if the network is unavailable before it can be persisted.
+            if (!data.length && current.length) return current;
+            localStorage.setItem(storageKey(entityKey), JSON.stringify(data));
+            return data;
+          });
         }
       })
       .catch(() => {});
@@ -51,28 +54,24 @@ export default function LogNotes({ entityKey, title = 'Lognote & lịch sử tha
   }, [entityKey]);
 
   const systemNotes = useMemo<LogNote[]>(() => {
-    return systemEvents.map((event, index) => {
-      const content = typeof event === 'string' ? event : event.content;
-      let time = typeof event === 'object' && event.time ? event.time : undefined;
-      
-      if (!time) {
-        const match = content.match(/\d{1,2}\/\d{1,2}\/\d{4}(?:\s+\d{1,2}:\d{2})?/);
-        time = match ? match[0] : renderTime;
-      }
-      return {
+    // Never generate a timestamp when opening a page. System notes are shown
+    // only when their timestamp was supplied by a real persisted event.
+    return systemEvents.flatMap((event, index) => {
+      if (typeof event === 'string' || !event.time) return [];
+      return [{
         id: `system-${index}`,
-        time,
+        time: event.time,
         actor: 'Hệ thống FT Workspace',
-        content,
+        content: event.content,
         system: true
-      };
+      }];
     });
-  }, [systemEvents, renderTime]);
+  }, [systemEvents]);
 
   const add = () => {
     const content = draft.trim();
     if (!content || !canWrite) return;
-    appendLogNote(entityKey, content, actor || 'Nhân viên FT Workspace');
+    appendLogNote(entityKey, content, actor || 'Nhân viên FT Workspace', false, idToken);
     setDraft('');
   };
 
@@ -84,7 +83,6 @@ export default function LogNotes({ entityKey, title = 'Lognote & lịch sử tha
           <h2 className="flex items-center gap-2 text-lg font-extrabold text-[#001e40]">
             <ClipboardList className="h-5 w-5"/>{title}
           </h2>
-          <p className="mt-1 text-sm text-slate-500">Dòng thời gian thay đổi, đồng bộ và ghi chú nghiệp vụ được lưu tại SQLite.</p>
         </div>
         <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-500 shadow-sm">{entries.length} mục</span>
       </header>

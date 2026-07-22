@@ -1,5 +1,5 @@
 import React, { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { LogIn, LogOut } from 'lucide-react';
+import { ChartColumnBig, ClipboardList, GraduationCap, LogIn, LogOut, Mail, ShieldUser } from 'lucide-react';
 
 import { Channel, UserRole } from './types';
 import Sidebar from './components/social-dashboard/Sidebar';
@@ -15,7 +15,7 @@ const EmailTemplateBuilder = lazy(() => import('./components/email-builder/Email
 const ExaminationModule = lazy(() => import('./components/ExaminationModule'));
 const DigitalTraining = lazy(() => import('./components/digital-training/DigitalTraining'));
 
-type ViewMode = 'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training';
+type ViewMode = 'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training' | 'account-management';
 
 type AppUser = {
   uid: string;
@@ -68,6 +68,7 @@ function getInitialViewMode(): ViewMode {
   if (path.startsWith('/social-dashboard')) return 'social-dashboard';
   if (path.startsWith('/email-builder')) return 'email-builder';
   if (path.startsWith('/examination')) return 'examination';
+  if (path.startsWith('/account-management')) return 'account-management';
   return 'workspace';
 }
 
@@ -237,7 +238,7 @@ export default function App() {
   };
 
   const handleConnectGoogle = async () => {
-    alert('Firebase đã được loại bỏ. Hãy cấu hình Google Service Account tại mục Cấu hình hệ thống để dùng Google Sheets.');
+    alert('Tính năng kết nối Google Sheets hiện chưa sẵn sàng.');
     return false;
   };
 
@@ -291,32 +292,45 @@ export default function App() {
   }
 
   if (viewMode === 'workspace') {
-    const apps: Array<{ mode: ViewMode; title: string; description: string; gradient: string }> = [
+    const apps: Array<{ mode: ViewMode; title: string; description: string; gradient: string; icon: React.ElementType }> = [
       {
         mode: 'social-dashboard',
         title: 'Phân tích Mạng xã hội',
         description: 'Theo dõi Facebook, Zalo OA, báo cáo tương tác và đồng bộ dữ liệu.',
         gradient: 'from-blue-500 to-indigo-600',
+        icon: ChartColumnBig,
       },
       {
         mode: 'email-builder',
         title: 'Trình tạo Email',
-        description: 'Thiết kế email trực quan và lưu mẫu dùng chung trong hệ thống Django.',
+        description: 'Thiết kế email trực quan và lưu mẫu dùng chung.',
         gradient: 'from-indigo-500 to-violet-600',
+        icon: Mail,
       },
       {
         mode: 'examination',
         title: 'Khảo thí',
         description: 'Quản lý cuộc thi, kỳ tổ chức, thí sinh và nguồn dữ liệu Google Sheets.',
         gradient: 'from-emerald-500 to-teal-600',
+        icon: ClipboardList,
       },
       {
         mode: 'digital-training',
         title: 'Đào tạo số',
         description: 'Quản lý nội dung đào tạo chuyển đổi số và ứng dụng AI.',
         gradient: 'from-cyan-500 to-blue-600',
+        icon: GraduationCap,
       },
     ];
+    if (userRole === 'ADMIN') {
+      apps.push({
+        mode: 'account-management',
+        title: 'Quản lý tài khoản',
+        description: 'Tạo, phân quyền và quản lý thành viên Workspace.',
+        gradient: 'from-slate-600 to-blue-700',
+        icon: ShieldUser,
+      });
+    }
 
     return (
       <div className="min-h-dvh liquid-bg flex flex-col font-sans relative overflow-x-hidden">
@@ -326,7 +340,6 @@ export default function App() {
               <img src="/logo.png" alt="FermatTech Logo" className="h-8 object-contain" />
               <div className="hidden sm:block border-l border-slate-200 pl-3.5">
                 <h1 className="font-extrabold text-slate-900 text-sm">Fermat Workspace</h1>
-                <p className="text-[10px] uppercase font-bold text-indigo-600 tracking-widest">Django Platform</p>
               </div>
             </div>
             {isGuest ? (
@@ -346,37 +359,47 @@ export default function App() {
 
         <main className="flex-1 w-full max-w-6xl mx-auto px-5 sm:px-8 py-12 sm:py-16 z-10">
           <div className="text-center max-w-2xl mx-auto mb-12 space-y-4">
-            <span className="inline-flex rounded-full border border-emerald-100 bg-emerald-50 px-3.5 py-1.5 text-xs font-bold text-emerald-700">
-              Backend Django · PostgreSQL/SQLite
-            </span>
             <h2 className="text-3xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">
               Không gian làm việc <span className="ft-gradient-text">FT Workspace</span>
             </h2>
-            <p className="text-base text-slate-500">
-              Xác thực và dữ liệu được quản lý trực tiếp trên máy chủ FermatTech, không sử dụng Firebase.
-            </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 max-w-4xl mx-auto">
-            {apps.map(app => (
-              <button
-                key={app.mode}
-                type="button"
-                onClick={() => openProtectedView(app.mode, app.mode === 'social-dashboard' ? 'dashboard' : undefined)}
-                className="glass-card p-7 rounded-3xl text-left group min-h-[210px] flex flex-col justify-between"
-              >
-                <div>
-                  <div className={`w-14 h-14 rounded-2xl bg-gradient-to-tr ${app.gradient} shadow-lg mb-5`} />
-                  <h3 className="ft-heading ft-heading-sm">{app.title}</h3>
-                  <p className="ft-body-sm text-slate-500 mt-2 leading-relaxed">{app.description}</p>
-                </div>
-                <span className="pt-5 text-sm font-semibold text-amber-600">Truy cập ứng dụng →</span>
-              </button>
-            ))}
+            {apps.map(app => {
+              const AppIcon = app.icon;
+              return (
+                <button
+                  key={app.mode}
+                  type="button"
+                  onClick={() => openProtectedView(app.mode, app.mode === 'social-dashboard' ? 'dashboard' : undefined)}
+                  className="glass-card p-7 rounded-3xl text-left group min-h-[210px] flex flex-col justify-between"
+                >
+                  <div>
+                    <div className={`grid w-14 h-14 place-items-center rounded-2xl bg-gradient-to-tr ${app.gradient} shadow-lg mb-5`}><AppIcon className="h-7 w-7 text-white" /></div>
+                    <h3 className="ft-heading ft-heading-sm">{app.title}</h3>
+                    <p className="ft-body-sm text-slate-500 mt-2 leading-relaxed">{app.description}</p>
+                  </div>
+                  <span className="pt-5 text-sm font-semibold text-amber-600">{'Truy cập ứng dụng →'}</span>
+                </button>
+              );
+            })}
           </div>
         </main>
         {loginModal}
       </div>
+    );
+  }
+
+  if (viewMode === 'account-management') {
+    if (userRole !== 'ADMIN') { setViewMode('workspace'); return null; }
+    return (
+      <>
+        <div className="min-h-screen bg-slate-50 font-sans">
+          <header className="border-b border-slate-200 bg-white"><div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4 sm:px-8"><button onClick={() => setViewMode('workspace')} className="ft-btn ft-btn-secondary">Quay lại Workspace</button><span className="text-sm font-bold text-slate-700">Quản trị Workspace</span></div></header>
+          <main className="mx-auto max-w-6xl px-5 py-8 sm:px-8"><Suspense fallback={<div className="py-16 text-center text-sm text-slate-500">Đang tải quản lý tài khoản...</div>}><AccountManagement idToken={idToken || ''} userRole={userRole} /></Suspense></main>
+        </div>
+        {loginModal}
+      </>
     );
   }
 
@@ -443,6 +466,7 @@ export default function App() {
         userRole={userRole}
         idToken={idToken || ''}
         onLogout={handleLogout}
+        onLogin={() => { setAuthError(''); setShowLoginModal(true); }}
         onBackToWorkspace={() => setViewMode('workspace')}
       />
       <main className="flex-1 overflow-y-auto px-5 py-6 md:px-7 md:py-7">
@@ -473,10 +497,8 @@ export default function App() {
                   userRole={userRole}
                   onConnectGoogle={handleConnectGoogle}
                   showUserManagement={false}
+                  onChannelsChanged={handleRefreshChannels}
                 />
-              )}
-              {activeTab === 'accounts' && (
-                <AccountManagement idToken={idToken || ''} userRole={userRole} />
               )}
             </Suspense>
           </div>

@@ -4,7 +4,7 @@ from rest_framework import status
 import uuid
 import json
 from django.utils import timezone
-from .models import Competition, ExamSession, Candidate, LogNote, ExaminationSheet
+from .models import Competition, ExamSession, Candidate, CandidateParticipation, RoundResult, LogNote, ExaminationSheet
 from authentication.models import SystemConfig
 from authentication.permissions import IsAuthenticated, IsManagerOrAdmin, IsAdmin
 from .sync import (
@@ -13,31 +13,28 @@ from .sync import (
     get_contest_codes,
     merge_contest_codes,
     same_candidate,
-    next_code
+    next_code,
+    export_session_to_google_sheet
 )
 
 EXAMINATION_SEED = {
     'competitions': [
-        { 'id': 'aysbc', 'code': 'AYSBC', 'name': 'Huy hiệu các Nhà khoa học trẻ Châu Á', 'parent': 'AYSBC', 'organizer': 'SCS và META Knowledge' },
-        { 'id': 'imo', 'code': 'IMO', 'name': 'International Maths Olympiad', 'parent': 'IMO', 'organizer': 'SCO' },
-        { 'id': 'ieo', 'code': 'IEO', 'name': 'International English Olympiad', 'parent': 'IEO - English', 'organizer': 'SCO' },
-        { 'id': 'iso', 'code': 'ISO', 'name': 'International Science Olympiad', 'parent': 'ISO - Science', 'organizer': 'SCO' },
+        { 'id': 'aysbc', 'code': 'AYSBC', 'name': 'Huy hi?u c?c Nh? khoa h?c tr? Ch?u ?', 'parent': 'AYSBC', 'organizer': 'SCS v? META Knowledge' },
+        { 'id': 'imo', 'code': 'SIMO', 'name': 'International Maths Olympiad', 'parent': 'SCO - IMO', 'organizer': 'SCO' },
+        { 'id': 'ieo', 'code': 'SIEO', 'name': 'International English Olympiad', 'parent': 'SCO - IEO', 'organizer': 'SCO' },
+        { 'id': 'iso', 'code': 'SISO', 'name': 'International Science Olympiad', 'parent': 'SCO - ISO', 'organizer': 'SCO' },
         { 'id': 'fimo', 'code': 'FIMO', 'name': 'FermatTech International Mathematics Olympiad', 'parent': 'FIMO', 'organizer': 'FermatTech' },
-        { 'id': 'fieo', 'code': 'FIEO', 'name': 'FermatTech International English Olympiad', 'parent': 'FIEO - Tiếng Anh', 'organizer': 'FermatTech' },
+        { 'id': 'fieo', 'code': 'FIEO', 'name': 'FermatTech International English Olympiad', 'parent': 'FIEO - Ti?ng Anh', 'organizer': 'FermatTech' },
     ],
     'sessions': [
-        { 'id': 'aysbc', 'code': 'AYSBC', 'name': 'Huy hiệu các Nhà khoa học trẻ Châu Á', 'parent': 'AYSBC', 'organizer': 'SCS và META Knowledge', 'time': 'T7/2026', 'candidates_count': 2, 'national': '26/7/2026', 'national_date': '2026-07-26', 'international': 'Dự kiến T10/2026', 'phase': 'Tuyển sinh', 'note': 'Thí sinh hoàn thành tích lũy sao đến hết ngày 28/7.' },
-        { 'id': 'imo', 'code': 'IMO', 'name': 'International Maths Olympiad', 'parent': 'IMO', 'organizer': 'SCO', 'time': 'T6–T8/2026', 'candidates_count': 862, 'national': '21/6/2026', 'national_date': '2026-06-21', 'international': '9/8/2026', 'international_date': '2026-08-09', 'phase': 'Ôn tập vòng Quốc tế', 'note': 'Đang tổ chức lớp ôn tập.' },
-        { 'id': 'ieo', 'code': 'IEO', 'name': 'International English Olympiad', 'parent': 'IEO - English', 'organizer': 'SCO', 'time': 'T6–T8/2026', 'candidates_count': 735, 'national': '21/6/2026', 'national_date': '2026-06-21', 'international': '9/8/2026', 'international_date': '2026-08-09', 'phase': 'Ôn tập vòng Quốc tế', 'note': 'Đang tổ chức lớp ôn tập.' },
-        { 'id': 'iso', 'code': 'ISO', 'name': 'International Science Olympiad', 'parent': 'ISO - Science', 'organizer': 'SCO', 'time': 'T6–T8/2026', 'candidates_count': 691, 'national': '21/6/2026', 'national_date': '2026-06-21', 'international': '9/8/2026', 'international_date': '2026-08-09', 'phase': 'Ôn tập vòng Quốc tế', 'note': 'Đang tổ chức lớp ôn tập.' },
-        { 'id': 'fimo', 'code': 'FIMO', 'name': 'FermatTech International Mathematics Olympiad', 'parent': 'FIMO', 'organizer': 'FermatTech', 'time': 'Dự kiến T9/2026', 'candidates_count': 320, 'national': 'Dự kiến tháng 9', 'international': 'Không tổ chức năm đầu', 'phase': 'Chuẩn bị hồ sơ', 'note': 'Hoàn thiện điều lệ và đối tác địa phương.' },
-        { 'id': 'fieo', 'code': 'FIEO', 'name': 'FermatTech International English Olympiad', 'parent': 'FIEO - Tiếng Anh', 'organizer': 'FermatTech', 'time': 'Dự kiến T9/2026', 'candidates_count': 286, 'national': 'Dự kiến tháng 9', 'international': 'Không tổ chức năm đầu', 'phase': 'Chuẩn bị hồ sơ', 'note': 'Hoàn thiện điều lệ và đối tác địa phương.' },
+        { 'id': 'aysbc', 'code': 'AYSBC', 'name': 'Huy hi?u c?c Nh? khoa h?c tr? Ch?u ?', 'parent': 'AYSBC', 'organizer': 'SCS v? META Knowledge', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Ch?a c?p nh?t', 'note': '' },
+        { 'id': 'imo', 'code': 'SIMO', 'name': 'International Maths Olympiad', 'parent': 'SCO - IMO', 'organizer': 'SCO', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Ch?a c?p nh?t', 'note': '' },
+        { 'id': 'ieo', 'code': 'SIEO', 'name': 'International English Olympiad', 'parent': 'SCO - IEO', 'organizer': 'SCO', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Ch?a c?p nh?t', 'note': '' },
+        { 'id': 'iso', 'code': 'SISO', 'name': 'International Science Olympiad', 'parent': 'SCO - ISO', 'organizer': 'SCO', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Ch?a c?p nh?t', 'note': '' },
+        { 'id': 'fimo', 'code': 'FIMO', 'name': 'FermatTech International Mathematics Olympiad', 'parent': 'FIMO', 'organizer': 'FermatTech', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Ch?a c?p nh?t', 'note': '' },
+        { 'id': 'fieo', 'code': 'FIEO', 'name': 'FermatTech International English Olympiad', 'parent': 'FIEO - Ti?ng Anh', 'organizer': 'FermatTech', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Ch?a c?p nh?t', 'note': '' },
     ],
-    'candidates': [
-        { 'id': 'FT26-0001', 'code': 'FT26-0001', 'name': 'Nguyễn Minh Anh', 'school': 'THCS Cầu Giấy', 'class_name': '8A1', 'city': 'Hà Nội', 'contests': 'AYSBC, IMO', 'achievement': 'HCV — AYSBC 2025', 'updated': '18/07/2026 09:20', 'email': 'minhanh@example.com', 'parent': 'Nguyễn Thu Hà', 'phone': '0988 123 456', 'identity': '001212345678', 'address': 'Cầu Giấy, Hà Nội' },
-        { 'id': 'FT26-0042', 'code': 'FT26-0042', 'name': 'Trần Gia Bảo', 'school': 'THCS Lê Quý Đôn', 'class_name': '9A3', 'city': 'Đà Nẵng', 'contests': 'IMO, ISO', 'achievement': 'HCB — IMO 2025', 'updated': '17/07/2026 16:45', 'email': 'giabao@example.com', 'parent': 'Trần Văn Long', 'phone': '0912 456 789', 'identity': '048211234567', 'address': 'Hải Châu, Đà Nẵng' },
-        { 'id': 'FT26-0079', 'code': 'FT26-0079', 'name': 'Lê Hoàng Nam', 'school': 'Tiểu học Đoàn Thị Điểm', 'class_name': '7A2', 'city': 'Hà Nội', 'contests': 'AYSBC, IEO', 'achievement': 'Top 10 — IEO 2025', 'updated': '16/07/2026 11:05', 'email': 'hoangnam@example.com', 'parent': 'Lê Thị Mai', 'phone': '0903 555 222', 'identity': '001213456789', 'address': 'Nam Từ Liêm, Hà Nội' },
-    ]
+    'candidates': [],
 }
 
 def ensure_examination_seed():
@@ -98,6 +95,107 @@ def ensure_examination_seed():
             }
         )
 
+def merge_exam_history(existing, incoming, session_id='', source=''):
+    rows = [item for item in (existing or []) if isinstance(item, dict)]
+    index = {}
+    for position, item in enumerate(rows):
+        key = (str(item.get('sessionId') or ''), str(item.get('round') or ''), str(item.get('sbd') or ''))
+        index[key] = position
+    for item in incoming or []:
+        if not isinstance(item, dict):
+            continue
+        clean = {str(key): str(value).strip() for key, value in item.items() if value not in (None, '')}
+        if not clean:
+            continue
+        clean['sessionId'] = session_id or clean.get('sessionId', '')
+        if source:
+            clean['source'] = source
+        key = (clean.get('sessionId', ''), clean.get('round', ''), clean.get('sbd', ''))
+        if key in index:
+            rows[index[key]].update(clean)
+        else:
+            index[key] = len(rows)
+            rows.append(clean)
+    return rows
+
+ROUND_FIELD_MAP = {
+    'sbd': 'sbd',
+    'date': 'exam_date',
+    'time': 'time_slot',
+    'mode': 'mode',
+    'location': 'location',
+    'link': 'link',
+    'account': 'account',
+    'attendance': 'attendance',
+    'score': 'score',
+    'scoreRate': 'score_rate',
+    'rank': 'rank',
+    'result': 'result',
+    'note': 'note',
+}
+
+
+def upsert_participation_history(candidate, session_id, history, source=''):
+    """Store a source tab as one session and each populated round independently."""
+    if not session_id:
+        return None
+    session = ExamSession.objects.filter(id=session_id).first()
+    if not session:
+        return None
+    participation, _ = CandidateParticipation.objects.get_or_create(
+        candidate=candidate,
+        session=session,
+        defaults={'source': source or ''},
+    )
+    if source and participation.source != source:
+        participation.source = source
+        participation.save(update_fields=['source', 'updated_at'])
+
+    for item in history or []:
+        if not isinstance(item, dict):
+            continue
+        round_name = str(item.get('round') or '').strip()
+        if not round_name:
+            continue
+        values = {
+            model_field: str(item.get(payload_field) or '').strip()
+            for payload_field, model_field in ROUND_FIELD_MAP.items()
+        }
+        values['raw_data'] = {str(key): value for key, value in item.items() if value not in (None, '')}
+        RoundResult.objects.update_or_create(
+            participation=participation,
+            round_name=round_name,
+            defaults=values,
+        )
+    return participation
+
+
+def normalized_exam_history(candidate):
+    rows = []
+    participations = CandidateParticipation.objects.filter(candidate=candidate).select_related('session').prefetch_related('round_results')
+    for participation in participations:
+        for result in participation.round_results.all():
+            rows.append({
+                'sessionId': participation.session_id,
+                'sessionCode': participation.session.code,
+                'round': result.round_name,
+                'sbd': result.sbd,
+                'date': result.exam_date,
+                'time': result.time_slot,
+                'mode': result.mode,
+                'location': result.location,
+                'link': result.link,
+                'account': result.account,
+                'attendance': result.attendance,
+                'score': result.score,
+                'scoreRate': result.score_rate,
+                'rank': result.rank,
+                'result': result.result,
+                'note': result.note,
+            })
+    return rows
+
+
 def serialize_competition(comp):
     return {
         'id': comp.id,
@@ -149,8 +247,20 @@ def serialize_candidate(cand):
         'address': cand.address or '',
         'birthDate': cand.birth_date or '',
         'sessionIds': cand.session_ids or [],
+        'examHistory': normalized_exam_history(cand) or cand.exam_history or [],
         'sortKey': cand.sort_key,
         'updated': cand.updated or ''
+    }
+
+
+def serialize_lognote(note):
+    return {
+        'id': note.key,
+        'time': timezone.localtime(note.created_at).strftime('%d/%m/%Y %H:%M'),
+        'createdAt': note.created_at.isoformat(),
+        'actor': note.updated_by or 'Nhân viên FT Workspace',
+        'content': note.content,
+        'system': note.system,
     }
 
 @api_view(['GET'])
@@ -486,6 +596,7 @@ def candidate_remove_from_session(request, pk, session_id):
         derived = [s.id for s in all_sessions if s.code.upper() in sess_codes]
         
     cand.session_ids = [s_id for s_id in derived if s_id != session_id]
+    CandidateParticipation.objects.filter(candidate=cand, session_id=session_id).delete()
     cand.updated = timezone.now().strftime('%d/%m/%Y %H:%M')
     cand.save()
     
@@ -504,30 +615,17 @@ def sheets_list(request):
                 'name': s.name,
                 'url': s.url,
                 'status': s.status,
+                'sessionId': s.session_id,
+                'sheetTab': s.sheet_tab,
+                'stage': s.stage,
                 'createdAt': s.created_at.isoformat(),
                 'updatedAt': s.updated_at.isoformat(),
                 'createdBy': s.created_by
             })
             
         if not result:
-            # Seed default sheet
-            default_sheet = ExaminationSheet.objects.create(
-                id=f"sheet-{uuid.uuid4().hex[:10]}",
-                name='Google Sheets Khảo thí FT (Mặc định)',
-                url=DEFAULT_SHEET_URL,
-                status='idle',
-                created_at=timezone.now(),
-                updated_at=timezone.now()
-            )
-            result = [{
-                'id': default_sheet.id,
-                'name': default_sheet.name,
-                'url': default_sheet.url,
-                'status': default_sheet.status,
-                'createdAt': default_sheet.created_at.isoformat(),
-                'updatedAt': default_sheet.updated_at.isoformat(),
-                'createdBy': default_sheet.created_by
-            }]
+            return Response([])
+
         return Response(result)
         
     elif request.method == 'POST':
@@ -537,15 +635,22 @@ def sheets_list(request):
         data = request.data or {}
         name = data.get('name', '').strip()
         url = data.get('url', '').strip()
+        session_id = str(data.get('sessionId') or '').strip()
         
         if not name or not url:
             return Response({'error': 'Tên nguồn và đường dẫn Google Sheets là bắt buộc.'}, status=status.HTTP_400_BAD_REQUEST)
             
+        if not session_id or not ExamSession.objects.filter(id=session_id).exists():
+            return Response({'error': 'Mỗi tab nguồn phải được gắn với một kỳ tổ chức hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
+
         sheet = ExaminationSheet.objects.create(
             id=f"sheet-{uuid.uuid4().hex[:10]}",
             name=name,
             url=url,
             status='idle',
+            session_id=session_id,
+            sheet_tab=data.get('sheetTab', '').strip(),
+            stage=data.get('stage', '').strip(),
             created_at=timezone.now(),
             updated_at=timezone.now(),
             created_by=request.user.email if hasattr(request.user, 'email') else None
@@ -555,6 +660,9 @@ def sheets_list(request):
             'name': sheet.name,
             'url': sheet.url,
             'status': sheet.status,
+            'sessionId': sheet.session_id,
+            'sheetTab': sheet.sheet_tab,
+            'stage': sheet.stage,
             'createdAt': sheet.created_at.isoformat(),
             'updatedAt': sheet.updated_at.isoformat(),
             'createdBy': sheet.created_by
@@ -574,6 +682,15 @@ def sheet_detail(request, pk):
             sheet.name = data['name'].strip()
         if 'url' in data and data['url'].strip():
             sheet.url = data['url'].strip()
+        if 'sessionId' in data:
+            requested_session_id = str(data.get('sessionId') or '').strip()
+            if not requested_session_id or not ExamSession.objects.filter(id=requested_session_id).exists():
+                return Response({'error': 'Mỗi tab nguồn phải được gắn với một kỳ tổ chức hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
+            sheet.session_id = requested_session_id
+        if 'sheetTab' in data:
+            sheet.sheet_tab = str(data.get('sheetTab') or '').strip()
+        if 'stage' in data:
+            sheet.stage = str(data.get('stage') or '').strip()
             
         sheet.updated_at = timezone.now()
         sheet.save()
@@ -582,6 +699,9 @@ def sheet_detail(request, pk):
             'name': sheet.name,
             'url': sheet.url,
             'status': sheet.status,
+            'sessionId': sheet.session_id,
+            'sheetTab': sheet.sheet_tab,
+            'stage': sheet.stage,
             'createdAt': sheet.created_at.isoformat(),
             'updatedAt': sheet.updated_at.isoformat(),
             'createdBy': sheet.created_by
@@ -595,20 +715,52 @@ def sheet_detail(request, pk):
 
 @api_view(['POST'])
 @permission_classes([IsManagerOrAdmin])
+def sheet_export(request, pk):
+    try:
+        sheet = ExaminationSheet.objects.get(id=pk)
+    except ExaminationSheet.DoesNotExist:
+        return Response({'error': 'Không tìm thấy nguồn dữ liệu.'}, status=status.HTTP_404_NOT_FOUND)
+    if not sheet.session_id:
+        return Response({'error': 'Nguồn dữ liệu chưa được gắn với kỳ tổ chức.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    sheet.status = 'running'
+    sheet.updated_at = timezone.now()
+    sheet.save(update_fields=['status', 'updated_at'])
+    try:
+        result = export_session_to_google_sheet(sheet, getattr(request, 'google_access_token', None))
+    except Exception as exc:
+        sheet.status = 'failed'
+        sheet.updated_at = timezone.now()
+        sheet.save(update_fields=['status', 'updated_at'])
+        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    sheet.status = 'success'
+    sheet.updated_at = timezone.now()
+    sheet.save(update_fields=['status', 'updated_at'])
+    return Response(result)
+
+
+@api_view(['POST'])
+@permission_classes([IsManagerOrAdmin])
 def sheets_sync(request):
     data = request.data or {}
     url = data.get('url', '').strip()
     sheet_id = data.get('id')
     
     target_url = url or None
+    session_id = str(data.get('sessionId') or '').strip() or None
     if sheet_id:
         try:
             sheet = ExaminationSheet.objects.get(id=sheet_id)
             target_url = sheet.url
+            session_id = sheet.session_id or session_id
         except ExaminationSheet.DoesNotExist:
-            pass
+            return Response({'error': 'Không tìm thấy nguồn dữ liệu.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if target_url and not session_id:
+        return Response({'error': 'Nguồn dữ liệu chưa được gắn với kỳ tổ chức.'}, status=status.HTTP_400_BAD_REQUEST)
             
-    result = sync_examination_from_google_sheet(target_url)
+    result = sync_examination_from_google_sheet(target_url, session_id, sheet_id)
     if not result['success']:
         return Response({'error': result['message']}, status=status.HTTP_400_BAD_REQUEST)
     return Response(result)
@@ -626,21 +778,21 @@ def import_candidates(request):
         data = request.data or {}
         input_records = data.get('records', [])
         source = data.get('source', '')
-        session_id = data.get('sessionId')
+        session_id = str(data.get('sessionId') or '').strip()
         
         if not input_records:
             return Response({'error': 'Không có hồ sơ để nhập.'}, status=status.HTTP_400_BAD_REQUEST)
-            
+
+        ensure_examination_seed()
+        if not session_id:
+            return Response({'error': 'Chọn kỳ tổ chức trước khi nhập dữ liệu.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            ExamSession.objects.get(id=session_id)
+        except ExamSession.DoesNotExist:
+            return Response({'error': 'Không tìm thấy kỳ tổ chức đã chọn.'}, status=status.HTTP_404_NOT_FOUND)
+
         if len(input_records) > 1000:
             return Response({'error': 'Mỗi lần chỉ được nhập tối đa 1.000 hồ sơ.'}, status=status.HTTP_400_BAD_REQUEST)
-            
-        if session_id:
-            try:
-                ExamSession.objects.get(id=session_id)
-            except ExamSession.DoesNotExist:
-                return Response({'error': 'Không tìm thấy kỳ thi cần thêm thí sinh.'}, status=status.HTTP_404_NOT_FOUND)
-                
-        ensure_examination_seed()
         
         existing = list(Candidate.objects.all())
         existing_codes_set = {c.code for c in existing}
@@ -670,6 +822,7 @@ def import_candidates(request):
                 'identity': str(rec.get('identity', '')).strip(),
                 'address': str(rec.get('address', '')).strip(),
                 'birth_date': str(rec.get('birthDate', '')).strip(),
+                'exam_history': rec.get('examHistory') or [],
             }
             
             # Match
@@ -679,7 +832,8 @@ def import_candidates(request):
                     'name': e.name,
                     'birth_date': e.birth_date,
                     'identity': e.identity,
-                    'email': e.email
+                    'email': e.email,
+                    'school': e.school
                 }
                 if same_candidate(e_dict, rec_cand):
                     matched = e
@@ -713,8 +867,10 @@ def import_candidates(request):
                     if session_id not in s_ids:
                         s_ids.append(session_id)
                     base.session_ids = s_ids
+                base.exam_history = merge_exam_history(base.exam_history, rec_cand['exam_history'], session_id, source)
                 base.updated = ts_vn
                 base.save()
+                upsert_participation_history(base, session_id, rec_cand['exam_history'], source)
                 updated += 1
                 items_returned.append(serialize_candidate(base))
             else:
@@ -735,9 +891,11 @@ def import_candidates(request):
                     address=rec_cand['address'],
                     birth_date=rec_cand['birth_date'],
                     session_ids=s_ids,
+                    exam_history=merge_exam_history([], rec_cand['exam_history'], session_id, source),
                     updated=ts_vn,
                     sort_key=f"{rec_cand['name'].lower()}_{rec_cand['identity'] or code}"
                 )
+                upsert_participation_history(new_c, session_id, rec_cand['exam_history'], source)
                 existing.append(new_c)
                 existing_codes_set.add(code)
                 created += 1
@@ -752,44 +910,27 @@ def import_candidates(request):
 @permission_classes([IsAuthenticated])
 def lognotes_detail(request, entityKey):
     try:
-        log_note, created = LogNote.objects.get_or_create(
-            key=entityKey,
-            defaults={'content': '[]'}
-        )
-        
         if request.method == 'GET':
-            notes = json.loads(log_note.content or '[]')
+            notes = [
+                serialize_lognote(note)
+                for note in LogNote.objects.filter(entity_key=entityKey).order_by('-created_at')
+            ]
             return Response(notes)
-            
-        elif request.method == 'POST':
-            data = request.data or {}
-            content = data.get('content', '').strip()
-            actor = data.get('actor', '').strip()
-            system = data.get('system', False)
-            
-            if not content:
-                return Response({'error': 'Nội dung không được để trống.'}, status=status.HTTP_400_BAD_REQUEST)
-                
-            current_notes = json.loads(log_note.content or '[]')
-            
-            new_note = {
-                'id': f"{int(timezone.now().timestamp() * 1000)}-{uuid.uuid4().hex[:5]}",
-                'time': timezone.now().strftime('%d/%m/%Y %H:%M'),
-                'actor': actor or request.user.email if hasattr(request.user, 'email') else 'Nhân viên FT Workspace',
-                'content': content,
-                'system': bool(system),
-                'createdAt': timezone.now().isoformat()
-            }
-            
-            updated_notes = [new_note] + current_notes
-            log_note.content = json.dumps(updated_notes)
-            log_note.updated_by = request.user.email if hasattr(request.user, 'email') else None
-            log_note.save()
-            
-            return Response({
-                'success': True,
-                'note': new_note,
-                'notes': updated_notes
-            })
+
+        data = request.data or {}
+        content = data.get('content', '').strip()
+        actor = data.get('actor', '').strip()
+        system = bool(data.get('system', False))
+        if not content:
+            return Response({'error': 'Nội dung không được để trống.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        note = LogNote.objects.create(
+            key=f"{entityKey}:{uuid.uuid4().hex}",
+            entity_key=entityKey,
+            content=content,
+            updated_by=actor or getattr(request.user, 'email', '') or 'Nhân viên FT Workspace',
+            system=system,
+        )
+        return Response({'success': True, 'note': serialize_lognote(note)}, status=status.HTTP_201_CREATED)
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

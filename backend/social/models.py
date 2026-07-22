@@ -31,6 +31,11 @@ class Post(models.Model):
     updated_at = models.DateTimeField()
     is_deleted = models.BooleanField(default=False)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=["channel_id", "published_at"], name="social_post_channel_date"),
+        ]
+
     def __str__(self):
         return f"{self.platform} post {self.post_key}"
 
@@ -52,6 +57,12 @@ class DailySnapshot(models.Model):
     engagement_rate = models.FloatField(null=True, blank=True)
     fetched_at = models.DateTimeField()
 
+    class Meta:
+        indexes = [
+            models.Index(fields=["channel_id", "snapshot_date"], name="social_daily_channel_date"),
+            models.Index(fields=["post_key", "snapshot_date"], name="social_daily_post_date"),
+        ]
+
     def __str__(self):
         return f"Snapshot {self.snapshot_key}"
 
@@ -62,6 +73,11 @@ class FollowerSnapshot(models.Model):
     channel_name = models.CharField(max_length=255)
     followers_count = models.IntegerField(default=0)
     fetched_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["channel_id", "snapshot_date"], name="social_follow_channel_date"),
+        ]
 
     def __str__(self):
         return f"{self.channel_name} on {self.snapshot_date}"

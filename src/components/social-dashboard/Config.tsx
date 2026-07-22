@@ -12,6 +12,20 @@ export interface TokenRow {
   pageId: string;
   pageName: string;
   accessToken: string;
+  issuedAt?: string;
+  expiresAt?: string;
+  sourceTokenId?: string;
+}
+
+interface FacebookScanToken {
+  id: string;
+  platform: 'facebook';
+  label: string;
+  accessToken: string;
+  issuedAt?: string;
+  expiresAt?: string;
+  pageIds: string[];
+  pageNames: string[];
 }
 
 const FERMAT_PRESETS = [
@@ -32,9 +46,10 @@ interface ConfigProps {
   userRole: UserRole;
   onConnectGoogle?: () => Promise<boolean>;
   showUserManagement?: boolean;
+  onChannelsChanged?: () => Promise<void>;
 }
 
-export default function Config({ idToken, googleAccessToken, userRole, onConnectGoogle, showUserManagement = false }: ConfigProps) {
+export default function Config({ idToken, googleAccessToken, userRole, onConnectGoogle, showUserManagement = false, onChannelsChanged }: ConfigProps) {
   const [spreadsheetId, setSpreadsheetId] = useState('');
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
   const [googleServiceAccountJson, setGoogleServiceAccountJson] = useState('');
@@ -43,6 +58,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
 
   // Token Table state
   const [tokensList, setTokensList] = useState<TokenRow[]>([]);
+  const [facebookScanTokens, setFacebookScanTokens] = useState<FacebookScanToken[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [formPlatform, setFormPlatform] = useState<'facebook' | 'zalo' | 'mock'>('facebook');
   const [formPageId, setFormPageId] = useState('');
@@ -97,6 +113,17 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
   });
 
   const isAdmin = userRole === 'ADMIN';
+  const tokenLifetime = (row: Omit<TokenRow, 'issuedAt' | 'expiresAt'>, previous?: TokenRow): TokenRow => {
+    if (previous?.accessToken === row.accessToken && previous.issuedAt && previous.expiresAt) return { ...row, issuedAt: previous.issuedAt, expiresAt: previous.expiresAt };
+    const issuedAt = new Date();
+    return { ...row, issuedAt: issuedAt.toISOString(), expiresAt: new Date(issuedAt.getTime() + 60 * 86_400_000).toISOString() };
+  };
+  const scanTokenLifetime = (accessToken: string, pages: { id: string; name: string }[], previous?: FacebookScanToken): FacebookScanToken => {
+    const issuedAt = previous?.accessToken === accessToken && previous.issuedAt && previous.expiresAt ? previous.issuedAt : new Date().toISOString();
+    const expiresAt = previous?.accessToken === accessToken && previous.expiresAt ? previous.expiresAt : new Date(new Date(issuedAt).getTime() + 60 * 86_400_000).toISOString();
+    return { id: previous?.id || `facebook-scan-${Date.now()}-${Math.random().toString(16).slice(2)}`, platform: 'facebook', label: 'Token quét Facebook', accessToken, issuedAt, expiresAt, pageIds: pages.map(page => page.id), pageNames: pages.map(page => page.name) };
+  };
+  const remainingDays = (expiresAt?: string) => expiresAt ? Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86_400_000)) : null;
 
   const fetchUsers = async () => {
     setLoadingUsers(true);
@@ -137,6 +164,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
         // Load or bootstrap visual tokensList
         if (data.detailedTokensList && Array.isArray(data.detailedTokensList)) {
           setTokensList(data.detailedTokensList);
+          setFacebookScanTokens(Array.isArray(data.facebookScanTokens) ? data.facebookScanTokens : []);
         } else {
           const bootstrapped: TokenRow[] = [];
           if (metaJson.trim()) {
@@ -172,6 +200,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
             }
           }
           setTokensList(bootstrapped);
+          setFacebookScanTokens(Array.isArray(data.facebookScanTokens) ? data.facebookScanTokens : []);
         }
       }
     } catch (e) {
@@ -219,6 +248,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
           metaPageTokensJson: serializedMeta,
           zaloOaTokensJson: serializedZalo,
           detailedTokensList: tokensList,
+          facebookScanTokens,
           cronSecret: cronSecret.trim(),
           adminEmails: adminEmails.trim(),
           autoSyncEnabled,
@@ -237,6 +267,9 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
         : '';
       setMetaPageTokensJson(serializedMeta);
       setZaloOaTokensJson(serializedZalo);
+      setTokensList(responseData.detailedTokensList || tokensList);
+      setFacebookScanTokens(responseData.facebookScanTokens || facebookScanTokens);
+      await onChannelsChanged?.();
       setSecretsSaveStatus({ status: 'success', message: `Lưu bảng quản lý mã Tokens và cấu hình bảo mật thành công!${duplicateNotice}` });
     } catch (err: any) {
       setSecretsSaveStatus({ status: 'failed', message: err.message || 'Lỗi lưu cấu hình bảo mật.' });
@@ -245,7 +278,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
     }
   };
 
-  const autoSaveTokensList = async (newList: TokenRow[]) => {
+  const autoSaveTokensList = async (newList: TokenRow[], nextScanTokens: FacebookScanToken[] = facebookScanTokens) => {
     if (!isAdmin) return;
     try {
       const metaObj: Record<string, string> = {};
@@ -272,6 +305,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
           metaPageTokensJson: serializedMeta,
           zaloOaTokensJson: serializedZalo,
           detailedTokensList: newList,
+          facebookScanTokens: nextScanTokens,
           cronSecret: cronSecret.trim(),
           adminEmails: adminEmails.trim(),
           autoSyncEnabled,
@@ -280,8 +314,12 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
       });
 
       if (res.ok) {
+        const responseData = await res.json();
         setMetaPageTokensJson(serializedMeta);
         setZaloOaTokensJson(serializedZalo);
+        setTokensList(responseData.detailedTokensList || newList);
+        setFacebookScanTokens(responseData.facebookScanTokens || nextScanTokens);
+        await onChannelsChanged?.();
         console.log('Đã tự động lưu cấu hình Tokens và đồng bộ hóa danh sách Kênh.');
       }
     } catch (e) {
@@ -291,52 +329,15 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
 
   const handleAddOrUpdateToken = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formPageId.trim() || !formAccessToken.trim()) {
-      alert('Vui lòng nhập đầy đủ ID Trang/OA và mã Access Token!');
-      return;
-    }
-
+    if (!formPageId.trim() || !formAccessToken.trim()) { alert('Vui lòng nhập đầy đủ ID Trang/OA và mã Access Token!'); return; }
     const cleanPageId = formPageId.trim();
     const cleanPageName = formPageName.trim() || `${formPlatform === 'facebook' ? 'Trang Facebook' : 'Zalo OA'} ${cleanPageId}`;
     const cleanAccessToken = formAccessToken.trim();
-
-    let nextList: TokenRow[] = [];
-    if (editingTokenId) {
-      // Edit existing
-      nextList = tokensList.map(t => t.id === editingTokenId ? {
-        ...t,
-        platform: formPlatform,
-        pageId: cleanPageId,
-        pageName: cleanPageName,
-        accessToken: cleanAccessToken
-      } : t);
-      setTokensList(nextList);
-      setEditingTokenId(null);
-    } else {
-      // Add new
-      const newId = `${formPlatform}-${cleanPageId}`;
-      if (tokensList.some(t => t.id === newId)) {
-        alert('Mã ID trang/OA này đã tồn tại trong bảng quản lý.');
-        return;
-      }
-      nextList = [...tokensList, {
-        id: newId,
-        platform: formPlatform,
-        pageId: cleanPageId,
-        pageName: cleanPageName,
-        accessToken: cleanAccessToken
-      }];
-      setTokensList(nextList);
-    }
-
-    // Reset Form
-    setFormPageId('');
-    setFormPageName('');
-    setFormAccessToken('');
-    setShowAddForm(false);
-
-    // Auto save
-    autoSaveTokensList(nextList);
+    const baseRow = { id: editingTokenId || `${formPlatform}-${cleanPageId}`, platform: formPlatform, pageId: cleanPageId, pageName: cleanPageName, accessToken: cleanAccessToken } as Omit<TokenRow, 'issuedAt' | 'expiresAt'>;
+    let nextList: TokenRow[];
+    if (editingTokenId) { nextList = tokensList.map(token => token.id === editingTokenId ? tokenLifetime(baseRow, token) : token); setEditingTokenId(null); }
+    else { if (tokensList.some(token => token.id === baseRow.id)) { alert('Mã ID trang/OA này đã tồn tại trong bảng quản lý.'); return; } nextList = [...tokensList, tokenLifetime(baseRow)]; }
+    setTokensList(nextList); setFormPageId(''); setFormPageName(''); setFormAccessToken(''); setShowAddForm(false); void autoSaveTokensList(nextList);
   };
 
   const handleFbScan = async () => {
@@ -376,74 +377,39 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
   };
 
   const handleImportScannedPages = () => {
-    const selected = scannedPages.filter(p => p.checked);
-    if (selected.length === 0) {
-      alert('Vui lòng chọn ít nhất một Trang để nhập!');
-      return;
-    }
-
+    const selected = scannedPages.filter(page => page.checked);
+    if (selected.length === 0) { alert('Vui lòng chọn ít nhất một Trang để nhập!'); return; }
+    const existingScanToken = facebookScanTokens.find(token => token.accessToken === fbUserToken.trim());
+    const nextScanToken = scanTokenLifetime(fbUserToken.trim(), selected, existingScanToken);
     const nextList = [...tokensList];
-    selected.forEach(p => {
-      const newId = `facebook-${p.id}`;
-      const idx = nextList.findIndex(t => t.id === newId);
-      const row = {
-        id: newId,
-        platform: 'facebook' as const,
-        pageId: p.id,
-        pageName: p.name,
-        accessToken: p.access_token
-      };
-      if (idx !== -1) {
-        nextList[idx] = row;
-      } else {
-        nextList.push(row);
-      }
+    selected.forEach(page => {
+      const id = `facebook-${page.id}`;
+      const index = nextList.findIndex(token => token.id === id);
+      const row = tokenLifetime({ id, platform: 'facebook', pageId: page.id, pageName: page.name, accessToken: page.access_token, sourceTokenId: nextScanToken.id }, index >= 0 ? nextList[index] : undefined);
+      row.issuedAt = nextScanToken.issuedAt;
+      row.expiresAt = nextScanToken.expiresAt;
+      if (index >= 0) nextList[index] = row; else nextList.push(row);
     });
-
-    setTokensList(nextList);
-    autoSaveTokensList(nextList);
-
+    const nextScanTokens = existingScanToken ? facebookScanTokens.map(token => token.id === existingScanToken.id ? nextScanToken : token) : [...facebookScanTokens, nextScanToken];
+    setTokensList(nextList); setFacebookScanTokens(nextScanTokens); void autoSaveTokensList(nextList, nextScanTokens);
     alert(`Đã nạp thành công ${selected.length} trang Facebook vào bảng cấu hình!`);
-    setShowAddForm(false);
-    setFbUserToken('');
-    setScannedPages([]);
+    setShowAddForm(false); setFbUserToken(''); setScannedPages([]);
   };
 
   const handleImportPresets = () => {
-    if (!presetToken.trim()) {
-      alert('Vui lòng dán mã Access Token áp dụng cho các trang mẫu!');
-      return;
-    }
-    const selectedList = FERMAT_PRESETS.filter(p => selectedPresets[p.pageId]);
-    if (selectedList.length === 0) {
-      alert('Vui lòng tích chọn ít nhất một Trang mẫu để nạp!');
-      return;
-    }
-
+    if (!presetToken.trim()) { alert('Vui lòng dán mã Access Token áp dụng cho các trang mẫu!'); return; }
+    const selectedList = FERMAT_PRESETS.filter(page => selectedPresets[page.pageId]);
+    if (selectedList.length === 0) { alert('Vui lòng tích chọn ít nhất một Trang mẫu để nhập!'); return; }
     const nextList = [...tokensList];
-    selectedList.forEach(p => {
-      const newId = `facebook-${p.pageId}`;
-      const idx = nextList.findIndex(t => t.id === newId);
-      const row = {
-        id: newId,
-        platform: 'facebook' as const,
-        pageId: p.pageId,
-        pageName: p.pageName,
-        accessToken: presetToken.trim()
-      };
-      if (idx !== -1) {
-        nextList[idx] = row;
-      } else {
-        nextList.push(row);
-      }
+    selectedList.forEach(page => {
+      const id = `facebook-${page.pageId}`;
+      const index = nextList.findIndex(token => token.id === id);
+      const row = tokenLifetime({ id, platform: 'facebook', pageId: page.pageId, pageName: page.pageName, accessToken: presetToken.trim() }, index >= 0 ? nextList[index] : undefined);
+      if (index >= 0) nextList[index] = row; else nextList.push(row);
     });
-
-    setTokensList(nextList);
-    autoSaveTokensList(nextList);
-
+    setTokensList(nextList); void autoSaveTokensList(nextList);
     alert(`Đã nạp thành công ${selectedList.length} trang mẫu của Fermat vào bảng cấu hình!`);
-    setShowAddForm(false);
-    setPresetToken('');
+    setShowAddForm(false); setPresetToken('');
   };
 
   const toggleAllPresets = (checked: boolean) => {
@@ -971,13 +937,14 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
                       <th className="p-4">ID Trang / OA</th>
                       <th className="p-4">Tên gợi nhớ</th>
                       <th className="p-4">Mã Access Token</th>
+                      <th className="p-4">Thời hạn</th>
                       {isAdmin && <th className="p-4 text-center">Tác vụ</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs">
                     {tokensList.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="p-8 text-center text-slate-400 italic">
+                        <td colSpan={isAdmin ? 6 : 5} className="p-8 text-center text-slate-400 italic">
                           Chưa có mã Token nào được cấu hình trong bảng quản lý. Hãy bấm nút phía trên để bắt đầu thêm.
                         </td>
                       </tr>
@@ -1010,6 +977,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
                               </button>
                             </div>
                           </td>
+                          <td className="p-4 text-xs font-semibold text-slate-600">{remainingDays(token.expiresAt) === null ? 'Chưa có hạn' : `Còn ${remainingDays(token.expiresAt)} ngày`}</td>
                           {isAdmin && (
                             <td className="p-4 text-center">
                               <div className="inline-flex items-center gap-1">
@@ -1076,6 +1044,12 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
               )}
             </div>
           </div>
+
+          {facebookScanTokens.length > 0 && <section className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
+            <h3 className="text-sm font-extrabold text-slate-800">Token quét Facebook đã lưu</h3>
+            <p className="mt-1 text-xs text-slate-500">Mỗi token có mốc hết hạn riêng; các trang nạp từ cùng token sẽ dùng chung mốc này.</p>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">{facebookScanTokens.map(token => <div key={token.id} className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs"><b className="block text-slate-700">{token.label}</b><span className="text-slate-500">{token.pageNames.length} trang · Còn {remainingDays(token.expiresAt) ?? 0} ngày</span></div>)}</div>
+          </section>}
         </div>
 
         {/* Right Column: Google Sheets, Users & Global Secrets */}
@@ -1089,7 +1063,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
                 Hành động hệ thống
               </h3>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                Nhấn lưu bên dưới để cập nhật danh sách các trang cấu hình trong bảng, khóa Cron và email admin vào SQLite.
+                Nhấn lưu bên dưới để cập nhật các thiết lập.
               </p>
 
               {isAdmin ? (
@@ -1288,9 +1262,9 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
                 <div className="flex items-center justify-between">
                   <div>
                     <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
-                      <span>Tự động đồng bộ (7:00 AM)</span>
+                      <span>Tự động đồng bộ (6:00 AM)</span>
                     </label>
-                    <p className="text-[10px] text-slate-400">Tự động đẩy dữ liệu sang Google Sheet hàng ngày lúc 7h00 sáng.</p>
+                    <p className="text-[10px] text-slate-400">Tự động đẩy dữ liệu sang Google Sheet hàng ngày lúc 6h00 sáng.</p>
                   </div>
                   <button
                     type="button"
@@ -1321,6 +1295,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
                             metaPageTokensJson: serializedMeta,
                             zaloOaTokensJson: serializedZalo,
                             detailedTokensList: tokensList,
+          facebookScanTokens,
                             cronSecret: cronSecret.trim(),
                             adminEmails: adminEmails.trim(),
                             autoSyncEnabled: nextState,

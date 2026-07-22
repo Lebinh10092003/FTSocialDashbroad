@@ -1,0 +1,10 @@
+[Unit]
+Description=Run FT Workspace social sync every day at 06:00
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 Asia/Ho_Chi_Minh
+Persistent=true
+Unit=workspace-social-sync.service
+
+[Install]
+WantedBy=timers.target

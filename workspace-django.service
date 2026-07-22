@@ -1,0 +1,17 @@
+[Unit]
+Description=FT Workspace Django API (Gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=workspace
+Group=www-data
+WorkingDirectory=/var/www/ft-workspace/backend
+EnvironmentFile=/var/www/ft-workspace/backend/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/var/www/ft-workspace/.venv/bin/gunicorn --workers 3 --bind 127.0.0.1:8001 --access-logfile - --error-logfile - config.wsgi:application
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

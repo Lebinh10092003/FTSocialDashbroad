@@ -8,6 +8,7 @@ urlpatterns = [
     path('channels/<str:channel_id>/sync', views.channel_sync, name='channel_sync'),
     path('media-summary/trend', views.media_summary_trend, name='media_summary_trend'),
     path('media-summary', views.media_summary, name='media_summary'),
+    path('reports/media-summary.xlsx', views.media_summary_xlsx, name='media_summary_xlsx'),
     path('followers/trend', views.followers_trend, name='followers_trend'),
     path('dashboard', views.dashboard_view, name='dashboard_view'),
     path('sync/all', views.sync_all, name='sync_all'),

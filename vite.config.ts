@@ -5,7 +5,7 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    base: './', // Hỗ trợ đường dẫn tương đối khi deploy lên GitHub Pages
+    base: '/', // Hỗ trợ đường dẫn tương đối khi deploy lên GitHub Pages
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
@@ -13,6 +13,8 @@ export default defineConfig(() => {
       },
     },
     server: {
+      port: 3000,
+      strictPort: true,
       proxy: {
         '/api': {
           target: 'http://127.0.0.1:8000',
@@ -31,7 +33,7 @@ export default defineConfig(() => {
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       // Khi chạy ở local, bỏ qua theo dõi thư mục server để tránh lặp reload khi database local (JSON) thay đổi.
       watch: process.env.DISABLE_HMR === 'true' ? null : {
-        ignored: ['**/server/**'],
+        ignored: ['**/backend/db.sqlite3'],
       },
     },
   };

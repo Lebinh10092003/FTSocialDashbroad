@@ -46,6 +46,15 @@ interface EmailTemplateBuilderProps {
   userName?: string | null;
 }
 
+function sortEmailTemplates(templates: EmailTemplate[]): EmailTemplate[] {
+  return [...templates].sort((a, b) => {
+    const aIsSystem = a.id.startsWith('aysbc-');
+    const bIsSystem = b.id.startsWith('aysbc-');
+    if (aIsSystem !== bIsSystem) return aIsSystem ? -1 : 1;
+    return Number(b.lastUpdated || 0) - Number(a.lastUpdated || 0);
+  });
+}
+
 export default function EmailTemplateBuilder(props: EmailTemplateBuilderProps) {
   return <EmailBuilderDialogProvider><EmailTemplateBuilderContent {...props} /></EmailBuilderDialogProvider>;
 }
@@ -118,13 +127,14 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
         if (!loaded || loaded.length === 0) {
           loaded = loadTemplates();
         }
+        loaded = sortEmailTemplates(loaded);
         if (!cancelled) {
           templatesRef.current = loaded;
           setTemplates(loaded);
 
           // 3. Xác định template đang active
           const params = new URLSearchParams(window.location.search);
-          const templateId = params.get('id') || prefs.activeTemplateId || null;
+          const templateId = params.get('id');
 
           if (templateId && loaded.some(t => t.id === templateId)) {
             setActiveTemplateIdState(templateId);
@@ -137,7 +147,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
       } catch (err: any) {
         console.warn('[EmailTemplateBuilder] Lỗi load templates:', err.message);
         // Fallback an toàn về localStorage
-        const loaded = loadTemplates();
+        const loaded = sortEmailTemplates(loadTemplates());
         if (!cancelled) {
           templatesRef.current = loaded;
           setTemplates(loaded);
@@ -192,11 +202,11 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
 
   // Save templates list automatically on changes (async: server + localStorage cache)
   const updateTemplatesList = (newList: EmailTemplate[]) => {
-    templatesRef.current = newList;
-    setTemplates(newList);
-    // Lưu localStorage ngay (sync), đồng thời gọi API server background
-    saveTemplates(newList); // localStorage
-    saveTemplatesAsync(newList); // server (background)
+    const ordered = sortEmailTemplates(newList);
+    templatesRef.current = ordered;
+    setTemplates(ordered);
+    saveTemplates(ordered);
+    saveTemplatesAsync(ordered);
   };
 
   // Helper: Find active template
@@ -574,10 +584,79 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
     return () => window.removeEventListener('keydown', handleHistoryShortcut);
   }, [editorMode, activeTemplateId, templates]);
 
+  const handleCreateTemplate = async () => {
+    const name = await dialog.prompt('Nhập tên mẫu email mới:', { title: 'Tạo mẫu email', confirmText: 'Tạo mẫu', placeholder: 'Tên mẫu email' });
+    if (name && name.trim()) {
+      const newId = `template-${Date.now()}`;
+      const newTemplate: EmailTemplate = {
+        id: newId,
+        name: name.trim(),
+        subject: `[Tiêu đề] ${name.trim()}`,
+        settings: {
+          maxWidth: 650,
+          externalBg: '#f8fafc',
+          contentBg: '#ffffff',
+          fontFamily: 'Roboto, "Helvetica Neue", Arial, sans-serif',
+          textColor: '#1e293b',
+          contentPadding: 24,
+          borderRadius: 16,
+          linkColor: '#1473d1',
+          btnDefaultBg: '#1473d1',
+          btnDefaultTextColor: '#ffffff'
+        },
+        blocks: [
+          {
+            id: `logo-${Date.now()}`,
+            type: 'logo',
+            content: {
+              url: 'https://fermat.vn/UploadFile/Images/2025/8/18/Hinh_anh_638911101534359159.png',
+              alt: 'Logo',
+              width: 120,
+              align: 'center',
+              link: 'https://www.fermat.vn'
+            },
+            styles: { marginTop: 10, marginBottom: 10 },
+            visible: true
+          },
+          {
+            id: `heading-${Date.now()}`,
+            type: 'heading',
+            content: {
+              text: name.trim(),
+              level: 'h2',
+              fontSize: 20,
+              color: '#0f3a72',
+              bold: true,
+              align: 'left'
+            },
+            styles: { marginTop: 15, marginBottom: 10 },
+            visible: true
+          },
+          {
+            id: `para-${Date.now()}`,
+            type: 'paragraph',
+            content: {
+              html: '<p>Kính gửi Quý phụ huynh...</p>',
+              align: 'left'
+            },
+            styles: { marginTop: 10, marginBottom: 10 },
+            visible: true
+          }
+        ],
+        lastUpdated: Date.now()
+      };
+      const newList = [...templates, newTemplate];
+      updateTemplatesList(newList);
+      handleEditTemplate(newId);
+      showToast('Đã tạo mẫu email mới.');
+    }
+  };
+
   const filteredTemplates = templates.filter(t => 
     t.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
     t.subject.toLowerCase().includes(searchQuery.toLowerCase())
   );
+  const addEmailTileIndex = Math.max(0, filteredTemplates.findIndex(template => !template.id.startsWith('aysbc-')));
 
   // LOADING SKELETON khi đang fetch templates từ server
   if (isLoading) {
@@ -664,79 +743,14 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
               Nhập JSON
             </label>
 
-            <button
-              onClick={async () => {
-                const name = await dialog.prompt('Nhập tên mẫu email mới:', { title: 'Tạo mẫu email', confirmText: 'Tạo mẫu', placeholder: 'Tên mẫu email' });
-                if (name && name.trim()) {
-                  const newId = `template-${Date.now()}`;
-                  const newTemplate: EmailTemplate = {
-                    id: newId,
-                    name: name.trim(),
-                    subject: `[Tiêu đề] ${name.trim()}`,
-                    settings: {
-                      maxWidth: 650,
-                      externalBg: '#f8fafc',
-                      contentBg: '#ffffff',
-                      fontFamily: 'Roboto, "Helvetica Neue", Arial, sans-serif',
-                      textColor: '#1e293b',
-                      contentPadding: 24,
-                      borderRadius: 16,
-                      linkColor: '#1473d1',
-                      btnDefaultBg: '#1473d1',
-                      btnDefaultTextColor: '#ffffff'
-                    },
-                    blocks: [
-                      {
-                        id: `logo-${Date.now()}`,
-                        type: 'logo',
-                        content: {
-                          url: 'https://fermat.vn/UploadFile/Images/2025/8/18/Hinh_anh_638911101534359159.png',
-                          alt: 'Logo',
-                          width: 120,
-                          align: 'center',
-                          link: 'https://www.fermat.vn'
-                        },
-                        styles: { marginTop: 10, marginBottom: 10 },
-                        visible: true
-                      },
-                      {
-                        id: `heading-${Date.now()}`,
-                        type: 'heading',
-                        content: {
-                          text: name.trim(),
-                          level: 'h2',
-                          fontSize: 20,
-                          color: '#0f3a72',
-                          bold: true,
-                          align: 'left'
-                        },
-                        styles: { marginTop: 15, marginBottom: 10 },
-                        visible: true
-                      },
-                      {
-                        id: `para-${Date.now()}`,
-                        type: 'paragraph',
-                        content: {
-                          html: '<p>Kính gửi Quý phụ huynh...</p>',
-                          align: 'left'
-                        },
-                        styles: { marginTop: 10, marginBottom: 10 },
-                        visible: true
-                      }
-                    ],
-                    lastUpdated: Date.now()
-                  };
-                  const newList = [...templates, newTemplate];
-                  updateTemplatesList(newList);
-                  handleEditTemplate(newId);
-                  showToast('Đã tạo mẫu email mới.');
-                }
-              }}
-              className="px-4 py-2 text-xs font-black text-white bg-blue-600 hover:bg-blue-750 rounded-xl cursor-pointer shadow-md transition-all active:scale-95"
-            >
-              Tạo mẫu mới
-            </button>
 
+
+            <button
+              onClick={handleCreateTemplate}
+              className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer transition-all"
+            >
+              T?o m?u m?i
+            </button>
             <button onClick={onAccountClick} className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer transition-all">{isGuest ? 'Đăng nhập' : userName || 'Tài khoản'}</button>
             <button
               onClick={onBackToWorkspace}
@@ -778,7 +792,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredTemplates.map(tpl => {
+              {filteredTemplates.map((tpl, index) => {
                 const isDefault = tpl.id.startsWith('aysbc-');
                 const lastUpdatedStr = new Date(tpl.lastUpdated || Date.now()).toLocaleDateString('vi-VN', {
                   hour: '2-digit',
@@ -788,8 +802,9 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
                 });
 
                 return (
-                  <div
-                    key={tpl.id}
+                  <React.Fragment key={tpl.id}>
+                    <div
+                      key={tpl.id}
                     onClick={() => handleEditTemplate(tpl.id)}
                     className="bg-white border border-slate-200/80 hover:border-blue-300 rounded-3xl p-5 shadow-sm hover:shadow-lg transition-all duration-350 cursor-pointer flex flex-col justify-between group min-h-[190px]"
                   >
@@ -861,7 +876,14 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
                         )}
                       </div>
                     </div>
-                  </div>
+                    </div>
+                    {index === addEmailTileIndex && (
+                      <button type="button" onClick={handleCreateTemplate} className="group flex min-h-[190px] flex-col items-center justify-center rounded-3xl border-2 border-dashed border-blue-200 bg-blue-50/40 p-5 text-center transition-all hover:border-blue-500 hover:bg-blue-50 hover:shadow-lg">
+                        <span className="grid h-14 w-14 place-items-center rounded-2xl bg-blue-600 text-4xl font-light leading-none text-white shadow-md transition-transform group-hover:scale-110">+</span>
+                        <span className="mt-4 text-sm font-black text-blue-700">Thêm Email mới</span>
+                      </button>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </div>

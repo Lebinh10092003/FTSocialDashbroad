@@ -1,9 +1,17 @@
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
+from django.conf import settings
+from django.http import HttpResponse
+from io import BytesIO
+import os
+import subprocess
+import sys
 from django.utils import timezone
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
 import datetime
-from .models import Channel, Post, DailySnapshot, FollowerSnapshot
+from .models import ApiLog, Channel, Post, DailySnapshot, FollowerSnapshot
 from authentication.permissions import IsAuthenticated, IsManagerOrAdmin
 from .sync import SyncEngine
 
@@ -19,13 +27,13 @@ def resolve_reporting_period(query):
     
     if start_date and end_date:
         return start_date, end_date
-    return get_recent_start_date(30), get_today_date()
+    return get_recent_start_date(6), get_today_date()
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def channels_list(request):
     if request.method == 'GET':
-        channels = Channel.objects.all().order_by('name')
+        channels = Channel.objects.exclude(external_id='current-facebook-token').order_by('name')
         
         # Calculate post count for each channel
         post_counts = {}
@@ -302,132 +310,242 @@ def media_summary_trend(request):
         
     return Response({'groupBy': group_by, 'trend': trend})
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def media_summary(request):
-    period_start, period_end = resolve_reporting_period(request.query_params)
-    platform_filter = request.query_params.get('platform')
-    channel_id_filter = request.query_params.get('channelId')
-    
+def _build_media_summary(query):
+    period_start, period_end = resolve_reporting_period(query)
+    platform_filter = query.get('platform')
+    channel_id_filter = query.get('channelId')
+
     if platform_filter == 'all':
         platform_filter = None
     if channel_id_filter == 'all':
         channel_id_filter = None
-        
-    # Get active channels
+
     channels = Channel.objects.filter(status='active')
     if platform_filter:
         channels = channels.filter(platform=platform_filter)
     if channel_id_filter:
         channels = channels.filter(id=channel_id_filter)
-        
-    channel_ids = [c.id for c in channels]
-    
+
+    channel_ids = [channel.id for channel in channels]
+    period_start_dt = SyncEngine._parse_boundary(period_start)
+    period_end_dt = SyncEngine._parse_boundary(period_end, end_of_day=True)
     posts = Post.objects.filter(
         channel_id__in=channel_ids,
-        published_at__gte=period_start,
-        published_at__lte=f"{period_end}T23:59:59.999Z"
+        published_at__gte=period_start_dt,
+        published_at__lte=period_end_dt,
     )
-    
     snapshots = DailySnapshot.objects.filter(
         channel_id__in=channel_ids,
         snapshot_date__gte=period_start,
-        snapshot_date__lte=period_end
+        snapshot_date__lte=period_end,
     )
-    
-    # Get latest snapshot for each postKey
-    latest_snaps = {}
-    for snap in snapshots:
-        existing = latest_snaps.get(snap.post_key)
-        if not existing or snap.snapshot_date > existing.snapshot_date:
-            latest_snaps[snap.post_key] = snap
-            
-    # Group by channels
+
+    latest_snapshots = {}
+    for snapshot in snapshots:
+        existing = latest_snapshots.get(snapshot.post_key)
+        if not existing or snapshot.snapshot_date > existing.snapshot_date:
+            latest_snapshots[snapshot.post_key] = snapshot
+
     result = []
-    for c in channels:
-        c_posts = [p for p in posts if p.channel_id == c.id]
-        
-        reactions = 0
-        comments = 0
-        shares = 0
-        clicks = 0
-        views = 0
-        reach = 0
-        impressions = 0
-        
-        for p in c_posts:
-            snap = latest_snaps.get(p.post_key)
-            if snap:
-                reactions += snap.reactions
-                comments += snap.comments
-                shares += snap.shares
-                clicks += snap.clicks
-                views += snap.views or snap.impressions or snap.reach or 0
-                reach += snap.reach
-                impressions += snap.impressions
-                
+    for channel in channels:
+        channel_posts = [post for post in posts if post.channel_id == channel.id]
+        reactions = comments = shares = clicks = views = reach = impressions = 0
+
+        for post in channel_posts:
+            snapshot = latest_snapshots.get(post.post_key)
+            if not snapshot:
+                continue
+            reactions += snapshot.reactions
+            comments += snapshot.comments
+            shares += snapshot.shares
+            clicks += snapshot.clicks
+            views += snapshot.views or snapshot.impressions or snapshot.reach or 0
+            reach += snapshot.reach
+            impressions += snapshot.impressions
+
         total_engagement = reactions + comments + shares + clicks
         engagement_rate = None
         if reach > 0:
             engagement_rate = round((total_engagement / reach) * 100, 2)
         elif impressions > 0:
             engagement_rate = round((total_engagement / impressions) * 100, 2)
-            
+
         result.append({
-            'channelId': c.id,
-            'channelName': c.name,
-            'platform': c.platform,
-            'postsCount': len(c_posts),
-            'followersCount': c.followers_count,
+            'id': channel.id,
+            'channelId': channel.id,
+            'name': channel.name,
+            'channelName': channel.name,
+            'externalId': channel.external_id,
+            'platform': channel.platform,
+            'lastSyncAt': channel.last_sync_at.isoformat() if channel.last_sync_at else None,
+            'lastSyncStatus': channel.last_sync_status,
+            'postsCount': len(channel_posts),
+            'followersCount': channel.followers_count,
             'views': views,
             'reactions': reactions,
             'comments': comments,
             'shares': shares,
             'clicks': clicks,
             'totalEngagement': total_engagement,
-            'engagementRate': engagement_rate
+            'engagementRate': engagement_rate,
         })
-        
-    return Response(result)
+
+    return result
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def media_summary(request):
+    return Response(_build_media_summary(request.query_params))
+
+
+def _safe_excel_value(value):
+    if isinstance(value, str) and value.startswith(('=', '+', '-', '@')):
+        return "'" + value
+    return value
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def media_summary_xlsx(request):
+    rows = _build_media_summary(request.query_params)
+    period_start, period_end = resolve_reporting_period(request.query_params)
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = 'Bao cao tong hop'
+    sheet.append(['BÁO CÁO TỔNG HỢP TRUYỀN THÔNG'])
+    sheet.append(['Thời gian', period_start + ' - ' + period_end])
+    sheet.append([])
+
+    headers = [
+        'STT',
+        'Nền tảng',
+        'Tên trang',
+        'ID trang',
+        'Đồng bộ lần cuối',
+        'Người theo dõi',
+        'Số bài đăng',
+        'Lượt xem',
+        'Cảm xúc',
+        'Bình luận',
+        'Chia sẻ',
+        'Lượt nhấp',
+        'Tổng tương tác',
+        'Tỷ lệ tương tác (%)',
+    ]
+    sheet.append(headers)
+
+    for index, row in enumerate(rows, start=1):
+        platform_name = 'Facebook' if row['platform'] == 'facebook' else 'Zalo OA'
+        sheet.append([
+            index,
+            platform_name,
+            _safe_excel_value(row['name']),
+            _safe_excel_value(row['externalId']),
+            row['lastSyncAt'] or '',
+            row['followersCount'],
+            row['postsCount'],
+            row['views'],
+            row['reactions'],
+            row['comments'],
+            row['shares'],
+            row['clicks'],
+            row['totalEngagement'],
+            row['engagementRate'] if row['engagementRate'] is not None else '',
+        ])
+
+    title_fill = PatternFill('solid', fgColor='17365D')
+    header_fill = PatternFill('solid', fgColor='2563EB')
+    sheet['A1'].fill = title_fill
+    sheet['A1'].font = Font(color='FFFFFF', bold=True, size=14)
+    sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
+
+    for cell in sheet[4]:
+        cell.fill = header_fill
+        cell.font = Font(color='FFFFFF', bold=True)
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    sheet.freeze_panes = 'A5'
+    sheet.auto_filter.ref = f"A4:N{max(4, sheet.max_row)}"
+    widths = [7, 14, 34, 24, 23, 18, 16, 16, 14, 14, 14, 14, 20, 24]
+    for column, width in enumerate(widths, start=1):
+        sheet.column_dimensions[chr(64 + column)].width = width
+
+    output = BytesIO()
+    workbook.save(output)
+    response = HttpResponse(
+        output.getvalue(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = (
+        f'attachment; filename="bao_cao_tong_hop_{get_today_date()}.xlsx"'
+    )
+    return response
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def followers_trend(request):
-    raw_days = int(request.query_params.get('days', 30))
-    if not (1 <= raw_days <= 365):
-        return Response({"error": "Tham số days phải nằm trong khoảng từ 1 đến 365."}, status=status.HTTP_400_BAD_REQUEST)
-        
+    try:
+        if request.query_params.get('startDate') and request.query_params.get('endDate'):
+            period_start, period_end = resolve_reporting_period(request.query_params)
+        else:
+            raw_days = int(request.query_params.get('days', 7))
+            if not (1 <= raw_days <= 365):
+                raise ValueError
+            period_start = get_recent_start_date(raw_days - 1)
+            period_end = get_today_date()
+        start_day = datetime.date.fromisoformat(period_start)
+        end_day = datetime.date.fromisoformat(period_end)
+        if start_day > end_day or (end_day - start_day).days > 365:
+            raise ValueError
+    except (TypeError, ValueError):
+        return Response(
+            {"error": "Khoảng thời gian phải hợp lệ và không vượt quá 1 năm."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     channel_id_filter = request.query_params.get('channelId')
     platform_filter = request.query_params.get('platform')
-    
     if channel_id_filter == 'all':
         channel_id_filter = None
     if platform_filter == 'all':
         platform_filter = None
-        
-    channels = Channel.objects.filter(status='active')
+
+    channels = Channel.objects.filter(status='active').exclude(external_id='current-facebook-token')
     if platform_filter:
         channels = channels.filter(platform=platform_filter)
     if channel_id_filter:
         channels = channels.filter(id=channel_id_filter)
-        
-    channel_ids = [c.id for c in channels]
-    period_start = get_recent_start_date(raw_days)
-    period_end = get_today_date()
-    
+    channel_ids = list(channels.values_list('id', flat=True))
+
+    histories = {channel_id: [] for channel_id in channel_ids}
     snapshots = FollowerSnapshot.objects.filter(
         channel_id__in=channel_ids,
-        snapshot_date__gte=period_start,
-        snapshot_date__lte=period_end
-    )
-    
-    trend_by_date = {}
-    for snap in snapshots:
-        trend_by_date[snap.snapshot_date] = trend_by_date.get(snap.snapshot_date, 0) + snap.followers_count
-        
-    trend = [{'date': d, 'followersCount': count} for d, count in trend_by_date.items()]
-    trend.sort(key=lambda x: x['date'])
-    
+        snapshot_date__lte=period_end,
+    ).order_by('snapshot_date')
+    for snapshot in snapshots:
+        histories.setdefault(snapshot.channel_id, []).append(snapshot)
+
+    cursors = {channel_id: 0 for channel_id in channel_ids}
+    latest_counts = {}
+    trend = []
+    current_day = start_day
+    while current_day <= end_day:
+        date_string = current_day.isoformat()
+        for channel_id in channel_ids:
+            history = histories.get(channel_id, [])
+            cursor = cursors[channel_id]
+            while cursor < len(history) and history[cursor].snapshot_date <= date_string:
+                latest_counts[channel_id] = history[cursor].followers_count
+                cursor += 1
+            cursors[channel_id] = cursor
+        trend.append({
+            'date': date_string,
+            'followersCount': sum(latest_counts.get(channel_id, 0) for channel_id in channel_ids),
+        })
+        current_day += datetime.timedelta(days=1)
+
     return Response(trend)
 
 @api_view(['GET'])
@@ -449,7 +567,7 @@ def dashboard_view(request):
     period_start, period_end = resolve_reporting_period({'startDate': start_date, 'endDate': end_date})
     
     # 1. Fetch active channels
-    channels = Channel.objects.filter(status='active')
+    channels = Channel.objects.filter(status='active').exclude(external_id='current-facebook-token')
     if platform_filter:
         channels = channels.filter(platform=platform_filter)
     if channel_id_filter:
@@ -489,6 +607,17 @@ def dashboard_view(request):
         if not existing or snap.snapshot_date > existing.snapshot_date:
             latest_snaps[snap.post_key] = snap
             
+    # Follower is a stock metric: use the last saved value on or before the selected end date.
+    follower_snapshots = FollowerSnapshot.objects.filter(
+        channel_id__in=channel_ids,
+        snapshot_date__lte=period_end,
+    ).order_by('snapshot_date')
+    latest_follower_snapshots = {}
+    for snapshot in follower_snapshots:
+        latest_follower_snapshots[snapshot.channel_id] = snapshot
+    followers_count = sum(snapshot.followers_count for snapshot in latest_follower_snapshots.values())
+    followers_available = bool(latest_follower_snapshots)
+
     # Calculate KPIs
     posts_count = len(posts)
     reactions = 0
@@ -618,13 +747,17 @@ def dashboard_view(request):
     top_posts = top_posts[:10]
     
     # 7. Top Viewed Posts (past 12 months)
-    top_viewed_start = (timezone.now() - datetime.timedelta(days=365)).strftime('%Y-%m-%d')
-    top_viewed_end = get_today_date()
-    
+    top_viewed_end_day = timezone.localdate()
+    top_viewed_start_day = top_viewed_end_day - datetime.timedelta(days=365)
+    top_viewed_start = top_viewed_start_day.isoformat()
+    top_viewed_end = top_viewed_end_day.isoformat()
+    top_viewed_start_at = timezone.make_aware(datetime.datetime.combine(top_viewed_start_day, datetime.time.min))
+    top_viewed_end_at = timezone.make_aware(datetime.datetime.combine(top_viewed_end_day, datetime.time.max))
+
     tv_posts = Post.objects.filter(
         channel_id__in=channel_ids,
-        published_at__gte=top_viewed_start,
-        published_at__lte=f"{top_viewed_end}T23:59:59.999Z"
+        published_at__gte=top_viewed_start_at,
+        published_at__lte=top_viewed_end_at,
     )
     if post_type_filter:
         if post_type_filter == 'other':
@@ -741,8 +874,8 @@ def dashboard_view(request):
             'reach': reach,
             'totalEngagement': total_engagement,
             'engagementRate': engagement_rate,
-            'followers': sum(c.followers_count for c in channels),
-            'followersAvailable': True
+            'followers': followers_count,
+            'followersAvailable': followers_available
         },
         'trends': trends,
         'channelStats': channel_stats,
@@ -754,18 +887,78 @@ def dashboard_view(request):
         'errors': errors
     })
 
+def _start_background_sync(days=365):
+    days = max(1, min(int(days), 3650))
+    manage_py = settings.BASE_DIR / "manage.py"
+    process_args = [
+        sys.executable,
+        str(manage_py),
+        "sync_social_daily",
+        "--backfill-days",
+        str(days),
+        "--recent-days",
+        str(days),
+    ]
+    popen_options = {
+        "cwd": str(settings.BASE_DIR),
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+    }
+    if os.name == "nt":
+        popen_options["creationflags"] = (
+            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+        )
+    else:
+        popen_options["start_new_session"] = True
+    subprocess.Popen(process_args, **popen_options)
+
+
 @api_view(['POST'])
 @permission_classes([IsManagerOrAdmin])
 def sync_all(request):
-    """POST /api/sync/all - Đồng bộ tất cả kênh"""
+    """POST /api/sync/all - Sync all active channels."""
     try:
+        if request.data.get("background"):
+            running_since = timezone.now() - datetime.timedelta(hours=6)
+            if ApiLog.objects.filter(
+                status__in=["queued", "running"],
+                started_at__gte=running_since,
+            ).exists():
+                return Response({
+                    "success": True,
+                    "queued": True,
+                    "alreadyRunning": True,
+                    "message": "Đang có một lần đồng bộ chạy ngầm. Dữ liệu sẽ tự cập nhật khi hoàn tất.",
+                }, status=status.HTTP_202_ACCEPTED)
+
+            days = request.data.get("days", 365)
+            _start_background_sync(days)
+            return Response({
+                "success": True,
+                "queued": True,
+                "message": "Đã bắt đầu đồng bộ ngầm dữ liệu 1 năm. Bạn có thể tiếp tục sử dụng trang.",
+            }, status=status.HTTP_202_ACCEPTED)
+
         google_token = getattr(request, 'google_access_token', None)
         since = request.data.get('since')
         until = request.data.get('until')
-        results = SyncEngine.sync_all_channels(google_token, since=since, until=until)
+        results = SyncEngine.sync_all_channels(
+            google_token,
+            since=since,
+            until=until,
+        )
         return Response(results)
-    except Exception as e:
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    except (TypeError, ValueError):
+        return Response(
+            {"error": "Khoảng thời gian đồng bộ không hợp lệ."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as exc:
+        return Response(
+            {"error": str(exc)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -777,6 +970,7 @@ def sync_history(request):
     for log in logs:
         result.append({
             'id': log.log_id,
+            'logId': log.log_id,
             'startedAt': log.started_at.isoformat(),
             'endedAt': log.ended_at.isoformat() if log.ended_at else None,
             'platform': log.platform,

@@ -43,9 +43,6 @@ export default function LoginModal({
           <h1 className="text-xl font-extrabold text-slate-900 tracking-tight" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
             Đăng nhập FT Workspace
           </h1>
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Tài khoản được xác thực trực tiếp bởi máy chủ Django của FermatTech.
-          </p>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-4">

@@ -41,7 +41,7 @@ interface DashboardProps {
 }
 
 type TrendMetric = 'views' | 'engagement' | 'postsCount' | 'engagementRate' | 'followers';
-type DatePreset = 'custom' | '7days' | '30days' | '3months';
+type DatePreset = 'custom' | '7days' | '30days' | '3months' | '6months' | '1year';
 
 interface FollowerTrendPoint {
   date: string;
@@ -122,11 +122,11 @@ const getTodayStr = () => new Date().toISOString().slice(0, 10);
 export default function Dashboard({ idToken, googleAccessToken, channels }: DashboardProps) {
   const [platformFilter, setPlatformFilter] = useState('all');
   const [channelFilter, setChannelFilter] = useState('all');
-  const [postTypeFilter, setPostTypeFilter] = useState('all');
-  const [startDate, setStartDate] = useState(getPastDateStr(29));
+  const [startDate, setStartDate] = useState(getPastDateStr(6));
   const [endDate, setEndDate] = useState(getTodayStr());
-  const [datePreset, setDatePreset] = useState<DatePreset>('30days');
+  const [datePreset, setDatePreset] = useState<DatePreset>('7days');
   const [syncingSelectedPeriod, setSyncingSelectedPeriod] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [data, setData] = useState<DashboardData | null>(null);
   const [followerTrend, setFollowerTrend] = useState<FollowerTrendPoint[]>([]);
   const [followerTrendLoading, setFollowerTrendLoading] = useState(false);
@@ -145,7 +145,6 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
       const params = new URLSearchParams({ startDate, endDate });
       if (platformFilter !== 'all') params.set('platform', platformFilter);
       if (channelFilter !== 'all') params.set('channelId', channelFilter);
-      if (postTypeFilter !== 'all') params.set('postType', postTypeFilter);
 
       const response = await fetch(`/api/dashboard?${params.toString()}`, {
         headers: {
@@ -185,7 +184,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   };
   useEffect(() => {
     fetchDashboardData();
-  }, [idToken, googleAccessToken, platformFilter, channelFilter, postTypeFilter, startDate, endDate, channels]);
+  }, [idToken, googleAccessToken, platformFilter, channelFilter, startDate, endDate, channels]);
   useEffect(() => {
     fetchFollowerTrend();
   }, [idToken, channelFilter, platformFilter, startDate, endDate]);
@@ -203,37 +202,28 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
     if (preset === '7days') start.setDate(end.getDate() - 6);
     if (preset === '30days') start.setDate(end.getDate() - 29);
     if (preset === '3months') start.setMonth(end.getMonth() - 3);
+    if (preset === '6months') start.setMonth(end.getMonth() - 6);
+    if (preset === '1year') start.setFullYear(end.getFullYear() - 1);
 
     setStartDate(start.toISOString().slice(0, 10));
     setEndDate(end.toISOString().slice(0, 10));
   };
 
   const syncSelectedPeriod = async () => {
-    setSyncingSelectedPeriod(true);
-    setError(null);
+    setSyncingSelectedPeriod(true); setSyncMessage(null); setError(null);
     try {
-      const response = await fetch('/api/sync/all', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${idToken}`,
-          'X-Google-OAuth-Token': googleAccessToken || '',
-        },
-        body: JSON.stringify({ since: startDate, until: endDate }),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.error || 'Không thể đồng bộ dữ liệu cho khoảng thời gian đã chọn.');
-      }
-      await fetchDashboardData();
-    } catch (syncError: any) {
-      setError(syncError.message || 'Không thể đồng bộ dữ liệu.');
-    } finally {
-      setSyncingSelectedPeriod(false);
-    }
+      const response = await fetch('/api/sync/all', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}`, 'X-Google-OAuth-Token': googleAccessToken || '' }, body: JSON.stringify({ background: true, days: 365 }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body.success) throw new Error(body.error || body.message || 'Không thể bắt đầu đồng bộ dữ liệu 1 năm.');
+      setSyncMessage(body.message || 'Đã bắt đầu đồng bộ ngầm dữ liệu 1 năm.');
+      await Promise.all([fetchDashboardData(), fetchFollowerTrend()]);
+    } catch (syncError: any) { setError(syncError.message || 'Không thể bắt đầu đồng bộ dữ liệu.'); }
+    finally { setSyncingSelectedPeriod(false); }
   };
   const filteredChannels = channels.filter(channel =>
-    channel.status === 'active' && (platformFilter === 'all' || channel.platform === platformFilter),
+    channel.status === 'active'
+    && channel.externalId !== 'current-facebook-token'
+    && (platformFilter === 'all' || channel.platform === platformFilter),
   );
   const typeStats = data?.typeStats || [];
   const isSingleChannelScope = channelFilter !== 'all';
@@ -299,7 +289,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
       metric: 'engagement',
       title: 'Lượt tương tác',
       value: data.kpis.totalEngagement.toLocaleString('vi-VN'),
-      description: 'Cảm xúc, bình luận, chia sẻ và lượt nhấp',
+      description: 'Cảm xúc, bình luận và chia sẻ',
       icon: TrendingUp,
       accent: 'border-blue-600 ring-blue-600 bg-blue-50/40',
       idle: 'bg-blue-50 text-blue-700',
@@ -317,17 +307,18 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
       metric: 'followers',
       title: 'Lượt follow',
       value: data.kpis.followersAvailable ? data.kpis.followers.toLocaleString('vi-VN') : 'Chưa có dữ liệu',
-      description: channelFilter === 'all' ? 'Tổng follower hiện tại của các trang đã chọn' : 'Follower hiện tại của trang đã chọn',
+      description: channelFilter === 'all' ? 'Tổng follower tại cuối kỳ của các trang đã chọn' : 'Follower tại cuối kỳ của trang đã chọn',
       icon: Users,
       accent: 'border-violet-600 ring-violet-600 bg-violet-50/40',
       idle: 'bg-violet-50 text-violet-700',
     },
   ] : [];
 
+  const visibleTrends = (data?.trends || []).filter(point => point.date >= startDate && point.date <= endDate);
   const isFollowerMetric = activeMetric === 'followers';
   const contentTrendValues = !data || activeMetric === 'followers'
     ? []
-    : data.trends.flatMap(point => [
+    : visibleTrends.flatMap(point => [
       Number(point[activeMetric] || 0),
       ...data.channelStats
         .filter(stat => selectedChannels.has(stat.channelName))
@@ -347,54 +338,52 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
 
   return (
     <div className="space-y-5 pb-6">
-      <section className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 border-b border-slate-200/70 pb-4">
-        <div>
-          <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Thống kê tương tác</h2>
-          <p className="text-sm text-slate-500 mt-1">Theo dõi hiệu quả nội dung đa kênh theo thời gian thực.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200/60 overflow-x-auto max-w-full">
-            {[
-              ['all', 'Tất cả'],
-              ['photo', 'Ảnh / Album'],
-              ['video', 'Video / Reel'],
-              ['link', 'Liên kết'],
-              ['status', 'Văn bản'],
-              ['other', 'Khác'],
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                onClick={() => setPostTypeFilter(value)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${postTypeFilter === value ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm">
-            <Calendar className="w-4 h-4 text-slate-400" />
-            <select value={datePreset} onChange={event => updatePreset(event.target.value as DatePreset)} className="text-sm font-bold text-slate-700 bg-transparent outline-none">
-              <option value="custom">Tùy chọn</option>
-              <option value="7days">7 ngày qua</option>
-              <option value="30days">30 ngày qua</option>
-              <option value="3months">3 tháng qua</option>
-            </select>
-            <input type="date" value={startDate} min={getPastDateStr(365)} max={endDate} onChange={event => { setStartDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none" />
-            <span className="text-sm text-slate-400">đến</span>
-            <input type="date" value={endDate} min={startDate} max={getTodayStr()} onChange={event => { setEndDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none" />
-          </div>
-        </div>
+      <section className="border-b border-slate-200/70 pb-4">
+        <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Thống kê tương tác</h2>
+        <p className="text-sm text-slate-500 mt-1">Theo dõi hiệu quả nội dung đa kênh theo thời gian thực.</p>
       </section>
 
       <section className="flex flex-wrap items-center gap-3 bg-slate-50 border border-slate-200/70 p-3 rounded-xl">
         <Filter className="w-5 h-5 text-slate-400" />
         <span className="text-sm font-bold text-slate-600">Lọc nhanh:</span>
-        <SearchableSelect value={platformFilter} onChange={value => { setPlatformFilter(value); setChannelFilter('all'); }} options={[{value:'all',label:'Tất cả nền tảng'},{value:'facebook',label:'Facebook Pages'},{value:'zalo',label:'Zalo OA'}]} className="min-w-[190px]"/>
-        <SearchableSelect value={channelFilter} onChange={setChannelFilter} options={[{value:'all',label:'Tổng tất cả trang'},...filteredChannels.map(channel => ({value:channel.id,label:channel.name}))]} className="min-w-[220px]"/>
-        <button onClick={syncSelectedPeriod} disabled={syncingSelectedPeriod} className="ml-auto inline-flex items-center gap-2 bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-sm font-extrabold text-slate-700 hover:bg-slate-100 disabled:opacity-60">
-          <RefreshCw className={`w-4 h-4 ${syncingSelectedPeriod ? 'animate-spin' : ''}`} /> Đồng bộ lại
+        <SearchableSelect
+          value={platformFilter}
+          onChange={value => { setPlatformFilter(value); setChannelFilter('all'); }}
+          options={[{ value: 'all', label: 'Tất cả nền tảng' }, { value: 'facebook', label: 'Facebook Pages' }, { value: 'zalo', label: 'Zalo OA' }]}
+          className="min-w-[190px]"
+        />
+        <SearchableSelect
+          value={channelFilter}
+          onChange={setChannelFilter}
+          options={[{ value: 'all', label: 'Tổng tất cả trang' }, ...filteredChannels.map(channel => ({ value: channel.id, label: channel.name }))]}
+          className="min-w-[220px]"
+        />
+        <div className="flex flex-wrap items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm">
+          <Calendar className="w-4 h-4 text-slate-400" />
+          <select value={datePreset} onChange={event => updatePreset(event.target.value as DatePreset)} className="text-sm font-bold text-slate-700 bg-transparent outline-none">
+            <option value="custom">Tùy chọn</option>
+            <option value="7days">7 ngày qua</option>
+            <option value="30days">1 tháng qua</option>
+            <option value="3months">3 tháng qua</option>
+            <option value="6months">6 tháng qua</option>
+            <option value="1year">1 năm qua</option>
+          </select>
+          <input type="date" value={startDate} min={getPastDateStr(365)} max={endDate} onChange={event => { setStartDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none" />
+          <span className="text-sm text-slate-400">đến</span>
+          <input type="date" value={endDate} min={startDate} max={getTodayStr()} onChange={event => { setEndDate(event.target.value); setDatePreset('custom'); }} className="text-sm text-slate-600 outline-none" />
+        </div>
+        <button
+          onClick={syncSelectedPeriod}
+          disabled={syncingSelectedPeriod}
+          title="Đồng bộ ngầm dữ liệu 1 năm gần nhất vào SQLite"
+          className="inline-flex items-center gap-2 bg-white border border-slate-200 px-3 py-2 rounded-lg text-sm font-extrabold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+        >
+          <RefreshCw className={'w-4 h-4 ' + (syncingSelectedPeriod ? 'animate-spin' : '')} />
+          {syncingSelectedPeriod ? 'Đang khởi chạy...' : 'Đồng bộ lại'}
         </button>
       </section>
+
+      {syncMessage && <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg text-xs text-emerald-800"><span className="w-2 h-2 rounded-full bg-emerald-500" />{syncMessage}</div>}
 
       {data?.lastSync && (
         <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg text-xs text-emerald-800">
@@ -516,7 +505,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                 )
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={data.trends} margin={{ top: 16, right: 18, left: 0, bottom: 12 }}>
+                  <AreaChart data={visibleTrends} margin={{ top: 16, right: 18, left: 0, bottom: 12 }}>
                     <defs>
                       <linearGradient id="totalLine" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#94a3b8" stopOpacity={0.2} /><stop offset="95%" stopColor="#94a3b8" stopOpacity={0} /></linearGradient>
                       {data.channelStats.map((stat, index) => <linearGradient key={stat.channelName} id={`channel-${index}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={COLORS[index % COLORS.length]} stopOpacity={0.18} /><stop offset="95%" stopColor={COLORS[index % COLORS.length]} stopOpacity={0} /></linearGradient>)}
@@ -555,8 +544,8 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
             )}
           </section>
           <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-            <ContentBarChart title="Lượt xem theo loại nội dung" subtitle="Tổng lượt xem của từng định dạng bài đăng." data={typeStats} dataKey="views" color="#0891b2" formatter="lượt xem" />
-            <ContentBarChart title="Lượt tương tác theo loại nội dung" subtitle="Tổng tương tác theo từng định dạng bài đăng." data={typeStats} dataKey="engagement" color="#2563eb" formatter="tương tác" />
+            <ContentBarChart title="Lượt xem theo loại nội dung" subtitle="Tổng lượt xem trong khoảng thời gian đang lọc." data={typeStats} dataKey="views" color="#0891b2" formatter="lượt xem" />
+            <ContentBarChart title="Lượt tương tác theo loại nội dung" subtitle="Tổng tương tác trong khoảng thời gian đang lọc." data={typeStats} dataKey="engagement" color="#2563eb" formatter="tương tác" />
             <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm">
               <h3 className="text-lg font-extrabold text-slate-800">Tỷ lệ tương tác</h3>
               <p className="text-sm text-slate-500 mt-1">Tỷ trọng cảm xúc, bình luận và lượt chia sẻ.</p>
@@ -599,7 +588,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                       <p className="text-sm font-extrabold text-slate-800 truncate" title={channel?.name}>{channel?.name || 'Kênh ẩn'}</p>
                       <p className="text-sm text-slate-600 leading-relaxed line-clamp-2 h-11">{post.message || <em>Không có nội dung văn bản</em>}</p>
                     </div>
-                    <div className="flex items-center justify-between border-t border-slate-100 mt-4 pt-3 text-xs"><span className="font-bold uppercase text-slate-500">{post.postType || 'Khác'}</span><div className="text-right"><span className="block font-extrabold text-blue-700">{post.engagement.toLocaleString('vi-VN')} tương tác</span><span className="block text-[11px] text-slate-400 mt-0.5">{(post.views || 0).toLocaleString('vi-VN')} lượt xem</span></div></div>
+                    <div className="flex items-center justify-between border-t border-slate-100 mt-4 pt-3 text-xs"><span className="font-bold uppercase text-slate-500">{post.postType || 'Khác'}</span><div className="text-right"><span className="block font-extrabold text-blue-700">{post.engagement.toLocaleString('vi-VN')} tương tác</span><span className="block text-[11px] font-bold text-blue-700 mt-0.5">{(post.views || 0).toLocaleString('vi-VN')} lượt xem</span></div></div>
                     <ChevronRight className="w-5 h-5 text-blue-600 ml-auto mt-3 opacity-0 group-hover:opacity-100" />
                   </a>
                 );
@@ -612,7 +601,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
             <div className="flex overflow-x-auto gap-4 pt-4 pb-2">
               {(data.topViewedPosts || []).map(post => {
                 const channel = channels.find(item => item.id === post.channelId);
-                return <a key={post.postKey} href={post.postUrl} target="_blank" rel="noreferrer" className="flex-none w-64 border border-slate-200 rounded-xl p-3 bg-white hover:border-cyan-400 hover:shadow-lg transition-all group"><div className="w-full h-32 rounded-lg bg-gradient-to-br from-cyan-600 to-blue-700 grid place-items-center text-white relative overflow-hidden"><ImageIcon className="w-11 h-11 opacity-60" />{post.imageUrl && <img src={post.imageUrl} alt="" onError={event => { event.currentTarget.style.display = 'none'; }} className="absolute inset-0 w-full h-full object-cover" />}<span className="absolute top-2 right-2 px-2 py-1 rounded-lg text-xs font-extrabold bg-slate-950/50">{post.platform === 'facebook' ? 'FB' : 'Zalo'}</span></div><div className="mt-4 space-y-2"><p className="text-xs font-bold uppercase tracking-wide text-slate-400">{new Date(post.publishedAt).toLocaleDateString('vi-VN')}</p><p className="text-sm font-extrabold text-slate-800 truncate" title={channel?.name}>{channel?.name || 'Kênh ẩn'}</p><p className="text-sm text-slate-600 leading-relaxed line-clamp-2 h-11">{post.message || <em>Không có nội dung văn bản</em>}</p></div><div className="flex items-center justify-between border-t border-slate-100 mt-4 pt-3 text-xs"><span className="font-bold uppercase text-slate-500">{post.postType || 'Khác'}</span><div className="text-right"><span className="block font-extrabold text-cyan-700">{post.views.toLocaleString('vi-VN')} lượt xem</span><span className="block text-[11px] text-slate-400 mt-0.5">{(post.engagement || 0).toLocaleString('vi-VN')} tương tác</span></div></div><ChevronRight className="w-5 h-5 text-cyan-600 ml-auto mt-3 opacity-0 group-hover:opacity-100" /></a>;
+                return <a key={post.postKey} href={post.postUrl} target="_blank" rel="noreferrer" className="flex-none w-64 border border-slate-200 rounded-xl p-3 bg-white hover:border-cyan-400 hover:shadow-lg transition-all group"><div className="w-full h-32 rounded-lg bg-gradient-to-br from-cyan-600 to-blue-700 grid place-items-center text-white relative overflow-hidden"><ImageIcon className="w-11 h-11 opacity-60" />{post.imageUrl && <img src={post.imageUrl} alt="" onError={event => { event.currentTarget.style.display = 'none'; }} className="absolute inset-0 w-full h-full object-cover" />}<span className="absolute top-2 right-2 px-2 py-1 rounded-lg text-xs font-extrabold bg-slate-950/50">{post.platform === 'facebook' ? 'FB' : 'Zalo'}</span></div><div className="mt-4 space-y-2"><p className="text-xs font-bold uppercase tracking-wide text-slate-400">{new Date(post.publishedAt).toLocaleDateString('vi-VN')}</p><p className="text-sm font-extrabold text-slate-800 truncate" title={channel?.name}>{channel?.name || 'Kênh ẩn'}</p><p className="text-sm text-slate-600 leading-relaxed line-clamp-2 h-11">{post.message || <em>Không có nội dung văn bản</em>}</p></div><div className="flex items-center justify-between border-t border-slate-100 mt-4 pt-3 text-xs"><span className="font-bold uppercase text-slate-500">{post.postType || 'Khác'}</span><div className="text-right"><span className="block font-extrabold text-blue-700">{post.views.toLocaleString('vi-VN')} lượt xem</span><span className="block text-[11px] font-bold text-blue-700 mt-0.5">{(post.engagement || 0).toLocaleString('vi-VN')} tương tác</span></div></div><ChevronRight className="w-5 h-5 text-cyan-600 ml-auto mt-3 opacity-0 group-hover:opacity-100" /></a>;
               })}
               {!(data.topViewedPosts || []).length && <p className="py-8 text-sm text-slate-400">Chưa có dữ liệu lượt xem trong 12 tháng gần nhất.</p>}
             </div>
@@ -622,38 +611,6 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   );
 }
 
-function ContentBarChart({
-  title,
-  subtitle,
-  data,
-  dataKey,
-  color,
-  formatter,
-}: {
-  title: string;
-  subtitle: string;
-  data: NonNullable<DashboardData['typeStats']>;
-  dataKey: 'views' | 'engagement';
-  color: string;
-  formatter: string;
-}) {
-  return (
-    <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm">
-      <h3 className="text-lg font-extrabold text-slate-800">{title}</h3>
-      <p className="text-sm text-slate-500 mt-1">{subtitle}</p>
-      <div className="h-60 mt-3">
-        {data.length ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} layout="vertical" margin={{ top: 0, right: 18, left: 6, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-              <XAxis type="number" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="type" width={92} tick={{ fontSize: 12, fill: '#475569' }} axisLine={false} tickLine={false} />
-              <Tooltip formatter={(value: number) => [`${value.toLocaleString('vi-VN')} ${formatter}`, '']} contentStyle={{ borderRadius: 12, fontSize: 12 }} />
-              <Bar dataKey={dataKey} fill={color} radius={[0, 7, 7, 0]} barSize={18} />
-            </BarChart>
-          </ResponsiveContainer>
-        ) : <div className="h-full grid place-items-center text-sm text-slate-400">Chưa có dữ liệu</div>}
-      </div>
-    </div>
-  );
+function ContentBarChart({ title, subtitle, data, dataKey, color, formatter }: { title: string; subtitle: string; data: NonNullable<DashboardData['typeStats']>; dataKey: 'views' | 'engagement'; color: string; formatter: string; }) {
+  return <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm"><h3 className="text-lg font-extrabold text-slate-800">{title}</h3><p className="text-sm text-slate-500 mt-1">{subtitle}</p><div className="h-60 mt-3">{data.length ? <ResponsiveContainer width="100%" height="100%"><BarChart data={data} layout="vertical" margin={{ top: 0, right: 18, left: 6, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" /><XAxis type="number" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} /><YAxis type="category" dataKey="type" width={92} tick={{ fontSize: 12, fill: '#475569' }} axisLine={false} tickLine={false} /><Tooltip formatter={(value: number) => [`${value.toLocaleString('vi-VN')} ${formatter}`, '']} contentStyle={{ borderRadius: 12, fontSize: 12 }} /><Bar dataKey={dataKey} fill={color} radius={[0, 7, 7, 0]} barSize={18} /></BarChart></ResponsiveContainer> : <div className="h-full grid place-items-center text-sm text-slate-400">Chưa có dữ liệu</div>}</div></div>;
 }
