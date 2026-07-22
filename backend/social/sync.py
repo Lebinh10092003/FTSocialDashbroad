@@ -8,7 +8,7 @@ from .models import ApiLog, Channel, DailySnapshot, FollowerSnapshot, Post
 from .providers import FacebookProvider, MockProvider, ZaloOAProvider
 
 
-DEFAULT_SYNC_DAYS = 365
+DEFAULT_SYNC_DAYS = 396
 
 
 class SyncCancelled(Exception):
@@ -47,6 +47,18 @@ class SyncEngine:
         return bool(
             request_id
             and ApiLog.objects.filter(request_id=request_id, status="cancelled").exists()
+        )
+
+    @staticmethod
+    def is_channel_cancelled(request_id, channel_id):
+        return bool(
+            request_id
+            and channel_id
+            and ApiLog.objects.filter(
+                request_id=request_id,
+                channel_id=channel_id,
+                status="cancelled",
+            ).exists()
         )
 
     @staticmethod
@@ -156,7 +168,7 @@ class SyncEngine:
                 )
             return False, "Không tìm thấy kênh"
 
-        if cls.is_request_cancelled(request_id):
+        if cls.is_channel_cancelled(request_id, channel_id):
             cls.mark_log_cancelled(queued_log)
             return False, "Đồng bộ đã được hủy."
 
@@ -193,7 +205,7 @@ class SyncEngine:
             provider = cls.get_provider(channel.platform)
             snapshot_date = timezone.localdate().isoformat()
 
-            if cls.is_request_cancelled(request_id):
+            if cls.is_channel_cancelled(request_id, channel_id):
                 raise SyncCancelled()
 
             followers = provider.get_followers(channel.id, channel.external_id)
@@ -225,7 +237,7 @@ class SyncEngine:
                     defaults=defaults,
                 )
 
-            if cls.is_request_cancelled(request_id):
+            if cls.is_channel_cancelled(request_id, channel_id):
                 raise SyncCancelled()
 
             # The regular Page field is the freshest stock count. Do not overwrite
@@ -248,7 +260,7 @@ class SyncEngine:
                 until=until,
             )
             raw_posts = [post for post in raw_posts if post.get("id")]
-            if cls.is_request_cancelled(request_id):
+            if cls.is_channel_cancelled(request_id, channel_id):
                 raise SyncCancelled()
             api_log.records_received = len(raw_posts)
 

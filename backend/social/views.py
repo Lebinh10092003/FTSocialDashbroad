@@ -142,20 +142,30 @@ def channel_test_connection(request, channel_id):
 @api_view(['POST'])
 @permission_classes([IsManagerOrAdmin])
 def channel_sync(request, channel_id):
-    since = request.data.get('since')
-    until = request.data.get('until')
     channel = Channel.objects.filter(id=channel_id).first()
     if not channel:
         return Response({"error": "Không tìm thấy kênh."}, status=status.HTTP_404_NOT_FOUND)
-    # A per-channel button must obey the same rule as the 06:00 job: first
-    # successful sync loads the whole first year; subsequent syncs use its day.
+
+    since = request.data.get("since")
+    until = request.data.get("until")
+    # A newly added channel always receives the full initial history window.
     if channel.initial_sync_completed_at is None:
         since = None
-    success, message = SyncEngine.sync_channel(channel_id, since=since, until=until)
-    if success:
-        return Response({"success": True, "message": message})
-    return Response({"error": message}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        until = None
 
+    request_id = _start_background_sync(
+        recent_days=1,
+        history_days=396,
+        channel_ids=[channel_id],
+        since=since,
+        until=until,
+    )
+    return Response({
+        "success": True,
+        "queued": True,
+        "requestId": request_id,
+        "message": "Đã xếp hàng đồng bộ nền cho kênh đã chọn.",
+    }, status=status.HTTP_202_ACCEPTED)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def media_summary_trend(request):
@@ -519,6 +529,7 @@ def followers_trend(request):
     if channel_id_filter:
         channels = channels.filter(id=channel_id_filter)
     channel_ids = list(channels.values_list('id', flat=True))
+    channel_names = {channel.id: channel.name for channel in channels}
 
     histories = {channel_id: [] for channel_id in channel_ids}
     snapshots_by_day = {channel_id: {} for channel_id in channel_ids}
@@ -538,6 +549,8 @@ def followers_trend(request):
         date_string = current_day.isoformat()
         daily_follows = []
         daily_unfollows = []
+        daily_follows_by_channel = {}
+        daily_unfollows_by_channel = {}
         for channel_id in channel_ids:
             history = histories.get(channel_id, [])
             cursor = cursors[channel_id]
@@ -549,15 +562,23 @@ def followers_trend(request):
             daily_snapshot = snapshots_by_day.get(channel_id, {}).get(date_string)
             if daily_snapshot and daily_snapshot.daily_follows_unique is not None:
                 daily_follows.append(daily_snapshot.daily_follows_unique)
+                daily_follows_by_channel[channel_id] = daily_snapshot.daily_follows_unique
             if daily_snapshot and daily_snapshot.daily_unfollows_unique is not None:
                 daily_unfollows.append(daily_snapshot.daily_unfollows_unique)
+                daily_unfollows_by_channel[channel_id] = daily_snapshot.daily_unfollows_unique
 
-        trend.append({
+        point = {
             'date': date_string,
             'followersCount': sum(latest_counts.get(channel_id, 0) for channel_id in channel_ids),
             'dailyFollowsUnique': sum(daily_follows) if daily_follows else None,
             'dailyUnfollowsUnique': sum(daily_unfollows) if daily_unfollows else None,
-        })
+        }
+        for channel_id in channel_ids:
+            channel_name = channel_names.get(channel_id, channel_id)
+            point[f'{channel_name}_followers'] = latest_counts.get(channel_id, 0)
+            point[f'{channel_name}_dailyFollowsUnique'] = daily_follows_by_channel.get(channel_id)
+            point[f'{channel_name}_dailyUnfollowsUnique'] = daily_unfollows_by_channel.get(channel_id)
+        trend.append(point)
         current_day += datetime.timedelta(days=1)
 
     return Response(trend)
@@ -903,7 +924,7 @@ def dashboard_view(request):
         'errors': errors
     })
 
-def _start_background_sync(recent_days=1, history_days=365, channel_ids=None):
+def _start_background_sync(recent_days=1, history_days=396, channel_ids=None, since=None, until=None):
     """Queue the requested active channels, then run a cancellable detached sync."""
     recent_days = max(1, min(int(recent_days), 30))
     history_days = max(recent_days, min(int(history_days), 3650))
@@ -927,6 +948,10 @@ def _start_background_sync(recent_days=1, history_days=365, channel_ids=None):
     ]
     for channel_id in selected_channel_ids:
         process_args.extend(["--channel-id", channel_id])
+    if since:
+        process_args.extend(['--since', str(since)])
+    if until:
+        process_args.extend(['--until', str(until)])
     process_args.extend([
         "--request-id",
         request_id,
@@ -965,7 +990,13 @@ def sync_all(request):
                 }, status=status.HTTP_202_ACCEPTED)
 
             recent_days = request.data.get("recentDays", request.data.get("days", 1))
-            request_id = _start_background_sync(recent_days=recent_days, history_days=365)
+            raw_channel_ids = request.data.get("channelIds") or []
+            channel_ids = [str(value).strip() for value in raw_channel_ids if str(value).strip()] if isinstance(raw_channel_ids, list) else []
+            request_id = _start_background_sync(
+                recent_days=recent_days,
+                history_days=request.data.get("historyDays", 396),
+                channel_ids=channel_ids,
+            )
             return Response({
                 "success": True,
                 "queued": True,
@@ -998,9 +1029,12 @@ def sync_all(request):
 def sync_cancel(request):
     """Request cancellation for the active background sync run(s)."""
     requested_id = str(request.data.get("requestId") or "").strip()
+    requested_channel_id = str(request.data.get("channelId") or "").strip()
     active_logs = ApiLog.objects.filter(status__in=["queued", "running"])
     if requested_id:
         active_logs = active_logs.filter(request_id=requested_id)
+    if requested_channel_id:
+        active_logs = active_logs.filter(channel_id=requested_channel_id)
 
     request_ids = list(active_logs.values_list("request_id", flat=True).distinct())
     if not request_ids:

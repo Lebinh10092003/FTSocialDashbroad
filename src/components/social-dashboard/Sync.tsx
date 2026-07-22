@@ -26,6 +26,8 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
   const [syncHistory, setSyncHistory] = useState<ApiLog[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [channelSyncStates, setChannelSyncStates] = useState<Record<string, ApiLog['status']>>({});
+  const [selectedChannelIds, setSelectedChannelIds] = useState<Set<string>>(() => new Set());
+  const [cancellingChannelId, setCancellingChannelId] = useState<string | null>(null);
 
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
@@ -49,6 +51,8 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
   const canManage = userRole === 'ADMIN' || userRole === 'MANAGER';
   const activeChannels = channels.filter(channel => channel.status === 'active');
   const activeChannelIds = new Set(activeChannels.map(channel => channel.id));
+  const selectedChannels = activeChannels.filter(channel => selectedChannelIds.has(channel.id));
+  const toggleChannelSelection = (channelId: string) => setSelectedChannelIds(current => { const next = new Set(current); if (next.has(channelId)) next.delete(channelId); else next.add(channelId); return next; });
   const hasActiveChannelSync = Object.entries(channelSyncStates).some(
     ([channelId, status]) => activeChannelIds.has(channelId) && (status === 'queued' || status === 'running'),
   );
@@ -100,50 +104,32 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
 
   const handleSyncAll = () => {
     if (!canManage) return;
+    const targets = selectedChannels.length ? selectedChannels : activeChannels;
+    const isSelectedSync = selectedChannels.length > 0;
     setConfirmState({
       isOpen: true,
-      title: 'Đồng bộ toàn bộ các kênh',
-      message: 'Bạn có muốn kích hoạt đồng bộ dữ liệu cho TOÀN BỘ các kênh đang hoạt động?',
-      confirmText: 'Đồng bộ tất cả',
+      title: isSelectedSync ? `Đồng bộ ${targets.length} trang đã chọn` : 'Đồng bộ toàn bộ các kênh',
+      message: isSelectedSync ? `Bạn có muốn đồng bộ dữ liệu cho ${targets.length} trang đã chọn?` : 'Bạn có muốn kích hoạt đồng bộ dữ liệu cho TOÀN BỘ các kênh đang hoạt động?',
+      confirmText: isSelectedSync ? 'Đồng bộ đã chọn' : 'Đồng bộ tất cả',
       type: 'info',
       onConfirm: async () => {
         setConfirmState(current => ({ ...current, isOpen: false }));
         setSyncingId('all');
         setSyncResult(null);
-        setChannelSyncStates(current => ({
-          ...current,
-          ...Object.fromEntries(activeChannels.map(channel => [channel.id, 'queued' as const])),
-        }));
-
+        setChannelSyncStates(current => ({ ...current, ...Object.fromEntries(targets.map(channel => [channel.id, 'queued' as const])) }));
         try {
           const res = await fetch('/api/sync/all', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer ' + idToken,
-              'X-Google-OAuth-Token': googleAccessToken || '',
-            },
-            body: JSON.stringify({ background: true, recentDays: 1 }),
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken, 'X-Google-OAuth-Token': googleAccessToken || '' },
+            body: JSON.stringify({ background: true, recentDays: 1, channelIds: targets.map(channel => channel.id) }),
           });
-
           const data = await res.json();
           if (data.success) {
             await onRefreshChannels();
-            setSyncResult({
-              status: 'success',
-              message: data.message || 'Đã xếp hàng đồng bộ nền cho các kênh. Xem tiến độ trong bảng lịch sử.',
-            });
-          } else {
-            setSyncResult({ status: 'failed', message: data.error || data.message || 'Lỗi xảy ra trong quá trình đồng bộ.' });
-          }
+            setSyncResult({ status: 'success', message: data.message || 'Đã xếp hàng đồng bộ nền.' });
+          } else setSyncResult({ status: 'failed', message: data.error || data.message || 'Lỗi xảy ra trong quá trình đồng bộ.' });
         } catch (error: any) {
           setSyncResult({ status: 'failed', message: error.message || 'Lỗi đồng bộ.' });
-          setChannelSyncStates(current => Object.fromEntries(
-            Object.entries(current).map(([channelId, status]) => [
-              channelId,
-              status === 'queued' || status === 'running' ? 'failed' : status,
-            ]),
-          ));
         } finally {
           await fetchSyncHistory(true);
           setSyncingId(null);
@@ -151,7 +137,6 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
       },
     });
   };
-
   const handleCancelAll = () => {
     if (!canManage || !hasActiveChannelSync) return;
     setConfirmState({
@@ -185,43 +170,34 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
     if (!canManage) return;
     setSyncingId(channelId);
     setSyncResult(null);
-    setChannelSyncStates(current => ({ ...current, [channelId]: 'running' }));
-
+    setChannelSyncStates(current => ({ ...current, [channelId]: 'queued' }));
     try {
       const res = await fetch('/api/channels/' + channelId + '/sync', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + idToken,
-          'X-Google-OAuth-Token': googleAccessToken || '',
-        },
-        body: JSON.stringify({
-          since: since || undefined,
-          until: until || undefined,
-        }),
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken, 'X-Google-OAuth-Token': googleAccessToken || '' },
+        body: JSON.stringify({ since: since || undefined, until: until || undefined }),
       });
-
       const data = await res.json();
-      if (data.success) {
-        setChannelSyncStates(current => ({ ...current, [channelId]: 'success' }));
-        await onRefreshChannels();
-        setSyncResult({
-          status: 'success',
-          message: data.message || 'Đồng bộ kênh hoàn tất.',
-        });
-      } else {
-        setChannelSyncStates(current => ({ ...current, [channelId]: 'failed' }));
-        setSyncResult({ status: 'failed', message: data.error || 'Đồng bộ thất bại.' });
-      }
+      if (data.success) setSyncResult({ status: 'success', message: data.message || 'Đã xếp hàng đồng bộ nền cho kênh.' });
+      else { setChannelSyncStates(current => ({ ...current, [channelId]: 'failed' })); setSyncResult({ status: 'failed', message: data.error || 'Đồng bộ thất bại.' }); }
     } catch (error: any) {
       setChannelSyncStates(current => ({ ...current, [channelId]: 'failed' }));
-      setSyncResult({ status: 'failed', message: error.message || 'Đồng bộ thất bại.' });
-    } finally {
-      await fetchSyncHistory(true);
-      setSyncingId(null);
-    }
+      setSyncResult({ status: 'failed', message: error.message || 'Lỗi đồng bộ.' });
+    } finally { await fetchSyncHistory(true); setSyncingId(null); }
   };
 
+  const handleCancelChannel = async (channelId: string) => {
+    if (!canManage) return;
+    setCancellingChannelId(channelId);
+    try {
+      const response = await fetch('/api/sync/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + idToken }, body: JSON.stringify({ channelId }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Không thể hủy đồng bộ kênh.');
+      setSyncResult({ status: 'success', message: data.message || 'Đã gửi yêu cầu hủy đồng bộ kênh.' });
+      await fetchSyncHistory(true);
+    } catch (error: any) { setSyncResult({ status: 'failed', message: error.message || 'Không thể hủy đồng bộ kênh.' }); }
+    finally { setCancellingChannelId(null); }
+  };
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-150 pb-5">
@@ -248,7 +224,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
               className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs px-4 py-2.5 rounded-xl disabled:opacity-50 transition-colors shadow-sm cursor-pointer"
             >
               <RefreshCw className={'w-4 h-4 ' + (syncingId === 'all' || hasActiveChannelSync ? 'animate-spin' : '')} />
-              {syncingId === 'all' || hasActiveChannelSync ? 'Đang đồng bộ...' : 'Đồng bộ toàn bộ các kênh'}
+              {syncingId === 'all' || hasActiveChannelSync ? 'Đang đồng bộ...' : selectedChannels.length > 0 ? ('Đồng bộ ' + selectedChannels.length + ' trang đã chọn') : 'Đồng bộ toàn bộ các kênh'}
             </button>
           </div>
         ) : (
@@ -302,22 +278,18 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
                   const isThisSyncing = isQueued || isRunning;
                   return (
                     <div key={chan.id} className={'flex items-center justify-between p-3 rounded-xl border transition-colors ' + (isRunning ? 'border-blue-200 bg-blue-50/60' : isQueued ? 'border-amber-200 bg-amber-50/60' : 'border-slate-100 bg-slate-50/50')}>
-                      <div>
-                        <span className="text-xs font-bold text-slate-800 block truncate max-w-[150px]">{chan.name}</span>
-                        <span className="text-[10px] text-slate-400 uppercase font-semibold">{chan.platform}</span>
-                      </div>
+                      <label className="flex min-w-0 flex-1 items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={selectedChannelIds.has(chan.id)} onChange={() => toggleChannelSelection(chan.id)} disabled={isThisSyncing} aria-label={`Chọn ${chan.name}`} className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50" />
+                        <span className="min-w-0"><span className="text-xs font-bold text-slate-800 block truncate max-w-[150px]">{chan.name}</span><span className="text-[10px] text-slate-400 uppercase font-semibold">{chan.platform}</span></span>
+                      </label>
                       <button
-                        onClick={() => handleSyncChannel(chan.id)}
-                        disabled={syncingId !== null || hasActiveChannelSync}
-                        title={isRunning ? 'Đang đồng bộ' : isQueued ? 'Đang chờ đến lượt đồng bộ' : 'Đồng bộ kênh này'}
-                        className={'flex items-center gap-1.5 bg-white border font-semibold text-[10px] px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-80 ' + (isRunning ? 'border-blue-200 text-blue-700' : isQueued ? 'border-amber-200 text-amber-700' : 'border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-100')}
+                        onClick={() => isThisSyncing ? handleCancelChannel(chan.id) : handleSyncChannel(chan.id)}
+                        disabled={isThisSyncing ? cancellingChannelId === chan.id : syncingId !== null || hasActiveChannelSync}
+                        title={isThisSyncing ? 'Hủy đồng bộ kênh này' : 'Đồng bộ kênh này'}
+                        className={'flex items-center gap-1.5 bg-white border font-semibold text-[10px] px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-80 ' + (isThisSyncing ? 'border-rose-200 text-rose-700' : 'border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-100')}
                       >
-                        {isThisSyncing ? (
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-500" />
-                        ) : (
-                          <Play className="w-3 h-3" />
-                        )}
-                        {isRunning ? 'Đang Sync' : isQueued ? 'Chờ Sync' : 'Sync'}
+                        {isThisSyncing ? <XCircle className={'w-3.5 h-3.5 ' + (cancellingChannelId === chan.id ? 'animate-spin' : '')} /> : <Play className="w-3 h-3" />}
+                        {isThisSyncing ? 'Hủy' : 'Sync'}
                       </button>
                     </div>
                   );

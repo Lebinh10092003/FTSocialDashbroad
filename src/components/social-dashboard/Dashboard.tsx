@@ -48,6 +48,7 @@ interface FollowerTrendPoint {
   followersCount: number;
   dailyFollowsUnique: number | null;
   dailyUnfollowsUnique: number | null;
+  [key: string]: string | number | null;
 }
 
 const formatFollowerInsight = (value: number | null | undefined) => (
@@ -268,6 +269,23 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
     });
   };
 
+  const renderChannelPicker = () => (
+    <div className="relative">
+      <button onClick={() => setIsChannelPickerOpen(open => !open)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm">
+        Chọn kênh hiển thị ({selectedChannels.size}) ▾
+      </button>
+      {isChannelPickerOpen && <>
+        <button aria-label="Đóng bộ chọn kênh" className="fixed inset-0 z-10 cursor-default" onClick={() => setIsChannelPickerOpen(false)} />
+        <div className="absolute right-0 mt-2 z-20 w-72 bg-white border border-slate-200 rounded-2xl shadow-xl p-3">
+          <div className="flex justify-between border-b border-slate-100 pb-2 mb-2">
+            <button onClick={() => setSelectedChannels(new Set((data?.channelStats || []).map(stat => stat.channelName)))} className="text-sm font-bold text-blue-700">Chọn tất cả</button>
+            <button onClick={() => setSelectedChannels(new Set())} className="text-sm font-bold text-rose-600">Bỏ chọn</button>
+          </div>
+          <div className="max-h-64 overflow-y-auto space-y-1">{(data?.channelStats || []).map(stat => <label key={stat.channelName} className="flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 text-sm font-medium text-slate-700 cursor-pointer"><input type="checkbox" checked={selectedChannels.has(stat.channelName)} onChange={() => toggleChannel(stat.channelName)} className="rounded text-blue-600" /><span className="truncate">{stat.channelName}</span></label>)}</div>
+        </div>
+      </>}
+    </div>
+  );
   const selectedBreakdown = () => {
     if (!data) return { reactions: 0, comments: 0, shares: 0 };
     return data.trends.reduce(
@@ -340,31 +358,26 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
 
   const visibleTrends = (data?.trends || []).filter(point => point.date >= startDate && point.date <= endDate);
   const isFollowerMetric = activeMetric === 'followers';
+  const followerValuesByDate = new Map(followerTrend.map(point => [point.date, point]));
+  const followerChartData = getCalendarDates(startDate, endDate).map(date => ({
+    ...(followerValuesByDate.get(date) || {}),
+    date,
+    followersCount: followerValuesByDate.get(date)?.followersCount ?? null,
+    dailyFollowsUnique: followerValuesByDate.get(date)?.dailyFollowsUnique ?? null,
+    dailyUnfollowsUnique: followerValuesByDate.get(date)?.dailyUnfollowsUnique ?? null,
+  }));
+  const followerTrendValues = !data ? [] : followerChartData.flatMap(point => [
+    Number(point.followersCount || 0),
+    ...data.channelStats.filter(stat => selectedChannels.has(stat.channelName)).map(stat => Number(point[`${stat.channelName}_followers`] || 0)),
+  ]);
   const contentTrendValues = !data || activeMetric === 'followers'
     ? []
     : visibleTrends.flatMap(point => [
       Number(point[activeMetric] || 0),
-      ...data.channelStats
-        .filter(stat => selectedChannels.has(stat.channelName))
-        .map(stat => Number(point[`${stat.channelName}_${activeMetric}`] || 0)),
+      ...data.channelStats.filter(stat => selectedChannels.has(stat.channelName)).map(stat => Number(point[`${stat.channelName}_${activeMetric}`] || 0)),
     ]);
-  const yAxisScale = getYAxisScale(
-    isFollowerMetric ? followerTrend.map(point => point.followersCount) : contentTrendValues,
-    manualScaleSteps || DEFAULT_AUTO_SCALE_STEPS,
-    !isFollowerMetric,
-  );
+  const yAxisScale = getYAxisScale(isFollowerMetric ? followerTrendValues : contentTrendValues, manualScaleSteps || DEFAULT_AUTO_SCALE_STEPS, !isFollowerMetric);
   const xAxisTicks = getDateAxisTicks(startDate, endDate);
-  const followerValuesByDate = new Map(followerTrend.map(point => [point.date, point]));
-  const followerChartData = getCalendarDates(startDate, endDate).map(date => {
-    const point = followerValuesByDate.get(date);
-    return {
-      date,
-      followersCount: point?.followersCount ?? null,
-      dailyFollowsUnique: point?.dailyFollowsUnique ?? null,
-      dailyUnfollowsUnique: point?.dailyUnfollowsUnique ?? null,
-    };
-  });
-
   return (
     <div className="space-y-5 pb-6">
       <section className="border-b border-slate-200/70 pb-4">
@@ -481,36 +494,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                   <span className="min-w-14 text-right text-xs font-extrabold text-slate-700">{manualScaleSteps ? `${manualScaleSteps} nấc` : 'Tự động'}</span>
                   {manualScaleSteps && <button type="button" onClick={() => setManualScaleSteps(null)} className="text-[11px] font-bold text-blue-700 hover:text-blue-900">Tự động</button>}
                 </div>
-                {isFollowerMetric ? (
-                  <SearchableSelect value={channelFilter} onChange={setChannelFilter} options={[{value:'all',label:'Tổng tất cả trang'},...filteredChannels.map(channel => ({value:channel.id,label:channel.name}))]} className="min-w-[220px]"/>
-                ) : (
-                  <>
-                    <div className="relative">
-                      <button onClick={() => setIsChannelPickerOpen(open => !open)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 shadow-sm">
-                        Chọn kênh hiển thị ({selectedChannels.size}) ▾
-                      </button>
-                      {isChannelPickerOpen && (
-                        <>
-                          <button aria-label="Đóng bộ chọn kênh" className="fixed inset-0 z-10 cursor-default" onClick={() => setIsChannelPickerOpen(false)} />
-                          <div className="absolute right-0 mt-2 z-20 w-72 bg-white border border-slate-200 rounded-2xl shadow-xl p-3">
-                            <div className="flex justify-between border-b border-slate-100 pb-2 mb-2">
-                              <button onClick={() => setSelectedChannels(new Set(data.channelStats.map(stat => stat.channelName)))} className="text-sm font-bold text-blue-700">Chọn tất cả</button>
-                              <button onClick={() => setSelectedChannels(new Set())} className="text-sm font-bold text-rose-600">Bỏ chọn</button>
-                            </div>
-                            <div className="max-h-64 overflow-y-auto space-y-1">
-                              {data.channelStats.map(stat => (
-                                <label key={stat.channelName} className="flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 text-sm font-medium text-slate-700 cursor-pointer">
-                                  <input type="checkbox" checked={selectedChannels.has(stat.channelName)} onChange={() => toggleChannel(stat.channelName)} className="rounded text-blue-600" />
-                                  <span className="truncate">{stat.channelName}</span>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </>
-                )}
+                {renderChannelPicker()}
               </div>
             </div>
 
@@ -525,7 +509,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                       <XAxis dataKey="date" ticks={xAxisTicks} interval={0} minTickGap={12} tickFormatter={(value: string) => value.slice(5).split('-').reverse().join('/')} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
                       <YAxis domain={yAxisScale.domain} ticks={yAxisScale.ticks} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
                       <Tooltip content={<FollowerTooltip />} cursor={{ stroke: '#c4b5fd', strokeDasharray: '3 3' }} />
-                      <Line type="monotone" dataKey="followersCount" name="Người theo dõi" stroke="#7c3aed" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                      {!isSingleChannelScope && <Line type="monotone" dataKey="followersCount" name="Tổng cộng" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />}\n                      {!onlyShowTotal && data.channelStats.filter(stat => selectedChannels.has(stat.channelName)).map((stat, index) => <Line key={stat.channelName} type="monotone" dataKey={`${stat.channelName}_followers`} name={stat.channelName} stroke={COLORS[index % COLORS.length]} strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />)}
                     </LineChart>
                   </ResponsiveContainer>
                 ) : (

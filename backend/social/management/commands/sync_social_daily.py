@@ -18,8 +18,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--initial-days",
             type=int,
-            default=365,
-            help="Initial one-year data window (default: 365 days).",
+            default=396,
+            help="Initial history window: one year plus a one-month comparison buffer (default: 396 days).",
         )
         parser.add_argument(
             "--recent-days",
@@ -38,7 +38,9 @@ class Command(BaseCommand):
             default="",
             help="Existing background sync request identifier, if one was pre-queued.",
         )
-
+        parser.add_argument("--since", default="", help="Optional inclusive manual start date (YYYY-MM-DD).")
+        parser.add_argument("--until", default="", help="Optional inclusive manual end date (YYYY-MM-DD).")
+        parser.add_argument("--force-history", action="store_true", help="Apply the initial history window even for an existing channel.")
     def handle(self, *args, **options):
         initial_days = options["initial_days"]
         recent_days = options["recent_days"]
@@ -57,6 +59,9 @@ class Command(BaseCommand):
 
         now = timezone.now()
         history_since = now - datetime.timedelta(days=initial_days)
+        manual_since = str(options.get("since") or "").strip()
+        manual_until = str(options.get("until") or "").strip()
+        force_history = bool(options.get("force_history"))
         request_id = str(options.get("request_id") or "").strip() or f"daily_{uuid.uuid4().hex[:10]}"
         channel_ids = [channel.id for channel in active_channels]
         existing_logs = {
@@ -71,31 +76,23 @@ class Command(BaseCommand):
         successes = 0
 
         for channel in active_channels:
-            if SyncEngine.is_request_cancelled(request_id):
-                self.stdout.write(self.style.WARNING("Đồng bộ đã được hủy."))
-                return
-
-            needs_initial_sync = channel.initial_sync_completed_at is None
+            needs_initial_sync = force_history or channel.initial_sync_completed_at is None
             recent_since = now - datetime.timedelta(days=recent_days)
-            since = history_since if needs_initial_sync else recent_since
-            follower_since = history_since if needs_initial_sync else recent_since
+            since = manual_since or (history_since if needs_initial_sync else recent_since)
+            until = manual_until or now
 
             success, message = SyncEngine.sync_channel(
                 channel.id,
                 request_id=request_id,
                 since=since,
-                until=now,
-                follower_since=follower_since,
+                until=until,
+                follower_since=since,
                 queued_log=queued_logs[channel.id],
             )
             status_label = "OK" if success else "ERROR"
             self.stdout.write(f"[{status_label}] {channel.name}: {message}")
             if success:
                 successes += 1
-
-            if SyncEngine.is_request_cancelled(request_id):
-                self.stdout.write(self.style.WARNING("Đồng bộ đã được hủy."))
-                return
 
         total = len(active_channels)
         if successes != total:

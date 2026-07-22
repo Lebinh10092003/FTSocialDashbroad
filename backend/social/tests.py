@@ -258,7 +258,7 @@ class BackgroundSyncTests(TestCase):
 
         process_args = popen.call_args.args[0]
         self.assertIn("sync_social_daily", process_args)
-        self.assertEqual(process_args.count("365"), 1)
+        self.assertEqual(process_args.count("396"), 1)
         self.assertEqual(process_args.count("1"), 1)
         self.assertIn("--request-id", process_args)
         self.assertEqual(popen.call_args.kwargs["stdout"], -3)
@@ -325,8 +325,8 @@ class DailySyncCommandTests(TestCase):
         call_command("sync_social_daily", stdout=StringIO())
 
         kwargs = sync_channel.call_args.kwargs
-        self.assertTrue(timedelta(days=364) < timezone.now() - kwargs["since"] < timedelta(days=366))
-        self.assertTrue(timedelta(days=364) < timezone.now() - kwargs["follower_since"] < timedelta(days=366))
+        self.assertTrue(timedelta(days=395) < timezone.now() - kwargs["since"] < timedelta(days=397))
+        self.assertTrue(timedelta(days=395) < timezone.now() - kwargs["follower_since"] < timedelta(days=397))
 
     @patch("social.management.commands.sync_social_daily.SyncEngine.sync_channel")
     def test_later_runs_refresh_only_the_new_day(self, sync_channel):
@@ -497,18 +497,20 @@ class DashboardFilterConsistencyTests(TestCase):
         self.assertEqual(response.status_code, 200)
         trend = response.json()
         self.assertEqual(len(trend), 7)
-        self.assertEqual(trend[0], {
-            'date': self.period_start.isoformat(),
-            'followersCount': 100,
-            'dailyFollowsUnique': None,
-            'dailyUnfollowsUnique': None,
-        })
-        self.assertEqual(trend[-1], {
-            'date': self.period_end.isoformat(),
-            'followersCount': 110,
-            'dailyFollowsUnique': 12,
-            'dailyUnfollowsUnique': 2,
-        })
+        self.assertEqual(trend[0]['date'], self.period_start.isoformat())
+        self.assertEqual(trend[0]['followersCount'], 100)
+        self.assertIsNone(trend[0]['dailyFollowsUnique'])
+        self.assertIsNone(trend[0]['dailyUnfollowsUnique'])
+        self.assertEqual(trend[0]['Filtered Page_followers'], 100)
+        self.assertIsNone(trend[0]['Filtered Page_dailyFollowsUnique'])
+        self.assertIsNone(trend[0]['Filtered Page_dailyUnfollowsUnique'])
+        self.assertEqual(trend[-1]['date'], self.period_end.isoformat())
+        self.assertEqual(trend[-1]['followersCount'], 110)
+        self.assertEqual(trend[-1]['dailyFollowsUnique'], 12)
+        self.assertEqual(trend[-1]['dailyUnfollowsUnique'], 2)
+        self.assertEqual(trend[-1]['Filtered Page_followers'], 110)
+        self.assertEqual(trend[-1]['Filtered Page_dailyFollowsUnique'], 12)
+        self.assertEqual(trend[-1]['Filtered Page_dailyUnfollowsUnique'], 2)
 
     def test_technical_facebook_placeholder_is_not_returned_as_a_channel(self):
         response = self.client.get('/api/channels')
