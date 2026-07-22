@@ -236,7 +236,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   const syncSelectedPeriod = async () => {
     setSyncingSelectedPeriod(true); setSyncMessage(null); setError(null);
     try {
-      const response = await fetch('/api/sync/all', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}`, 'X-Google-OAuth-Token': googleAccessToken || '' }, body: JSON.stringify({ background: true, recentDays: 7 }) });
+      const response = await fetch('/api/sync/all', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}`, 'X-Google-OAuth-Token': googleAccessToken || '' }, body: JSON.stringify({ background: true, recentDays: 1 }) });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || !body.success) throw new Error(body.error || body.message || 'Không thể bắt đầu đồng bộ dữ liệu gần đây.');
       setSyncMessage(body.message || 'Đã bắt đầu đồng bộ nền dữ liệu gần đây.');

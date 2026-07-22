@@ -127,7 +127,7 @@ def _bootstrap_admin(email: str, password: str):
 
 
 
-TOKEN_LIFETIME_DAYS = 60
+TOKEN_LIFETIME_DAYS = 53
 TOKEN_WARNING_DAYS = 5
 
 
@@ -248,9 +248,9 @@ def _seed_config() -> dict:
     current_facebook_token = os.getenv("CURRENT_FACEBOOK_ACCESS_TOKEN", "").strip()
     if current_facebook_token:
         try:
-            ttl_days = max(1, int(os.getenv("CURRENT_FACEBOOK_TOKEN_TTL_DAYS", "54")))
+            ttl_days = max(1, int(os.getenv("CURRENT_FACEBOOK_TOKEN_TTL_DAYS", "53")))
         except ValueError:
-            ttl_days = 54
+            ttl_days = 53
         scan_tokens.append({
             "id": "facebook-scan-current",
             "platform": "facebook",
@@ -319,11 +319,12 @@ def _get_config() -> SystemConfig:
     return config
 
 
-def _sync_channels(tokens: list[dict]) -> None:
+def _sync_channels(tokens: list[dict]) -> list[str]:
     from social.models import Channel
 
     now = timezone.now()
     active_pairs: set[tuple[str, str]] = set()
+    created_channel_ids: list[str] = []
     for token in tokens:
         platform = str(token.get("platform") or "").strip().lower()
         page_id = str(token.get("pageId") or "").strip()
@@ -338,7 +339,7 @@ def _sync_channels(tokens: list[dict]) -> None:
             channel.updated_at = now
             channel.save(update_fields=["name", "status", "updated_at"])
         else:
-            Channel.objects.create(
+            channel = Channel.objects.create(
                 id=str(uuid.uuid4()),
                 platform=platform,
                 name=name,
@@ -348,12 +349,15 @@ def _sync_channels(tokens: list[dict]) -> None:
                 created_at=now,
                 updated_at=now,
             )
+            created_channel_ids.append(channel.id)
 
     for channel in Channel.objects.filter(status="active"):
         if (channel.platform, channel.external_id) not in active_pairs:
             channel.status = "inactive"
             channel.updated_at = now
             channel.save(update_fields=["status", "updated_at"])
+
+    return created_channel_ids
 
 
 @api_view(["GET"])
@@ -626,13 +630,18 @@ def system_config_view(request):
     if "adminEmails" in payload:
         config.admin_emails = str(payload.get("adminEmails") or "")
     config.save()
+    new_channel_ids = []
     if isinstance(payload.get("detailedTokensList"), list):
-        _sync_channels(current["detailedTokensList"])
+        new_channel_ids = _sync_channels(current["detailedTokensList"])
+        if new_channel_ids:
+            from social.views import _start_background_sync
+            _start_background_sync(recent_days=1, history_days=365, channel_ids=new_channel_ids)
     return Response({
         "success": True,
         "message": "Đã lưu cấu hình hệ thống.",
         "detailedTokensList": current.get("detailedTokensList", []),
         "facebookScanTokens": current.get("facebookScanTokens", []),
+        "newChannelSyncQueued": len(new_channel_ids),
     })
 
 

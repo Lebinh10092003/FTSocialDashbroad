@@ -144,6 +144,13 @@ def channel_test_connection(request, channel_id):
 def channel_sync(request, channel_id):
     since = request.data.get('since')
     until = request.data.get('until')
+    channel = Channel.objects.filter(id=channel_id).first()
+    if not channel:
+        return Response({"error": "Không tìm thấy kênh."}, status=status.HTTP_404_NOT_FOUND)
+    # A per-channel button must obey the same rule as the 06:00 job: first
+    # successful sync loads the whole first year; subsequent syncs use its day.
+    if channel.initial_sync_completed_at is None:
+        since = None
     success, message = SyncEngine.sync_channel(channel_id, since=since, until=until)
     if success:
         return Response({"success": True, "message": message})
@@ -245,12 +252,9 @@ def media_summary_trend(request):
         published_at__lte=f"{period_end}T23:59:59.999Z"
     )
     
-    # Query snapshots
-    snapshots = DailySnapshot.objects.filter(
-        channel_id__in=channel_ids,
-        snapshot_date__gte=period_start,
-        snapshot_date__lte=period_end
-    )
+    # Metric snapshots are fetched after publication; use the newest saved metric for each report post.
+    post_keys = [post.post_key for post in posts]
+    snapshots = DailySnapshot.objects.filter(post_key__in=post_keys)
     
     # Get latest snapshot for each postKey
     latest_snaps = {}
@@ -335,11 +339,7 @@ def _build_media_summary(query):
         published_at__gte=period_start_dt,
         published_at__lte=period_end_dt,
     )
-    snapshots = DailySnapshot.objects.filter(
-        channel_id__in=channel_ids,
-        snapshot_date__gte=period_start,
-        snapshot_date__lte=period_end,
-    )
+    snapshots = DailySnapshot.objects.filter(post_key__in=[post.post_key for post in posts])
 
     latest_snapshots = {}
     for snapshot in snapshots:
@@ -603,12 +603,8 @@ def dashboard_view(request):
     posts = [p for p in posts if period_start <= str(p.published_at)[:10] <= period_end]
     post_keys = [p.post_key for p in posts]
     
-    # 3. Fetch snapshots
-    snapshots = DailySnapshot.objects.filter(
-        channel_id__in=channel_ids,
-        snapshot_date__gte=period_start,
-        snapshot_date__lte=period_end
-    )
+    # 3. Fetch the newest saved metric for each post in the selected period.
+    snapshots = DailySnapshot.objects.filter(post_key__in=post_keys)
     if platform_filter:
         snapshots = snapshots.filter(platform=platform_filter)
         
@@ -791,11 +787,7 @@ def dashboard_view(request):
         
     tv_post_keys = [p.post_key for p in tv_posts]
     
-    tv_snapshots = DailySnapshot.objects.filter(
-        channel_id__in=channel_ids,
-        snapshot_date__gte=top_viewed_start,
-        snapshot_date__lte=top_viewed_end
-    )
+    tv_snapshots = DailySnapshot.objects.filter(post_key__in=tv_post_keys)
     
     tv_latest_snaps = {}
     for snap in tv_snapshots:
@@ -911,12 +903,16 @@ def dashboard_view(request):
         'errors': errors
     })
 
-def _start_background_sync(recent_days=7, history_days=365):
-    """Queue all channels first, then run a cancellable detached sync process."""
+def _start_background_sync(recent_days=1, history_days=365, channel_ids=None):
+    """Queue the requested active channels, then run a cancellable detached sync."""
     recent_days = max(1, min(int(recent_days), 30))
     history_days = max(recent_days, min(int(history_days), 3650))
     request_id = f"background_{uuid.uuid4().hex[:12]}"
-    active_channels = list(Channel.objects.filter(status="active").order_by("name"))
+    channels = Channel.objects.filter(status="active")
+    selected_channel_ids = [str(value).strip() for value in (channel_ids or []) if str(value).strip()]
+    if selected_channel_ids:
+        channels = channels.filter(id__in=selected_channel_ids)
+    active_channels = list(channels.order_by("name"))
     SyncEngine.queue_channels(active_channels, request_id)
 
     manage_py = settings.BASE_DIR / "manage.py"
@@ -924,13 +920,17 @@ def _start_background_sync(recent_days=7, history_days=365):
         sys.executable,
         str(manage_py),
         "sync_social_daily",
-        "--backfill-days",
+        "--initial-days",
         str(history_days),
         "--recent-days",
         str(recent_days),
+    ]
+    for channel_id in selected_channel_ids:
+        process_args.extend(["--channel-id", channel_id])
+    process_args.extend([
         "--request-id",
         request_id,
-    ]
+    ])
     popen_options = {
         "cwd": str(settings.BASE_DIR),
         "stdout": subprocess.DEVNULL,
@@ -964,13 +964,13 @@ def sync_all(request):
                     "message": "Đang có một lần đồng bộ chạy ngầm. Dữ liệu sẽ tự cập nhật khi hoàn tất.",
                 }, status=status.HTTP_202_ACCEPTED)
 
-            recent_days = request.data.get("recentDays", request.data.get("days", 7))
+            recent_days = request.data.get("recentDays", request.data.get("days", 1))
             request_id = _start_background_sync(recent_days=recent_days, history_days=365)
             return Response({
                 "success": True,
                 "queued": True,
                 "requestId": request_id,
-                "message": "Đã xếp hàng đồng bộ nền. Bài đăng gần đây được cập nhật trong 7 ngày; lịch sử follow chỉ nạp một năm khi một kênh chưa có dữ liệu.",
+                "message": "Đã xếp hàng đồng bộ nền. Kênh chưa có dữ liệu sẽ nạp đủ 1 năm bài đăng, chỉ số và follow; các lần sau chỉ quét ngày mới.",
             }, status=status.HTTP_202_ACCEPTED)
 
         google_token = getattr(request, 'google_access_token', None)

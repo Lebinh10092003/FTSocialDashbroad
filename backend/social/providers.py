@@ -237,10 +237,15 @@ class FacebookProvider:
 
         posts = []
         seen_ids = set()
+        seen_cursors = set()
         after = None
 
-        for _page_number in range(100):
+        while True:
             if after:
+                if after in seen_cursors:
+                    logger.warning("Facebook returned a repeated pagination cursor for Page %s", external_id)
+                    break
+                seen_cursors.add(after)
                 params["after"] = after
             response = fetch_with_retry(url, headers=headers, params=params)
             items = response.get("data", [])

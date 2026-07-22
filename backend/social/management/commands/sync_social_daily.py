@@ -10,22 +10,28 @@ from social.sync import SyncEngine
 
 class Command(BaseCommand):
     help = (
-        "Refresh recent social posts and follower snapshots. The first run "
-        "backfills one year of daily follower history."
+        "Load one year of posts, post metrics and follower history once; "
+        "then refresh only the new day."
     )
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "--backfill-days",
+            "--initial-days",
             type=int,
             default=365,
-            help="Initial follower-history backfill window (default: 365 days).",
+            help="Initial one-year data window (default: 365 days).",
         )
         parser.add_argument(
             "--recent-days",
             type=int,
-            default=7,
-            help="Recent post and follower refresh window after the first run (default: 7 days).",
+            default=1,
+            help="Post and follower refresh window after the first run (default: 1 day).",
+        )
+        parser.add_argument(
+            "--channel-id",
+            action="append",
+            default=[],
+            help="Only sync this channel; may be supplied more than once.",
         )
         parser.add_argument(
             "--request-id",
@@ -34,19 +40,23 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        backfill_days = options["backfill_days"]
+        initial_days = options["initial_days"]
         recent_days = options["recent_days"]
-        if not 1 <= recent_days <= backfill_days:
-            raise CommandError("--recent-days must be between 1 and --backfill-days.")
-        if backfill_days > 3650:
-            raise CommandError("--backfill-days cannot exceed 3650 days.")
+        if not 1 <= recent_days <= initial_days:
+            raise CommandError("--recent-days must be between 1 and --initial-days.")
+        if initial_days > 3650:
+            raise CommandError("--initial-days cannot exceed 3650 days.")
 
-        active_channels = list(Channel.objects.filter(status="active").order_by("name"))
+        selected_channel_ids = [str(value).strip() for value in options.get("channel_id", []) if str(value).strip()]
+        channels = Channel.objects.filter(status="active")
+        if selected_channel_ids:
+            channels = channels.filter(id__in=selected_channel_ids)
+        active_channels = list(channels.order_by("name"))
         if not active_channels:
             raise CommandError("Không có kênh hoạt động để đồng bộ.")
 
         now = timezone.now()
-        history_since = now - datetime.timedelta(days=backfill_days)
+        history_since = now - datetime.timedelta(days=initial_days)
         request_id = str(options.get("request_id") or "").strip() or f"daily_{uuid.uuid4().hex[:10]}"
         channel_ids = [channel.id for channel in active_channels]
         existing_logs = {
@@ -65,14 +75,15 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.WARNING("Đồng bộ đã được hủy."))
                 return
 
-            has_follower_history = channel.follower_history_loaded_at is not None
+            needs_initial_sync = channel.initial_sync_completed_at is None
             recent_since = now - datetime.timedelta(days=recent_days)
-            follower_since = recent_since if has_follower_history else history_since
+            since = history_since if needs_initial_sync else recent_since
+            follower_since = history_since if needs_initial_sync else recent_since
 
             success, message = SyncEngine.sync_channel(
                 channel.id,
                 request_id=request_id,
-                since=recent_since,
+                since=since,
                 until=now,
                 follower_since=follower_since,
                 queued_log=queued_logs[channel.id],

@@ -16,7 +16,7 @@ interface SyncProps {
 
 function getDefaultSinceDate(): string {
   const date = new Date();
-  date.setDate(date.getDate() - 6);
+  date.setDate(date.getDate() - 1);
   return date.toISOString().slice(0, 10);
 }
 
@@ -123,7 +123,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
               'Authorization': 'Bearer ' + idToken,
               'X-Google-OAuth-Token': googleAccessToken || '',
             },
-            body: JSON.stringify({ background: true, recentDays: 7 }),
+            body: JSON.stringify({ background: true, recentDays: 1 }),
           });
 
           const data = await res.json();
@@ -268,7 +268,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
             <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">Đồng bộ riêng lẻ từ ngày (mặc định 7 ngày gần nhất)</label>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Đồng bộ riêng lẻ từ ngày (mặc định ngày mới nhất)</label>
               <input 
                 type="date"
                 value={since}

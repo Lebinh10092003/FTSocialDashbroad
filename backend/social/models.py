@@ -12,6 +12,9 @@ class Channel(models.Model):
     last_sync_at = models.DateTimeField(null=True, blank=True)
     last_sync_status = models.CharField(max_length=50, null=True, blank=True)
     follower_history_loaded_at = models.DateTimeField(null=True, blank=True)
+    # A channel is not ready for the cheap daily refresh until posts, post
+    # metrics and follower history have all been saved for the initial period.
+    initial_sync_completed_at = models.DateTimeField(null=True, blank=True)
     total_posts = models.IntegerField(default=0)
     followers_count = models.IntegerField(default=0)
 

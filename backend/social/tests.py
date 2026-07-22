@@ -259,7 +259,7 @@ class BackgroundSyncTests(TestCase):
         process_args = popen.call_args.args[0]
         self.assertIn("sync_social_daily", process_args)
         self.assertEqual(process_args.count("365"), 1)
-        self.assertEqual(process_args.count("7"), 1)
+        self.assertEqual(process_args.count("1"), 1)
         self.assertIn("--request-id", process_args)
         self.assertEqual(popen.call_args.kwargs["stdout"], -3)
         self.assertEqual(popen.call_args.kwargs["stderr"], -3)
@@ -319,27 +319,27 @@ class DailySyncCommandTests(TestCase):
         )
 
     @patch("social.management.commands.sync_social_daily.SyncEngine.sync_channel")
-    def test_initial_run_backfills_one_year_of_followers_but_only_recent_posts(self, sync_channel):
+    def test_initial_run_loads_one_year_of_posts_metrics_and_followers(self, sync_channel):
         sync_channel.return_value = (True, "ok")
 
         call_command("sync_social_daily", stdout=StringIO())
 
         kwargs = sync_channel.call_args.kwargs
-        self.assertTrue(timedelta(days=6) < timezone.now() - kwargs["since"] < timedelta(days=8))
+        self.assertTrue(timedelta(days=364) < timezone.now() - kwargs["since"] < timedelta(days=366))
         self.assertTrue(timedelta(days=364) < timezone.now() - kwargs["follower_since"] < timedelta(days=366))
 
     @patch("social.management.commands.sync_social_daily.SyncEngine.sync_channel")
-    def test_later_runs_refresh_only_the_recent_week(self, sync_channel):
+    def test_later_runs_refresh_only_the_new_day(self, sync_channel):
         now = timezone.now()
-        self.channel.follower_history_loaded_at = now
-        self.channel.save(update_fields=["follower_history_loaded_at"])
+        self.channel.initial_sync_completed_at = now
+        self.channel.save(update_fields=["initial_sync_completed_at"])
         sync_channel.return_value = (True, "ok")
 
         call_command("sync_social_daily", stdout=StringIO())
 
         kwargs = sync_channel.call_args.kwargs
-        self.assertTrue(timedelta(days=6) < timezone.now() - kwargs["since"] < timedelta(days=8))
-        self.assertTrue(timedelta(days=6) < timezone.now() - kwargs["follower_since"] < timedelta(days=8))
+        self.assertTrue(timedelta(hours=23) < timezone.now() - kwargs["since"] < timedelta(hours=25))
+        self.assertTrue(timedelta(hours=23) < timezone.now() - kwargs["follower_since"] < timedelta(hours=25))
 
 class DashboardFilterConsistencyTests(TestCase):
     def setUp(self):

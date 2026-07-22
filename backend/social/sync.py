@@ -299,6 +299,11 @@ class SyncEngine:
 
             snapshots_saved = 0
             if metric_targets:
+                metric_post_keys = {
+                    post_keys_by_external_id[item["id"]]
+                    for item in metric_targets
+                    if item.get("id") in post_keys_by_external_id
+                }
                 metrics = provider.get_post_metrics(
                     channel.id,
                     channel.external_id,
@@ -316,11 +321,22 @@ class SyncEngine:
                         raw_metric,
                         snapshot_date,
                     )
-                    snapshots_saved += 1
+
+                # Verify the actual database rows, not merely the API response.
+                snapshots_saved = DailySnapshot.objects.filter(
+                    snapshot_date=snapshot_date,
+                    post_key__in=metric_post_keys,
+                ).count()
+                if snapshots_saved != len(metric_post_keys):
+                    raise RuntimeError(
+                        f"Thiếu dữ liệu chỉ số trên máy chủ: {snapshots_saved}/{len(metric_post_keys)} bài."
+                    )
 
             channel.followers_count = followers
             if follower_since and timezone.now() - follower_since >= datetime.timedelta(days=30):
                 channel.follower_history_loaded_at = timezone.now()
+            if since and timezone.now() - since >= datetime.timedelta(days=364):
+                channel.initial_sync_completed_at = timezone.now()
             channel.total_posts = Post.objects.filter(
                 channel_id=channel.id,
                 is_deleted=False,
@@ -334,6 +350,7 @@ class SyncEngine:
                     "last_sync_at",
                     "last_sync_status",
                     "follower_history_loaded_at",
+                    "initial_sync_completed_at",
                 ]
             )
 
@@ -341,6 +358,7 @@ class SyncEngine:
             api_log.records_inserted = inserted
             api_log.records_updated = updated
             api_log.ended_at = timezone.now()
+
             api_log.save(
                 update_fields=[
                     "status",
