@@ -11,8 +11,13 @@ HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8001/api/health/}"
 HEALTH_HOST="${HEALTH_HOST:-workspace.fermat.vn}"
 HEALTH_RETRIES="${HEALTH_RETRIES:-30}"
 HEALTH_DELAY_SECONDS="${HEALTH_DELAY_SECONDS:-1}"
-DATABASE_BACKUP_DIR="${DATABASE_BACKUP_DIR:-/var/lib/ft-workspace/backups}"
+WORKSPACE_DATA_DIR="${WORKSPACE_DATA_DIR:-/home/workspace/ft-workspace-data}"
+export DJANGO_DB_PATH="${DJANGO_DB_PATH:-$WORKSPACE_DATA_DIR/workspace.sqlite3}"
+DATABASE_BACKUP_DIR="${DATABASE_BACKUP_DIR:-$WORKSPACE_DATA_DIR/backups}"
 DATABASE_BACKUP_KEEP="${DATABASE_BACKUP_KEEP:-30}"
+LEGACY_DATABASE_PATH="$PROJECT_DIR/backend/db.sqlite3"
+
+mkdir -p "$(dirname "$DJANGO_DB_PATH")" "$DATABASE_BACKUP_DIR"
 
 cd "$PROJECT_DIR"
 git pull --ff-only
@@ -23,15 +28,23 @@ fi
 
 "$VENV_DIR/bin/pip" install --upgrade pip
 "$VENV_DIR/bin/pip" install -r backend/requirements.txt
+
+npm ci
+VITE_API_URL=/api npm run build
+
+# On the first persistent deployment, freeze writes while the legacy database is
+# copied. This prevents losing a configuration or token change made mid-deploy.
+if [ ! -f "$DJANGO_DB_PATH" ] && [ -f "$LEGACY_DATABASE_PATH" ] && [ "$DJANGO_DB_PATH" != "$LEGACY_DATABASE_PATH" ]; then
+  sudo systemctl stop "$SYNC_SERVICE_NAME" "$SYNC_TIMER_NAME" || true
+  sudo systemctl stop "$SERVICE_NAME" || true
+fi
+
 (
   cd backend
   "$VENV_DIR/bin/python" manage.py backup_workspace_db --destination "$DATABASE_BACKUP_DIR" --keep "$DATABASE_BACKUP_KEEP"
   "$VENV_DIR/bin/python" manage.py migrate --noinput
   "$VENV_DIR/bin/python" manage.py collectstatic --noinput
 )
-
-npm ci
-VITE_API_URL=/api npm run build
 
 sudo install -m 0644 workspace-django.service "/etc/systemd/system/$SERVICE_NAME"
 sudo install -m 0644 workspace-social-sync.service "/etc/systemd/system/$SYNC_SERVICE_NAME"
