@@ -458,7 +458,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
               return (
                 <button
                   key={card.title}
-                  onClick={() => card.metric && setActiveMetric(card.metric)}
+                  onClick={() => { if (!card.metric) return; setActiveMetric(card.metric); if (card.metric === 'followers') setOnlyShowTotal(true); }}
                   className={`text-left p-4 rounded-xl border transition-all premium-card ${card.metric ? 'cursor-pointer' : 'cursor-default'} ${isActive ? `${card.accent} ring-2` : 'bg-white border-slate-200/70 hover:border-slate-300'}`}
                 >
                   <span className="flex items-center justify-between">
@@ -534,6 +534,17 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
               )}
             </div>
 
+            {isFollowerMetric && (
+              <div className="border-t border-slate-100 pt-3 space-y-3">
+                {!isSingleChannelScope && <label className="flex items-center justify-end gap-2 text-xs font-bold text-slate-600 cursor-pointer">
+                  <input type="checkbox" checked={onlyShowTotal} onChange={event => setOnlyShowTotal(event.target.checked)} className="w-4 h-4 accent-blue-600" /> Chỉ hiển đường tổng
+                </label>}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="bg-violet-50/60 p-3 rounded-xl border border-violet-100"><p className="text-xs font-extrabold uppercase tracking-wide text-violet-700">Follow mới</p><p className="text-2xl font-extrabold text-slate-900 mt-1">{formatFollowerInsight(followerChartData[followerChartData.length - 1]?.dailyFollowsUnique)}</p><p className="text-xs text-slate-500 mt-1">Ghi nhận ở ngày cuối kỳ đang chọn.</p></div>
+                  <div className="bg-rose-50/60 p-3 rounded-xl border border-rose-100"><p className="text-xs font-extrabold uppercase tracking-wide text-rose-700">Bỏ follow</p><p className="text-2xl font-extrabold text-slate-900 mt-1">{formatFollowerInsight(followerChartData[followerChartData.length - 1]?.dailyUnfollowsUnique)}</p><p className="text-xs text-slate-500 mt-1">Ghi nhận ở ngày cuối kỳ đang chọn.</p></div>
+                </div>
+              </div>
+            )}
             {!isFollowerMetric && (
               <div className="border-t border-slate-100 pt-3 space-y-3">
                 {!isSingleChannelScope && <label className="flex items-center justify-end gap-2 text-xs font-bold text-slate-600 cursor-pointer">
