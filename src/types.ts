@@ -56,6 +56,8 @@ export interface FollowerSnapshot {
   channelId: string;
   channelName: string;
   followersCount: number;
+  dailyFollowsUnique?: number | null;
+  dailyUnfollowsUnique?: number | null;
   fetchedAt: string;
 }
 export interface ApiLog {

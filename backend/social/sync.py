@@ -165,6 +165,36 @@ class SyncEngine:
             snapshot_date = timezone.localdate().isoformat()
 
             followers = provider.get_followers(channel.id, channel.external_id)
+            raw_follower_insights = getattr(provider, "get_follower_insights", lambda *_args, **_kwargs: [])(
+                channel.id,
+                channel.external_id,
+                since=since,
+                until=until,
+            )
+            follower_insights = raw_follower_insights if isinstance(raw_follower_insights, list) else []
+            for insight in follower_insights:
+                if not isinstance(insight, dict):
+                    continue
+                insight_date = str(insight.get("snapshot_date") or "").strip()
+                if not insight_date or "followers_count" not in insight:
+                    continue
+                defaults = {
+                    "snapshot_date": insight_date,
+                    "channel_id": channel.id,
+                    "channel_name": channel.name,
+                    "followers_count": insight["followers_count"],
+                    "fetched_at": timezone.now(),
+                }
+                for field in ("daily_follows_unique", "daily_unfollows_unique"):
+                    if field in insight:
+                        defaults[field] = insight[field]
+                FollowerSnapshot.objects.update_or_create(
+                    snapshot_key=f"{insight_date}:{channel.id}",
+                    defaults=defaults,
+                )
+
+            # The regular Page field is the freshest stock count. Do not overwrite
+            # same-day daily Insights values that may already have been saved above.
             FollowerSnapshot.objects.update_or_create(
                 snapshot_key=f"{snapshot_date}:{channel.id}",
                 defaults={

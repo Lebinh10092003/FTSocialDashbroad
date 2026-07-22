@@ -1,4 +1,5 @@
 import time
+import logging
 import requests
 import datetime
 import os
@@ -6,6 +7,8 @@ from django.utils import timezone
 import json
 import zlib
 from authentication.models import SystemConfig
+
+logger = logging.getLogger(__name__)
 
 class SocialPostRaw:
     def __init__(self, id, message=None, created_time=None, permalink_url=None, post_type=None, image_url=None):
@@ -112,6 +115,71 @@ class FacebookProvider:
             params={"fields": "followers_count"},
         )
         return int(data.get("followers_count", 0) or 0)
+
+    @staticmethod
+    def _insight_snapshot_date(end_time):
+        value = str(end_time or "").strip()
+        if not value:
+            return None
+        try:
+            parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if timezone.is_naive(parsed):
+                parsed = timezone.make_aware(parsed, datetime.timezone.utc)
+            return timezone.localtime(parsed).date().isoformat()
+        except (TypeError, ValueError):
+            return value[:10] or None
+
+    def get_follower_insights(self, channel_id, external_id, since=None, until=None):
+        """Return Page Insights grouped by the insight day without exposing tokens."""
+        token = self.get_token(external_id)
+        if token == "fb_mock_token_for_page":
+            return []
+
+        params = {
+            "metric": "page_follows,page_daily_follows_unique,page_daily_unfollows_unique",
+            "period": "day",
+        }
+        if since:
+            params["since"] = int(since.timestamp())
+        if until:
+            params["until"] = int(until.timestamp())
+
+        try:
+            payload = fetch_with_retry(
+                f"https://graph.facebook.com/{self.api_version}/{external_id}/insights",
+                headers={"Authorization": f"Bearer {token}"},
+                params=params,
+            )
+        except requests.RequestException as exc:
+            # Insights require Page analysis permissions. Keep post syncing available
+            # for a Page that has not yet granted this scope.
+            logger.warning("Page Insights unavailable for Facebook Page %s: %s", external_id, exc)
+            return []
+
+        fields = {
+            "page_follows": "followers_count",
+            "page_daily_follows_unique": "daily_follows_unique",
+            "page_daily_unfollows_unique": "daily_unfollows_unique",
+        }
+        by_date = {}
+        for metric in payload.get("data", []):
+            field = fields.get(str(metric.get("name") or ""))
+            if not field:
+                continue
+            for point in metric.get("values", []) or []:
+                snapshot_date = self._insight_snapshot_date(point.get("end_time"))
+                if not snapshot_date:
+                    continue
+                raw_value = point.get("value")
+                if isinstance(raw_value, dict):
+                    raw_value = raw_value.get("value")
+                try:
+                    value = int(raw_value)
+                except (TypeError, ValueError):
+                    continue
+                by_date.setdefault(snapshot_date, {"snapshot_date": snapshot_date})[field] = value
+
+        return [by_date[key] for key in sorted(by_date)]
 
     def list_posts(self, channel_id, external_id, since=None, until=None):
         token = self.get_token(external_id)

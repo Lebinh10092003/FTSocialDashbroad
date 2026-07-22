@@ -72,6 +72,8 @@ class FollowerSnapshot(models.Model):
     channel_id = models.CharField(max_length=255)
     channel_name = models.CharField(max_length=255)
     followers_count = models.IntegerField(default=0)
+    daily_follows_unique = models.IntegerField(null=True, blank=True)
+    daily_unfollows_unique = models.IntegerField(null=True, blank=True)
     fetched_at = models.DateTimeField()
 
     class Meta:

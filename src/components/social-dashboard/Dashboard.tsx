@@ -46,7 +46,31 @@ type DatePreset = 'custom' | '7days' | '30days' | '3months' | '6months' | '1year
 interface FollowerTrendPoint {
   date: string;
   followersCount: number;
+  dailyFollowsUnique: number | null;
+  dailyUnfollowsUnique: number | null;
 }
+
+const formatFollowerInsight = (value: number | null | undefined) => (
+  value == null ? 'Chưa có dữ liệu' : Number(value).toLocaleString('vi-VN')
+);
+
+const FollowerTooltip = ({ active, payload, label }: {
+  active?: boolean;
+  payload?: Array<{ payload?: FollowerTrendPoint }>;
+  label?: string;
+}) => {
+  if (!active || !payload?.length) return null;
+  const point = payload[0]?.payload;
+  if (!point) return null;
+  return (
+    <div className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-xs text-white shadow-xl">
+      <p className="mb-2 font-extrabold text-slate-100">{label}</p>
+      <p>Người theo dõi: <strong>{formatFollowerInsight(point.followersCount)}</strong></p>
+      <p className="mt-1">Người theo dõi mới: <strong>{formatFollowerInsight(point.dailyFollowsUnique)}</strong></p>
+      <p className="mt-1">Người bỏ theo dõi: <strong>{formatFollowerInsight(point.dailyUnfollowsUnique)}</strong></p>
+    </div>
+  );
+};
 
 interface YAxisScale {
   domain: [number, number];
@@ -330,11 +354,16 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
     !isFollowerMetric,
   );
   const xAxisTicks = getDateAxisTicks(startDate, endDate);
-  const followerValuesByDate = new Map(followerTrend.map(point => [point.date, point.followersCount]));
-  const followerChartData = getCalendarDates(startDate, endDate).map(date => ({
-    date,
-    followersCount: followerValuesByDate.get(date) ?? null,
-  }));
+  const followerValuesByDate = new Map(followerTrend.map(point => [point.date, point]));
+  const followerChartData = getCalendarDates(startDate, endDate).map(date => {
+    const point = followerValuesByDate.get(date);
+    return {
+      date,
+      followersCount: point?.followersCount ?? null,
+      dailyFollowsUnique: point?.dailyFollowsUnique ?? null,
+      dailyUnfollowsUnique: point?.dailyUnfollowsUnique ?? null,
+    };
+  });
 
   return (
     <div className="space-y-5 pb-6">
@@ -496,7 +525,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                       <XAxis dataKey="date" ticks={xAxisTicks} interval={0} minTickGap={12} tickFormatter={(value: string) => value.slice(5).split('-').reverse().join('/')} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
                       <YAxis domain={yAxisScale.domain} ticks={yAxisScale.ticks} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
-                      <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: 10, color: '#fff', fontSize: 12 }} itemStyle={{ color: '#fff' }} labelStyle={{ color: '#fff', fontWeight: 700 }} formatter={(value: number) => [Number(value).toLocaleString('vi-VN'), 'Người theo dõi']} />
+                      <Tooltip content={<FollowerTooltip />} cursor={{ stroke: '#c4b5fd', strokeDasharray: '3 3' }} />
                       <Line type="monotone" dataKey="followersCount" name="Người theo dõi" stroke="#7c3aed" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
                     </LineChart>
                   </ResponsiveContainer>

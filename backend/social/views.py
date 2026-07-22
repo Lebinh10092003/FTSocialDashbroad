@@ -501,7 +501,7 @@ def followers_trend(request):
             raise ValueError
     except (TypeError, ValueError):
         return Response(
-            {"error": "Khoảng thời gian phải hợp lệ và không vượt quá 1 năm."},
+            {"error": "Kho\u1ea3ng th\u1eddi gian ph\u1ea3i h\u1ee3p l\u1ec7 v\u00e0 kh\u00f4ng v\u01b0\u1ee3t qu\u00e1 1 n\u0103m."},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -520,12 +520,14 @@ def followers_trend(request):
     channel_ids = list(channels.values_list('id', flat=True))
 
     histories = {channel_id: [] for channel_id in channel_ids}
+    snapshots_by_day = {channel_id: {} for channel_id in channel_ids}
     snapshots = FollowerSnapshot.objects.filter(
         channel_id__in=channel_ids,
         snapshot_date__lte=period_end,
     ).order_by('snapshot_date')
     for snapshot in snapshots:
         histories.setdefault(snapshot.channel_id, []).append(snapshot)
+        snapshots_by_day.setdefault(snapshot.channel_id, {})[snapshot.snapshot_date] = snapshot
 
     cursors = {channel_id: 0 for channel_id in channel_ids}
     latest_counts = {}
@@ -533,6 +535,8 @@ def followers_trend(request):
     current_day = start_day
     while current_day <= end_day:
         date_string = current_day.isoformat()
+        daily_follows = []
+        daily_unfollows = []
         for channel_id in channel_ids:
             history = histories.get(channel_id, [])
             cursor = cursors[channel_id]
@@ -540,9 +544,18 @@ def followers_trend(request):
                 latest_counts[channel_id] = history[cursor].followers_count
                 cursor += 1
             cursors[channel_id] = cursor
+
+            daily_snapshot = snapshots_by_day.get(channel_id, {}).get(date_string)
+            if daily_snapshot and daily_snapshot.daily_follows_unique is not None:
+                daily_follows.append(daily_snapshot.daily_follows_unique)
+            if daily_snapshot and daily_snapshot.daily_unfollows_unique is not None:
+                daily_unfollows.append(daily_snapshot.daily_unfollows_unique)
+
         trend.append({
             'date': date_string,
             'followersCount': sum(latest_counts.get(channel_id, 0) for channel_id in channel_ids),
+            'dailyFollowsUnique': sum(daily_follows) if daily_follows else None,
+            'dailyUnfollowsUnique': sum(daily_unfollows) if daily_unfollows else None,
         })
         current_day += datetime.timedelta(days=1)
 

@@ -334,7 +334,7 @@ class DashboardFilterConsistencyTests(TestCase):
         self._snapshot(self.too_old_post, self.channel, 9000, 900, 0, 0, 0)
 
         self._follower_snapshot(self.channel, self.period_start - timedelta(days=1), 100)
-        self._follower_snapshot(self.channel, self.period_end, 110)
+        self._follower_snapshot(self.channel, self.period_end, 110, daily_follows_unique=12, daily_unfollows_unique=2)
         self._follower_snapshot(self.channel, self.period_end + timedelta(days=1), 999)
         self._follower_snapshot(self.other_channel, self.period_end, 220)
         self._follower_snapshot(self.placeholder, self.period_end, 777)
@@ -374,13 +374,15 @@ class DashboardFilterConsistencyTests(TestCase):
             fetched_at=timezone.now(),
         )
 
-    def _follower_snapshot(self, channel, snapshot_day, followers):
+    def _follower_snapshot(self, channel, snapshot_day, followers, daily_follows_unique=None, daily_unfollows_unique=None):
         FollowerSnapshot.objects.create(
             snapshot_key=f"{channel.id}:{snapshot_day.isoformat()}",
             snapshot_date=snapshot_day.isoformat(),
             channel_id=channel.id,
             channel_name=channel.name,
             followers_count=followers,
+            daily_follows_unique=daily_follows_unique,
+            daily_unfollows_unique=daily_unfollows_unique,
             fetched_at=timezone.now(),
         )
 
@@ -418,8 +420,18 @@ class DashboardFilterConsistencyTests(TestCase):
         self.assertEqual(response.status_code, 200)
         trend = response.json()
         self.assertEqual(len(trend), 7)
-        self.assertEqual(trend[0], {'date': self.period_start.isoformat(), 'followersCount': 100})
-        self.assertEqual(trend[-1], {'date': self.period_end.isoformat(), 'followersCount': 110})
+        self.assertEqual(trend[0], {
+            'date': self.period_start.isoformat(),
+            'followersCount': 100,
+            'dailyFollowsUnique': None,
+            'dailyUnfollowsUnique': None,
+        })
+        self.assertEqual(trend[-1], {
+            'date': self.period_end.isoformat(),
+            'followersCount': 110,
+            'dailyFollowsUnique': 12,
+            'dailyUnfollowsUnique': 2,
+        })
 
     def test_technical_facebook_placeholder_is_not_returned_as_a_channel(self):
         response = self.client.get('/api/channels')
