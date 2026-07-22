@@ -1,10 +1,14 @@
-name: CI
+name: CI and deploy
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   frontend:
@@ -14,7 +18,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install
+          cache: npm
+      - run: npm ci
       - run: npm run lint
       - run: npm run build
 
@@ -35,3 +40,42 @@ jobs:
       - run: python backend/manage.py migrate --noinput
       - run: python backend/manage.py check
       - run: python backend/manage.py makemigrations --check --dry-run
+
+  deploy:
+    name: Deploy Workspace VPS
+    needs: [frontend, backend]
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: workspace-production-deploy
+      cancel-in-progress: false
+    environment: production
+    steps:
+      - name: Configure VPS SSH access
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_PORT: ${{ vars.VPS_PORT }}
+          VPS_USERNAME: ${{ vars.VPS_USERNAME }}
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          : "${VPS_HOST:?Missing repository variable VPS_HOST}"
+          : "${VPS_PORT:?Missing repository variable VPS_PORT}"
+          : "${VPS_USERNAME:?Missing repository variable VPS_USERNAME}"
+          : "${VPS_SSH_PRIVATE_KEY:?Missing repository secret VPS_SSH_PRIVATE_KEY}"
+          : "${VPS_KNOWN_HOSTS:?Missing repository secret VPS_KNOWN_HOSTS}"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Run isolated Workspace deployment
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_PORT: ${{ vars.VPS_PORT }}
+          VPS_USERNAME: ${{ vars.VPS_USERNAME }}
+        run: |
+          set -Eeuo pipefail
+          ssh -i ~/.ssh/id_ed25519 -p "$VPS_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USERNAME@$VPS_HOST" 'cd /var/www/ft-workspace && bash deploy.sh'

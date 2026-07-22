@@ -67,3 +67,23 @@ npm run dev
 ```
 
 Open `http://127.0.0.1:3000`. The frontend reads `VITE_API_URL=http://127.0.0.1:8000/api` from `.env.local`; SQLite remains at `backend/db.sqlite3` and is not committed.
+
+## GitHub Actions deployment
+
+Pushes to main run the CI checks first. Deployment is disabled until the repository variable DEPLOY_ENABLED is set to true; when enabled, the deploy job connects only to the dedicated Workspace directory /var/www/ft-workspace and runs bash deploy.sh. It does not touch khaothi.fermat.vn.
+
+Configure these repository variables in Settings > Secrets and variables > Actions > Variables:
+
+- DEPLOY_ENABLED: true
+- VPS_HOST: VPS IP address or workspace.fermat.vn
+- VPS_PORT: SSH port, normally 22
+- VPS_USERNAME: deployment account, normally workspace
+
+Configure these repository secrets in Settings > Secrets and variables > Actions > Secrets:
+
+- VPS_SSH_PRIVATE_KEY: private key for the GitHub Actions deployment key
+- VPS_KNOWN_HOSTS: verified SSH host-key entry for the VPS
+
+Use a dedicated SSH key for GitHub Actions. Add its public key to /home/workspace/.ssh/authorized_keys on the VPS, and grant the workspace account only the passwordless systemd/install commands that deploy.sh requires. Keep the private key only in GitHub Secrets; never commit it or paste it into the repository.
+
+After the variables and secrets are saved, open Actions > CI and deploy > Run workflow, choose main, and run it manually once to verify the connection.
