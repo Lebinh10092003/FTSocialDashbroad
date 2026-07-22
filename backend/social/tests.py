@@ -85,6 +85,34 @@ class FacebookPaginationTests(TestCase):
         self.assertNotIn("post_clicks", requested)
 
 
+    @patch("social.providers.fetch_with_retry")
+    def test_follower_insights_fetches_each_metric_separately(self, fetch):
+        fetch.side_effect = [
+            {"data": [{"name": "page_follows", "values": [{"value": 100, "end_time": "2026-07-22T07:00:00+0000"}]}]},
+            {"data": [{"name": "page_daily_follows_unique", "values": [{"value": 4, "end_time": "2026-07-22T07:00:00+0000"}]}]},
+            {"data": [{"name": "page_daily_unfollows_unique", "values": [{"value": 1, "end_time": "2026-07-22T07:00:00+0000"}]}]},
+        ]
+        provider = FacebookProvider()
+        with patch.object(provider, "get_token", return_value="test-token"):
+            rows = provider.get_follower_insights(
+                "channel",
+                "page",
+                since=timezone.now() - timedelta(days=7),
+                until=timezone.now(),
+            )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["followers_count"], 100)
+        self.assertEqual(rows[0]["daily_follows_unique"], 4)
+        self.assertEqual(rows[0]["daily_unfollows_unique"], 1)
+        self.assertEqual(fetch.call_count, 3)
+        self.assertEqual(
+            [call.kwargs["params"]["metric"] for call in fetch.call_args_list],
+            ["page_follows", "page_daily_follows_unique", "page_daily_unfollows_unique"],
+        )
+        self.assertTrue(all("access_token" not in call.kwargs["params"] for call in fetch.call_args_list))
+
+
 class SyncQueueTests(TestCase):
     def setUp(self):
         now = timezone.now()

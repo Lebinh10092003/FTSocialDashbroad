@@ -130,54 +130,57 @@ class FacebookProvider:
             return value[:10] or None
 
     def get_follower_insights(self, channel_id, external_id, since=None, until=None):
-        """Return Page Insights grouped by the insight day without exposing tokens."""
+        """Return Page Insights grouped by day without exposing access tokens.
+
+        Meta rejects the three required Page metrics when they are sent as a
+        comma-separated value, so fetch each daily metric independently.
+        """
         token = self.get_token(external_id)
         if token == "fb_mock_token_for_page":
             return []
 
-        params = {
-            "metric": "page_follows,page_daily_follows_unique,page_daily_unfollows_unique",
-            "period": "day",
-        }
-        if since:
-            params["since"] = int(since.timestamp())
-        if until:
-            params["until"] = int(until.timestamp())
-
-        try:
-            payload = fetch_with_retry(
-                f"https://graph.facebook.com/{self.api_version}/{external_id}/insights",
-                headers={"Authorization": f"Bearer {token}"},
-                params=params,
-            )
-        except requests.RequestException as exc:
-            # Insights require Page analysis permissions. Keep post syncing available
-            # for a Page that has not yet granted this scope.
-            logger.warning("Page Insights unavailable for Facebook Page %s: %s", external_id, exc)
-            return []
-
-        fields = {
+        metric_fields = {
             "page_follows": "followers_count",
             "page_daily_follows_unique": "daily_follows_unique",
             "page_daily_unfollows_unique": "daily_unfollows_unique",
         }
         by_date = {}
-        for metric in payload.get("data", []):
-            field = fields.get(str(metric.get("name") or ""))
-            if not field:
+        for metric_name, field in metric_fields.items():
+            params = {"metric": metric_name, "period": "day"}
+            if since:
+                params["since"] = int(since.timestamp())
+            if until:
+                params["until"] = int(until.timestamp())
+            try:
+                payload = fetch_with_retry(
+                    f"https://graph.facebook.com/{self.api_version}/{external_id}/insights",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params=params,
+                )
+            except requests.RequestException as exc:
+                # Insights require Page analysis permissions. Keep post syncing
+                # available for a Page that has not yet granted this scope.
+                logger.warning(
+                    "Page Insight %s unavailable for Facebook Page %s: %s",
+                    metric_name,
+                    external_id,
+                    exc,
+                )
                 continue
-            for point in metric.get("values", []) or []:
-                snapshot_date = self._insight_snapshot_date(point.get("end_time"))
-                if not snapshot_date:
-                    continue
-                raw_value = point.get("value")
-                if isinstance(raw_value, dict):
-                    raw_value = raw_value.get("value")
-                try:
-                    value = int(raw_value)
-                except (TypeError, ValueError):
-                    continue
-                by_date.setdefault(snapshot_date, {"snapshot_date": snapshot_date})[field] = value
+
+            for metric in payload.get("data", []):
+                for point in metric.get("values", []) or []:
+                    snapshot_date = self._insight_snapshot_date(point.get("end_time"))
+                    if not snapshot_date:
+                        continue
+                    raw_value = point.get("value")
+                    if isinstance(raw_value, dict):
+                        raw_value = raw_value.get("value")
+                    try:
+                        value = int(raw_value)
+                    except (TypeError, ValueError):
+                        continue
+                    by_date.setdefault(snapshot_date, {"snapshot_date": snapshot_date})[field] = value
 
         return [by_date[key] for key in sorted(by_date)]
 
