@@ -1,89 +1,303 @@
 # Deploy FT Workspace (React + Django + SQLite)
 
-This deployment is isolated to `workspace.fermat.vn`. It must be installed as a separate Nginx server block; do not modify the `khaothi.fermat.vn` configuration.
+Hệ thống được triển khai riêng cho `workspace.fermat.vn` tại:
 
-## One-time VPS setup
+```text
+/var/www/ft-workspace
+```
+
+API Django chạy nội bộ tại `127.0.0.1:8001`. Nginx là cổng truy cập công khai. Không sửa hoặc ghi đè cấu hình của `khaothi.fermat.vn`.
+
+---
+
+## 1. Khởi tạo VPS lần đầu
+
+Đăng nhập VPS bằng `root`, sau đó chạy:
 
 ```bash
-sudo mkdir -p /var/www/ft-workspace
-sudo chown -R workspace:www-data /var/www/ft-workspace
+apt update
+apt install -y git sudo curl nginx python3 python3-venv python3-pip nodejs npm
+
+# Tạo user chạy ứng dụng nếu chưa có
+id workspace >/dev/null 2>&1 || useradd --create-home --home-dir /home/workspace --shell /bin/bash workspace
+usermod -aG www-data workspace
+
+# Tạo thư mục dự án
+mkdir -p /var/www/ft-workspace
+chown -R workspace:www-data /var/www/ft-workspace
+
+# Clone repository nếu thư mục chưa phải Git repository
+if [ ! -d /var/www/ft-workspace/.git ]; then
+    rm -rf /var/www/ft-workspace
+    sudo -u workspace -H git clone --branch main \
+      https://github.com/Lebinh10092003/FTSocialDashbroad.git \
+      /var/www/ft-workspace
+fi
+
 cd /var/www/ft-workspace
-git clone <repository-url> .
-cp backend/.env.example backend/.env
+
+# Tạo file môi trường lần đầu
+if [ ! -f backend/.env ]; then
+    sudo -u workspace -H cp backend/.env.example backend/.env
+fi
+
+chown workspace:www-data backend/.env
 chmod 600 backend/.env
 ```
 
-Edit `backend/.env`: set a production `DJANGO_SECRET_KEY`, `DJANGO_DEBUG=false`, `DJANGO_ALLOWED_HOSTS=workspace.fermat.vn`, and `CSRF_TRUSTED_ORIGINS=https://workspace.fermat.vn`.
-
-Install the dedicated service and Nginx config:
+Sửa cấu hình production:
 
 ```bash
-sudo cp workspace-django.service /etc/systemd/system/workspace-django.service
-sudo cp workspace-social-sync.service /etc/systemd/system/workspace-social-sync.service
-sudo cp workspace-social-sync.timer /etc/systemd/system/workspace-social-sync.timer
-sudo systemctl daemon-reload
-sudo systemctl enable workspace-django.service
-sudo systemctl enable --now workspace-social-sync.timer
-sudo cp nginx-workspace.conf /etc/nginx/sites-available/workspace.fermat.vn
-sudo ln -s /etc/nginx/sites-available/workspace.fermat.vn /etc/nginx/sites-enabled/workspace.fermat.vn
-sudo nginx -t
-sudo systemctl reload nginx
+nano /var/www/ft-workspace/backend/.env
 ```
 
-The `User` and filesystem paths in both service files must match the deployment account and directory. The API listens only on `127.0.0.1:8001`; Nginx is the public entrypoint. The timer runs at 06:00 in `Asia/Ho_Chi_Minh`, refreshes the most recent 365 days and stores daily metrics snapshots for the rolling one-year window in `backend/db.sqlite3`.
+Các biến tối thiểu:
 
-Check the schedule and the last run with:
+```env
+DJANGO_DEBUG=false
+DJANGO_SECRET_KEY=THAY_BANG_CHUOI_BI_MAT_DAI_VA_NGAU_NHIEN
+DJANGO_ALLOWED_HOSTS=workspace.fermat.vn
+CSRF_TRUSTED_ORIGINS=https://workspace.fermat.vn
+BOOTSTRAP_ADMIN_EMAIL=admin@fermat.vn
+BOOTSTRAP_ADMIN_PASSWORD=THAY_BANG_MAT_KHAU_MANH
+CRON_SECRET=THAY_BANG_CHUOI_BI_MAT_KHAC
+```
+
+Tạo chuỗi bí mật:
 
 ```bash
-systemctl list-timers workspace-social-sync.timer
-sudo systemctl status workspace-social-sync.service
-sudo journalctl -u workspace-social-sync.service -n 100 --no-pager
+openssl rand -hex 48
 ```
 
-## Deploy an update
+---
+
+## 2. Cấp quyền deploy cho user `workspace`
+
+`deploy.sh` có các lệnh `sudo install` và `sudo systemctl`. Vì vậy cần cấp quyền một lần bằng tài khoản `root`:
+
+```bash
+cat > /etc/sudoers.d/workspace-deploy <<'EOF'
+workspace ALL=(root) NOPASSWD: /usr/bin/install, /usr/bin/systemctl
+EOF
+
+chmod 440 /etc/sudoers.d/workspace-deploy
+visudo -cf /etc/sudoers.d/workspace-deploy
+```
+
+Kết quả đúng:
+
+```text
+/etc/sudoers.d/workspace-deploy: parsed OK
+```
+
+Nếu deploy báo:
+
+```text
+workspace is not in the sudoers file
+```
+
+thì phần cấu hình trên chưa được thực hiện hoặc file sudoers không hợp lệ.
+
+---
+
+## 3. Cài Systemd và Nginx lần đầu
+
+Chạy bằng `root`:
 
 ```bash
 cd /var/www/ft-workspace
-bash deploy.sh
+
+cp workspace-django.service /etc/systemd/system/workspace-django.service
+cp workspace-social-sync.service /etc/systemd/system/workspace-social-sync.service
+cp workspace-social-sync.timer /etc/systemd/system/workspace-social-sync.timer
+
+systemctl daemon-reload
+systemctl enable workspace-django.service
+systemctl enable --now workspace-social-sync.timer
+
+cp nginx-workspace.conf /etc/nginx/sites-available/workspace.fermat.vn
+ln -sfn \
+  /etc/nginx/sites-available/workspace.fermat.vn \
+  /etc/nginx/sites-enabled/workspace.fermat.vn
+
+nginx -t
+systemctl reload nginx
 ```
 
-The script pulls the current branch, creates/reuses `.venv`, installs Python dependencies, runs migrations and collectstatic, builds React with `VITE_API_URL=/api`, installs/enables the isolated social-sync timer, restarts Gunicorn through systemd, then checks `http://127.0.0.1:8001/api/health/`.
+---
 
-## Local development
+## 4. Deploy lần đầu trên VPS
+
+Không chạy `deploy.sh` trực tiếp bằng `root`. Chạy bằng user `workspace`:
 
 ```bash
-cp backend/.env.example backend/.env
-cp .env.example .env.local
-cd backend
-python manage.py migrate
-python manage.py runserver
+sudo -u workspace -H bash -lc 'cd /var/www/ft-workspace && bash deploy.sh'
 ```
 
-In another terminal:
+Script sẽ tự động:
+
+- lấy code mới nhất bằng `git pull --ff-only`;
+- tạo hoặc dùng lại `.venv`;
+- cài thư viện Python;
+- chạy Django migrations;
+- chạy `collectstatic`;
+- cài thư viện Node.js;
+- build React với `VITE_API_URL=/api`;
+- cập nhật timer đồng bộ dữ liệu;
+- restart Django;
+- kiểm tra API health.
+
+Cảnh báo sau không làm deploy thất bại:
+
+```text
+Some chunks are larger than 500 kB after minification
+```
+
+Đây chỉ là cảnh báo tối ưu dung lượng JavaScript của Vite.
+
+---
+
+## 5. Một lệnh deploy và restart từ Windows CMD
+
+Sau khi VPS đã được khởi tạo đầy đủ, mở **Command Prompt trên Windows** và chạy một lệnh sau:
+
+```cmd
+ssh root@IP_VPS "sudo -u workspace -H git -C /var/www/ft-workspace fetch origin main && sudo -u workspace -H git -C /var/www/ft-workspace reset --hard origin/main && sudo -u workspace -H bash -lc 'cd /var/www/ft-workspace && bash deploy.sh' && systemctl restart workspace-django.service workspace-social-sync.timer nginx && curl -fsS http://127.0.0.1:8001/api/health/"
+```
+
+Thay `IP_VPS` bằng địa chỉ IP thật của VPS.
+
+Ví dụ:
+
+```cmd
+ssh root@103.000.000.000 "sudo -u workspace -H git -C /var/www/ft-workspace fetch origin main && sudo -u workspace -H git -C /var/www/ft-workspace reset --hard origin/main && sudo -u workspace -H bash -lc 'cd /var/www/ft-workspace && bash deploy.sh' && systemctl restart workspace-django.service workspace-social-sync.timer nginx && curl -fsS http://127.0.0.1:8001/api/health/"
+```
+
+Lệnh trên thực hiện đầy đủ:
+
+1. Kết nối vào VPS.
+2. Lấy code mới nhất từ nhánh `main`.
+3. Reset mã nguồn trên VPS về đúng trạng thái của `origin/main`.
+4. Build lại backend và frontend.
+5. Chạy migration và collectstatic.
+6. Restart Django, timer đồng bộ và Nginx.
+7. Kiểm tra API health.
+
+Lệnh `git reset --hard origin/main` chỉ reset các file được Git quản lý. File `backend/.env`, `backend/db.sqlite3`, uploads và các file không được commit vẫn được giữ lại.
+
+---
+
+## 6. Tạo file CMD để lần sau chỉ gõ `deploy-workspace`
+
+Trên máy Windows, tạo file:
+
+```text
+deploy-workspace.cmd
+```
+
+Nội dung:
+
+```bat
+@echo off
+ssh root@IP_VPS "sudo -u workspace -H git -C /var/www/ft-workspace fetch origin main && sudo -u workspace -H git -C /var/www/ft-workspace reset --hard origin/main && sudo -u workspace -H bash -lc 'cd /var/www/ft-workspace && bash deploy.sh' && systemctl restart workspace-django.service workspace-social-sync.timer nginx && curl -fsS http://127.0.0.1:8001/api/health/"
+
+if errorlevel 1 (
+    echo.
+    echo DEPLOY THAT BAI
+    pause
+    exit /b 1
+)
+
+echo.
+echo DEPLOY THANH CONG
+pause
+```
+
+Thay `IP_VPS` bằng IP thật. Đặt file này trong thư mục đã được thêm vào biến môi trường `PATH` của Windows. Sau đó chỉ cần mở CMD và chạy:
+
+```cmd
+deploy-workspace
+```
+
+---
+
+## 7. Chỉ restart dịch vụ, không pull code
+
+Từ Windows CMD:
+
+```cmd
+ssh root@IP_VPS "systemctl restart workspace-django.service workspace-social-sync.timer nginx && systemctl --no-pager --full status workspace-django.service"
+```
+
+---
+
+## 8. Khởi động lại toàn bộ VPS
+
+Chỉ dùng khi thật sự cần reboot hệ điều hành:
+
+```cmd
+ssh root@IP_VPS "reboot"
+```
+
+Sau khi VPS hoạt động trở lại, kiểm tra:
+
+```cmd
+ssh root@IP_VPS "systemctl is-active workspace-django.service nginx && curl -fsS http://127.0.0.1:8001/api/health/"
+```
+
+---
+
+## 9. Kiểm tra và xử lý lỗi
+
+Kiểm tra Django:
 
 ```bash
-npm install
-npm run dev
+systemctl status workspace-django.service --no-pager
+journalctl -u workspace-django.service -n 100 --no-pager
 ```
 
-Open `http://127.0.0.1:3000`. The frontend reads `VITE_API_URL=http://127.0.0.1:8000/api` from `.env.local`; SQLite remains at `backend/db.sqlite3` and is not committed.
+Kiểm tra timer đồng bộ:
 
-## GitHub Actions deployment
+```bash
+systemctl list-timers workspace-social-sync.timer
+systemctl status workspace-social-sync.service --no-pager
+journalctl -u workspace-social-sync.service -n 100 --no-pager
+```
 
-Pushes to main run the CI checks first. Deployment is disabled until the repository variable DEPLOY_ENABLED is set to true; when enabled, the deploy job connects only to the dedicated Workspace directory /var/www/ft-workspace and runs bash deploy.sh. It does not touch khaothi.fermat.vn.
+Kiểm tra Nginx:
 
-Configure these repository variables in Settings > Secrets and variables > Actions > Variables:
+```bash
+nginx -t
+systemctl status nginx --no-pager
+```
 
-- DEPLOY_ENABLED: true
-- VPS_HOST: VPS IP address or workspace.fermat.vn
-- VPS_PORT: SSH port, normally 22
-- VPS_USERNAME: deployment account, normally workspace
+Kiểm tra API:
 
-Configure these repository secrets in Settings > Secrets and variables > Actions > Secrets:
+```bash
+curl -i http://127.0.0.1:8001/api/health/
+curl -I https://workspace.fermat.vn
+```
 
-- VPS_SSH_PRIVATE_KEY: private key for the GitHub Actions deployment key
-- VPS_KNOWN_HOSTS: verified SSH host-key entry for the VPS
+---
 
-Use a dedicated SSH key for GitHub Actions. Add its public key to /home/workspace/.ssh/authorized_keys on the VPS, and grant the workspace account only the passwordless systemd/install commands that deploy.sh requires. Keep the private key only in GitHub Secrets; never commit it or paste it into the repository.
+## 10. GitHub Actions deployment
 
-After the variables and secrets are saved, open Actions > CI and deploy > Run workflow, choose main, and run it manually once to verify the connection.
+Push lên nhánh `main` sẽ chạy CI. Deployment chỉ hoạt động khi repository variable sau được cấu hình:
+
+```text
+DEPLOY_ENABLED=true
+```
+
+Repository variables:
+
+- `DEPLOY_ENABLED`: `true`
+- `VPS_HOST`: IP VPS hoặc `workspace.fermat.vn`
+- `VPS_PORT`: thường là `22`
+- `VPS_USERNAME`: thường là `workspace`
+
+Repository secrets:
+
+- `VPS_SSH_PRIVATE_KEY`: private key dành riêng cho GitHub Actions
+- `VPS_KNOWN_HOSTS`: SSH host-key đã xác minh của VPS
+
+Không commit private key hoặc nội dung `backend/.env` lên repository.
