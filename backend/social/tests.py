@@ -178,6 +178,42 @@ class SyncQueueTests(TestCase):
         queued_log.refresh_from_db()
         self.assertEqual(queued_log.status, 'success')
         self.assertIsNotNone(queued_log.ended_at)
+    def test_initial_follower_history_does_not_expand_post_discovery(self):
+        provider = Mock()
+        provider.get_followers.return_value = 10
+        provider.get_follower_insights.return_value = []
+        provider.list_posts.return_value = []
+        recent_since = timezone.now() - timedelta(days=7)
+        history_since = timezone.now() - timedelta(days=365)
+
+        with patch.object(SyncEngine, 'get_provider', return_value=provider):
+            success, _message = SyncEngine.sync_channel(
+                self.channel.id,
+                since=recent_since,
+                until=timezone.now(),
+                follower_since=history_since,
+            )
+
+        self.assertTrue(success)
+        self.assertEqual(provider.get_follower_insights.call_args.kwargs['since'], history_since)
+        self.assertEqual(provider.list_posts.call_args.kwargs['since'], recent_since)
+
+    def test_cancelled_queue_stops_before_calling_the_provider(self):
+        queued_log = SyncEngine.queue_channels([self.channel], 'cancel_request')[self.channel.id]
+        queued_log.status = 'cancelled'
+        queued_log.save(update_fields=['status'])
+        provider = Mock()
+
+        with patch.object(SyncEngine, 'get_provider', return_value=provider):
+            success, message = SyncEngine.sync_channel(
+                self.channel.id,
+                request_id='cancel_request',
+                queued_log=queued_log,
+            )
+
+        self.assertFalse(success)
+        self.assertIn('hủy', message)
+        provider.get_followers.assert_not_called()
 
     @patch.object(SyncEngine, 'sync_channel')
     def test_sync_all_creates_queue_for_every_channel_before_processing(self, sync_channel):
@@ -218,11 +254,13 @@ class SyncQueueTests(TestCase):
 class BackgroundSyncTests(TestCase):
     @patch("social.views.subprocess.Popen")
     def test_background_sync_launches_one_year_management_command(self, popen):
-        _start_background_sync(365)
+        _start_background_sync()
 
         process_args = popen.call_args.args[0]
         self.assertIn("sync_social_daily", process_args)
-        self.assertEqual(process_args.count("365"), 2)
+        self.assertEqual(process_args.count("365"), 1)
+        self.assertEqual(process_args.count("7"), 1)
+        self.assertIn("--request-id", process_args)
         self.assertEqual(popen.call_args.kwargs["stdout"], -3)
         self.assertEqual(popen.call_args.kwargs["stderr"], -3)
 
@@ -281,44 +319,27 @@ class DailySyncCommandTests(TestCase):
         )
 
     @patch("social.management.commands.sync_social_daily.SyncEngine.sync_channel")
-    def test_initial_run_backfills_one_year(self, sync_channel):
+    def test_initial_run_backfills_one_year_of_followers_but_only_recent_posts(self, sync_channel):
         sync_channel.return_value = (True, "ok")
 
         call_command("sync_social_daily", stdout=StringIO())
 
         kwargs = sync_channel.call_args.kwargs
-        self.assertIsNone(kwargs["snapshot_existing_since"])
-        self.assertGreaterEqual(
-            timezone.now() - kwargs["since"],
-            timedelta(days=364),
-        )
+        self.assertTrue(timedelta(days=6) < timezone.now() - kwargs["since"] < timedelta(days=8))
+        self.assertTrue(timedelta(days=364) < timezone.now() - kwargs["follower_since"] < timedelta(days=366))
 
     @patch("social.management.commands.sync_social_daily.SyncEngine.sync_channel")
-    def test_later_runs_refresh_and_snapshot_one_year(self, sync_channel):
+    def test_later_runs_refresh_only_the_recent_week(self, sync_channel):
         now = timezone.now()
-        self.channel.last_sync_at = now
-        self.channel.save(update_fields=["last_sync_at"])
-        Post.objects.create(
-            post_key="facebook:test:post",
-            platform="facebook",
-            channel_id=self.channel.id,
-            external_post_id="post",
-            post_url="https://example.com/post",
-            post_type="photo",
-            published_at=now,
-            imported_at=now,
-            updated_at=now,
-        )
+        self.channel.follower_history_loaded_at = now
+        self.channel.save(update_fields=["follower_history_loaded_at"])
         sync_channel.return_value = (True, "ok")
 
         call_command("sync_social_daily", stdout=StringIO())
 
         kwargs = sync_channel.call_args.kwargs
-        discovery_age = timezone.now() - kwargs["since"]
-        snapshot_age = timezone.now() - kwargs["snapshot_existing_since"]
-        self.assertTrue(timedelta(days=364) < discovery_age < timedelta(days=366))
-        self.assertTrue(timedelta(days=364) < snapshot_age < timedelta(days=366))
-
+        self.assertTrue(timedelta(days=6) < timezone.now() - kwargs["since"] < timedelta(days=8))
+        self.assertTrue(timedelta(days=6) < timezone.now() - kwargs["follower_since"] < timedelta(days=8))
 
 class DashboardFilterConsistencyTests(TestCase):
     def setUp(self):
@@ -458,7 +479,10 @@ class DashboardFilterConsistencyTests(TestCase):
         self.assertEqual(data['kpis']['followers'], 110)
         self.assertTrue(data['kpis']['followersAvailable'])
         self.assertEqual([item['channelName'] for item in data['channelStats']], [self.channel.name])
-        self.assertEqual([item['postKey'] for item in data['topPosts']], [self.recent_post.post_key])
+        self.assertEqual(
+            [item['postKey'] for item in data['topPosts']],
+            [self.recent_post.post_key, self.old_top_post.post_key, self.too_old_post.post_key],
+        )
         self.assertEqual([item['type'] for item in data['typeStats']], ['Ảnh / Album'])
         self.assertEqual([item['date'] for item in data['trends']], [self.period_end.isoformat()])
 

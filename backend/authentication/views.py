@@ -442,7 +442,7 @@ def manage_users(request):
 
 
 @api_view(["PUT", "DELETE"])
-@permission_classes([IsAdmin])
+@permission_classes([IsManagerOrAdmin])
 def manage_single_user(request, email):
     clean_email = _normalise_email(email)
     profile = UserProfile.objects.filter(email=clean_email).first()
@@ -452,22 +452,24 @@ def manage_single_user(request, email):
         return _delete_account(clean_email)
 
     role = str(request.data.get("role") or "").upper()
-    if role not in {"MANAGER", "EMPLOYEE"}:
-        return Response({"error": "Vai trò chỉ có thể là MANAGER hoặc EMPLOYEE."}, status=status.HTTP_400_BAD_REQUEST)
+    if role not in {"ADMIN", "MANAGER", "EMPLOYEE"}:
+        return Response({"error": "Vai trò không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+    if request.user_role == "MANAGER" and role != "EMPLOYEE":
+        return Response({"error": "Quản lý chỉ được cấp vai trò Nhân viên."}, status=status.HTTP_403_FORBIDDEN)
     profile.role = role
     profile.save(update_fields=["role", "updated_at"])
     return Response(_user_payload(profile))
 
 
 @api_view(["GET"])
-@permission_classes([IsAdmin])
+@permission_classes([IsManagerOrAdmin])
 def admin_users(request):
     users = UserProfile.objects.all().order_by("-updated_at")
     return Response([_user_payload(item) for item in users])
 
 
 @api_view(["POST"])
-@permission_classes([IsAdmin])
+@permission_classes([IsManagerOrAdmin])
 def admin_create_user(request):
     email = _normalise_email(request.data.get("email"))
     password = str(request.data.get("password") or "")
@@ -476,8 +478,8 @@ def admin_create_user(request):
 
     if not email or not password:
         return Response({"error": "Vui lòng nhập email và mật khẩu."}, status=status.HTTP_400_BAD_REQUEST)
-    if role not in {"MANAGER", "EMPLOYEE"}:
-        return Response({"error": "Chỉ được cấp vai trò Quản lý hoặc Nhân viên."}, status=status.HTTP_400_BAD_REQUEST)
+    if role not in {"ADMIN", "MANAGER", "EMPLOYEE"}:
+        return Response({"error": "Vai trò không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
     if request.user_role == "MANAGER" and role != "EMPLOYEE":
         return Response({"error": "Quản lý chỉ được tạo tài khoản Nhân viên."}, status=status.HTTP_403_FORBIDDEN)
     try:
@@ -524,7 +526,7 @@ def _delete_account(email: str) -> Response:
 
 
 @api_view(["POST"])
-@permission_classes([IsAdmin])
+@permission_classes([IsManagerOrAdmin])
 def admin_delete_user(request):
     email = _normalise_email(request.data.get("email"))
     if not email:

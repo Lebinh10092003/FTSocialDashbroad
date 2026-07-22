@@ -11,6 +11,10 @@ from .providers import FacebookProvider, MockProvider, ZaloOAProvider
 DEFAULT_SYNC_DAYS = 365
 
 
+class SyncCancelled(Exception):
+    """Raised when an administrator cancels a queued background sync."""
+
+
 class SyncEngine:
     @staticmethod
     def queue_channels(channels, request_id):
@@ -37,6 +41,25 @@ class SyncEngine:
         if platform == "zalo":
             return ZaloOAProvider()
         return MockProvider()
+
+    @staticmethod
+    def is_request_cancelled(request_id):
+        return bool(
+            request_id
+            and ApiLog.objects.filter(request_id=request_id, status="cancelled").exists()
+        )
+
+    @staticmethod
+    def mark_log_cancelled(api_log):
+        if not api_log:
+            return
+        api_log.status = "cancelled"
+        api_log.ended_at = timezone.now()
+        api_log.error_code = "SYNC_CANCELLED"
+        api_log.error_message = "Đồng bộ đã được quản trị viên hủy."
+        api_log.save(
+            update_fields=["status", "ended_at", "error_code", "error_message"]
+        )
 
     @staticmethod
     def _parse_boundary(value, end_of_day=False):
@@ -85,6 +108,7 @@ class SyncEngine:
         since=None,
         until=None,
         snapshot_existing_since=None,
+        follower_since=None,
         queued_log=None,
     ):
         request_id = request_id or f"req_{uuid.uuid4().hex[:10]}"
@@ -94,6 +118,7 @@ class SyncEngine:
         since = cls._parse_boundary(since)
         until = cls._parse_boundary(until, end_of_day=True)
         snapshot_existing_since = cls._parse_boundary(snapshot_existing_since)
+        follower_since = cls._parse_boundary(follower_since)
 
         if not since:
             since = timezone.now() - datetime.timedelta(days=DEFAULT_SYNC_DAYS)
@@ -131,6 +156,10 @@ class SyncEngine:
                 )
             return False, "Không tìm thấy kênh"
 
+        if cls.is_request_cancelled(request_id):
+            cls.mark_log_cancelled(queued_log)
+            return False, "Đồng bộ đã được hủy."
+
         if queued_log:
             api_log = queued_log
             api_log.started_at = started_at
@@ -164,11 +193,14 @@ class SyncEngine:
             provider = cls.get_provider(channel.platform)
             snapshot_date = timezone.localdate().isoformat()
 
+            if cls.is_request_cancelled(request_id):
+                raise SyncCancelled()
+
             followers = provider.get_followers(channel.id, channel.external_id)
             raw_follower_insights = getattr(provider, "get_follower_insights", lambda *_args, **_kwargs: [])(
                 channel.id,
                 channel.external_id,
-                since=since,
+                since=follower_since or since,
                 until=until,
             )
             follower_insights = raw_follower_insights if isinstance(raw_follower_insights, list) else []
@@ -193,6 +225,9 @@ class SyncEngine:
                     defaults=defaults,
                 )
 
+            if cls.is_request_cancelled(request_id):
+                raise SyncCancelled()
+
             # The regular Page field is the freshest stock count. Do not overwrite
             # same-day daily Insights values that may already have been saved above.
             FollowerSnapshot.objects.update_or_create(
@@ -213,6 +248,8 @@ class SyncEngine:
                 until=until,
             )
             raw_posts = [post for post in raw_posts if post.get("id")]
+            if cls.is_request_cancelled(request_id):
+                raise SyncCancelled()
             api_log.records_received = len(raw_posts)
 
             inserted = 0
@@ -282,6 +319,8 @@ class SyncEngine:
                     snapshots_saved += 1
 
             channel.followers_count = followers
+            if follower_since and timezone.now() - follower_since >= datetime.timedelta(days=30):
+                channel.follower_history_loaded_at = timezone.now()
             channel.total_posts = Post.objects.filter(
                 channel_id=channel.id,
                 is_deleted=False,
@@ -294,6 +333,7 @@ class SyncEngine:
                     "total_posts",
                     "last_sync_at",
                     "last_sync_status",
+                    "follower_history_loaded_at",
                 ]
             )
 
@@ -317,6 +357,11 @@ class SyncEngine:
                 f"lưu {snapshots_saved} snapshot ngày.",
             )
 
+        except SyncCancelled:
+            cls.mark_log_cancelled(api_log)
+            channel.last_sync_status = "cancelled"
+            channel.save(update_fields=["last_sync_status"])
+            return False, "Đồng bộ đã được hủy."
         except Exception as exc:
             channel.last_sync_status = "failed"
             channel.save(update_fields=["last_sync_status"])
@@ -353,6 +398,14 @@ class SyncEngine:
         results = []
 
         for channel in active_channels:
+            if cls.is_request_cancelled(request_id):
+                return {
+                    "success": False,
+                    "cancelled": True,
+                    "message": "Đồng bộ đã được hủy.",
+                    "results": results,
+                    "requestId": request_id,
+                }
             success, message = cls.sync_channel(
                 channel.id,
                 request_id=request_id,

@@ -7,6 +7,7 @@ from io import BytesIO
 import os
 import subprocess
 import sys
+import uuid
 from django.utils import timezone
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -733,32 +734,42 @@ def dashboard_view(request):
             'engagement': c_eng
         })
         
-    # 6. Top Posts
+    # 6. Most recent posts: always show the latest ten in the selected page scope.
+    # This list intentionally ignores the dashboard date window.
+    recent_posts = list(
+        Post.objects.filter(channel_id__in=channel_ids, is_deleted=False)
+        .order_by("-published_at")[:10]
+    )
+    recent_post_keys = [post.post_key for post in recent_posts]
+    recent_snapshots = DailySnapshot.objects.filter(post_key__in=recent_post_keys).order_by(
+        "post_key", "-snapshot_date"
+    )
+    recent_latest_snaps = {}
+    for snapshot in recent_snapshots:
+        recent_latest_snaps.setdefault(snapshot.post_key, snapshot)
+
     top_posts = []
-    for p in posts:
-        snap = latest_snaps.get(p.post_key)
+    for post in recent_posts:
+        snapshot = recent_latest_snaps.get(post.post_key)
         top_posts.append({
-            'postKey': p.post_key,
-            'platform': p.platform,
-            'channelId': p.channel_id,
-            'externalPostId': p.external_post_id,
-            'postUrl': p.post_url,
-            'imageUrl': p.image_url,
-            'postType': p.post_type,
-            'message': p.message,
-            'publishedAt': p.published_at,
-            'importedAt': p.imported_at,
-            'updatedAt': p.updated_at,
-            'isDeleted': p.is_deleted,
-            'engagement': snap.total_engagement if snap else 0,
-            'likes': snap.reactions if snap else 0,
-            'comments': snap.comments if snap else 0,
-            'shares': snap.shares if snap else 0,
-            'views': (snap.views or snap.impressions or snap.reach or 0) if snap else 0
+            'postKey': post.post_key,
+            'platform': post.platform,
+            'channelId': post.channel_id,
+            'externalPostId': post.external_post_id,
+            'postUrl': post.post_url,
+            'imageUrl': post.image_url,
+            'postType': post.post_type,
+            'message': post.message,
+            'publishedAt': post.published_at,
+            'importedAt': post.imported_at,
+            'updatedAt': post.updated_at,
+            'isDeleted': post.is_deleted,
+            'engagement': snapshot.total_engagement if snapshot else 0,
+            'likes': snapshot.reactions if snapshot else 0,
+            'comments': snapshot.comments if snapshot else 0,
+            'shares': snapshot.shares if snapshot else 0,
+            'views': (snapshot.views or snapshot.impressions or snapshot.reach or 0) if snapshot else 0,
         })
-    top_posts.sort(key=lambda x: x['publishedAt'], reverse=True)
-    top_posts = top_posts[:10]
-    
     # 7. Top Viewed Posts (past 12 months)
     top_viewed_end_day = timezone.localdate()
     top_viewed_start_day = top_viewed_end_day - datetime.timedelta(days=365)
@@ -900,17 +911,25 @@ def dashboard_view(request):
         'errors': errors
     })
 
-def _start_background_sync(days=365):
-    days = max(1, min(int(days), 3650))
+def _start_background_sync(recent_days=7, history_days=365):
+    """Queue all channels first, then run a cancellable detached sync process."""
+    recent_days = max(1, min(int(recent_days), 30))
+    history_days = max(recent_days, min(int(history_days), 3650))
+    request_id = f"background_{uuid.uuid4().hex[:12]}"
+    active_channels = list(Channel.objects.filter(status="active").order_by("name"))
+    SyncEngine.queue_channels(active_channels, request_id)
+
     manage_py = settings.BASE_DIR / "manage.py"
     process_args = [
         sys.executable,
         str(manage_py),
         "sync_social_daily",
         "--backfill-days",
-        str(days),
+        str(history_days),
         "--recent-days",
-        str(days),
+        str(recent_days),
+        "--request-id",
+        request_id,
     ]
     popen_options = {
         "cwd": str(settings.BASE_DIR),
@@ -925,7 +944,7 @@ def _start_background_sync(days=365):
     else:
         popen_options["start_new_session"] = True
     subprocess.Popen(process_args, **popen_options)
-
+    return request_id
 
 @api_view(['POST'])
 @permission_classes([IsManagerOrAdmin])
@@ -945,12 +964,13 @@ def sync_all(request):
                     "message": "Đang có một lần đồng bộ chạy ngầm. Dữ liệu sẽ tự cập nhật khi hoàn tất.",
                 }, status=status.HTTP_202_ACCEPTED)
 
-            days = request.data.get("days", 365)
-            _start_background_sync(days)
+            recent_days = request.data.get("recentDays", request.data.get("days", 7))
+            request_id = _start_background_sync(recent_days=recent_days, history_days=365)
             return Response({
                 "success": True,
                 "queued": True,
-                "message": "Đã bắt đầu đồng bộ ngầm dữ liệu 1 năm. Bạn có thể tiếp tục sử dụng trang.",
+                "requestId": request_id,
+                "message": "Đã xếp hàng đồng bộ nền. Bài đăng gần đây được cập nhật trong 7 ngày; lịch sử follow chỉ nạp một năm khi một kênh chưa có dữ liệu.",
             }, status=status.HTTP_202_ACCEPTED)
 
         google_token = getattr(request, 'google_access_token', None)
@@ -972,6 +992,35 @@ def sync_all(request):
             {"error": str(exc)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+@api_view(['POST'])
+@permission_classes([IsManagerOrAdmin])
+def sync_cancel(request):
+    """Request cancellation for the active background sync run(s)."""
+    requested_id = str(request.data.get("requestId") or "").strip()
+    active_logs = ApiLog.objects.filter(status__in=["queued", "running"])
+    if requested_id:
+        active_logs = active_logs.filter(request_id=requested_id)
+
+    request_ids = list(active_logs.values_list("request_id", flat=True).distinct())
+    if not request_ids:
+        return Response(
+            {"error": "Không có lượt đồng bộ nào đang chạy để hủy."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    now = timezone.now()
+    active_logs.update(
+        status="cancelled",
+        ended_at=now,
+        error_code="SYNC_CANCELLED",
+        error_message="Đồng bộ đã được quản trị viên hủy.",
+    )
+    return Response({
+        "success": True,
+        "requestIds": request_ids,
+        "message": "Đã gửi yêu cầu hủy đồng bộ. Kênh đang xử lý sẽ dừng sau tác vụ API hiện tại.",
+    })
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

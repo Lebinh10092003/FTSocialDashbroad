@@ -236,10 +236,10 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   const syncSelectedPeriod = async () => {
     setSyncingSelectedPeriod(true); setSyncMessage(null); setError(null);
     try {
-      const response = await fetch('/api/sync/all', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}`, 'X-Google-OAuth-Token': googleAccessToken || '' }, body: JSON.stringify({ background: true, days: 365 }) });
+      const response = await fetch('/api/sync/all', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}`, 'X-Google-OAuth-Token': googleAccessToken || '' }, body: JSON.stringify({ background: true, recentDays: 7 }) });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok || !body.success) throw new Error(body.error || body.message || 'Không thể bắt đầu đồng bộ dữ liệu 1 năm.');
-      setSyncMessage(body.message || 'Đã bắt đầu đồng bộ ngầm dữ liệu 1 năm.');
+      if (!response.ok || !body.success) throw new Error(body.error || body.message || 'Không thể bắt đầu đồng bộ dữ liệu gần đây.');
+      setSyncMessage(body.message || 'Đã bắt đầu đồng bộ nền dữ liệu gần đây.');
       await Promise.all([fetchDashboardData(), fetchFollowerTrend()]);
     } catch (syncError: any) { setError(syncError.message || 'Không thể bắt đầu đồng bộ dữ liệu.'); }
     finally { setSyncingSelectedPeriod(false); }
@@ -404,22 +404,21 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
         <button
           onClick={syncSelectedPeriod}
           disabled={syncingSelectedPeriod}
-          title="Đồng bộ ngầm dữ liệu 1 năm gần nhất vào SQLite"
+          title="Đồng bộ nền dữ liệu 7 ngày gần đây vào SQLite"
           className="inline-flex items-center gap-2 bg-white border border-slate-200 px-3 py-2 rounded-lg text-sm font-extrabold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
         >
           <RefreshCw className={'w-4 h-4 ' + (syncingSelectedPeriod ? 'animate-spin' : '')} />
           {syncingSelectedPeriod ? 'Đang khởi chạy...' : 'Đồng bộ lại'}
         </button>
+        {data?.lastSync && (
+          <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg text-xs text-emerald-800">
+            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            Cập nhật lúc <strong>{new Date(data.lastSync).toLocaleString('vi-VN')}</strong>
+          </div>
+        )}
       </section>
 
       {syncMessage && <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg text-xs text-emerald-800"><span className="w-2 h-2 rounded-full bg-emerald-500" />{syncMessage}</div>}
-
-      {data?.lastSync && (
-        <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg text-xs text-emerald-800">
-          <span className="w-2 h-2 rounded-full bg-emerald-500" />
-          Dữ liệu cập nhật đến <strong>{new Date(data.lastSync).toLocaleString('vi-VN')}</strong>
-        </div>
-      )}
 
       {loading ? (
         <div className="flex flex-col items-center justify-center py-28 bg-white border border-slate-200 rounded-3xl space-y-4">

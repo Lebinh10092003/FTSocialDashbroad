@@ -12,6 +12,7 @@ urlpatterns = [
     path('followers/trend', views.followers_trend, name='followers_trend'),
     path('dashboard', views.dashboard_view, name='dashboard_view'),
     path('sync/all', views.sync_all, name='sync_all'),
+    path('sync/cancel', views.sync_cancel, name='sync_cancel'),
     path('sync/history', views.sync_history, name='sync_history'),
     path('posts', views.posts_list, name='posts_list'),
 ]

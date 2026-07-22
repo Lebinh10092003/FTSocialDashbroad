@@ -16,7 +16,7 @@ interface SyncProps {
 
 function getDefaultSinceDate(): string {
   const date = new Date();
-  date.setFullYear(date.getFullYear() - 1);
+  date.setDate(date.getDate() - 6);
   return date.toISOString().slice(0, 10);
 }
 
@@ -28,6 +28,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
   const [channelSyncStates, setChannelSyncStates] = useState<Record<string, ApiLog['status']>>({});
 
   const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const [syncResult, setSyncResult] = useState<{ status: 'success' | 'failed'; message: string } | null>(null);
 
   // Custom confirmation modal state to bypass iframe window.confirm limits
@@ -62,9 +63,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
       latestByChannel[log.channelId] = log.status;
     }
 
-    if (Object.keys(latestByChannel).length) {
-      setChannelSyncStates(current => ({ ...current, ...latestByChannel }));
-    }
+    setChannelSyncStates(latestByChannel);
   };
 
   const fetchSyncHistory = async (silent = false) => {
@@ -124,7 +123,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
               'Authorization': 'Bearer ' + idToken,
               'X-Google-OAuth-Token': googleAccessToken || '',
             },
-            body: JSON.stringify({ since, until: until || undefined }),
+            body: JSON.stringify({ background: true, recentDays: 7 }),
           });
 
           const data = await res.json();
@@ -132,7 +131,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
             await onRefreshChannels();
             setSyncResult({
               status: 'success',
-              message: 'Kích hoạt đồng bộ tất cả các kênh hoàn tất. Xem chi tiết kết quả trong bảng lịch sử.',
+              message: data.message || 'Đã xếp hàng đồng bộ nền cho các kênh. Xem tiến độ trong bảng lịch sử.',
             });
           } else {
             setSyncResult({ status: 'failed', message: data.error || data.message || 'Lỗi xảy ra trong quá trình đồng bộ.' });
@@ -153,6 +152,35 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
     });
   };
 
+  const handleCancelAll = () => {
+    if (!canManage || !hasActiveChannelSync) return;
+    setConfirmState({
+      isOpen: true,
+      title: 'Hủy đồng bộ dữ liệu',
+      message: 'Bạn có muốn dừng lượt đồng bộ đang chạy? Kênh đang gọi API sẽ dừng sau tác vụ hiện tại, các kênh chờ sẽ không tiếp tục.',
+      confirmText: 'Hủy đồng bộ',
+      type: 'danger',
+      onConfirm: async () => {
+        setConfirmState(current => ({ ...current, isOpen: false }));
+        setCancelling(true);
+        try {
+          const response = await fetch('/api/sync/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + idToken },
+            body: JSON.stringify({}),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || 'Không thể hủy đồng bộ.');
+          setSyncResult({ status: 'success', message: data.message || 'Đã gửi yêu cầu hủy đồng bộ.' });
+          await fetchSyncHistory(true);
+        } catch (error: any) {
+          setSyncResult({ status: 'failed', message: error.message || 'Không thể hủy đồng bộ.' });
+        } finally {
+          setCancelling(false);
+        }
+      },
+    });
+  };
   const handleSyncChannel = async (channelId: string) => {
     if (!canManage) return;
     setSyncingId(channelId);
@@ -203,14 +231,26 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
         </div>
 
         {canManage ? (
-          <button
-            onClick={handleSyncAll}
-            disabled={syncingId !== null || hasActiveChannelSync || activeChannels.length === 0}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs px-4 py-2.5 rounded-xl disabled:opacity-50 transition-colors shadow-sm cursor-pointer"
-          >
-            <RefreshCw className={'w-4 h-4 ' + (syncingId === 'all' || hasActiveChannelSync ? 'animate-spin' : '')} />
-            {syncingId === 'all' || hasActiveChannelSync ? 'Đang đồng bộ...' : 'Đồng bộ toàn bộ các kênh'}
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {hasActiveChannelSync && (
+              <button
+                onClick={handleCancelAll}
+                disabled={cancelling}
+                className="flex items-center gap-2 border border-rose-200 bg-white text-rose-700 hover:bg-rose-50 font-semibold text-xs px-4 py-2.5 rounded-xl disabled:opacity-50 transition-colors"
+              >
+                <XCircle className={'w-4 h-4 ' + (cancelling ? 'animate-spin' : '')} />
+                {cancelling ? 'Đang hủy...' : 'Hủy đồng bộ'}
+              </button>
+            )}
+            <button
+              onClick={handleSyncAll}
+              disabled={syncingId !== null || hasActiveChannelSync || activeChannels.length === 0}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs px-4 py-2.5 rounded-xl disabled:opacity-50 transition-colors shadow-sm cursor-pointer"
+            >
+              <RefreshCw className={'w-4 h-4 ' + (syncingId === 'all' || hasActiveChannelSync ? 'animate-spin' : '')} />
+              {syncingId === 'all' || hasActiveChannelSync ? 'Đang đồng bộ...' : 'Đồng bộ toàn bộ các kênh'}
+            </button>
+          </div>
         ) : (
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 text-slate-500 rounded-lg text-xs font-semibold">
             <ShieldAlert className="w-4 h-4 text-slate-400" />
@@ -228,7 +268,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
             <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">Đồng bộ từ ngày (mặc định 1 năm gần nhất)</label>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Đồng bộ riêng lẻ từ ngày (mặc định 7 ngày gần nhất)</label>
               <input 
                 type="date"
                 value={since}
@@ -363,10 +403,12 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
                               ? 'bg-blue-50 text-blue-700'
                               : log.status === 'queued'
                                 ? 'bg-amber-50 text-amber-700'
-                                : 'bg-red-50 text-red-700'
+                                : log.status === 'cancelled'
+                                  ? 'bg-slate-100 text-slate-600'
+                                  : 'bg-red-50 text-red-700'
                         )}>
                           {(log.status === 'queued' || log.status === 'running') && <RefreshCw className="w-3 h-3 animate-spin" />}
-                          {log.status === 'success' ? 'Thành công' : log.status === 'running' ? 'Đang chạy' : log.status === 'queued' ? 'Đang chờ' : 'Thất bại'}
+                          {log.status === 'success' ? 'Thành công' : log.status === 'running' ? 'Đang chạy' : log.status === 'queued' ? 'Đang chờ' : log.status === 'cancelled' ? 'Đã hủy' : 'Thất bại'}
                         </span>
                       </td>
                       <td className="p-4 text-center text-slate-600 font-medium">{log.recordsReceived}</td>
@@ -379,6 +421,8 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
                           <span className="text-blue-600 font-medium">Đang lấy dữ liệu...</span>
                         ) : log.status === 'queued' ? (
                           <span className="text-amber-600 font-medium">Đang chờ đến lượt...</span>
+                        ) : log.status === 'cancelled' ? (
+                          <span className="text-slate-500 font-medium">Đã hủy theo yêu cầu quản trị.</span>
                         ) : (
                           <span className="text-red-500 font-medium">{log.errorMessage}</span>
                         )}

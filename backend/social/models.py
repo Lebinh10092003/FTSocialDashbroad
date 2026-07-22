@@ -11,6 +11,7 @@ class Channel(models.Model):
     updated_at = models.DateTimeField()
     last_sync_at = models.DateTimeField(null=True, blank=True)
     last_sync_status = models.CharField(max_length=50, null=True, blank=True)
+    follower_history_loaded_at = models.DateTimeField(null=True, blank=True)
     total_posts = models.IntegerField(default=0)
     followers_count = models.IntegerField(default=0)
 
