@@ -7,6 +7,9 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 SERVICE_NAME="${SERVICE_NAME:-workspace-django.service}"
 SYNC_SERVICE_NAME="${SYNC_SERVICE_NAME:-workspace-social-sync.service}"
 SYNC_TIMER_NAME="${SYNC_TIMER_NAME:-workspace-social-sync.timer}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8001/api/health/}"
+HEALTH_RETRIES="${HEALTH_RETRIES:-30}"
+HEALTH_DELAY_SECONDS="${HEALTH_DELAY_SECONDS:-1}"
 
 cd "$PROJECT_DIR"
 git pull --ff-only
@@ -25,10 +28,27 @@ fi
 
 npm ci
 VITE_API_URL=/api npm run build
+
+sudo install -m 0644 workspace-django.service "/etc/systemd/system/$SERVICE_NAME"
 sudo install -m 0644 workspace-social-sync.service "/etc/systemd/system/$SYNC_SERVICE_NAME"
 sudo install -m 0644 workspace-social-sync.timer "/etc/systemd/system/$SYNC_TIMER_NAME"
 sudo systemctl daemon-reload
+sudo systemctl enable "$SERVICE_NAME"
 sudo systemctl enable --now "$SYNC_TIMER_NAME"
 sudo systemctl restart "$SERVICE_NAME"
-curl --fail --silent --show-error http://127.0.0.1:8001/api/health/
-echo
+
+for attempt in $(seq 1 "$HEALTH_RETRIES"); do
+  if curl --fail --silent "$HEALTH_URL" >/dev/null 2>&1; then
+    curl --fail --silent --show-error "$HEALTH_URL"
+    echo
+    echo "Deploy completed successfully."
+    exit 0
+  fi
+
+  echo "Waiting for Django API ($attempt/$HEALTH_RETRIES)..."
+  sleep "$HEALTH_DELAY_SECONDS"
+done
+
+echo "ERROR: Django API did not become ready at $HEALTH_URL" >&2
+sudo systemctl --no-pager --full status "$SERVICE_NAME" || true
+exit 1
