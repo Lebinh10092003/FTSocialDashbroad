@@ -133,6 +133,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const sample = useMemo(() => rows.slice(0, 5), [rows]);
+  const rowIndexForPreview = (row: Candidate) => rows.indexOf(row) + 1;
 
   // States mới cho việc quản lý đa nguồn Google Sheets
   const [sheets, setSheets] = useState<SheetSource[]>([]);
@@ -535,14 +536,15 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
             <table className="ft-table min-w-[900px]">
               <thead>
                 <tr>
-                  <th>Mã FT</th><th>Họ và tên</th><th>Trường học</th>
-                  <th>Ngày sinh</th><th>Cuộc thi</th><th>Tỉnh/TP</th>
+                  <th>Mã FT</th><th>Họ và tên</th><th>Ngày sinh</th><th>CCCD / Hộ chiếu</th>
+                  <th>Trường học</th><th>Lớp / khối</th><th>Tỉnh / TP</th><th>Điện thoại</th>
+                  <th>Email</th><th>Cuộc thi</th><th>Môn thi / bảng thi</th><th>Hình thức đăng ký</th>
                 </tr>
               </thead>
               <tbody>
                 {sample.map(row => (
                   <tr key={`${row.code || 'new'}-${row.name}`}>
-                    <td><code className="text-xs">{row.code || 'Tự tạo: FT-000…'}</code></td>
+                    <td><code className="text-xs">{row.code || ('FT-' + String(rowIndexForPreview(row)).padStart(5, '0'))}</code></td>
                     <td><b>{row.name}</b></td>
                     <td>{row.birthDate || '—'}</td>
                     <td>{row.identity || '—'}</td>

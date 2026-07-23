@@ -68,10 +68,10 @@ def next_code(existing_codes_set, offset=0):
     """Return the next stable, human-readable FermatTech candidate code."""
     numbers = [int(match.group(1)) for code in existing_codes_set if (match := re.fullmatch(r'FT-(\d+)', str(code).strip().upper()))]
     seq = max(numbers, default=0) + 1 + max(offset, 0)
-    candidate = f"FT-{seq:06d}"
+    candidate = f"FT-{seq:05d}"
     while candidate in existing_codes_set:
         seq += 1
-        candidate = f"FT-{seq:06d}"
+        candidate = f"FT-{seq:05d}"
     return candidate
 
 def parse_dob(raw):
