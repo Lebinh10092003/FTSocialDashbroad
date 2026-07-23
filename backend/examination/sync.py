@@ -198,6 +198,7 @@ ROUND_HISTORY_FIELD_MAP = {
     'location': 'location',
     'link': 'link',
     'account': 'account',
+    'password': 'password',
     'attendance': 'attendance',
     'score': 'score',
     'scoreRate': 'score_rate',
@@ -230,6 +231,7 @@ def history_from_sheet_row(headers, row):
         'location': ['diadiemphongthi', 'diadiemthi'],
         'link': ['linkthi'],
         'account': ['taikhoanmatruycap', 'taikhoan'],
+        'password': ['matkhau', 'password'],
         'attendance': ['trangthaiduthi', 'trangthaithamgia'],
         'scoreRate': ['tylediem'],
         'score': ['diem'],
@@ -285,6 +287,11 @@ def upsert_participation_history(candidate, session_id, history, source=''):
             for payload_field, model_field in ROUND_HISTORY_FIELD_MAP.items()
         }
         values['raw_data'] = {str(key): value for key, value in item.items() if value not in (None, '')}
+        existing_result = RoundResult.objects.filter(participation=participation, round_name=round_name).first()
+        if existing_result:
+            for model_field in ROUND_HISTORY_FIELD_MAP.values():
+                if not values.get(model_field):
+                    values[model_field] = getattr(existing_result, model_field)
         RoundResult.objects.update_or_create(
             participation=participation,
             round_name=round_name,
@@ -326,7 +333,7 @@ for _round_number in (1, 2, 3):
     EXPORT_HEADERS.extend([
         _prefix + 'Số báo danh', _prefix + 'Ngày thi', _prefix + 'Giờ/ca thi',
         _prefix + 'Hình thức thi', _prefix + 'Địa điểm/phòng thi', _prefix + 'Link thi',
-        _prefix + 'Tài khoản/mã truy cập', _prefix + 'Trạng thái dự thi', _prefix + 'Điểm',
+        _prefix + 'Tài khoản/mã truy cập', _prefix + 'Mật khẩu', _prefix + 'Trạng thái dự thi', _prefix + 'Điểm',
         _prefix + 'Tỷ lệ điểm', _prefix + 'Xếp hạng', _prefix + 'Kết quả/giải thưởng',
         _prefix + 'Ghi chú/sự cố',
     ])
@@ -367,11 +374,11 @@ def session_export_rows(session_id):
         for number in (1, 2, 3):
             result = slots.get(number)
             if not result:
-                row.extend([''] * 13)
+                row.extend([''] * 14)
                 continue
             row.extend([
                 result.sbd, result.exam_date, result.time_slot, result.mode, result.location,
-                result.link, result.account, result.attendance, result.score, result.score_rate,
+                result.link, result.account, result.password, result.attendance, result.score, result.score_rate,
                 result.rank, result.result, result.note,
             ])
         rows.append(row)

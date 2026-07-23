@@ -144,6 +144,7 @@ ROUND_FIELD_MAP = {
     'location': 'location',
     'link': 'link',
     'account': 'account',
+    'password': 'password',
     'attendance': 'attendance',
     'score': 'score',
     'scoreRate': 'score_rate',
@@ -197,6 +198,11 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
             for payload_field, model_field in ROUND_FIELD_MAP.items()
         }
         values['raw_data'] = {str(key): value for key, value in item.items() if value not in (None, '')}
+        existing_result = RoundResult.objects.filter(participation=participation, round_name=round_name).first()
+        if existing_result:
+            for model_field in ROUND_FIELD_MAP.values():
+                if not values.get(model_field):
+                    values[model_field] = getattr(existing_result, model_field)
         RoundResult.objects.update_or_create(
             participation=participation,
             round_name=round_name,
@@ -222,6 +228,7 @@ def normalized_exam_history(candidate):
                 'location': result.location,
                 'link': result.link,
                 'account': result.account,
+                'password': result.password,
                 'attendance': result.attendance,
                 'score': result.score,
                 'scoreRate': result.score_rate,
@@ -285,7 +292,7 @@ def serialize_candidate_participations(cand):
                 'id': str(result.id),
                 'round': result.round_name, 'eligibility': result.eligibility, 'sbd': result.sbd,
                 'date': result.exam_date, 'time': result.time_slot, 'mode': result.mode,
-                'location': result.location, 'link': result.link, 'account': result.account,
+                'location': result.location, 'link': result.link, 'account': result.account, 'password': result.password,
                 'attendance': result.attendance, 'score': result.score, 'scoreRate': result.score_rate,
                 'rank': result.rank, 'result': result.result, 'note': result.note,
             } for result in participation.round_results.all()],
@@ -661,7 +668,7 @@ def round_result_detail(request, pk):
     data = request.data or {}
     fields = {
         'eligibility': 'eligibility', 'sbd': 'sbd', 'date': 'exam_date', 'time': 'time_slot',
-        'mode': 'mode', 'location': 'location', 'link': 'link', 'account': 'account',
+        'mode': 'mode', 'location': 'location', 'link': 'link', 'account': 'account', 'password': 'password',
         'attendance': 'attendance', 'score': 'score', 'scoreRate': 'score_rate',
         'rank': 'rank', 'result': 'result', 'note': 'note',
     }

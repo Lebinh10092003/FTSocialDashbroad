@@ -76,9 +76,9 @@ const normalise = (value: unknown) => String(value ?? '').trim().toLocaleLowerCa
 const text = (value: unknown) => String(value ?? '').trim();
 const valueFor = (entries: [string, string][], field: string) => aliases[field]?.map(alias => entries.find(([key]) => key.includes(alias))?.[1] || '').find(Boolean) || '';
 
-type RoundHistory = { round: string; eligibility?: string; sbd?: string; date?: string; time?: string; mode?: string; location?: string; link?: string; account?: string; attendance?: string; score?: string; scoreRate?: string; rank?: string; result?: string; note?: string };
+type RoundHistory = { round: string; eligibility?: string; sbd?: string; date?: string; time?: string; mode?: string; location?: string; link?: string; account?: string; password?: string; attendance?: string; score?: string; scoreRate?: string; rank?: string; result?: string; note?: string };
 function historyFromRow(row: ImportRow): RoundHistory[] {
-  const fields: Record<string, string[]> = { eligibility: ['dieu kien tham gia'], sbd: ['so bao danh'], date: ['ngay thi'], time: ['gio ca thi'], mode: ['hinh thuc thi'], location: ['dia diem phong thi'], link: ['link thi'], account: ['tai khoan ma truy cap'], attendance: ['trang thai du thi'], score: ['diem'], scoreRate: ['ty le diem'], rank: ['xep hang'], result: ['ket qua giai thuong'], note: ['ghi chu su co'] };
+  const fields: Record<string, string[]> = { eligibility: ['dieu kien tham gia'], sbd: ['so bao danh'], date: ['ngay thi'], time: ['gio ca thi'], mode: ['hinh thuc thi'], location: ['dia diem phong thi'], link: ['link thi'], account: ['tai khoan ma truy cap'], password: ['mat khau', 'password'], attendance: ['trang thai du thi'], score: ['diem'], scoreRate: ['ty le diem'], rank: ['xep hang'], result: ['ket qua giai thuong'], note: ['ghi chu su co'] };
   return [1, 2, 3].map(roundNumber => {
     const prefix = `vong ${roundNumber}`;
     const entries = Object.entries(row).map(([key, value]) => [normalise(key), text(value)] as [string, string]).filter(([key]) => key.startsWith(prefix));

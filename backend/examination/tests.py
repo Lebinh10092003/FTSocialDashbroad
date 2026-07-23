@@ -51,7 +51,7 @@ class CandidateRoundHistoryTests(TestCase):
             self.candidate,
             self.session.id,
             [
-                {'round': 'Round 1', 'sbd': 'A-001', 'score': '82'},
+                {'round': 'Round 1', 'sbd': 'A-001', 'password': 'secret-round-1', 'score': '82'},
                 {'round': 'Round 2', 'sbd': 'B-001', 'score': '91'},
             ],
             'https://docs.google.com/spreadsheets/d/example#gid=1',
@@ -69,6 +69,7 @@ class CandidateRoundHistoryTests(TestCase):
         history = serialize_candidate(self.candidate)['examHistory']
         self.assertEqual(len(history), 2)
         self.assertEqual({item['sessionId'] for item in history}, {'simo-2026'})
+        self.assertEqual(next(item for item in history if item['round'] == 'Round 1')['password'], 'secret-round-1')
 
 
     def test_export_rows_keep_all_rounds_in_one_session_row(self):
@@ -79,7 +80,7 @@ class CandidateRoundHistoryTests(TestCase):
             self.candidate,
             self.session.id,
             [
-                {'round': 'Round 1', 'sbd': 'A-001', 'score': '82'},
+                {'round': 'Round 1', 'sbd': 'A-001', 'password': 'secret-round-1', 'score': '82'},
                 {'round': 'Round 2', 'sbd': 'B-001', 'score': '91'},
             ],
         )

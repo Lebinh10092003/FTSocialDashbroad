@@ -105,6 +105,7 @@ class RoundResult(models.Model):
     location = models.CharField(max_length=1000, blank=True, default='')
     link = models.CharField(max_length=2000, blank=True, default='')
     account = models.CharField(max_length=1000, blank=True, default='')
+    password = models.CharField(max_length=1000, blank=True, default='')
     attendance = models.CharField(max_length=255, blank=True, default='')
     score = models.CharField(max_length=255, blank=True, default='')
     score_rate = models.CharField(max_length=255, blank=True, default='')

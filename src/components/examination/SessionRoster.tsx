@@ -10,7 +10,7 @@ type Props = {
 const dash = (value?: string) => value || '—';
 const fields: Array<[keyof CandidateExamHistory, string]> = [
   ['eligibility','Điều kiện dự thi'], ['sbd','Số báo danh'], ['date','Ngày thi'], ['time','Giờ / ca thi'],
-  ['mode','Hình thức'], ['location','Địa điểm / phòng'], ['link','Link phòng thi'], ['account','Tài khoản'],
+  ['mode','Hình thức'], ['location','Địa điểm / phòng'], ['link','Link phòng thi'], ['account','Tài khoản'], ['password','Mật khẩu'],
   ['attendance','Điểm danh'], ['score','Điểm'], ['scoreRate','Tỷ lệ điểm'], ['rank','Xếp hạng'],
   ['result','Kết quả'], ['note','Ghi chú'],
 ];
