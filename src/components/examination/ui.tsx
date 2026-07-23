@@ -8,6 +8,32 @@ export const todayIso = (value = new Date()) => {
   return new Date(value.getTime() - offset).toISOString().slice(0, 10);
 };
 export const emptyDate = (): DraftDate => ({ day: '', month: '', year: '', planned: false, unknown: false });
+export function normaliseBirthDate(value?: string) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^\d{4}$/.test(raw)) return raw;
+  const iso = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  const parts = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
+  let year = '', month = '', day = '';
+  if (iso) [, year, month, day] = iso;
+  else if (parts) {
+    const [, first, second, last] = parts;
+    year = last.length === 2 ? `20${last}` : last;
+    if (Number(first) > 12) [day, month] = [first, second];
+    else if (Number(second) > 12) [month, day] = [first, second];
+    else [day, month] = [first, second];
+  } else return raw;
+  const candidate = new Date(Number(year), Number(month) - 1, Number(day));
+  if (!Number.isInteger(Number(year)) || candidate.getFullYear() !== Number(year) || candidate.getMonth() !== Number(month) - 1 || candidate.getDate() !== Number(day)) return raw;
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+}
+export function formatGrade(value?: string) { return String(value || '').trim().replace(/^khối\s*/i, ''); }
+export function formatBirthDate(value?: string) {
+  const normalized = normaliseBirthDate(value);
+  if (/^\d{4}$/.test(normalized)) return normalized;
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : (normalized || '—');
+}
 export function dateValue(value: DraftDate) {
   if (value.unknown) return { label: 'Ch\u01b0a c\u00f3 th\u00f4ng tin', date: '' };
   const hasMonthYear = Boolean(value.month && value.year);
@@ -45,9 +71,15 @@ export function TimeField({ label, value, onChange }: { label: string; value: Dr
   const setUnknown = (unknown: boolean) => onChange({ ...value, unknown, planned: unknown ? false : value.planned });
   const plannedText = 'Th\u1eddi gian d\u1ef1 ki\u1ebfn';
   const unknownText = 'Ch\u01b0a c\u00f3 th\u00f4ng tin';
-  return <fieldset className="rounded-lg border border-slate-200 p-3"><legend className="px-1 text-sm font-bold">{label}</legend><div className="mb-3 flex gap-4 text-xs font-semibold"><label className="inline-flex cursor-pointer items-center gap-1"><input className="cursor-pointer" type="checkbox" checked={Boolean(value.planned)} disabled={Boolean(value.unknown)} onChange={event => update('planned', event.currentTarget.checked)} /><span>{plannedText}</span></label><label className="inline-flex cursor-pointer items-center gap-1"><input className="cursor-pointer" type="checkbox" checked={Boolean(value.unknown)} onChange={event => setUnknown(event.currentTarget.checked)} /><span>{unknownText}</span></label></div>{value.unknown ? <p className="rounded bg-slate-50 px-3 py-2 text-sm text-slate-500">{'Ch\u01b0a c\u00f3 th\u00f4ng tin v\u1ec1 th\u1eddi gian.'}</p> : <><div className="grid grid-cols-3 gap-2">{(['day', 'month', 'year'] as const).map((part, index) => <select key={part} value={value[part] || ''} onChange={event => update(part, event.currentTarget.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"><option value="">{index === 0 ? 'Ng\u00e0y' : index === 1 ? 'Th\u00e1ng' : 'N\u0103m'}{index === 0 && value.planned ? ' (tu\u1ef3 ch\u1ecdn)' : ''}</option>{Array.from({ length: index === 0 ? 31 : index === 1 ? 12 : 4 }, (_, itemIndex) => { const option = index === 2 ? 2026 + itemIndex : itemIndex + 1; return <option key={option} value={String(option)}>{option}</option>; })}</select>)}</div><p className="mt-2 text-[11px] text-slate-500">{value.planned ? 'D\u1ef1 ki\u1ebfn: b\u1eaft bu\u1ed9c th\u00e1ng v\u00e0 n\u0103m; ng\u00e0y c\u00f3 th\u1ec3 \u0111\u1ec3 tr\u1ed1ng.' : 'Ch\u00ednh th\u1ee9c: b\u1eaft bu\u1ed9c \u0111\u1ee7 ng\u00e0y, th\u00e1ng v\u00e0 n\u0103m.'}</p></>}</fieldset>;
+  return <fieldset className="rounded-lg border border-slate-200 p-3"><legend className="px-1 text-sm font-bold">{label}</legend><div className="mb-3 flex gap-4 text-xs font-semibold"><label className="inline-flex cursor-pointer items-center gap-1"><input className="cursor-pointer" type="checkbox" checked={Boolean(value.planned)} disabled={Boolean(value.unknown)} onChange={event => update('planned', event.currentTarget.checked)} /><span>{plannedText}</span></label><label className="inline-flex cursor-pointer items-center gap-1"><input className="cursor-pointer" type="checkbox" checked={Boolean(value.unknown)} onChange={event => setUnknown(event.currentTarget.checked)} /><span>{unknownText}</span></label></div>{value.unknown ? <p className="rounded bg-slate-50 px-3 py-2 text-sm text-slate-500">{'Ch\u01b0a c\u00f3 th\u00f4ng tin v\u1ec1 th\u1eddi gian.'}</p> : <><div className="grid grid-cols-3 gap-2">{(['day', 'month', 'year'] as const).map((part, index) => <select key={part} value={value[part] || ''} onChange={event => update(part, event.currentTarget.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"><option value="">{index === 0 ? 'Ng\u00e0y' : index === 1 ? 'Th\u00e1ng' : 'N\u0103m'}{index === 0 && value.planned ? ' (tu\u1ef3 ch\u1ecdn)' : ''}</option>{Array.from({ length: index === 0 ? 31 : index === 1 ? 12 : 31 }, (_, itemIndex) => { const option = index === 2 ? new Date().getFullYear() - 10 + itemIndex : itemIndex + 1; return <option key={option} value={String(option)}>{option}</option>; })}</select>)}</div><p className="mt-2 text-[11px] text-slate-500">{value.planned ? 'D\u1ef1 ki\u1ebfn: b\u1eaft bu\u1ed9c th\u00e1ng v\u00e0 n\u0103m; ng\u00e0y c\u00f3 th\u1ec3 \u0111\u1ec3 tr\u1ed1ng.' : 'Ch\u00ednh th\u1ee9c: b\u1eaft bu\u1ed9c \u0111\u1ee7 ng\u00e0y, th\u00e1ng v\u00e0 n\u0103m.'}</p></>}</fieldset>;
 }export function sessionDisplayName(session: ExaminationSession) {
-  const monthYear = (date?: string, fallback?: string) => { if (date) { const [year, month] = date.split('-'); return `T${Number(month)}/${year}`; } const match = fallback?.match(/T?(\d{1,2})\/(\d{4})/i); return match ? `T${Number(match[1])}/${match[2]}` : (fallback || 'Chưa có thông tin'); };
+  const monthYear = (date?: string, fallback?: string) => {
+    const iso = String(date || '').trim().match(/^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/);
+    if (iso && Number(iso[2]) >= 1 && Number(iso[2]) <= 12) return `T${Number(iso[2])}/${iso[1]}`;
+    const text = String(fallback || '').trim();
+    const match = text.match(/T?(\d{1,2})\/(\d{4})/i);
+    return match ? `T${Number(match[1])}/${match[2]}` : (/^(none|null|nan)$/i.test(text) ? 'Chưa có thông tin' : (text || 'Chưa có thông tin'));
+  };
   return `${session.code}: ${monthYear(session.nationalDate, session.national)} - ${monthYear(session.internationalDate, session.international)}`;
 }
 export function SessionsTable({ items, onSelect }: { items: ExaminationSession[]; onSelect: (session: ExaminationSession) => void }) {

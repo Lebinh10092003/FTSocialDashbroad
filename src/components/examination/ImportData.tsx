@@ -6,6 +6,7 @@ import {
   Trash2, Pencil, Plus,
 } from 'lucide-react';
 import type { Candidate, ExaminationSession } from './types';
+import { normaliseBirthDate } from './ui';
 
 type ImportRow = Record<string, unknown>;
 type Props = {
@@ -58,7 +59,7 @@ const aliases: Record<string, string[]> = {
   school: ['ten truong', 'truong hoc', 'truong', 'school'],
   className: ['lop dang hoc', 'hoc sinh lop', 'lop', 'class'],
   city: ['tinh thanh pho cu tru', 'tinh thanh pho', 'tinh thanhpho', 'dia phuong', 'city'],
-  ward: ['xa phuong', 'phuong xa', 'phuong', 'ward'], nationality: ['quoc tich', 'nationality'], grade: ['khoi lop hien tai', 'khoi lop', 'grade'],
+  ward: ['xa phuong', 'phuong xa', 'phuong', 'ward'], nationality: ['quoc tich', 'nationality'], grade: ['khoi lop hien tai', 'khoi lop', 'khoi', 'grade'],
   subject: ['mon thi linh vuc', 'mon thi', 'linh vuc', 'subject'], category: ['bang thi category', 'bang thi', 'category'],
   registrationMethod: ['hinh thuc dang ky', 'registration method'], registrationUnit: ['don vi dang ky', 'registration unit'], teamName: ['ten doi nhom', 'doi nhom', 'team'], examLanguage: ['ngon ngu thi', 'exam language'], generalNote: ['ghi chu chung', 'general note'], certificateLink: ['link chung nhan', 'certificate link'],
   contests: ['cuoc thi dang ky tham gia', 'cuoc thi dang ky', 'cuoc thi', 'mon thi', 'contest', 'ky thi', 'dang ky thi'],
@@ -93,7 +94,7 @@ function mapRows(rawRows: ImportRow[]): (Candidate & { examHistory?: RoundHistor
     const entries = Object.entries(row).map(([key, value]) => [normalise(key), text(value)] as [string, string]);
     const name = valueFor(entries, 'name');
     const code = valueFor(entries, 'code');
-    return { code, name, school: valueFor(entries, 'school'), className: valueFor(entries, 'className'), city: valueFor(entries, 'city'), ward: valueFor(entries, 'ward'), nationality: valueFor(entries, 'nationality'), grade: valueFor(entries, 'grade'), contests: valueFor(entries, 'contests'), subject: valueFor(entries, 'subject'), category: valueFor(entries, 'category'), registrationMethod: valueFor(entries, 'registrationMethod'), registrationUnit: valueFor(entries, 'registrationUnit'), teamName: valueFor(entries, 'teamName'), examLanguage: valueFor(entries, 'examLanguage'), generalNote: valueFor(entries, 'generalNote'), certificateLink: valueFor(entries, 'certificateLink'), achievement: valueFor(entries, 'achievement'), highestRound: valueFor(entries, 'highestRound'), email: valueFor(entries, 'email'), parent: valueFor(entries, 'parent'), phone: valueFor(entries, 'phone'), identity: valueFor(entries, 'identity'), address: valueFor(entries, 'address'), birthDate: valueFor(entries, 'birthDate'), updated: '', examHistory: historyFromRow(row) };
+    return { code, name, school: valueFor(entries, 'school'), className: valueFor(entries, 'className'), city: valueFor(entries, 'city'), ward: valueFor(entries, 'ward'), nationality: valueFor(entries, 'nationality'), grade: valueFor(entries, 'grade'), contests: valueFor(entries, 'contests'), subject: valueFor(entries, 'subject'), category: valueFor(entries, 'category'), registrationMethod: valueFor(entries, 'registrationMethod'), registrationUnit: valueFor(entries, 'registrationUnit'), teamName: valueFor(entries, 'teamName'), examLanguage: valueFor(entries, 'examLanguage'), generalNote: valueFor(entries, 'generalNote'), certificateLink: valueFor(entries, 'certificateLink'), achievement: valueFor(entries, 'achievement'), highestRound: valueFor(entries, 'highestRound'), email: valueFor(entries, 'email'), parent: valueFor(entries, 'parent'), phone: valueFor(entries, 'phone'), identity: valueFor(entries, 'identity'), address: valueFor(entries, 'address'), birthDate: normaliseBirthDate(valueFor(entries, 'birthDate')), updated: '', examHistory: historyFromRow(row) };
   }).filter(row => row.name && !['stt', 'họ và tên', 'ho va ten'].includes(normalise(row.name)));
 }
 
