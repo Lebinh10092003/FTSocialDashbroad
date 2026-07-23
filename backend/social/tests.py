@@ -340,6 +340,91 @@ class DailySyncCommandTests(TestCase):
         kwargs = sync_channel.call_args.kwargs
         self.assertTrue(timedelta(hours=23) < timezone.now() - kwargs["since"] < timedelta(hours=25))
         self.assertTrue(timedelta(hours=23) < timezone.now() - kwargs["follower_since"] < timedelta(hours=25))
+        self.assertTrue(
+            timedelta(days=395) < timezone.now() - kwargs["snapshot_existing_since"] < timedelta(days=397)
+        )
+
+
+class MediaSummaryTrendTests(TestCase):
+    def setUp(self):
+        now = timezone.now()
+        self.channel = Channel.objects.create(
+            id="facebook:trend",
+            platform="facebook",
+            name="Trend Page",
+            external_id="trend-page",
+            status="active",
+            created_at=now,
+            updated_at=now,
+        )
+        self.current_day = timezone.localdate()
+        self.previous_month_end = self.current_day.replace(day=1) - timedelta(days=1)
+        self.previous_month_start = self.previous_month_end.replace(day=1)
+        published_at = timezone.make_aware(
+            datetime.datetime.combine(self.previous_month_start - timedelta(days=1), datetime.time(hour=8))
+        )
+        self.post = Post.objects.create(
+            post_key="facebook:trend:post",
+            platform="facebook",
+            channel_id=self.channel.id,
+            external_post_id="post",
+            post_url="https://example.com/post",
+            post_type="photo",
+            published_at=published_at,
+            imported_at=now,
+            updated_at=now,
+        )
+        self._snapshot(self.previous_month_end, views=10, engagement=4)
+        self._snapshot(self.current_day, views=25, engagement=9)
+        FollowerSnapshot.objects.create(
+            snapshot_key=f"{self.channel.id}:{self.previous_month_end.isoformat()}",
+            snapshot_date=self.previous_month_end.isoformat(),
+            channel_id=self.channel.id,
+            channel_name=self.channel.name,
+            followers_count=100,
+            fetched_at=now,
+        )
+        FollowerSnapshot.objects.create(
+            snapshot_key=f"{self.channel.id}:{self.current_day.isoformat()}",
+            snapshot_date=self.current_day.isoformat(),
+            channel_id=self.channel.id,
+            channel_name=self.channel.name,
+            followers_count=120,
+            fetched_at=now,
+        )
+
+    def _snapshot(self, snapshot_day, views, engagement):
+        DailySnapshot.objects.create(
+            snapshot_key=f"{self.post.post_key}:{snapshot_day.isoformat()}",
+            snapshot_date=snapshot_day.isoformat(),
+            platform=self.channel.platform,
+            channel_id=self.channel.id,
+            post_key=self.post.post_key,
+            views=views,
+            reach=views,
+            impressions=views,
+            reactions=engagement,
+            likes=engagement,
+            total_engagement=engagement,
+            fetched_at=timezone.now(),
+        )
+
+    def test_monthly_trend_uses_snapshot_values_at_each_period_end(self):
+        response = self.client.get('/api/media-summary/trend', {'groupBy': 'month'})
+        self.assertEqual(response.status_code, 200)
+        trend = {point['period']: point for point in response.json()['trend']}
+        previous_period = self.previous_month_end.strftime('%Y-%m')
+        current_period = self.current_day.strftime('%Y-%m')
+
+        self.assertEqual(trend[previous_period]['views'], 10)
+        self.assertEqual(trend[previous_period]['engagement'], 4)
+        self.assertEqual(trend[previous_period]['postsCount'], 1)
+        self.assertEqual(trend[previous_period]['followers'], 100)
+        self.assertEqual(trend[current_period]['views'], 25)
+        self.assertEqual(trend[current_period]['engagement'], 9)
+        self.assertEqual(trend[current_period]['postsCount'], 1)
+        self.assertEqual(trend[current_period]['followers'], 120)
+
 
 class DashboardFilterConsistencyTests(TestCase):
     def setUp(self):

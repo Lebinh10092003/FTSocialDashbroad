@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -19,6 +19,7 @@ import {
 import {
   AlertCircle,
   Calendar,
+  ChevronLeft,
   ChevronRight,
   Eye,
   Filter,
@@ -162,6 +163,60 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   const [isChannelPickerOpen, setIsChannelPickerOpen] = useState(false);
   const [onlyShowTotal, setOnlyShowTotal] = useState(false);
   const [manualScaleSteps, setManualScaleSteps] = useState<number | null>(null);
+  const recentPostsScrollerRef = useRef<HTMLDivElement>(null);
+  const recentPostsHoldRef = useRef<{ delayId: number | null; intervalId: number | null; wasHeld: boolean } | null>(null);
+  const suppressRecentPostsClickRef = useRef(false);
+  const [recentPostsNavigation, setRecentPostsNavigation] = useState({ canScrollLeft: false, canScrollRight: false });
+
+  const updateRecentPostsNavigation = () => {
+    const container = recentPostsScrollerRef.current;
+    if (!container) return;
+    const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
+    const next = {
+      canScrollLeft: container.scrollLeft > 1,
+      canScrollRight: container.scrollLeft < maxScrollLeft - 1,
+    };
+    setRecentPostsNavigation(current => (
+      current.canScrollLeft === next.canScrollLeft && current.canScrollRight === next.canScrollRight
+        ? current
+        : next
+    ));
+  };
+
+  const scrollRecentPosts = (direction: -1 | 1, smooth = true) => {
+    const container = recentPostsScrollerRef.current;
+    if (!container) return;
+    container.scrollBy({ left: direction * Math.max(180, container.clientWidth * 0.72), behavior: smooth ? 'smooth' : 'auto' });
+    window.requestAnimationFrame(updateRecentPostsNavigation);
+  };
+
+  const stopRecentPostsScroll = () => {
+    const hold = recentPostsHoldRef.current;
+    if (!hold) return;
+    if (hold.delayId !== null) window.clearTimeout(hold.delayId);
+    if (hold.intervalId !== null) window.clearInterval(hold.intervalId);
+    if (hold.wasHeld) suppressRecentPostsClickRef.current = true;
+    recentPostsHoldRef.current = null;
+  };
+
+  const startRecentPostsScroll = (direction: -1 | 1, event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const hold = { delayId: null as number | null, intervalId: null as number | null, wasHeld: false };
+    recentPostsHoldRef.current = hold;
+    hold.delayId = window.setTimeout(() => {
+      hold.wasHeld = true;
+      hold.intervalId = window.setInterval(() => scrollRecentPosts(direction, false), 24);
+    }, 220);
+  };
+
+  const clickRecentPostsScroll = (direction: -1 | 1) => {
+    if (suppressRecentPostsClickRef.current) {
+      suppressRecentPostsClickRef.current = false;
+      return;
+    }
+    scrollRecentPosts(direction);
+  };
 
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -217,6 +272,21 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   useEffect(() => {
     if (data) setSelectedChannels(new Set(data.channelStats.map(stat => stat.channelName)));
   }, [data]);
+
+  useEffect(() => {
+    const container = recentPostsScrollerRef.current;
+    if (!container) return;
+    updateRecentPostsNavigation();
+    container.addEventListener('scroll', updateRecentPostsNavigation, { passive: true });
+    const observer = new ResizeObserver(updateRecentPostsNavigation);
+    observer.observe(container);
+    return () => {
+      container.removeEventListener('scroll', updateRecentPostsNavigation);
+      observer.disconnect();
+    };
+  }, [data?.topPosts.length]);
+
+  useEffect(() => () => stopRecentPostsScroll(), []);
 
   const updatePreset = (preset: DatePreset) => {
     setDatePreset(preset);
@@ -600,9 +670,21 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
           </section>
 
           <section className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm">
-            <h3 className="text-lg font-extrabold text-slate-800">Bài viết mới đây</h3>
-            <p className="text-sm text-slate-500 mt-1">Các bài mới nhất đã đồng bộ, có thumbnail khi nền tảng cung cấp.</p>
-            <div className="flex overflow-x-auto gap-4 pt-4 pb-2">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-extrabold text-slate-800">Bài viết mới đây</h3>
+                <p className="text-sm text-slate-500 mt-1">Các bài mới nhất đã đồng bộ, có thumbnail khi nền tảng cung cấp.</p>
+              </div>
+              <div className="flex items-center gap-2" aria-label="Điều hướng bài viết mới đây">
+                <button type="button" aria-label="Cuộn sang trái" title="Bấm để cuộn; nhấn giữ để cuộn liên tục" onClick={() => clickRecentPostsScroll(-1)} onPointerDown={event => startRecentPostsScroll(-1, event)} onPointerUp={stopRecentPostsScroll} onPointerCancel={stopRecentPostsScroll} onLostPointerCapture={stopRecentPostsScroll} disabled={!recentPostsNavigation.canScrollLeft} className="grid h-9 w-9 place-items-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40">
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                <button type="button" aria-label="Cuộn sang phải" title="Bấm để cuộn; nhấn giữ để cuộn liên tục" onClick={() => clickRecentPostsScroll(1)} onPointerDown={event => startRecentPostsScroll(1, event)} onPointerUp={stopRecentPostsScroll} onPointerCancel={stopRecentPostsScroll} onLostPointerCapture={stopRecentPostsScroll} disabled={!recentPostsNavigation.canScrollRight} className="grid h-9 w-9 place-items-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40">
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+            <div ref={recentPostsScrollerRef} className="flex overflow-x-auto gap-4 pt-4 pb-2 scroll-smooth">
               {data.topPosts.map(post => {
                 const channel = channels.find(item => item.id === post.channelId);
                 return (

@@ -77,12 +77,28 @@ export function DateBadge({ label, date }: { label: string; date?: string }) {
 }
 export function DeadlineLegend() { return <div className="flex flex-wrap gap-2 text-[10px] font-semibold"><span className="text-blue-700">Đã qua</span><span className="text-emerald-700">›1 tháng</span><span className="text-orange-700">≤1 tháng</span><span className="text-red-600">≤15 ngày</span><span className="rounded bg-red-600 px-1 text-white">≤7 ngày</span></div>; }
 export function TimeField({ label, value, onChange }: { label: string; value: DraftDate; onChange: (value: DraftDate) => void }) {
-  const update = (key: keyof DraftDate, next: string | boolean) => onChange({ ...value, [key]: next });
-  const setUnknown = (unknown: boolean) => onChange({ ...value, unknown, planned: unknown ? false : value.planned });
-  const plannedText = 'Th\u1eddi gian d\u1ef1 ki\u1ebfn';
-  const unknownText = 'Ch\u01b0a c\u00f3 th\u00f4ng tin';
-  return <fieldset className="rounded-lg border border-slate-200 p-3"><legend className="px-1 text-sm font-bold">{label}</legend><div className="mb-3 flex gap-4 text-xs font-semibold"><label className="inline-flex cursor-pointer items-center gap-1"><input className="cursor-pointer" type="checkbox" checked={Boolean(value.planned)} disabled={Boolean(value.unknown)} onChange={event => update('planned', event.currentTarget.checked)} /><span>{plannedText}</span></label><label className="inline-flex cursor-pointer items-center gap-1"><input className="cursor-pointer" type="checkbox" checked={Boolean(value.unknown)} onChange={event => setUnknown(event.currentTarget.checked)} /><span>{unknownText}</span></label></div>{value.unknown ? <p className="rounded bg-slate-50 px-3 py-2 text-sm text-slate-500">{'Ch\u01b0a c\u00f3 th\u00f4ng tin v\u1ec1 th\u1eddi gian.'}</p> : <><div className="grid grid-cols-3 gap-2">{(['day', 'month', 'year'] as const).map((part, index) => <select key={part} value={value[part] || ''} onChange={event => update(part, event.currentTarget.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"><option value="">{index === 0 ? 'Ng\u00e0y' : index === 1 ? 'Th\u00e1ng' : 'N\u0103m'}{index === 0 && value.planned ? ' (tu\u1ef3 ch\u1ecdn)' : ''}</option>{Array.from({ length: index === 0 ? 31 : index === 1 ? 12 : 31 }, (_, itemIndex) => { const option = index === 2 ? new Date().getFullYear() - 10 + itemIndex : itemIndex + 1; return <option key={option} value={String(option)}>{option}</option>; })}</select>)}</div><p className="mt-2 text-[11px] text-slate-500">{value.planned ? 'D\u1ef1 ki\u1ebfn: b\u1eaft bu\u1ed9c th\u00e1ng v\u00e0 n\u0103m; ng\u00e0y c\u00f3 th\u1ec3 \u0111\u1ec3 tr\u1ed1ng.' : 'Ch\u00ednh th\u1ee9c: b\u1eaft bu\u1ed9c \u0111\u1ee7 ng\u00e0y, th\u00e1ng v\u00e0 n\u0103m.'}</p></>}</fieldset>;
-}export function sessionDisplayName(session: ExaminationSession) {
+  // Keep the selected value locally while the session editor serializes it to
+  // label/date fields. This prevents a native select from snapping back before
+  // the parent state has finished updating.
+  const valueKey = [value.day, value.month, value.year, value.planned, value.unknown].join('|');
+  const [draftValue, setDraftValue] = useState<DraftDate>(value);
+  useEffect(() => setDraftValue(value), [valueKey]);
+
+  const update = (key: keyof DraftDate, next: string | boolean) => {
+    const nextValue = { ...draftValue, [key]: next };
+    setDraftValue(nextValue);
+    onChange(nextValue);
+  };
+  const setUnknown = (unknown: boolean) => {
+    const nextValue = { ...draftValue, unknown, planned: unknown ? false : draftValue.planned };
+    setDraftValue(nextValue);
+    onChange(nextValue);
+  };
+  const plannedText = 'Thời gian dự kiến';
+  const unknownText = 'Chưa có thông tin';
+  return <fieldset className="rounded-lg border border-slate-200 p-3"><legend className="px-1 text-sm font-bold">{label}</legend><div className="mb-3 flex gap-4 text-xs font-semibold"><label className="inline-flex cursor-pointer items-center gap-1"><input className="cursor-pointer" type="checkbox" checked={Boolean(draftValue.planned)} disabled={Boolean(draftValue.unknown)} onChange={event => update('planned', event.currentTarget.checked)} /><span>{plannedText}</span></label><label className="inline-flex cursor-pointer items-center gap-1"><input className="cursor-pointer" type="checkbox" checked={Boolean(draftValue.unknown)} onChange={event => setUnknown(event.currentTarget.checked)} /><span>{unknownText}</span></label></div>{draftValue.unknown ? <p className="rounded bg-slate-50 px-3 py-2 text-sm text-slate-500">{'Chưa có thông tin về thời gian.'}</p> : <><div className="grid grid-cols-3 gap-2">{(['day', 'month', 'year'] as const).map((part, index) => <select key={part} value={draftValue[part] || ''} onChange={event => update(part, event.currentTarget.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"><option value="">{index === 0 ? 'Ngày' : index === 1 ? 'Tháng' : 'Năm'}{index === 0 && draftValue.planned ? ' (tuỳ chọn)' : ''}</option>{Array.from({ length: index === 0 ? 31 : index === 1 ? 12 : 31 }, (_, itemIndex) => { const option = index === 2 ? new Date().getFullYear() - 10 + itemIndex : itemIndex + 1; return <option key={option} value={String(option)}>{option}</option>; })}</select>)}</div><p className="mt-2 text-[11px] text-slate-500">{draftValue.planned ? 'Dự kiến: bắt buộc tháng và năm; ngày có thể để trống.' : 'Chính thức: bắt buộc đủ ngày, tháng và năm.'}</p></>}</fieldset>;
+}
+export function sessionDisplayName(session: ExaminationSession) {
   const monthYear = (date?: string, fallback?: string) => {
     const iso = String(date || '').trim().match(/^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/);
     if (iso && Number(iso[2]) >= 1 && Number(iso[2]) <= 12) return `T${Number(iso[2])}/${iso[1]}`;

@@ -7,6 +7,43 @@ from rest_framework.test import APIClient
 from .models import Candidate, CandidateParticipation, ExamSession, LogNote, RoundResult
 
 
+class ExistingSessionRoundBackfillTests(TestCase):
+    def test_blank_legacy_session_receives_common_editable_rounds(self):
+        session = ExamSession.objects.create(
+            id='fieo-legacy', competition_id='fieo', code='FIEO', name='FIEO legacy',
+            parent='FIEO', organizer='FermatTech', time='', sort_key='fieo-legacy',
+        )
+
+        from .views import ensure_examination_seed
+        ensure_examination_seed()
+
+        session.refresh_from_db()
+        self.assertEqual(
+            [round_config['name'] for round_config in session.rounds],
+            ['Vòng loại Quốc gia', 'Vòng Chung kết Quốc gia', 'Vòng Quốc tế'],
+        )
+        self.assertTrue(all('slots' in round_config for round_config in session.rounds))
+
+    def test_backfill_preserves_legacy_final_and_international_dates(self):
+        session = ExamSession.objects.create(
+            id='fimo-legacy', competition_id='fimo', code='FIMO', name='FIMO legacy',
+            parent='FIMO', organizer='FermatTech', time='', sort_key='fimo-legacy',
+            national='26/7/2026', national_date='2026-07-26',
+            international='Tháng 9/2026', international_date='',
+        )
+
+        from .views import ensure_examination_seed, sync_legacy_round_milestones
+        ensure_examination_seed()
+        session.refresh_from_db()
+        sync_legacy_round_milestones(session, session.rounds)
+
+        self.assertEqual(session.rounds[1]['date'], '2026-07-26')
+        self.assertEqual(session.rounds[1]['label'], '26/7/2026')
+        self.assertEqual(session.rounds[2]['label'], 'Tháng 9/2026')
+        self.assertEqual(session.national_date, '2026-07-26')
+        self.assertEqual(session.national, '26/7/2026')
+
+
 class LogNoteApiTests(TestCase):
     def setUp(self):
         self.user = UserProfile.objects.create(email='lognote-admin@example.com', name='LogNote Admin', role='ADMIN')
@@ -65,8 +102,8 @@ class CandidateRoundHistoryTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         candidate_note = LogNote.objects.filter(entity_key=f'candidate-{self.candidate.code}').latest('created_at')
-        self.assertIn('Trường học: “Trường cũ” → “Trường mới”', candidate_note.content)
-        self.assertIn('Điện thoại: “0900000000” → “0911222333”', candidate_note.content)
+        self.assertIn('Đã đổi Trường học từ "Trường cũ" thành "Trường mới".', candidate_note.content)
+        self.assertIn('Đã đổi Điện thoại từ "0900000000" thành "0911222333".', candidate_note.content)
         self.assertEqual(candidate_note.updated_by, 'round-admin@example.com')
         self.assertFalse(candidate_note.system)
         self.assertTrue(LogNote.objects.filter(entity_key=f'session-{self.session.id}', content__contains='Cập nhật hồ sơ thí sinh').exists())
@@ -129,6 +166,9 @@ class CandidateRoundHistoryTests(TestCase):
         )
         self.assertEqual(update.status_code, 200)
         self.assertEqual(len(update.data['rounds'][0]['slots']), 2)
+        session_note = LogNote.objects.filter(entity_key=f'session-{self.session.id}').latest('created_at')
+        self.assertIn('Đã bổ sung Thông tin các vòng thi: Vòng Chung kết Quốc gia (26/7/2026).', session_note.content)
+        self.assertNotIn('"id"', session_note.content)
         self.assertEqual(update.data['nationalDate'], '2026-07-26')
         self.assertEqual(update.data['national'], '26/7/2026')
 

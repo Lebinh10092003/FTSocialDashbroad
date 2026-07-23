@@ -23,15 +23,62 @@ def audit_actor(request):
     return getattr(request.user, 'email', '') or getattr(request, 'user_email', '') or 'Nhân viên FT Workspace'
 
 
+def describe_rounds(rounds):
+    """Turn stored round JSON into a concise Vietnamese audit description."""
+    if not isinstance(rounds, list):
+        return ''
+    descriptions = []
+    for round_config in rounds:
+        if not isinstance(round_config, dict):
+            continue
+        name = str(round_config.get('name') or '').strip()
+        if not name:
+            continue
+        timing = str(round_config.get('label') or round_config.get('date') or '').strip()
+        descriptions.append(f'{name} ({timing})' if timing else f'{name} (chưa có thời gian)')
+    return '; '.join(descriptions)
+
+
+def describe_registration(value):
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return str(value or '').strip()
+    if not isinstance(value, dict):
+        return ''
+    labels = {
+        'subject': 'Môn thi', 'category': 'Bảng thi', 'registrationMethod': 'Hình thức đăng ký',
+        'registrationUnit': 'Đơn vị đăng ký', 'teamName': 'Tên đội', 'examLanguage': 'Ngôn ngữ thi',
+        'generalNote': 'Ghi chú', 'certificateLink': 'Link chứng nhận',
+    }
+    details = [f'{labels.get(key, key)}: {str(item).strip()}' for key, item in value.items() if str(item or '').strip()]
+    return '; '.join(details)
+
+
+def audit_display_value(field, value):
+    if field == 'rounds':
+        return describe_rounds(value) or 'chưa có vòng thi'
+    if field == 'registration':
+        return describe_registration(value) or 'chưa có thông tin'
+    return str(value or '').strip() or 'chưa có thông tin'
+
+
 def audit_values(before, after, labels):
-    """Build a readable, complete before/after trail for only changed fields."""
+    """Build concise, natural-language audit sentences for changed fields."""
     changes = []
     for field, label in labels.items():
-        old_value = str(before.get(field) or '').strip() or '—'
-        new_value = str(after.get(field) or '').strip() or '—'
-        if old_value != new_value:
-            changes.append(f'{label}: “{old_value}” → “{new_value}”')
-    return '; '.join(changes)
+        old_value = audit_display_value(field, before.get(field))
+        new_value = audit_display_value(field, after.get(field))
+        if old_value == new_value:
+            continue
+        if old_value == 'chưa có thông tin' or old_value == 'chưa có vòng thi':
+            changes.append(f'Đã bổ sung {label}: {new_value}.')
+        elif new_value == 'chưa có thông tin' or new_value == 'chưa có vòng thi':
+            changes.append(f'Đã xóa {label} (trước đó: {old_value}).')
+        else:
+            changes.append(f'Đã đổi {label} từ "{old_value}" thành "{new_value}".')
+    return ' '.join(changes)
 
 
 def append_audit(entity_key, content, request=None, system=False, actor=''):
@@ -83,9 +130,44 @@ def repair_legacy_seed_text():
             for old, new in LEGACY_SEED_TEXT_CORRECTIONS.items():
                 model.objects.filter(**{field: old}).update(**{field: new})
 
+def default_session_rounds(session):
+    """Provide the common editable round structure for legacy blank sessions."""
+    return [
+        {'id': 'round-national', 'name': 'Vòng loại Quốc gia', 'label': '', 'date': '', 'slots': []},
+        {
+            'id': 'round-final',
+            'name': 'Vòng Chung kết Quốc gia',
+            'label': str(session.national or '').strip(),
+            'date': str(session.national_date or '').strip(),
+            'slots': [],
+        },
+        {
+            'id': 'round-international',
+            'name': 'Vòng Quốc tế',
+            'label': str(session.international or '').strip(),
+            'date': str(session.international_date or '').strip(),
+            'slots': [],
+        },
+    ]
+
+
+def ensure_existing_session_rounds():
+    """Backfill only legacy sessions that have no usable round configuration."""
+    for session in ExamSession.objects.all().only('id', 'rounds', 'national', 'national_date', 'international', 'international_date'):
+        configured = [
+            round_config for round_config in (session.rounds or [])
+            if isinstance(round_config, dict) and str(round_config.get('name') or '').strip()
+        ]
+        if configured:
+            continue
+        session.rounds = default_session_rounds(session)
+        session.save(update_fields=['rounds', 'updated_at'])
+
+
 def ensure_examination_seed():
     repair_legacy_seed_text()
     if ExamSession.objects.exists():
+        ensure_existing_session_rounds()
         return
         
     for comp_data in EXAMINATION_SEED['competitions']:
@@ -121,6 +203,8 @@ def ensure_examination_seed():
             }
         )
         
+    ensure_existing_session_rounds()
+
     for cand_data in EXAMINATION_SEED['candidates']:
         Candidate.objects.get_or_create(
             id=cand_data['id'],
@@ -517,11 +601,17 @@ def competition_detail(request, pk):
 def sync_legacy_round_milestones(session, rounds):
     """Keep legacy summary fields in sync with named rounds for existing screens and exports."""
     def find_round(marker):
-        for round_config in rounds:
-            name = str(round_config.get('name') or '').lower()
-            if marker in name:
-                return round_config
-        return None
+        matches = [
+            round_config for round_config in rounds
+            if marker in str(round_config.get('name') or '').lower()
+        ]
+        # A standard configuration can contain both a qualifying and a final
+        # national round. Prefer the one with timing data so a blank qualifier
+        # never wipes a configured final-round milestone.
+        return next(
+            (round_config for round_config in matches if round_config.get('label') or round_config.get('date')),
+            matches[0] if matches else None,
+        )
 
     national = find_round('qu\u1ed1c gia') or find_round('national')
     international = find_round('qu\u1ed1c t\u1ebf') or find_round('international')
@@ -593,7 +683,7 @@ def session_create(request):
         sort_key=f"{comp.code.lower()}_{sess_id}",
         created_by=request.user.email if hasattr(request.user, 'email') else None
     )
-    append_audit(f'session-{sess.id}', 'Tạo kỳ tổ chức: ' + audit_values({}, {'name': sess.name, 'competition': comp.code, 'phase': sess.phase, 'rounds': json.dumps(processed_rounds, ensure_ascii=False)}, {'name':'Tên kỳ tổ chức', 'competition':'Cuộc thi', 'phase':'Giai đoạn', 'rounds':'Các vòng thi'}), request)
+    append_audit(f'session-{sess.id}', 'Tạo kỳ tổ chức: ' + audit_values({}, {'name': sess.name, 'competition': comp.code, 'phase': sess.phase, 'rounds': processed_rounds}, {'name':'Tên kỳ tổ chức', 'competition':'Cuộc thi', 'phase':'Giai đoạn', 'rounds':'Các vòng thi'}), request)
     append_audit(f'competition-{comp.id}', f'Tạo kỳ tổ chức {sess.name}.', request)
     return Response(serialize_session(sess), status=status.HTTP_201_CREATED)
 
@@ -606,7 +696,7 @@ def session_detail(request, pk):
         return Response({'error': 'Không tìm thấy kỳ tổ chức.'}, status=status.HTTP_404_NOT_FOUND)
         
     if request.method == 'PUT':
-        before = {'name': sess.name, 'phase': sess.phase, 'note': sess.note, 'national': sess.national, 'nationalDate': sess.national_date, 'international': sess.international, 'internationalDate': sess.international_date, 'competitionId': sess.competition_id, 'rounds': json.dumps(sess.rounds or [], ensure_ascii=False)}
+        before = {'name': sess.name, 'phase': sess.phase, 'note': sess.note, 'national': sess.national, 'nationalDate': sess.national_date, 'international': sess.international, 'internationalDate': sess.international_date, 'competitionId': sess.competition_id, 'rounds': sess.rounds or []}
         data = request.data or {}
         
         allowed_fields = ['name', 'phase', 'note', 'national', 'nationalDate', 'international', 'internationalDate']
@@ -652,7 +742,7 @@ def session_detail(request, pk):
         
         sync_session_candidate_totals()
         sess.refresh_from_db()
-        after = {'name': sess.name, 'phase': sess.phase, 'note': sess.note, 'national': sess.national, 'nationalDate': sess.national_date, 'international': sess.international, 'internationalDate': sess.international_date, 'competitionId': sess.competition_id, 'rounds': json.dumps(sess.rounds or [], ensure_ascii=False)}
+        after = {'name': sess.name, 'phase': sess.phase, 'note': sess.note, 'national': sess.national, 'nationalDate': sess.national_date, 'international': sess.international, 'internationalDate': sess.international_date, 'competitionId': sess.competition_id, 'rounds': sess.rounds or []}
         change_text = audit_values(before, after, {'name':'Tên kỳ tổ chức', 'phase':'Giai đoạn hiện tại', 'note':'Ghi chú', 'national':'Mốc vòng quốc gia', 'nationalDate':'Ngày vòng quốc gia', 'international':'Mốc vòng quốc tế', 'internationalDate':'Ngày vòng quốc tế', 'competitionId':'Cuộc thi', 'rounds':'Thông tin các vòng thi'})
         append_audit(f'session-{sess.id}', 'Cập nhật kỳ tổ chức: ' + (change_text or 'Không có thay đổi dữ liệu.'), request)
         return Response(serialize_session(sess))

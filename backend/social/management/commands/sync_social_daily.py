@@ -81,12 +81,20 @@ class Command(BaseCommand):
             since = manual_since or (history_since if needs_initial_sync else recent_since)
             until = manual_until or now
 
+            # Post metrics are stock values (for example, a post published last
+            # month can still receive new views today). Discover only recent
+            # posts on routine runs, but refresh the metrics of every tracked
+            # post in the reporting history so today's snapshot is complete.
+            # Without this, only followers received a new daily value.
+            snapshot_existing_since = manual_since or history_since
+
             success, message = SyncEngine.sync_channel(
                 channel.id,
                 request_id=request_id,
                 since=since,
                 until=until,
                 follower_since=since,
+                snapshot_existing_since=snapshot_existing_since,
                 queued_log=queued_logs[channel.id],
             )
             status_label = "OK" if success else "ERROR"

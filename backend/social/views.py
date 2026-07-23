@@ -178,8 +178,9 @@ def media_summary_trend(request):
     if channel_id_filter == 'all':
         channel_id_filter = None
         
-    # Build list of active channels
-    channels = Channel.objects.filter(status='active')
+    # Build list of active channels. The technical Facebook-token placeholder
+    # is not a reportable channel.
+    channels = Channel.objects.filter(status='active').exclude(external_id='current-facebook-token')
     if platform_filter:
         channels = channels.filter(platform=platform_filter)
     if channel_id_filter:
@@ -255,28 +256,34 @@ def media_summary_trend(request):
     period_start = buckets[0]['start']
     period_end = buckets[-1]['end']
     
-    # Query posts
+    # A post's lifetime counters can increase after its publication date. The
+    # trend therefore uses each saved metric snapshot at a bucket boundary,
+    # rather than grouping a newer value by the publication month.
     posts = Post.objects.filter(
         channel_id__in=channel_ids,
-        published_at__gte=period_start,
         published_at__lte=f"{period_end}T23:59:59.999Z"
     )
-    
-    # Metric snapshots are fetched after publication; use the newest saved metric for each report post.
+
+    posts_by_bucket = {}
+    for bucket in buckets:
+        posts_by_bucket[bucket['key']] = [
+            post for post in posts if str(post.published_at)[:10] <= bucket['end']
+        ]
+
+    # Each bucket uses the latest snapshot on or before its end date, matching
+    # follower logic. The daily sync now creates the needed current-day rows.
     post_keys = [post.post_key for post in posts]
-    snapshots = DailySnapshot.objects.filter(post_key__in=post_keys)
-    
-    # Get latest snapshot for each postKey
-    latest_snaps = {}
-    for snap in snapshots:
-        existing = latest_snaps.get(snap.post_key)
-        if not existing or snap.snapshot_date > existing.snapshot_date:
-            latest_snaps[snap.post_key] = snap
-            
-    # Query follower snapshots
+    snapshots_by_post = {}
+    for snapshot in DailySnapshot.objects.filter(
+        post_key__in=post_keys,
+        snapshot_date__lte=period_end,
+    ).order_by('post_key', 'snapshot_date'):
+        snapshots_by_post.setdefault(snapshot.post_key, []).append(snapshot)
+
+    # Include history before the first bucket so its value is not incorrectly
+    # shown as zero when a follower snapshot was saved earlier.
     follower_snaps = FollowerSnapshot.objects.filter(
         channel_id__in=channel_ids,
-        snapshot_date__gte=period_start,
         snapshot_date__lte=period_end
     ).order_by('snapshot_date')
     
@@ -295,17 +302,18 @@ def media_summary_trend(request):
         
     trend = []
     for bucket in buckets:
-        b_start = bucket['start']
         b_end = bucket['end']
-        
-        # Filter posts in this bucket range
-        b_posts = [p for p in posts if str(p.published_at)[:10] >= b_start and str(p.published_at)[:10] <= b_end]
-        
+
+        b_posts = posts_by_bucket[bucket['key']]
         views_sum = 0
         engagement_sum = 0
-        
+
         for p in b_posts:
-            snap = latest_snaps.get(p.post_key)
+            snap = None
+            for candidate in snapshots_by_post.get(p.post_key, []):
+                if candidate.snapshot_date > b_end:
+                    break
+                snap = candidate
             if snap:
                 views_sum += getattr(snap, 'views', 0) or getattr(snap, 'impressions', 0) or getattr(snap, 'reach', 0) or 0
                 engagement_sum += getattr(snap, 'total_engagement', 0) or 0
