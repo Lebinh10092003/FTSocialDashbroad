@@ -1,5 +1,7 @@
 from authentication.models import UserProfile
+from django.contrib.auth import get_user_model
 from django.test import TestCase
+from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
 from .models import Candidate, CandidateParticipation, ExamSession, LogNote, RoundResult
@@ -43,6 +45,12 @@ class CandidateRoundHistoryTests(TestCase):
         self.candidate = Candidate.objects.create(
             id='FT26-9001', code='FT26-9001', name='Candidate One', sort_key='candidate-one',
         )
+        email = 'round-admin@example.com'
+        self.user = UserProfile.objects.create(email=email, name='Round Admin', role='ADMIN')
+        django_user = get_user_model().objects.create_user(username=email, email=email, password='RoundAdmin9921')
+        token = Token.objects.create(user=django_user).key
+        self.client = APIClient()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
 
     def test_one_session_tab_keeps_multiple_rounds_without_duplicates(self):
         from .views import serialize_candidate, upsert_participation_history
@@ -89,3 +97,34 @@ class CandidateRoundHistoryTests(TestCase):
         self.assertEqual(rows[1][0], 'FT26-9001')
         self.assertIn('A-001', rows[1])
         self.assertIn('B-001', rows[1])
+    def test_round_slots_persist_and_removal_updates_candidate_participation(self):
+        from .views import upsert_participation_history
+
+        update = self.client.put(
+            f'/api/examination/sessions/{self.session.id}',
+            {'rounds': [{'id': 'r1', 'name': 'Round 1', 'label': '', 'date': '', 'slots': [
+                {'id': 'slot-1', 'date': '2026-07-26', 'time': '09:00 - 10:00', 'mode': 'Trực tuyến', 'link': 'https://example.test/room', 'location': ''},
+                {'id': 'slot-2', 'date': '2026-07-27', 'time': '13:00 - 14:00', 'mode': 'Trực tiếp', 'link': '', 'location': 'Hà Nội'},
+            ]}]},
+            format='json',
+        )
+        self.assertEqual(update.status_code, 200)
+        self.assertEqual(len(update.data['rounds'][0]['slots']), 2)
+
+        self.candidate.session_ids = [self.session.id]
+        self.candidate.contests = 'SIMO'
+        self.candidate.save()
+        upsert_participation_history(self.candidate, self.session.id, [
+            {'round': 'Round 1', 'sbd': 'A-001'},
+            {'round': 'Round 2', 'sbd': 'B-001'},
+        ])
+        second = RoundResult.objects.get(round_name='Round 2')
+        response = self.client.delete(f'/api/examination/round-results/{second.id}?removeFromSession=0')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(CandidateParticipation.objects.filter(candidate=self.candidate, session=self.session).exists())
+
+        first = RoundResult.objects.get(round_name='Round 1')
+        response = self.client.delete(f'/api/examination/round-results/{first.id}?removeFromSession=1')
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(CandidateParticipation.objects.filter(candidate=self.candidate, session=self.session).exists())
+        self.assertEqual(response.data['candidate']['sessionIds'], [])

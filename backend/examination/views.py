@@ -208,6 +208,10 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
             round_name=round_name,
             defaults=values,
         )
+    # A new registration always enters the first configured round so it is visible and manageable in the round roster.
+    if not participation.round_results.exists():
+        first_round = next((str(item.get('name') or '').strip() for item in (session.rounds or []) if isinstance(item, dict) and item.get('name')), 'Vòng 1')
+        RoundResult.objects.get_or_create(participation=participation, round_name=first_round)
     return participation
 
 
@@ -506,7 +510,8 @@ def session_create(request):
                     'id': r.get('id') or f"round-{uuid.uuid4().hex[:10]}",
                     'name': str(r['name']).strip(),
                     'label': str(r.get('label') or timing.get('label') or '').strip(),
-                    'date': r.get('date') or timing.get('date')
+                    'date': r.get('date') or timing.get('date'),
+                    'slots': [{key: str(slot.get(key) or '').strip() for key in ('id', 'date', 'time', 'mode', 'link', 'location', 'note')} for slot in r.get('slots', []) if isinstance(slot, dict)]
                 })
                 
     time_str = f"{national.get('label', '')} · {international.get('label', '')}".strip()
@@ -563,7 +568,8 @@ def session_detail(request, pk):
                         'id': r.get('id') or f"round-{uuid.uuid4().hex[:10]}",
                         'name': str(r['name']).strip(),
                         'label': str(r.get('label') or timing.get('label') or '').strip(),
-                    'date': r.get('date') or timing.get('date')
+                    'date': r.get('date') or timing.get('date'),
+                    'slots': [{key: str(slot.get(key) or '').strip() for key in ('id', 'date', 'time', 'mode', 'link', 'location', 'note')} for slot in r.get('slots', []) if isinstance(slot, dict)]
                     })
             sess.rounds = processed_rounds
             
@@ -657,7 +663,7 @@ def candidate_detail(request, pk):
         sync_session_candidate_totals()
         return Response({'success': True})
 
-@api_view(['PUT'])
+@api_view(['PUT', 'DELETE'])
 @permission_classes([IsManagerOrAdmin])
 def round_result_detail(request, pk):
     try:
@@ -665,6 +671,28 @@ def round_result_detail(request, pk):
     except RoundResult.DoesNotExist:
         return Response({'error': 'Không tìm thấy dữ liệu vòng thi.'}, status=status.HTTP_404_NOT_FOUND)
 
+    if request.method == 'DELETE':
+        candidate = item.participation.candidate
+        if request.query_params.get('removeFromSession') == '1':
+            session_id = item.participation.session_id
+            all_sessions = list(ExamSession.objects.all())
+            existing_ids = list(candidate.session_ids or [])
+            remaining_ids = [value for value in existing_ids if value != session_id]
+            if not existing_ids:
+                existing_codes = get_contest_codes(candidate.contests)
+                remaining_ids = [session.id for session in all_sessions if session.id != session_id and session.code.upper() in existing_codes]
+            candidate.session_ids = remaining_ids
+            removed_session = next((session for session in all_sessions if session.id == session_id), None)
+            remaining_codes = {session.code.upper() for session in all_sessions if session.id in remaining_ids}
+            if removed_session and removed_session.code.upper() not in remaining_codes:
+                candidate.contests = ', '.join(code for code in get_contest_codes(candidate.contests) if code.upper() != removed_session.code.upper())
+            CandidateParticipation.objects.filter(candidate=candidate, session_id=session_id).delete()
+        else:
+            item.delete()
+        candidate.updated = timezone.now().strftime('%d/%m/%Y %H:%M')
+        candidate.save()
+        sync_session_candidate_totals()
+        return Response({'candidate': serialize_candidate(candidate)})
     data = request.data or {}
     fields = {
         'eligibility': 'eligibility', 'sbd': 'sbd', 'date': 'exam_date', 'time': 'time_slot',

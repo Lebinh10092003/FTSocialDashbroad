@@ -2,7 +2,8 @@ import type { UserRole } from '../../types';
 
 export type ExaminationPage = 'overview' | 'competitions' | 'sessions' | 'candidates' | 'classes' | 'teachers' | 'partners' | 'import' | 'competition-detail' | 'session-detail' | 'candidate-detail' | 'class-detail' | 'teacher-detail';
 export type DraftDate = { day: string; month: string; year: string; planned: boolean; unknown: boolean };
-export type SessionRound = { id: string; name: string; label: string; date?: string };
+export type SessionRoundSlot = { id: string; date?: string; time?: string; mode?: string; link?: string; location?: string; note?: string };
+export type SessionRound = { id: string; name: string; label: string; date?: string; slots?: SessionRoundSlot[] };
 export type ExaminationSession = { id: string; competitionId?: string; code: string; name: string; parent: string; organizer: string; time: string; candidates: number; national: string; nationalDate?: string; international: string; internationalDate?: string; phase: string; note: string; rounds?: SessionRound[]; updatedAt?: string; createdAt?: string };
 export type CandidateExamHistory = { id?: string; sessionId?: string; sessionCode?: string; round: string; eligibility?: string; sbd?: string; date?: string; time?: string; mode?: string; location?: string; link?: string; account?: string; password?: string; attendance?: string; score?: string; scoreRate?: string; rank?: string; result?: string; note?: string };
 export type CandidateParticipation = { sessionId: string; sessionCode: string; sessionName: string; sessionTime: string; registration: { subject?: string; category?: string; registrationMethod?: string; registrationUnit?: string; teamName?: string; examLanguage?: string; generalNote?: string; certificateLink?: string }; rounds: CandidateExamHistory[] };
