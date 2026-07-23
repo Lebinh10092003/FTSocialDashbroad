@@ -18,7 +18,7 @@ function draftDateFrom(date?: string, label?: string) {
   if (iso) return { day: String(Number(iso[3])), month: String(Number(iso[2])), year: iso[1], planned, unknown: false };
   const monthYear = text.match(/(\d{1,2})\/(\d{4})/);
   if (monthYear) return { day: '', month: String(Number(monthYear[1])), year: monthYear[2], planned, unknown: false };
-  return { ...emptyDate(), unknown };
+  return { ...emptyDate(), planned, unknown };
 }
 
 function SessionFields({ value, competitions, onChange }: { value: ExaminationSession; competitions: Competition[]; onChange: (next: ExaminationSession) => void }) {
