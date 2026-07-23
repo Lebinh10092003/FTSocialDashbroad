@@ -12,11 +12,11 @@ const CandidateFields = ({ value, onChange, enrollment = false }: { value: Candi
 
 function draftDateFrom(date?: string, label?: string) {
   const text = String(label || '').trim();
-  const unknown = text.toLocaleLowerCase('vi-VN').includes('chưa có thông tin');
-  const planned = text.toLocaleLowerCase('vi-VN').startsWith('dự kiến');
+  const unknown = text.toLocaleLowerCase('vi-VN').includes('ch\u01b0a c\u00f3 th\u00f4ng tin');
+  const planned = text.toLocaleLowerCase('vi-VN').startsWith('d\u1ef1 ki\u1ebfn');
   const iso = String(date || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (iso) return { day: String(Number(iso[3])), month: String(Number(iso[2])), year: iso[1], planned, unknown: false };
-  const monthYear = text.match(/(?:tháng\s*)?(\d{1,2})\/(\d{4})/i);
+  const monthYear = text.match(/(\d{1,2})\/(\d{4})/);
   if (monthYear) return { day: '', month: String(Number(monthYear[1])), year: monthYear[2], planned, unknown: false };
   return { ...emptyDate(), unknown };
 }
