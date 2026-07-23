@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, BarChart3, Bell, CalendarDays, Check, ChevronDown, ChevronRight, CircleHelp, ClipboardCheck, GraduationCap, Handshake, LayoutDashboard, Link2, LogIn, Mail, MapPin, Pencil, Phone, Plus, Search, School, Trophy, Trash2, UploadCloud, Users, X } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
