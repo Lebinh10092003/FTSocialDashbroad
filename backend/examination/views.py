@@ -14,6 +14,8 @@ from .sync import (
     get_contest_codes,
     merge_contest_codes,
     same_candidate,
+    candidate_match_assessment,
+    should_replace_birth_date,
     next_code,
     parse_dob,
     format_person_name,
@@ -1229,27 +1231,22 @@ def sync_status(request):
     config = SystemConfig.objects.filter(key='examination_sync_state').first()
     return Response(config.data if config and config.data else {'status': 'idle'})
 
-def duplicate_match_reason(existing, incoming, supplied_code=''):
-    if supplied_code and str(existing.code or '').upper() == supplied_code.upper():
-        return 'Mã hồ sơ'
-    if str(existing.identity or '').strip() and str(incoming.get('identity') or '').strip() and re.sub(r'\D', '', existing.identity) == re.sub(r'\D', '', str(incoming.get('identity') or '')):
-        return 'CCCD/Hộ chiếu'
-    if str(existing.email or '').strip() and str(incoming.get('email') or '').strip() and existing.email.strip().casefold() == str(incoming.get('email') or '').strip().casefold():
-        return 'Họ tên và email'
-    return 'Họ tên, ngày sinh và trường'
-
-
 def duplicate_candidate_summary(candidate):
     sessions = list(ExamSession.objects.filter(id__in=list(candidate.session_ids or [])).values('id', 'code', 'name'))
     return {
         'code': candidate.code,
         'name': candidate.name,
         'birthDate': candidate.birth_date or '',
+        'identity': candidate.identity or '',
+        'email': candidate.email or '',
+        'phone': candidate.phone or '',
         'school': candidate.school or '',
+        'className': candidate.class_name or '',
         'city': candidate.city or '',
+        'ward': candidate.ward or '',
+        'address': candidate.address or '',
         'sessions': sessions,
     }
-
 
 @api_view(['POST'])
 @permission_classes([IsManagerOrAdmin])
@@ -1276,19 +1273,33 @@ def import_candidate_duplicates(request):
             'birth_date': parse_dob(record.get('birthDate', '')),
             'identity': str(record.get('identity') or '').strip(),
             'email': str(record.get('email') or '').strip(),
+            'phone': str(record.get('phone') or '').strip(),
             'school': str(record.get('school') or '').strip(),
+            'class_name': str(record.get('className') or '').strip(),
+            'city': str(record.get('city') or '').strip(),
+            'ward': str(record.get('ward') or '').strip(),
+            'address': str(record.get('address') or '').strip(),
         }
-        matched = next((candidate for candidate in existing if same_candidate({
-            'name': candidate.name, 'birth_date': candidate.birth_date, 'identity': candidate.identity,
-            'email': candidate.email, 'school': candidate.school,
-        }, incoming)), None)
-        if not matched and supplied_code:
-            matched = next((candidate for candidate in existing if str(candidate.code or '').upper() == supplied_code), None)
-        if matched:
+        matches = []
+        for candidate in existing:
+            assessment = candidate_match_assessment({
+                'name': candidate.name, 'birth_date': candidate.birth_date, 'identity': candidate.identity,
+                'email': candidate.email, 'phone': candidate.phone, 'school': candidate.school,
+                'class_name': candidate.class_name,
+                'city': candidate.city, 'ward': candidate.ward, 'address': candidate.address,
+            }, incoming)
+            if assessment:
+                matches.append((candidate, assessment))
+        if supplied_code:
+            coded = next((candidate for candidate in existing if str(candidate.code or '').upper() == supplied_code), None)
+            if coded and not any(candidate.id == coded.id for candidate, _ in matches):
+                matches.append((coded, {'status': 'confirmed', 'reason': 'Mã hồ sơ'}))
+        for matched, assessment in matches:
             duplicates.append({
                 'row': index + 1,
                 'importedName': name,
-                'matchBy': duplicate_match_reason(matched, incoming, supplied_code),
+                'status': assessment['status'],
+                'matchBy': assessment['reason'],
                 'existing': duplicate_candidate_summary(matched),
             })
     return Response({'duplicates': duplicates})
@@ -1299,6 +1310,9 @@ def import_candidates(request):
     try:
         data = request.data or {}
         input_records = data.get('records', [])
+        confirmed_matches = data.get('confirmedMatches', {})
+        if not isinstance(confirmed_matches, dict):
+            confirmed_matches = {}
         source = data.get('source', '')
         session_id = str(data.get('sessionId') or '').strip()
         
@@ -1367,30 +1381,48 @@ def import_candidates(request):
                 'exam_history': rec.get('examHistory') or [],
             }
             
-            # Match
-            matched = None
+            # Automatically link only when the rules yield one unambiguous,
+            # confirmed profile. Multiple matches stay separate for safety.
+            assessments = []
             for e in existing:
                 e_dict = {
                     'name': e.name,
                     'birth_date': e.birth_date,
                     'identity': e.identity,
                     'email': e.email,
-                    'school': e.school
+                    'phone': e.phone,
+                    'school': e.school,
+                    'class_name': e.class_name,
+                    'city': e.city,
+                    'ward': e.ward,
+                    'address': e.address,
                 }
-                if same_candidate(e_dict, rec_cand):
-                    matched = e
-                    break
-                    
-            same_code_cand = None
-            if rec_code:
-                same_code_cand = next((e for e in existing if e.code.upper() == rec_code), None)
-                
-            base = matched or same_code_cand
-            code = matched.code if matched else (rec_code if (rec_code and rec_code not in existing_codes_set) else next_code(existing_codes_set))
-            
+                assessment = candidate_match_assessment(e_dict, rec_cand)
+                if assessment:
+                    assessments.append((e, assessment))
+            confirmed = [(candidate, assessment) for candidate, assessment in assessments if assessment['status'] == 'confirmed']
+            matched, matched_assessment = confirmed[0] if len(confirmed) == 1 else (None, None)
+
+            # A manager can explicitly confirm a row marked "Cần xác nhận" in
+            # the preview. The server verifies that the requested profile was
+            # actually one of those suspicious matches before linking it.
+            forced_candidate = None
+            forced_code = str(confirmed_matches.get(str(idx + 1), '') or '').strip().upper()
+            if forced_code:
+                possible = next(((candidate, assessment) for candidate, assessment in assessments if candidate.code.upper() == forced_code and assessment['status'] == 'possible'), None)
+                if possible:
+                    forced_candidate, matched_assessment = possible
+
+            same_code_cand = next((e for e in existing if rec_code and e.code.upper() == rec_code), None)
+            base = matched or same_code_cand or forced_candidate
+            code = base.code if base else (rec_code if (rec_code and rec_code not in existing_codes_set) else next_code(existing_codes_set))
             ts_vn = timezone.now().strftime('%d/%m/%Y %H:%M')
             
             if base:
+                before_values = {
+                    field: getattr(base, field)
+                    for field in ('name', 'birth_date', 'identity', 'email', 'phone', 'school', 'class_name', 'city', 'ward', 'nationality', 'grade', 'address', 'achievement', 'highest_round', 'parent')
+                }
                 previous_session_ids = list(base.session_ids or [])
                 already_in_target_session = session_id in previous_session_ids or CandidateParticipation.objects.filter(candidate=base, session_id=session_id).exists()
                 base.name = rec_cand['name']
@@ -1407,8 +1439,8 @@ def import_candidates(request):
                 if rec_cand['phone']: base.phone = rec_cand['phone']
                 if rec_cand['identity']: base.identity = rec_cand['identity']
                 if rec_cand['address']: base.address = rec_cand['address']
-                if rec_cand['birth_date']: base.birth_date = rec_cand['birth_date']
-                
+                if should_replace_birth_date(base.birth_date, rec_cand['birth_date']): base.birth_date = rec_cand['birth_date']
+
                 base.contests = merge_contest_codes(base.contests, rec_cand['contests'])
                 if session_id:
                     s_ids = list(base.session_ids) if base.session_ids else []
@@ -1419,16 +1451,32 @@ def import_candidates(request):
                 base.updated = ts_vn
                 base.save()
                 upsert_participation_history(base, session_id, rec_cand['exam_history'], source, rec_cand['registration'])
+
+                after_values = {
+                    field: getattr(base, field)
+                    for field in ('name', 'birth_date', 'identity', 'email', 'phone', 'school', 'class_name', 'city', 'ward', 'nationality', 'grade', 'address', 'achievement', 'highest_round', 'parent')
+                }
+                changes = audit_values(before_values, after_values, {
+                    'name': 'họ tên', 'birth_date': 'ngày sinh', 'identity': 'CCCD/Hộ chiếu',
+                    'email': 'email', 'phone': 'số điện thoại', 'school': 'trường', 'class_name': 'lớp',
+                    'city': 'tỉnh/thành phố', 'ward': 'xã/phường', 'nationality': 'quốc tịch',
+                    'grade': 'khối lớp', 'address': 'địa chỉ', 'achievement': 'thành tích',
+                    'highest_round': 'vòng cao nhất', 'parent': 'phụ huynh',
+                })
+                note_lines = []
+                if forced_candidate:
+                    note_lines.append(f'Người dùng đã xác nhận hồ sơ nhập là trùng với mã {base.code}.')
+                elif matched:
+                    note_lines.append(f'Hệ thống tự nhận diện hồ sơ trùng theo {matched_assessment["reason"]}.')
+                if changes:
+                    note_lines.append(changes)
                 if not already_in_target_session:
                     linked_existing += 1
                     previous_sessions = list(ExamSession.objects.filter(id__in=previous_session_ids).exclude(id=session_id).values_list('code', 'name'))
                     previous_label = ', '.join(f'{code} · {name}' for code, name in previous_sessions) or 'chưa có kỳ tổ chức khác được ghi nhận'
-                    append_audit(
-                        f'candidate-{base.code}',
-                        f'Hệ thống nhận diện hồ sơ đã có. Đã bổ sung dữ liệu vào kỳ tổ chức {target_session.code} · {target_session.name}. Thí sinh đã từng thi: {previous_label}.',
-                        request,
-                        system=True,
-                    )
+                    note_lines.append(f'Đã bổ sung dữ liệu vào kỳ tổ chức {target_session.code} · {target_session.name}. Thí sinh đã từng thi: {previous_label}.')
+                if note_lines:
+                    append_audit(f'candidate-{base.code}', '\n'.join(note_lines), request, system=not bool(forced_candidate))
                 updated += 1
                 items_returned.append(serialize_candidate(base))
             else:

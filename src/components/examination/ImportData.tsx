@@ -31,8 +31,9 @@ interface SyncState {
 type DuplicateCandidate = {
   row: number;
   importedName: string;
+  status: 'confirmed' | 'possible';
   matchBy: string;
-  existing: { code: string; name: string; birthDate?: string; school?: string; city?: string; sessions?: { id: string; code: string; name: string }[] };
+  existing: { code: string; name: string; birthDate?: string; identity?: string; email?: string; phone?: string; school?: string; className?: string; city?: string; ward?: string; address?: string; sessions?: { id: string; code: string; name: string }[] };
 };
 interface SheetSource {
   id: string;
@@ -150,6 +151,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>([]);
+  const [confirmedMatches, setConfirmedMatches] = useState<Record<string, string>>({});
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const previewLimit = 20;
   const sample = useMemo(() => rows.slice(0, previewLimit), [rows]);
@@ -229,6 +231,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
 
   const setParsedRows = (rawRows: ImportRow[], sourceName: string) => {
     const parsed = mapRows(rawRows);
+    setConfirmedMatches({});
     setRows(parsed);
     setSource(sourceName);
     void checkDuplicateCandidates(parsed);
@@ -276,7 +279,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     try {
       const res = await fetch('/api/examination/import/candidates', {
         method: 'POST', headers: authHeaders,
-        body: JSON.stringify({ records: rows, source, sessionId: resolvedSessionId }),
+        body: JSON.stringify({ records: rows, source, sessionId: resolvedSessionId, confirmedMatches }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Không thể nhập dữ liệu.');
@@ -563,13 +566,38 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
       {(checkingDuplicates || duplicates.length > 0) && (
         <section className="mt-5 ft-surface overflow-hidden border-amber-200">
           <div className="border-b border-amber-100 bg-amber-50 px-5 py-4">
-            <h2 className="text-lg font-bold text-amber-900">Hồ sơ đã có trên hệ thống {duplicates.length ? `(${duplicates.length})` : ''}</h2>
-            <p className="mt-1 text-sm text-amber-800">{checkingDuplicates ? 'Đang đối chiếu danh sách…' : 'Các hồ sơ dưới đây sẽ giữ nguyên mã FT; khi nhập chỉ được bổ sung kỳ tổ chức và dữ liệu thi mới.'}</p>
+            <h2 className="text-lg font-bold text-amber-900">Hồ sơ cần đối chiếu {duplicates.length ? `(${duplicates.length})` : ''}</h2>
+            <p className="mt-1 text-sm text-amber-800">
+              {checkingDuplicates
+                ? 'Đang đối chiếu danh sách…'
+                : '“Đủ căn cứ” sẽ tự giữ mã FT cũ. Với “Cần xác nhận”, hãy chọn đúng hồ sơ cũ nếu là cùng một thí sinh; nếu không chọn, hệ thống sẽ tạo hồ sơ riêng.'}
+            </p>
           </div>
-          {!checkingDuplicates && <div className="overflow-x-auto"><table className="ft-table min-w-[900px]"><thead><tr><th>Dòng trong file</th><th>Thông tin nhập</th><th>Hồ sơ hiện có</th><th>Căn cứ trùng</th><th>Các kỳ đã tham gia</th></tr></thead><tbody>{duplicates.map(item => <tr key={`${item.row}-${item.existing.code}`}><td>{item.row}</td><td><b>{item.importedName}</b></td><td><b>{item.existing.name}</b><p className="mt-1 text-xs text-slate-500">{item.existing.code} · {formatBirthDate(item.existing.birthDate)} · {item.existing.school || 'Chưa có trường'}</p></td><td>{item.matchBy}</td><td>{item.existing.sessions?.length ? item.existing.sessions.map(session => `${session.code} · ${session.name}`).join(', ') : 'Chưa ghi nhận kỳ trước'}</td></tr>)}</tbody></table></div>}
+          {!checkingDuplicates && (
+            <div className="overflow-x-auto">
+              <table className="ft-table min-w-[1320px]">
+                <thead><tr><th>Dòng trong file</th><th>Thông tin nhập</th><th>Hồ sơ cũ nghi ngờ</th><th>Trạng thái</th><th>Căn cứ đối chiếu</th><th>Các kỳ đã tham gia</th><th>Quyết định</th></tr></thead>
+                <tbody>{duplicates.map(item => {
+                  const selected = confirmedMatches[String(item.row)] === item.existing.code;
+                  return <tr key={`${item.row}-${item.existing.code}`}>
+                    <td>{item.row}</td>
+                    <td><b>{item.importedName}</b></td>
+                    <td>
+                      <b>{item.existing.name}</b>
+                      <p className="mt-1 text-xs text-slate-500">{item.existing.code} · {formatBirthDate(item.existing.birthDate)} · {item.existing.school || 'Chưa có trường'}{item.existing.className ? ` · ${item.existing.className}` : ''}</p>
+                      <p className="mt-1 text-xs text-slate-500">CCCD: {item.existing.identity || '—'} · SĐT: {item.existing.phone || '—'} · Email: {item.existing.email || '—'}</p>
+                    </td>
+                    <td><span className={item.status === 'confirmed' ? 'rounded-full bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700' : 'rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-800'}>{item.status === 'confirmed' ? 'Đủ căn cứ' : 'Cần xác nhận'}</span></td>
+                    <td>{item.matchBy}</td>
+                    <td>{item.existing.sessions?.length ? item.existing.sessions.map(session => `${session.code} · ${session.name}`).join(', ') : 'Chưa ghi nhận kỳ trước'}</td>
+                    <td>{item.status === 'confirmed' ? <span className="text-xs font-semibold text-emerald-700">Tự động dùng {item.existing.code}</span> : <div className="flex min-w-[220px] flex-col gap-2"><button type="button" onClick={() => setConfirmedMatches(current => selected ? Object.fromEntries(Object.entries(current).filter(([row]) => row !== String(item.row))) : { ...current, [String(item.row)]: item.existing.code })} className={selected ? 'rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white' : 'rounded-lg border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-50'}>{selected ? `✓ Xác nhận dùng ${item.existing.code}` : `Xác nhận trùng với ${item.existing.code}`}</button><button type="button" onClick={() => setConfirmedMatches(current => Object.fromEntries(Object.entries(current).filter(([row]) => row !== String(item.row))))} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">Giữ là hai hồ sơ riêng</button></div>}</td>
+                  </tr>;
+                })}</tbody>
+              </table>
+            </div>
+          )}
         </section>
-      )}
-      {/* Preview bảng */}
+      )}      {/* Preview bảng */}
       {rows.length > 0 && (
         <section className="mt-5 ft-surface overflow-hidden">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

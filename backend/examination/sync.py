@@ -48,27 +48,98 @@ def format_person_name(value):
     words = re.sub(r'\s+', ' ', clean_txt(value)).split(' ')
     return ' '.join('-'.join(part[:1].upper() + part[1:].lower() for part in word.split('-') if part) for word in words if word)
 
+def normalized_identity(value):
+    digits = re.sub(r'\D', '', clean_txt(value))
+    return digits if len(digits) >= 6 and len(set(digits)) > 1 else ''
+
+
+def normalized_phone(value):
+    digits = re.sub(r'\D', '', clean_txt(value))
+    if digits.startswith('84') and len(digits) in {11, 12}:
+        digits = '0' + digits[2:]
+    return digits if len(digits) >= 9 and len(set(digits)) > 1 else ''
+
+
+def normalized_email(value):
+    email = clean_txt(value).casefold()
+    return email if '@' in email and '.' in email.rsplit('@', 1)[-1] else ''
+
+
+def birth_date_parts(value):
+    raw = clean_txt(value)
+    full = raw if re.fullmatch(r'\d{4}-\d{2}-\d{2}', raw) else ''
+    year = raw[:4] if re.fullmatch(r'\d{4}(?:-\d{2}-\d{2})?', raw) else ''
+    return year, full
+
+
+def same_nonempty(a, b):
+    left, right = normalise_str(a), normalise_str(b)
+    return bool(left and right and left == right)
+
+
+def should_replace_birth_date(existing_value, incoming_value):
+    """Keep a known DD/MM/YYYY-equivalent ISO date when a later import has only its year."""
+    _, existing_full = birth_date_parts(existing_value)
+    _, incoming_full = birth_date_parts(incoming_value)
+    return bool(clean_txt(incoming_value)) and not (existing_full and not incoming_full)
+
+
+def candidate_match_assessment(a, b):
+    """Classify matches using only reliable identifiers, then a strict fallback.
+
+    CCCD, email and phone are the primary keys. Matching one of those plus the
+    same name is safe to link automatically; the same identifier with a
+    different name is surfaced for an operator to confirm. When at least one
+    record is missing an identifier, a full name + full DOB + school + class is
+    the only automatic fallback.
+    """
+    identity_a, identity_b = normalized_identity(a.get('identity')), normalized_identity(b.get('identity'))
+    email_a, email_b = normalized_email(a.get('email')), normalized_email(b.get('email'))
+    phone_a, phone_b = normalized_phone(a.get('phone')), normalized_phone(b.get('phone'))
+    identifier_pairs = [
+        ('CCCD/Hộ chiếu', identity_a, identity_b),
+        ('email', email_a, email_b),
+        ('số điện thoại', phone_a, phone_b),
+    ]
+    shared_identifiers = [label for label, left, right in identifier_pairs if left and right and left == right]
+    name_matches = same_nonempty(a.get('name'), b.get('name'))
+
+    if shared_identifiers:
+        reason = ', '.join(shared_identifiers)
+        if name_matches:
+            return {'status': 'confirmed', 'reason': f'Họ tên và {reason} trùng'}
+        return {'status': 'possible', 'reason': f'{reason} trùng nhưng họ tên khác, cần xác nhận'}
+
+    # Do not use descriptive fields when both records already have a complete
+    # but different identity footprint. It is very likely two people.
+    identifiers_missing = any(not value for _, left, right in identifier_pairs for value in (left, right))
+    if not identifiers_missing or not name_matches:
+        return None
+
+    year_a, full_a = birth_date_parts(a.get('birth_date'))
+    year_b, full_b = birth_date_parts(b.get('birth_date'))
+    if full_a and full_b and full_a != full_b:
+        return None
+    if year_a and year_b and year_a != year_b:
+        return None
+
+    school_matches = same_nonempty(a.get('school'), b.get('school'))
+    class_matches = same_nonempty(a.get('class_name') or a.get('className'), b.get('class_name') or b.get('className'))
+    full_birth_matches = bool(full_a and full_b and full_a == full_b)
+    compatible_birth = bool(year_a and year_b and year_a == year_b)
+
+    if full_birth_matches and school_matches and class_matches:
+        return {'status': 'confirmed', 'reason': 'Họ tên, ngày sinh đầy đủ, trường và lớp trùng'}
+    if compatible_birth and (school_matches or class_matches):
+        return {'status': 'possible', 'reason': 'Họ tên, năm/ngày sinh và trường hoặc lớp trùng, cần xác nhận'}
+    if school_matches and class_matches:
+        return {'status': 'possible', 'reason': 'Họ tên, trường và lớp trùng nhưng thiếu ngày sinh, cần xác nhận'}
+    return None
+
+
 def same_candidate(a, b):
-    # Exact government ID is strongest identity key.
-    identity_a = normalise_str(a.get('identity'))
-    identity_b = normalise_str(b.get('identity'))
-    if identity_a and identity_b:
-        return identity_a == identity_b
-
-    name_a, name_b = normalise_str(a.get('name')), normalise_str(b.get('name'))
-    if not name_a or name_a != name_b:
-        return False
-
-    # Email plus the same name is safe enough to link a returning candidate.
-    email_a, email_b = normalise_str(a.get('email')), normalise_str(b.get('email'))
-    if email_a and email_b and email_a == email_b:
-        return True
-
-    # When there is no ID/email, require the three stable fields; never match by name alone.
-    dob_a, dob_b = normalise_str(a.get('birth_date')), normalise_str(b.get('birth_date'))
-    school_a, school_b = normalise_str(a.get('school')), normalise_str(b.get('school'))
-    return bool(dob_a and dob_b and school_a and school_b and dob_a == dob_b and school_a == school_b)
-
+    assessment = candidate_match_assessment(a, b)
+    return bool(assessment and assessment['status'] == 'confirmed')
 def next_code(existing_codes_set, offset=0):
     """Return the next stable, human-readable FermatTech candidate code."""
     numbers = [int(match.group(1)) for code in existing_codes_set if (match := re.fullmatch(r'FT-(\d+)', str(code).strip().upper()))]
@@ -634,18 +705,26 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
         updated = 0
         linked_existing = 0
         for cand in incoming:
-            matched = next((candidate for candidate in existing if same_candidate({
-                'name': candidate.name, 'birth_date': candidate.birth_date, 'identity': candidate.identity,
-                'email': candidate.email, 'school': candidate.school,
-            }, cand)), None)
+            candidate_assessments = []
+            for candidate in existing:
+                assessment = candidate_match_assessment({
+                    'name': candidate.name, 'birth_date': candidate.birth_date, 'identity': candidate.identity,
+                    'email': candidate.email, 'phone': candidate.phone, 'school': candidate.school,
+                    'class_name': candidate.class_name, 'city': candidate.city, 'ward': candidate.ward, 'address': candidate.address,
+                }, cand)
+                if assessment:
+                    candidate_assessments.append((candidate, assessment))
+            confirmed = [(candidate, assessment) for candidate, assessment in candidate_assessments if assessment['status'] == 'confirmed']
+            matched, matched_assessment = confirmed[0] if len(confirmed) == 1 else (None, None)
             same_code = next((candidate for candidate in existing if cand['code'] and candidate.code.upper() == cand['code'].upper()), None)
             base = matched or same_code
             if base:
+                before_values = {field: getattr(base, field) for field in ('name', 'birth_date', 'identity', 'email', 'phone', 'school', 'class_name', 'city', 'ward', 'nationality', 'grade', 'address', 'achievement', 'highest_round', 'parent')}
                 previous_session_ids = list(base.session_ids or [])
                 already_in_target_session = session_id in previous_session_ids or CandidateParticipation.objects.filter(candidate=base, session_id=session_id).exists()
                 base.name = cand['name']
                 for field, key in [('birth_date', 'birth_date'), ('identity', 'identity'), ('email', 'email'), ('phone', 'phone'), ('school', 'school'), ('class_name', 'class_name'), ('city', 'city'), ('ward', 'ward'), ('nationality', 'nationality'), ('grade', 'grade'), ('address', 'address'), ('achievement', 'achievement'), ('highest_round', 'highest_round')]:
-                    if cand[key]:
+                    if cand[key] and (field != 'birth_date' or should_replace_birth_date(base.birth_date, cand[key])):
                         setattr(base, field, cand[key])
                 if cand['parent']:
                     base.parent = cand['parent']
@@ -658,6 +737,24 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
                 base.sort_key = f"{base.name.lower()}_{base.identity or base.id}"
                 base.save()
                 upsert_participation_history(base, session_id, cand['exam_history'], spreadsheet_url, cand['registration'])
+                if matched:
+                    labels = {
+                        'name': 'họ tên', 'birth_date': 'ngày sinh', 'identity': 'CCCD/Hộ chiếu', 'email': 'email',
+                        'phone': 'số điện thoại', 'school': 'trường', 'class_name': 'lớp', 'city': 'tỉnh/thành phố',
+                        'ward': 'xã/phường', 'nationality': 'quốc tịch', 'grade': 'khối lớp', 'address': 'địa chỉ',
+                        'achievement': 'thành tích', 'highest_round': 'vòng cao nhất', 'parent': 'phụ huynh',
+                    }
+                    changes = [
+                        f'Đã cập nhật {labels[field]} từ "{before_values[field] or "chưa có thông tin"}" thành "{getattr(base, field) or "chưa có thông tin"}".'
+                        for field in labels if before_values[field] != getattr(base, field)
+                    ]
+                    if changes:
+                        LogNote.objects.create(
+                            key=f'candidate-{base.code}:import-update:{uuid.uuid4().hex}',
+                            entity_key=f'candidate-{base.code}',
+                            content=f'Hệ thống tự nhận diện hồ sơ trùng theo {matched_assessment["reason"]}.\n' + '\n'.join(changes),
+                            updated_by='Hệ thống FT Workspace', system=True,
+                        )
                 if not already_in_target_session:
                     linked_existing += 1
                     append_existing_candidate_link_note(base, session_id, previous_session_ids)

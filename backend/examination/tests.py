@@ -333,9 +333,43 @@ class CandidateImportReuseTests(TestCase):
         self.assertIn(self.target.id, self.candidate.session_ids)
         self.assertTrue(CandidateParticipation.objects.filter(candidate=self.candidate, session=self.target).exists())
         note = LogNote.objects.filter(entity_key='candidate-FT-00001').latest('created_at')
-        self.assertIn('Hệ thống nhận diện hồ sơ đã có', note.content)
+        self.assertIn('Hệ thống tự nhận diện hồ sơ trùng', note.content)
         self.assertIn('T6/2026', note.content)
 
+    def test_confirmed_possible_match_reuses_selected_profile_and_records_audit(self):
+        self.candidate.email = 'parent@example.com'
+        self.candidate.save(update_fields=['email'])
+        response = self.client.post('/api/examination/import/candidates', {
+            'sessionId': self.target.id,
+            'source': 'Danh sách xác nhận.xlsx',
+            'confirmedMatches': {'1': 'FT-00001'},
+            'records': [{
+                'name': 'Nguyen Ngoc An', 'email': 'parent@example.com',
+                'school': 'Trường B', 'birthDate': '20/03/2014',
+            }],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['created'], 0)
+        self.assertEqual(Candidate.objects.count(), 1)
+        self.candidate.refresh_from_db()
+        self.assertEqual(self.candidate.name, 'Nguyen Ngoc An')
+        self.assertEqual(self.candidate.school, 'Trường B')
+        note = LogNote.objects.filter(entity_key='candidate-FT-00001').latest('created_at')
+        self.assertIn('Người dùng đã xác nhận', note.content)
+
+    def test_year_only_import_does_not_overwrite_a_full_birth_date(self):
+        response = self.client.post('/api/examination/import/candidates', {
+            'sessionId': self.target.id,
+            'source': 'Danh sách bổ sung.xlsx',
+            'records': [{
+                'name': 'Nguyễn Minh Anh', 'identity': '001214066182', 'birthDate': '2014',
+            }],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.candidate.refresh_from_db()
+        self.assertEqual(self.candidate.birth_date, '2014-03-20')
 
 class SessionCompetitionConsistencyTests(TestCase):
     def test_legacy_session_is_relinked_and_serialized_with_the_competition_name(self):
@@ -383,8 +417,20 @@ class ImportDuplicatePreviewTests(TestCase):
         duplicate = response.data['duplicates'][0]
         self.assertEqual(duplicate['importedName'], 'Nguyễn Minh Anh')
         self.assertEqual(duplicate['existing']['code'], 'FT-00042')
-        self.assertEqual(duplicate['matchBy'], 'CCCD/Hộ chiếu')
+        self.assertEqual(duplicate['matchBy'], 'Họ tên và CCCD/Hộ chiếu trùng')
         self.assertNotIn('password', duplicate['existing'])
+        self.assertEqual(duplicate['status'], 'confirmed')
+
+    def test_duplicate_preview_does_not_match_same_name_with_a_different_birth_date(self):
+        response = self.client.post('/api/examination/import/candidates/duplicates', {
+            'records': [{
+                'name': 'Nguyen Minh Anh', 'birthDate': '21/03/2014',
+                'school': 'Truong A', 'city': 'Ha Noi',
+            }],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['duplicates'], [])
 
     def test_manual_candidate_update_normalizes_person_name(self):
         response = self.client.put('/api/examination/candidates/FT-00042', {
@@ -395,3 +441,61 @@ class ImportDuplicatePreviewTests(TestCase):
         candidate = Candidate.objects.get(code='FT-00042')
         self.assertEqual(candidate.name, 'Nguyễn Minh-Anh')
         self.assertEqual(candidate.parent, 'Trần Thị Bình')
+class CandidateIdentityMatchingTests(TestCase):
+    def test_same_name_and_shared_identifier_are_confirmed_even_when_other_fields_changed(self):
+        from .sync import candidate_match_assessment, same_candidate
+
+        previous = {
+            'name': 'Nguyen Thi Phuc An', 'birth_date': '2014-03-21',
+            'identity': '001214056485', 'email': 'old@example.com', 'phone': '0981111111',
+        }
+        incoming = {
+            'name': 'Nguyen Thi Phuc An', 'birth_date': '2014-09-21',
+            'identity': '001214056485', 'email': 'new@example.com', 'phone': '0982222222',
+        }
+
+        assessment = candidate_match_assessment(previous, incoming)
+        self.assertEqual(assessment['status'], 'confirmed')
+        self.assertIn('CCCD', assessment['reason'])
+        self.assertTrue(same_candidate(previous, incoming))
+
+    def test_shared_identifier_but_different_name_requires_confirmation(self):
+        from .sync import candidate_match_assessment, same_candidate
+
+        previous = {'name': 'Nguyen Thi Phuc An', 'email': 'parent@example.com'}
+        incoming = {'name': 'Nguyen Ngoc An', 'email': 'parent@example.com'}
+
+        assessment = candidate_match_assessment(previous, incoming)
+        self.assertEqual(assessment['status'], 'possible')
+        self.assertFalse(same_candidate(previous, incoming))
+
+    def test_missing_identifiers_use_strict_name_birth_school_and_class_fallback(self):
+        from .sync import candidate_match_assessment, same_candidate
+
+        previous = {
+            'name': 'Nguyen Thi Phuc An', 'birth_date': '2014-03-21',
+            'school': 'THCS Trung Vuong', 'class_name': '7A1',
+        }
+        incoming = {
+            'name': 'Nguyen Thi Phuc An', 'birth_date': '2014-03-21',
+            'school': 'THCS Trung Vuong', 'class_name': '7A1',
+        }
+
+        assessment = candidate_match_assessment(previous, incoming)
+        self.assertEqual(assessment['status'], 'confirmed')
+        self.assertTrue(same_candidate(previous, incoming))
+
+    def test_same_name_school_but_different_full_birth_dates_do_not_match(self):
+        from .sync import candidate_match_assessment, same_candidate
+
+        previous = {
+            'name': 'Nguyen Thi Phuc An', 'birth_date': '2014-03-21',
+            'school': 'THCS Trung Vuong', 'class_name': '7A1',
+        }
+        incoming = {
+            'name': 'Nguyen Thi Phuc An', 'birth_date': '2014-09-21',
+            'school': 'THCS Trung Vuong', 'class_name': '7A1',
+        }
+
+        self.assertIsNone(candidate_match_assessment(previous, incoming))
+        self.assertFalse(same_candidate(previous, incoming))
