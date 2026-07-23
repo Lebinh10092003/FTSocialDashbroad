@@ -5,15 +5,32 @@ import { Channel, UserRole } from './types';
 import Sidebar from './components/social-dashboard/Sidebar';
 import LoginModal from './components/LoginModal';
 
-const Dashboard = lazy(() => import('./components/social-dashboard/Dashboard'));
-const MediaSummary = lazy(() => import('./components/social-dashboard/MediaSummary'));
-const Posts = lazy(() => import('./components/social-dashboard/Posts'));
-const Sync = lazy(() => import('./components/social-dashboard/Sync'));
-const Config = lazy(() => import('./components/social-dashboard/Config'));
-const AccountManagement = lazy(() => import('./components/social-dashboard/AccountManagement'));
-const EmailTemplateBuilder = lazy(() => import('./components/email-builder/EmailTemplateBuilder'));
-const ExaminationModule = lazy(() => import('./components/ExaminationModule'));
-const DigitalTraining = lazy(() => import('./components/digital-training/DigitalTraining'));
+const lazyWithRecovery = <T extends React.ComponentType<any>>(loader: () => Promise<{ default: T }>) => lazy(async () => {
+  const retryKey = `ft-workspace-lazy-reload:${window.location.pathname}`;
+  try {
+    const module = await loader();
+    sessionStorage.removeItem(retryKey);
+    return module;
+  } catch (error) {
+    if (!sessionStorage.getItem(retryKey)) {
+      sessionStorage.setItem(retryKey, '1');
+      window.location.reload();
+      return new Promise<never>(() => {});
+    }
+    sessionStorage.removeItem(retryKey);
+    throw error;
+  }
+});
+
+const Dashboard = lazyWithRecovery(() => import('./components/social-dashboard/Dashboard'));
+const MediaSummary = lazyWithRecovery(() => import('./components/social-dashboard/MediaSummary'));
+const Posts = lazyWithRecovery(() => import('./components/social-dashboard/Posts'));
+const Sync = lazyWithRecovery(() => import('./components/social-dashboard/Sync'));
+const Config = lazyWithRecovery(() => import('./components/social-dashboard/Config'));
+const AccountManagement = lazyWithRecovery(() => import('./components/social-dashboard/AccountManagement'));
+const EmailTemplateBuilder = lazyWithRecovery(() => import('./components/email-builder/EmailTemplateBuilder'));
+const ExaminationModule = lazyWithRecovery(() => import('./components/ExaminationModule'));
+const DigitalTraining = lazyWithRecovery(() => import('./components/digital-training/DigitalTraining'));
 
 type ViewMode = 'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training' | 'account-management';
 
