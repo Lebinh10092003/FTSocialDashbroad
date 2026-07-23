@@ -43,6 +43,11 @@ def merge_contest_codes(*values):
             result.append(c)
     return ', '.join(result)
 
+def format_person_name(value):
+    """Normalize a person's name to title case while preserving Vietnamese accents."""
+    words = re.sub(r'\s+', ' ', clean_txt(value)).split(' ')
+    return ' '.join('-'.join(part[:1].upper() + part[1:].lower() for part in word.split('-') if part) for word in words if word)
+
 def same_candidate(a, b):
     # Exact government ID is strongest identity key.
     identity_a = normalise_str(a.get('identity'))
@@ -583,7 +588,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
                 index = col.get(field)
                 return clean_txt(row[index]) if index is not None and index < len(row) else ''
 
-            name = value('name')
+            name = format_person_name(value('name'))
             if not name:
                 continue
             raw_contests = value('contests')
@@ -607,7 +612,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
                 'class_name': value('className'), 'city': value('city'), 'ward': value('ward'), 'nationality': value('nationality'),
                 'grade': value('grade'), 'address': value('fullAddress') or ', '.join(filter(None, [value('streetAddress'), value('ward'), value('city')])),
                 'contests': contests, 'achievement': value('achievement') or ' | '.join(legacy_achievement), 'highest_round': value('highestRound'),
-                'parent': value('parent'), 'updated': value('updated') or ts_vn, 'registration': registration,
+                'parent': format_person_name(value('parent')), 'updated': value('updated') or ts_vn, 'registration': registration,
                 'exam_history': history_from_sheet_row(header_row, row),
             }
             incoming.append(cand)

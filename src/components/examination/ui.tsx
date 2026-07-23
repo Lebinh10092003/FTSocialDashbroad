@@ -38,6 +38,11 @@ export function BirthDateControl({ value, onChange }: { value?: string; onChange
   return <div className="mt-1"><label className="mb-2 inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={yearOnly} onChange={event => changeYearOnly(event.currentTarget.checked)}/><span>Chỉ năm sinh</span></label>{yearOnly ? <select value={normalized} onChange={event => onChange(event.currentTarget.value)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2"><option value="">Chọn năm sinh</option>{years.map(year => <option key={year} value={year}>{year}</option>)}</select> : <input type="date" value={/^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : ''} onChange={event => onChange(event.currentTarget.value)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2"/>}</div>;
 }
 export function formatGrade(value?: string) { return String(value || '').trim().replace(/^khối\s*/i, ''); }
+export function formatPersonName(value?: string) {
+  return String(value || '').trim().replace(/\s+/g, ' ').split(' ').filter(Boolean)
+    .map(word => word.split('-').filter(Boolean).map(part => `${part.charAt(0).toLocaleUpperCase('vi-VN')}${part.slice(1).toLocaleLowerCase('vi-VN')}`).join('-'))
+    .join(' ');
+}
 export function formatBirthDate(value?: string) {
   const normalized = normaliseBirthDate(value);
   if (/^\d{4}$/.test(normalized)) return normalized;

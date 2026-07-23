@@ -6,7 +6,7 @@ import {
   Trash2, Pencil, Plus,
 } from 'lucide-react';
 import type { Candidate, ExaminationSession } from './types';
-import { formatBirthDate, normaliseBirthDate } from './ui';
+import { formatBirthDate, formatPersonName, normaliseBirthDate } from './ui';
 
 type ImportRow = Record<string, unknown>;
 type Props = {
@@ -28,6 +28,12 @@ interface SyncState {
   error?: string;
 }
 
+type DuplicateCandidate = {
+  row: number;
+  importedName: string;
+  matchBy: string;
+  existing: { code: string; name: string; birthDate?: string; school?: string; city?: string; sessions?: { id: string; code: string; name: string }[] };
+};
 interface SheetSource {
   id: string;
   name: string;
@@ -98,9 +104,9 @@ function historyFromRow(row: ImportRow): RoundHistory[] {
 function mapRows(rawRows: ImportRow[]): (Candidate & { examHistory?: RoundHistory[] })[] {
   return rawRows.map((row, index) => {
     const entries = Object.entries(row).map(([key, value]) => [normalise(key), text(value)] as [string, string]);
-    const name = valueFor(entries, 'name');
+    const name = formatPersonName(valueFor(entries, 'name'));
     const code = valueFor(entries, 'code');
-    return { code, name, school: valueFor(entries, 'school'), className: valueFor(entries, 'className'), city: valueFor(entries, 'city'), ward: valueFor(entries, 'ward'), nationality: valueFor(entries, 'nationality'), grade: valueFor(entries, 'grade'), contests: valueFor(entries, 'contests'), subject: valueFor(entries, 'subject'), category: valueFor(entries, 'category'), registrationMethod: valueFor(entries, 'registrationMethod'), registrationUnit: valueFor(entries, 'registrationUnit'), teamName: valueFor(entries, 'teamName'), examLanguage: valueFor(entries, 'examLanguage'), generalNote: valueFor(entries, 'generalNote'), certificateLink: valueFor(entries, 'certificateLink'), achievement: valueFor(entries, 'achievement'), highestRound: valueFor(entries, 'highestRound'), email: valueFor(entries, 'email'), parent: valueFor(entries, 'parent'), phone: valueFor(entries, 'phone'), identity: valueFor(entries, 'identity'), address: valueFor(entries, 'address'), birthDate: normaliseBirthDate(valueFor(entries, 'birthDate')), updated: valueFor(entries, 'updated'), examHistory: historyFromRow(row) };
+    return { code, name, school: valueFor(entries, 'school'), className: valueFor(entries, 'className'), city: valueFor(entries, 'city'), ward: valueFor(entries, 'ward'), nationality: valueFor(entries, 'nationality'), grade: valueFor(entries, 'grade'), contests: valueFor(entries, 'contests'), subject: valueFor(entries, 'subject'), category: valueFor(entries, 'category'), registrationMethod: valueFor(entries, 'registrationMethod'), registrationUnit: valueFor(entries, 'registrationUnit'), teamName: valueFor(entries, 'teamName'), examLanguage: valueFor(entries, 'examLanguage'), generalNote: valueFor(entries, 'generalNote'), certificateLink: valueFor(entries, 'certificateLink'), achievement: valueFor(entries, 'achievement'), highestRound: valueFor(entries, 'highestRound'), email: valueFor(entries, 'email'), parent: formatPersonName(valueFor(entries, 'parent')), phone: valueFor(entries, 'phone'), identity: valueFor(entries, 'identity'), address: valueFor(entries, 'address'), birthDate: normaliseBirthDate(valueFor(entries, 'birthDate')), updated: valueFor(entries, 'updated'), examHistory: historyFromRow(row) };
   }).filter(row => row.name && !['stt', 'họ và tên', 'ho va ten'].includes(normalise(row.name)));
 }
 
@@ -143,6 +149,8 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   const [source, setSource] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>([]);
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const previewLimit = 20;
   const sample = useMemo(() => rows.slice(0, previewLimit), [rows]);
   const rowIndexForPreview = (row: Candidate) => rows.indexOf(row) + 1;
@@ -167,6 +175,25 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   };
 
 
+  const checkDuplicateCandidates = async (records: Candidate[]) => {
+    setDuplicates([]);
+    if (!records.length || !idToken) return;
+    setCheckingDuplicates(true);
+    try {
+      const response = await fetch('/api/examination/import/candidates/duplicates', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ records }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'Không thể kiểm tra hồ sơ trùng.');
+      setDuplicates(Array.isArray(body.duplicates) ? body.duplicates : []);
+    } catch (error) {
+      console.warn('Không thể kiểm tra hồ sơ trùng:', error);
+    } finally {
+      setCheckingDuplicates(false);
+    }
+  };
   const activeSheetSources = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     return sheets.filter(sheet => {
@@ -204,6 +231,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     const parsed = mapRows(rawRows);
     setRows(parsed);
     setSource(sourceName);
+    void checkDuplicateCandidates(parsed);
     setMessage(
       parsed.length
         ? `Đã nhận diện ${parsed.length} thí sinh. Kiểm tra mẫu xem trước rồi nhập dữ liệu.`
@@ -532,6 +560,15 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
         </div>
       )}
 
+      {(checkingDuplicates || duplicates.length > 0) && (
+        <section className="mt-5 ft-surface overflow-hidden border-amber-200">
+          <div className="border-b border-amber-100 bg-amber-50 px-5 py-4">
+            <h2 className="text-lg font-bold text-amber-900">Hồ sơ đã có trên hệ thống {duplicates.length ? `(${duplicates.length})` : ''}</h2>
+            <p className="mt-1 text-sm text-amber-800">{checkingDuplicates ? 'Đang đối chiếu danh sách…' : 'Các hồ sơ dưới đây sẽ giữ nguyên mã FT; khi nhập chỉ được bổ sung kỳ tổ chức và dữ liệu thi mới.'}</p>
+          </div>
+          {!checkingDuplicates && <div className="overflow-x-auto"><table className="ft-table min-w-[900px]"><thead><tr><th>Dòng trong file</th><th>Thông tin nhập</th><th>Hồ sơ hiện có</th><th>Căn cứ trùng</th><th>Các kỳ đã tham gia</th></tr></thead><tbody>{duplicates.map(item => <tr key={`${item.row}-${item.existing.code}`}><td>{item.row}</td><td><b>{item.importedName}</b></td><td><b>{item.existing.name}</b><p className="mt-1 text-xs text-slate-500">{item.existing.code} · {formatBirthDate(item.existing.birthDate)} · {item.existing.school || 'Chưa có trường'}</p></td><td>{item.matchBy}</td><td>{item.existing.sessions?.length ? item.existing.sessions.map(session => `${session.code} · ${session.name}`).join(', ') : 'Chưa ghi nhận kỳ trước'}</td></tr>)}</tbody></table></div>}
+        </section>
+      )}
       {/* Preview bảng */}
       {rows.length > 0 && (
         <section className="mt-5 ft-surface overflow-hidden">

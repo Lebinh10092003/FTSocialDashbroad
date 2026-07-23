@@ -2,7 +2,7 @@ import React from 'react';
 import type { Candidate, Competition, ExaminationSession, SessionRound } from './types';
 import ExamDialog from './ExamDialog';
 import { sessionRounds } from './rounds';
-import { BirthDateControl, TimeField, dateValue, emptyDate } from './ui';
+import { BirthDateControl, TimeField, dateValue, emptyDate, formatPersonName } from './ui';
 
 type Teacher = { name: string; subject: string; phone: string; email: string; workplace: string };
 type Mode = 'competition' | 'session' | 'candidate' | 'teacher' | 'enrol' | null;
@@ -19,7 +19,7 @@ const SESSION_PHASE_SUGGESTIONS = [
 ];
 const CandidateFields = ({ value, onChange, enrollment = false }: { value: Candidate; onChange: (value: Candidate) => void; enrollment?: boolean }) => {
   const fields: [keyof Candidate, string][] = [['name', 'Họ và tên *'], ['identity', 'Căn cước công dân'], ['email', 'Email'], ['school', 'Tên trường'], ['className', 'Lớp đang học'], ['grade', 'Khối lớp hiện tại'], ['city', 'Tỉnh / thành phố cư trú'], ['ward', 'Xã / phường'], ['nationality', 'Quốc tịch'], ['achievement', 'Kết quả / giải thưởng'], ['highestRound', 'Vòng cao nhất đã đạt'], ['parent', 'Phụ huynh'], ['phone', 'Điện thoại'], ['address', 'Địa chỉ'], ...(enrollment ? ([['code', 'Mã FT (để trống để tự tạo)']] as [keyof Candidate, string][]) : [])];
-  return <div className="grid gap-4 sm:grid-cols-2"><label><span className="text-sm font-bold">Ngày sinh</span><BirthDateControl value={value.birthDate} onChange={birthDate => onChange({ ...value, birthDate })}/></label>{fields.map(([field, label]) => <label key={field} className={field === 'address' ? 'sm:col-span-2' : ''}><span className="text-sm font-bold">{label}</span><input type="text" value={String(value[field] || '')} onChange={event => onChange({ ...value, [field]: event.target.value })} className={input}/></label>)}{!enrollment && <label className="sm:col-span-2"><span className="text-sm font-bold">Các cuộc thi đã tham gia</span><input value={value.contests} onChange={event => onChange({ ...value, contests: event.target.value })} className={input} placeholder="AYSBC, IMO"/></label>}</div>;
+  return <div className="grid gap-4 sm:grid-cols-2"><label><span className="text-sm font-bold">Ngày sinh</span><BirthDateControl value={value.birthDate} onChange={birthDate => onChange({ ...value, birthDate })}/></label>{fields.map(([field, label]) => <label key={field} className={field === 'address' ? 'sm:col-span-2' : ''}><span className="text-sm font-bold">{label}</span><input type="text" value={String(value[field] || '')} onChange={event => onChange({ ...value, [field]: field === 'name' || field === 'parent' ? formatPersonName(event.target.value) : event.target.value })} className={input}/></label>)}{!enrollment && <label className="sm:col-span-2"><span className="text-sm font-bold">Các cuộc thi đã tham gia</span><input value={value.contests} onChange={event => onChange({ ...value, contests: event.target.value })} className={input} placeholder="AYSBC, IMO"/></label>}</div>;
 };
 function draftDateFrom(date?: string, label?: string) {
   const text = String(label || '').trim();

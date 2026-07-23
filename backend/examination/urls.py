@@ -16,6 +16,7 @@ urlpatterns = [
     path('examination/sheets/<str:pk>/export', views.sheet_export, name='sheet_export'),
     path('examination/sync/google-sheet', views.sheets_sync, name='sheets_sync'),
     path('examination/sync/status', views.sync_status, name='sync_status'),
+    path('examination/import/candidates/duplicates', views.import_candidate_duplicates, name='import_candidate_duplicates'),
     path('examination/import/candidates', views.import_candidates, name='import_candidates'),
     path('examination/lognotes/<str:entityKey>', views.lognotes_detail, name='lognotes_detail'),
     path('examination/<str:resource>', views.get_resource_list, name='get_resource_list'),

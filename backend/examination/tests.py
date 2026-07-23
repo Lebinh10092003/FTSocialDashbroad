@@ -357,3 +357,41 @@ class SessionCompetitionConsistencyTests(TestCase):
         self.assertEqual(session.parent, competition.name)
         self.assertEqual(session.organizer, competition.organizer)
         self.assertEqual(payload['competitionName'], competition.name)
+class ImportDuplicatePreviewTests(TestCase):
+    def setUp(self):
+        email = 'duplicate-preview@example.com'
+        UserProfile.objects.create(email=email, name='Duplicate Preview', role='ADMIN')
+        django_user = get_user_model().objects.create_user(username=email, email=email, password='DuplicatePreview9921')
+        token = Token.objects.create(user=django_user).key
+        self.client = APIClient()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
+        Candidate.objects.create(
+            id='FT-00042', code='FT-00042', name='Nguyễn Minh Anh', identity='001214066182',
+            school='Trường A', birth_date='2014-03-20', city='Hà Nội', sort_key='nguyen-minh-anh',
+        )
+
+    def test_duplicate_preview_returns_existing_profile_without_exposing_exam_credentials(self):
+        response = self.client.post('/api/examination/import/candidates/duplicates', {
+            'records': [{
+                'name': 'nguyễn MINH anh', 'identity': '001214066182',
+                'birthDate': '20/03/2014', 'school': 'Trường A',
+            }],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['duplicates']), 1)
+        duplicate = response.data['duplicates'][0]
+        self.assertEqual(duplicate['importedName'], 'Nguyễn Minh Anh')
+        self.assertEqual(duplicate['existing']['code'], 'FT-00042')
+        self.assertEqual(duplicate['matchBy'], 'CCCD/Hộ chiếu')
+        self.assertNotIn('password', duplicate['existing'])
+
+    def test_manual_candidate_update_normalizes_person_name(self):
+        response = self.client.put('/api/examination/candidates/FT-00042', {
+            'name': 'nguyễn  MINH-ANH', 'parent': 'trần THỊ bình',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        candidate = Candidate.objects.get(code='FT-00042')
+        self.assertEqual(candidate.name, 'Nguyễn Minh-Anh')
+        self.assertEqual(candidate.parent, 'Trần Thị Bình')

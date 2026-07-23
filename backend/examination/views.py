@@ -16,6 +16,7 @@ from .sync import (
     same_candidate,
     next_code,
     parse_dob,
+    format_person_name,
     export_session_to_google_sheet
 )
 
@@ -908,7 +909,7 @@ def candidate_detail(request, pk):
         for field in fields:
             if field in data:
                 val = str(data[field]).strip()
-                if field == 'name': cand.name = val
+                if field == 'name': cand.name = format_person_name(val)
                 elif field == 'school': cand.school = val
                 elif field == 'className': cand.class_name = val
                 elif field == 'city': cand.city = val
@@ -919,7 +920,7 @@ def candidate_detail(request, pk):
                 elif field == 'achievement': cand.achievement = val
                 elif field == 'highestRound': cand.highest_round = val
                 elif field == 'email': cand.email = val
-                elif field == 'parent': cand.parent = val
+                elif field == 'parent': cand.parent = format_person_name(val)
                 elif field == 'phone': cand.phone = val
                 elif field == 'identity': cand.identity = val
                 elif field == 'address': cand.address = val
@@ -1228,6 +1229,70 @@ def sync_status(request):
     config = SystemConfig.objects.filter(key='examination_sync_state').first()
     return Response(config.data if config and config.data else {'status': 'idle'})
 
+def duplicate_match_reason(existing, incoming, supplied_code=''):
+    if supplied_code and str(existing.code or '').upper() == supplied_code.upper():
+        return 'Mã hồ sơ'
+    if str(existing.identity or '').strip() and str(incoming.get('identity') or '').strip() and re.sub(r'\D', '', existing.identity) == re.sub(r'\D', '', str(incoming.get('identity') or '')):
+        return 'CCCD/Hộ chiếu'
+    if str(existing.email or '').strip() and str(incoming.get('email') or '').strip() and existing.email.strip().casefold() == str(incoming.get('email') or '').strip().casefold():
+        return 'Họ tên và email'
+    return 'Họ tên, ngày sinh và trường'
+
+
+def duplicate_candidate_summary(candidate):
+    sessions = list(ExamSession.objects.filter(id__in=list(candidate.session_ids or [])).values('id', 'code', 'name'))
+    return {
+        'code': candidate.code,
+        'name': candidate.name,
+        'birthDate': candidate.birth_date or '',
+        'school': candidate.school or '',
+        'city': candidate.city or '',
+        'sessions': sessions,
+    }
+
+
+@api_view(['POST'])
+@permission_classes([IsManagerOrAdmin])
+def import_candidate_duplicates(request):
+    """Preview safe identity matches before a spreadsheet is committed."""
+    records = (request.data or {}).get('records', [])
+    if not isinstance(records, list):
+        return Response({'error': 'Danh sách hồ sơ không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
+    if len(records) > 1000:
+        return Response({'error': 'Mỗi lần chỉ được kiểm tra tối đa 1.000 hồ sơ.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    existing = list(Candidate.objects.all())
+    duplicates = []
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        name = format_person_name(record.get('name', ''))
+        if not name:
+            continue
+        raw_code = str(record.get('code') or '').replace('/', '-').replace('?', '-').replace('#', '-').strip().upper()
+        supplied_code = '' if raw_code in {'', '-', '—', 'N/A', 'NA'} else raw_code
+        incoming = {
+            'name': name,
+            'birth_date': parse_dob(record.get('birthDate', '')),
+            'identity': str(record.get('identity') or '').strip(),
+            'email': str(record.get('email') or '').strip(),
+            'school': str(record.get('school') or '').strip(),
+        }
+        matched = next((candidate for candidate in existing if same_candidate({
+            'name': candidate.name, 'birth_date': candidate.birth_date, 'identity': candidate.identity,
+            'email': candidate.email, 'school': candidate.school,
+        }, incoming)), None)
+        if not matched and supplied_code:
+            matched = next((candidate for candidate in existing if str(candidate.code or '').upper() == supplied_code), None)
+        if matched:
+            duplicates.append({
+                'row': index + 1,
+                'importedName': name,
+                'matchBy': duplicate_match_reason(matched, incoming, supplied_code),
+                'existing': duplicate_candidate_summary(matched),
+            })
+    return Response({'duplicates': duplicates})
+
 @api_view(['POST'])
 @permission_classes([IsManagerOrAdmin])
 def import_candidates(request):
@@ -1266,7 +1331,7 @@ def import_candidates(request):
             # code. They receive the next FT-00001 style code below; a supplied
             # legacy code remains usable for re-import matching.
             rec_code = '' if raw_code in {'', '-', '—', 'N/A', 'NA'} else raw_code
-            rec_name = str(rec.get('name', '')).strip()
+            rec_name = format_person_name(rec.get('name', ''))
             if not rec_name:
                 continue
                 
@@ -1283,7 +1348,7 @@ def import_candidates(request):
                 'achievement': str(rec.get('achievement', '')).strip(),
                 'highest_round': str(rec.get('highestRound', '')).strip(),
                 'email': str(rec.get('email', '')).strip(),
-                'parent': str(rec.get('parent', '')).strip(),
+                'parent': format_person_name(rec.get('parent', '')),
                 'phone': str(rec.get('phone', '')).strip(),
                 'identity': str(rec.get('identity', '')).strip(),
                 'address': str(rec.get('address', '')).strip(),
