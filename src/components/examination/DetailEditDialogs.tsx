@@ -28,17 +28,10 @@ function SessionFields({ value, competitions, onChange }: { value: ExaminationSe
     const timing = dateValue(time);
     updateRound(index, { label: timing.label || '', date: timing.date || '' });
   };
-  const updateMilestone = (field: 'national' | 'international', time: ReturnType<typeof emptyDate>) => {
-    const timing = dateValue(time);
-    const dateField = field === 'national' ? 'nationalDate' : 'internationalDate';
-    onChange({ ...value, [field]: timing.label || '', [dateField]: timing.date || '' });
-  };
   return <div className="grid gap-4">
     <label><span className="text-sm font-bold">Tên kỳ tổ chức *</span><input value={value.name} onChange={event => onChange({ ...value, name: event.target.value })} className={input}/></label>
     <label><span className="text-sm font-bold">Cuộc thi *</span><select value={value.competitionId || ''} onChange={event => onChange({ ...value, competitionId: event.target.value })} className={input}>{competitions.map(item => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}</select></label>
     <div className="grid gap-4 sm:grid-cols-2"><label><span className="text-sm font-bold">Giai đoạn hiện tại</span><input value={value.phase || ''} onChange={event => onChange({ ...value, phase: event.target.value })} placeholder="Ví dụ: Chuẩn bị" className={input}/></label><label><span className="text-sm font-bold">Ghi chú chung</span><input value={value.note || ''} onChange={event => onChange({ ...value, note: event.target.value })} className={input}/></label></div>
-    <TimeField label="Thời gian Vòng quốc gia" value={draftDateFrom(value.nationalDate, value.national)} onChange={time => updateMilestone('national', time)}/>
-    <TimeField label="Thời gian Vòng quốc tế" value={draftDateFrom(value.internationalDate, value.international)} onChange={time => updateMilestone('international', time)}/>
     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4"><div className="mb-3"><h3 className="font-extrabold text-[#001e40]">Các vòng thi</h3><p className="mt-1 text-sm text-slate-500">Tên vòng tạo ra tab tương ứng trên trang chi tiết. Mỗi vòng dùng cùng cách khai báo thời gian như lúc tạo kỳ.</p></div><div className="grid gap-3">{rounds.map((round, index) => <div key={round.id || index} className="rounded-lg border bg-white p-3"><div className="flex items-center justify-between gap-3"><b className="text-sm text-[#001e40]">Vòng {index + 1}</b><button type="button" onClick={() => onChange({ ...value, rounds: rounds.filter((_, current) => current !== index) })} className="text-xs font-bold text-rose-600">Xóa vòng</button></div><label className="mt-3 block"><span className="text-xs font-bold text-slate-500">Tên vòng thi *</span><input value={round.name || ''} onChange={event => updateRound(index, { name: event.target.value })} className={input}/></label><div className="mt-3"><TimeField label={`Thời gian ${round.name || `Vòng ${index + 1}`}`} value={draftDateFrom(round.date, round.label)} onChange={time => updateRoundTime(index, time)}/></div></div>)}</div><button type="button" onClick={() => onChange({ ...value, rounds: [...rounds, { id: `round-${Date.now()}`, name: '', label: '', date: '' }] })} className="mt-3 rounded-lg border border-dashed border-[#aa3000] px-3 py-2 text-sm font-bold text-[#aa3000]">+ Thêm vòng thi</button></div>
   </div>;
 }
