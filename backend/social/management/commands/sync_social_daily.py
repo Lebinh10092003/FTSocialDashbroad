@@ -77,16 +77,21 @@ class Command(BaseCommand):
 
         for channel in active_channels:
             needs_initial_sync = force_history or channel.initial_sync_completed_at is None
-            recent_since = now - datetime.timedelta(days=recent_days)
-            since = manual_since or (history_since if needs_initial_sync else recent_since)
+            fallback_recent_since = now - datetime.timedelta(days=recent_days)
+
+            # The first run fills the reporting history once. Every following
+            # run begins at this channel's own successful sync marker, exactly
+            # like follower history: only data created since that marker is
+            # requested and snapshotted. The fallback keeps legacy channels
+            # safe when they have an initial marker but no recorded sync time.
+            incremental_since = channel.last_sync_at or fallback_recent_since
+            since = manual_since or (history_since if needs_initial_sync else incremental_since)
             until = manual_until or now
 
-            # Post metrics are stock values (for example, a post published last
-            # month can still receive new views today). Discover only recent
-            # posts on routine runs, but refresh the metrics of every tracked
-            # post in the reporting history so today's snapshot is complete.
-            # Without this, only followers received a new daily value.
-            snapshot_existing_since = manual_since or history_since
+            # Re-read metrics only for posts in this incremental window. This
+            # prevents the 06:00 job and the dashboard button from repeatedly
+            # querying the entire one-year archive.
+            snapshot_existing_since = since
 
             success, message = SyncEngine.sync_channel(
                 channel.id,

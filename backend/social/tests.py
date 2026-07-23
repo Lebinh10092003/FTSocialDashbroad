@@ -341,8 +341,23 @@ class DailySyncCommandTests(TestCase):
         self.assertTrue(timedelta(hours=23) < timezone.now() - kwargs["since"] < timedelta(hours=25))
         self.assertTrue(timedelta(hours=23) < timezone.now() - kwargs["follower_since"] < timedelta(hours=25))
         self.assertTrue(
-            timedelta(days=395) < timezone.now() - kwargs["snapshot_existing_since"] < timedelta(days=397)
+            timedelta(hours=23) < timezone.now() - kwargs["snapshot_existing_since"] < timedelta(hours=25)
         )
+
+    @patch("social.management.commands.sync_social_daily.SyncEngine.sync_channel")
+    def test_later_runs_begin_at_the_channel_last_successful_sync(self, sync_channel):
+        last_sync = timezone.now() - timedelta(hours=7, minutes=15)
+        self.channel.initial_sync_completed_at = last_sync - timedelta(days=365)
+        self.channel.last_sync_at = last_sync
+        self.channel.save(update_fields=["initial_sync_completed_at", "last_sync_at"])
+        sync_channel.return_value = (True, "ok")
+
+        call_command("sync_social_daily", stdout=StringIO())
+
+        kwargs = sync_channel.call_args.kwargs
+        self.assertTrue(timedelta(hours=7) < timezone.now() - kwargs["since"] < timedelta(hours=7, minutes=30))
+        self.assertEqual(kwargs["snapshot_existing_since"], kwargs["since"])
+        self.assertEqual(kwargs["follower_since"], kwargs["since"])
 
 
 class MediaSummaryTrendTests(TestCase):
@@ -571,7 +586,10 @@ class DashboardFilterConsistencyTests(TestCase):
         self.assertEqual([item['type'] for item in data['typeStats']], ['Ảnh / Album'])
         expected_dates = [(self.period_start + timedelta(days=offset)).isoformat() for offset in range(7)]
         self.assertEqual([item['date'] for item in data['trends']], expected_dates)
-
+        latest_day = next(item for item in data['trends'] if item['date'] == self.period_end.isoformat())
+        self.assertEqual(latest_day['postsCount'], 1)
+        self.assertEqual(latest_day['views'], 10)
+        self.assertEqual(latest_day['engagement'], 10)
         top_viewed_keys = [item['postKey'] for item in data['topViewedPosts']]
         self.assertEqual(top_viewed_keys[0], self.old_top_post.post_key)
         self.assertIn(self.recent_post.post_key, top_viewed_keys)

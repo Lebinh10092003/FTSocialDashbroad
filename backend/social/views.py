@@ -677,11 +677,10 @@ def dashboard_view(request):
     elif impressions > 0:
         engagement_rate = round((total_engagement / impressions) * 100, 2)
 
-    # 4. Build a complete daily series from metric snapshots. Metrics are stock
-    # counters at the provider, therefore each point is the increment since the
-    # previous saved snapshot for that post. This makes the current day visible
-    # and lets every chart reflect the 06:00 refresh even when no new post was
-    # published that day.
+    # 4. Build a complete series by the post publication date. Each point uses
+    # the latest saved metric for that post as of the selected period end. This
+    # keeps all dashboard cards and chart lines aligned with incremental syncs,
+    # without inventing zero deltas for days when an older post was not re-read.
     start_day = datetime.date.fromisoformat(period_start)
     end_day = datetime.date.fromisoformat(period_end)
     channel_map = {channel.id: channel.name for channel in channels}
@@ -706,46 +705,26 @@ def dashboard_view(request):
         trend_map[date_string] = point
         current_day += datetime.timedelta(days=1)
 
-    # Post count is naturally grouped by its publication day.
     for post in posts:
         date_string = str(post.published_at)[:10]
         point = trend_map.get(date_string)
         if not point:
             continue
-        channel_name = channel_map.get(post.channel_id, 'Kênh ẩn')
-        point['postsCount'] += 1
-        point[f'{channel_name}_postsCount'] += 1
 
-    # Read prior snapshots too: they are needed to calculate each day's delta.
-    snapshot_history = DailySnapshot.objects.filter(
-        post_key__in=post_keys,
-        snapshot_date__lte=period_end,
-    ).order_by('post_key', 'snapshot_date')
-    if platform_filter:
-        snapshot_history = snapshot_history.filter(platform=platform_filter)
-
-    previous_by_post = {}
-    for snapshot in snapshot_history:
-        previous = previous_by_post.get(snapshot.post_key)
-        previous_by_post[snapshot.post_key] = snapshot
-        point = trend_map.get(snapshot.snapshot_date)
-        if not point or previous is None:
-            continue
-
-        channel_name = channel_map.get(snapshot.channel_id, 'Kênh ẩn')
-        current_views = snapshot.views or snapshot.impressions or snapshot.reach or 0
-        previous_views = previous.views or previous.impressions or previous.reach or 0
-        deltas = {
-            'views': max(0, current_views - previous_views),
-            'engagement': max(0, (snapshot.total_engagement or 0) - (previous.total_engagement or 0)),
-            'likes': max(0, (snapshot.reactions or 0) - (previous.reactions or 0)),
-            'comments': max(0, (snapshot.comments or 0) - (previous.comments or 0)),
-            'shares': max(0, (snapshot.shares or 0) - (previous.shares or 0)),
-            'reach': max(0, (snapshot.reach or 0) - (previous.reach or 0)),
+        channel_name = channel_map.get(post.channel_id, 'Hidden channel')
+        snapshot = latest_snaps.get(post.post_key)
+        values = {
+            'postsCount': 1,
+            'engagement': snapshot.total_engagement if snapshot else 0,
+            'likes': snapshot.reactions if snapshot else 0,
+            'comments': snapshot.comments if snapshot else 0,
+            'shares': snapshot.shares if snapshot else 0,
+            'views': (snapshot.views or snapshot.impressions or snapshot.reach or 0) if snapshot else 0,
+            'reach': snapshot.reach if snapshot else 0,
         }
-        for metric, value in deltas.items():
-            point[metric] += value
-            point[f'{channel_name}_{metric}'] += value
+        for metric, value in values.items():
+            point[metric] += value or 0
+            point[f'{channel_name}_{metric}'] += value or 0
 
     trends = []
     for point in trend_map.values():
@@ -1077,7 +1056,11 @@ def sync_cancel(request):
 def sync_history(request):
     """GET /api/sync/history - Lịch sử đồng bộ"""
     from .models import ApiLog
-    logs = ApiLog.objects.all().order_by('-started_at')[:100]
+    request_id = str(request.query_params.get("requestId") or "").strip()
+    logs = ApiLog.objects.all()
+    if request_id:
+        logs = logs.filter(request_id=request_id)
+    logs = logs.order_by('-started_at')[:100]
     result = []
     for log in logs:
         result.append({

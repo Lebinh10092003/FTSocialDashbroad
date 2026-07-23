@@ -343,15 +343,40 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
     setEndDate(range.endDate);
   };
 
+  const waitForBackgroundSync = async (requestId: string) => {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await new Promise<void>(resolve => window.setTimeout(resolve, 2000));
+      const response = await fetch(`/api/sync/history?requestId=${encodeURIComponent(requestId)}`, {
+        cache: 'no-store',
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      if (!response.ok) throw new Error('Không thể theo dõi tiến trình đồng bộ.');
+      const logs = await response.json().catch(() => []);
+      if (!Array.isArray(logs) || logs.length === 0) continue;
+      if (logs.some(log => log.status === 'queued' || log.status === 'running')) continue;
+      const failedLog = logs.find(log => log.status !== 'success');
+      if (failedLog) throw new Error(failedLog.errorMessage || 'Một kênh chưa đồng bộ thành công.');
+      return;
+    }
+    throw new Error('Đồng bộ đang mất nhiều thời gian hơn dự kiến. Báo cáo sẽ tự cập nhật khi hoàn tất.');
+  };
+
   const syncSelectedPeriod = async () => {
     setSyncingSelectedPeriod(true); setSyncMessage(null); setError(null);
     try {
       const response = await fetch('/api/sync/all', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}`, 'X-Google-OAuth-Token': googleAccessToken || '' }, body: JSON.stringify({ background: true, recentDays: 1 }) });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok || !body.success) throw new Error(body.error || body.message || 'Không thể bắt đầu đồng bộ dữ liệu gần đây.');
-      setSyncMessage(body.message || 'Đã bắt đầu đồng bộ nền dữ liệu gần đây.');
+      if (!response.ok || !body.success) throw new Error(body.error || body.message || 'Không thể bắt đầu đồng bộ dữ liệu mới.');
+      if (body.alreadyRunning) {
+        setSyncMessage('Đang có một lần đồng bộ chạy. Báo cáo sẽ tự làm mới khi hoàn tất.');
+        return;
+      }
+      if (!body.requestId) throw new Error('Không nhận được mã theo dõi đồng bộ.');
+      setSyncMessage('Đang đồng bộ phần dữ liệu phát sinh từ lần cập nhật gần nhất...');
+      await waitForBackgroundSync(body.requestId);
       await Promise.all([fetchDashboardData(), fetchFollowerTrend()]);
-    } catch (syncError: any) { setError(syncError.message || 'Không thể bắt đầu đồng bộ dữ liệu.'); }
+      setSyncMessage('Đã cập nhật báo cáo với dữ liệu mới nhất.');
+    } catch (syncError: any) { setError(syncError.message || 'Không thể đồng bộ dữ liệu.'); }
     finally { setSyncingSelectedPeriod(false); }
   };
   const filteredChannels = channels.filter(channel =>
@@ -526,11 +551,11 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
         <button
           onClick={syncSelectedPeriod}
           disabled={syncingSelectedPeriod}
-          title="Đồng bộ nền dữ liệu 7 ngày gần đây vào SQLite"
+          title="Cập nhật phần dữ liệu phát sinh kể từ lần đồng bộ gần nhất"
           className="inline-flex items-center gap-2 bg-white border border-slate-200 px-3 py-2 rounded-lg text-sm font-extrabold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
         >
           <RefreshCw className={'w-4 h-4 ' + (syncingSelectedPeriod ? 'animate-spin' : '')} />
-          {syncingSelectedPeriod ? 'Đang khởi chạy...' : 'Đồng bộ lại'}
+          {syncingSelectedPeriod ? 'Đang đồng bộ...' : 'Đồng bộ lại'}
         </button>
         {data?.lastSync && (
           <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg text-xs text-emerald-800">
@@ -588,7 +613,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
           <section className="bg-white p-4 md:p-5 rounded-2xl border border-slate-200/70 shadow-sm space-y-4">
             <div className="flex flex-col lg:flex-row justify-between gap-4">
               <div>
-                <h3 className="text-lg font-extrabold text-slate-800">Xu hướng {isFollowerMetric ? 'lượt follow' : selectedMetricLabel[activeMetric]} {isFollowerMetric ? 'theo thời gian' : 'theo ngày cập nhật'}</h3>
+                <h3 className="text-lg font-extrabold text-slate-800">Xu hướng {isFollowerMetric ? 'lượt follow' : selectedMetricLabel[activeMetric]} {isFollowerMetric ? 'theo thời gian' : 'theo ngày đăng'}</h3>
                 <p className="text-sm text-slate-500 mt-1">{isFollowerMetric ? 'Chọn trang để xem biến động người theo dõi trong khoảng thời gian đang lọc.' : 'Chọn KPI phía trên để đổi chỉ số hiển thị trên biểu đồ.'}</p>
               </div>
               <div className="flex items-start gap-2">
