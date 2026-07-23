@@ -533,31 +533,33 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
             </button>
           </div>
           <div className="overflow-x-auto">
-            <table className="ft-table min-w-[900px]">
+            <table className="ft-table min-w-[4800px]">
               <thead>
                 <tr>
-                  <th>Mã FT</th><th>Họ và tên</th><th>Ngày sinh</th><th>CCCD / Hộ chiếu</th>
-                  <th>Trường học</th><th>Lớp / khối</th><th>Tỉnh / TP</th><th>Điện thoại</th>
-                  <th>Email</th><th>Cuộc thi</th><th>Môn thi / bảng thi</th><th>Hình thức đăng ký</th>
+                  <th colSpan={15}>HỒ SƠ THÍ SINH</th>
+                  <th colSpan={7}>THÔNG TIN ĐĂNG KÝ</th>
+                  <th colSpan={15}>VÒNG 1</th>
+                </tr>
+                <tr>
+                  <th>Mã FT</th><th>Cuộc thi đăng ký tham gia</th><th>Họ và tên thí sinh</th><th>Ngày sinh</th><th>Số CCCD/Hộ chiếu</th>
+                  <th>Quốc tịch</th><th>Họ tên phụ huynh</th><th>Số điện thoại liên lạc</th><th>Email liên lạc</th><th>Tỉnh/Thành phố cư trú</th>
+                  <th>Xã/phường</th><th>Địa chỉ liên hệ</th><th>Tên trường</th><th>Lớp đang học</th><th>Khối lớp hiện tại</th>
+                  <th>Môn thi/Lĩnh vực</th><th>Bảng thi/Category</th><th>Hình thức đăng ký</th><th>Đơn vị đăng ký</th><th>Tên đội/Nhóm</th><th>Ngôn ngữ thi</th><th>Ghi chú chung</th>
+                  <th>Điều kiện tham gia</th><th>Số báo danh (SBD)</th><th>Ngày thi</th><th>Giờ/Ca thi</th><th>Hình thức thi</th><th>Địa điểm/Phòng thi</th><th>Link thi</th><th>Tài khoản/Mã truy cập</th><th>Mật khẩu (Nếu có)</th><th>Trạng thái dự thi</th><th>Điểm</th><th>Tỷ lệ điểm</th><th>Xếp hạng</th><th>Kết quả/Giải thưởng</th><th>Ghi chú/Sự cố</th>
                 </tr>
               </thead>
               <tbody>
-                {sample.map(row => (
-                  <tr key={`${row.code || 'new'}-${row.name}`}>
+                {sample.map(row => {
+                  const roundOne = row.examHistory?.find(item => normalise(item.round) === 'vong 1');
+                  return <tr key={`${row.code || 'new'}-${row.name}`}>
                     <td><code className="text-xs">{row.code || ('FT-' + String(rowIndexForPreview(row)).padStart(5, '0'))}</code></td>
-                    <td><b>{row.name}</b></td>
-                    <td>{row.birthDate || '—'}</td>
-                    <td>{row.identity || '—'}</td>
-                    <td>{row.school || '—'}</td>
-                    <td>{[row.className, row.grade].filter(Boolean).join(' · ') || '—'}</td>
-                    <td>{row.city || '—'}</td>
-                    <td>{row.phone || '—'}</td>
-                    <td>{row.email || '—'}</td>
-                    <td>{row.contests || '—'}</td>
-                    <td>{[row.subject, row.category].filter(Boolean).join(' · ') || '—'}</td>
-                    <td>{row.registrationMethod || '—'}</td>
-                  </tr>
-                ))}
+                    <td>{row.contests || '—'}</td><td><b>{row.name}</b></td><td>{row.birthDate || '—'}</td><td>{row.identity || '—'}</td>
+                    <td>{row.nationality || '—'}</td><td>{row.parent || '—'}</td><td>{row.phone || '—'}</td><td>{row.email || '—'}</td><td>{row.city || '—'}</td>
+                    <td>{row.ward || '—'}</td><td>{row.address || '—'}</td><td>{row.school || '—'}</td><td>{row.className || '—'}</td><td>{row.grade || '—'}</td>
+                    <td>{row.subject || '—'}</td><td>{row.category || '—'}</td><td>{row.registrationMethod || '—'}</td><td>{row.registrationUnit || '—'}</td><td>{row.teamName || '—'}</td><td>{row.examLanguage || '—'}</td><td>{row.generalNote || '—'}</td>
+                    <td>{roundOne?.eligibility || '—'}</td><td>{roundOne?.sbd || '—'}</td><td>{roundOne?.date || '—'}</td><td>{roundOne?.time || '—'}</td><td>{roundOne?.mode || '—'}</td><td>{roundOne?.location || '—'}</td><td>{roundOne?.link || '—'}</td><td>{roundOne?.account || '—'}</td><td>{roundOne?.password || '—'}</td><td>{roundOne?.attendance || '—'}</td><td>{roundOne?.score || '—'}</td><td>{roundOne?.scoreRate || '—'}</td><td>{roundOne?.rank || '—'}</td><td>{roundOne?.result || '—'}</td><td>{roundOne?.note || '—'}</td>
+                  </tr>;
+                })}
               </tbody>
             </table>
           </div>
