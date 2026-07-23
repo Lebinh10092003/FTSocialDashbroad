@@ -137,7 +137,7 @@ def resolve_column_indices(header):
             idx['teamName'] = i
         elif 'examLanguage' not in idx and ('ngonnguthi' in nh or 'examlanguage' in nh):
             idx['examLanguage'] = i
-        elif 'generalNote' not in idx and ('ghichuchung' in nh or 'generalnote' in nh):
+        elif 'generalNote' not in idx and ('ghichuchung' in nh or nh.endswith('ghichu') or 'generalnote' in nh):
             idx['generalNote'] = i
         elif 'certificateLink' not in idx and ('linkchungnhan' in nh or 'certificatelink' in nh):
             idx['certificateLink'] = i
@@ -341,11 +341,11 @@ def sync_session_candidate_totals():
         session.save(update_fields=['candidates_count', 'updated_at'])
 
 PROFILE_EXPORT_HEADERS = [
-    'STT', 'Mã hồ sơ', 'Họ và tên thí sinh', 'Ngày sinh (DD/MM/YYYY hoặc YYYY)', 'Số CCCD/Hộ chiếu', 'Quốc tịch',
-    'Họ tên phụ huynh', 'Số điện thoại liên lạc', 'Email liên lạc', 'Tỉnh/Thành phố cư trú', 'Xã/phường', 'Địa chỉ liên hệ',
-    'Tên trường', 'Lớp đang học (ví dụ: 6A1)', 'Khối lớp hiện tại',
+    'STT', 'Mã hồ sơ', 'Họ và tên thí sinh', 'Ngày sinh', 'Số CCCD/Hộ chiếu', 'Quốc tịch',
+    'Họ tên phụ huynh', 'Số điện thoại', 'Email', 'Tỉnh/Thành phố', 'Xã/phường', 'Địa chỉ liên hệ',
+    'Trường', 'Lớp đang học (ví dụ: 6A1)', 'Khối lớp',
 ]
-REGISTRATION_EXPORT_HEADERS = ['Môn thi/Lĩnh vực', 'Bảng thi/Category', 'Hình thức đăng ký', 'Tên đội/Nhóm', 'Ngôn ngữ thi', 'Ghi chú chung']
+REGISTRATION_EXPORT_HEADERS = ['Môn thi/Lĩnh vực', 'Bảng thi/Category', 'Hình thức đăng ký', 'Tên đội/Nhóm', 'Ngôn ngữ thi', 'Ghi chú']
 ROUND_EXPORT_HEADERS = [
     'Điều kiện tham gia', 'Số báo danh (SBD)', 'Ngày thi', 'Giờ/Ca thi', 'Hình thức thi', 'Địa điểm/Phòng thi',
     'Link thi', 'Tài khoản/Mã truy cập', 'Mật khẩu', 'Trạng thái dự thi', 'Điểm', 'Tỷ lệ điểm', 'Xếp hạng',

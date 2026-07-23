@@ -196,6 +196,7 @@ class CandidateRoundHistoryTests(TestCase):
         self.assertEqual(columns['highestRound'], 66)
         self.assertEqual(columns['achievement'], 67)
         self.assertEqual(columns['certificateLink'], 68)
+        self.assertEqual(columns['generalNote'], 20)
 
         row = [''] * len(headers)
         row[21] = 'Đủ điều kiện'

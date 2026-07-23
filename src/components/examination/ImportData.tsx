@@ -48,8 +48,8 @@ interface SheetSource {
 // ─── Cột & alias cho import từ file ──────────────────────────────────────────
 // Mẫu chính thức có 2 hàng tiêu đề: nhóm thông tin và tên cột.
 const previewGroups = [
-  { label: 'HỒ SƠ THÍ SINH', columns: ['STT', 'Mã hồ sơ', 'Họ và tên thí sinh', 'Ngày sinh', 'Số CCCD/Hộ chiếu', 'Quốc tịch', 'Họ tên phụ huynh', 'Số điện thoại liên lạc', 'Email liên lạc', 'Tỉnh/Thành phố cư trú', 'Xã/phường', 'Địa chỉ liên hệ', 'Tên trường', 'Lớp đang học', 'Khối lớp hiện tại'] },
-  { label: 'THÔNG TIN ĐĂNG KÝ', columns: ['Môn thi/Lĩnh vực', 'Bảng thi/Category', 'Hình thức đăng ký', 'Tên đội/Nhóm', 'Ngôn ngữ thi', 'Ghi chú chung'] },
+  { label: 'HỒ SƠ THÍ SINH', columns: ['STT', 'Mã hồ sơ', 'Họ và tên thí sinh', 'Ngày sinh', 'Số CCCD/Hộ chiếu', 'Quốc tịch', 'Họ tên phụ huynh', 'Số điện thoại', 'Email', 'Tỉnh/Thành phố', 'Xã/phường', 'Địa chỉ liên hệ', 'Trường', 'Lớp đang học', 'Khối lớp'] },
+  { label: 'THÔNG TIN ĐĂNG KÝ', columns: ['Môn thi/Lĩnh vực', 'Bảng thi/Category', 'Hình thức đăng ký', 'Tên đội/Nhóm', 'Ngôn ngữ thi', 'Ghi chú'] },
   { label: 'VÒNG 1', columns: ['Điều kiện tham gia', 'Số báo danh (SBD)', 'Ngày thi', 'Giờ/Ca thi', 'Hình thức thi', 'Địa điểm/Phòng thi', 'Link thi', 'Tài khoản/Mã truy cập', 'Mật khẩu', 'Trạng thái dự thi', 'Điểm', 'Tỷ lệ điểm', 'Xếp hạng', 'Kết quả/Giải thưởng', 'Ghi chú/Sự cố'] },
   { label: 'VÒNG 2', columns: ['Điều kiện tham gia', 'Số báo danh (SBD)', 'Ngày thi', 'Giờ/Ca thi', 'Hình thức thi', 'Địa điểm/Phòng thi', 'Link thi', 'Tài khoản/Mã truy cập', 'Mật khẩu', 'Trạng thái dự thi', 'Điểm', 'Tỷ lệ điểm', 'Xếp hạng', 'Kết quả/Giải thưởng', 'Ghi chú/Sự cố'] },
   { label: 'VÒNG 3', columns: ['Điều kiện tham gia', 'Số báo danh (SBD)', 'Ngày thi', 'Giờ/Ca thi', 'Hình thức thi', 'Địa điểm/Phòng thi', 'Link thi', 'Tài khoản/Mã truy cập', 'Mật khẩu', 'Trạng thái dự thi', 'Điểm', 'Tỷ lệ điểm', 'Xếp hạng', 'Kết quả/Giải thưởng', 'Ghi chú/Sự cố'] },
@@ -68,7 +68,7 @@ const aliases: Record<string, string[]> = {
   city: ['tinh thanh pho cu tru', 'tinh thanh pho', 'tinh thanhpho', 'dia phuong', 'city'],
   ward: ['xa phuong', 'phuong xa', 'phuong', 'ward'], nationality: ['quoc tich', 'nationality'], grade: ['khoi lop hien tai', 'khoi lop', 'khoi', 'grade'],
   subject: ['mon thi linh vuc', 'mon thi', 'linh vuc', 'subject'], category: ['bang thi category', 'bang thi', 'category'],
-  registrationMethod: ['hinh thuc dang ky', 'registration method'], registrationUnit: ['don vi dang ky', 'registration unit'], teamName: ['ten doi nhom', 'doi nhom', 'team'], examLanguage: ['ngon ngu thi', 'exam language'], generalNote: ['ghi chu chung', 'general note'], certificateLink: ['link chung nhan', 'certificate link'],
+  registrationMethod: ['hinh thuc dang ky', 'registration method'], registrationUnit: ['don vi dang ky', 'registration unit'], teamName: ['ten doi nhom', 'doi nhom', 'team'], examLanguage: ['ngon ngu thi', 'exam language'], generalNote: ['ghi chu chung', 'ghi chu', 'general note'], certificateLink: ['link chung nhan', 'certificate link'],
   contests: ['cuoc thi dang ky tham gia', 'cuoc thi dang ky', 'cuoc thi', 'contest', 'ky thi', 'dang ky thi'],
   achievement: ['tong hop ket qua cao nhat', 'ket qua cao nhat', 'ket qua giai thuong', 'ket qua thanh tich', 'ket qua', 'thanh tich', 'xep hang', 'result'],
   highestRound: ['tong hop vong cao nhat da dat', 'vong cao nhat da dat', 'highest round'],
