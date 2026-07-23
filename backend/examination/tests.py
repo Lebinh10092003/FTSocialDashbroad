@@ -4,7 +4,7 @@ from django.test import TestCase
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
-from .models import Candidate, CandidateParticipation, ExamSession, LogNote, RoundResult
+from .models import Candidate, CandidateParticipation, Competition, ExamSession, LogNote, RoundResult
 
 
 class ExistingSessionRoundBackfillTests(TestCase):
@@ -225,6 +225,31 @@ class CandidateRoundHistoryTests(TestCase):
         self.assertEqual(participation.subject, 'Toán')
         self.assertEqual(participation.category, 'Bảng A')
         self.assertEqual(participation.team_name, 'Nhóm 1')
+    def test_import_assigns_ft_code_and_preserves_all_template_fields(self):
+        response = self.client.post('/api/examination/import/candidates', {
+            'sessionId': self.session.id,
+            'source': 'Template XLSX',
+            'records': [{
+                'code': '', 'name': 'Candidate Imported', 'birthDate': '20/03/2014',
+                'city': 'Hà Nội', 'ward': 'Phường Giảng Võ', 'school': 'School A',
+                'examHistory': [{
+                    'round': 'Vòng 1', 'date': '6/21/26', 'time': '09:00 - 10:00',
+                    'mode': 'Trực tuyến', 'link': 'https://example.test/room',
+                    'account': 'candidate.account', 'password': 'candidate.password',
+                }],
+            }],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        candidate = Candidate.objects.get(name='Candidate Imported')
+        self.assertRegex(candidate.code, r'^FT-\d{5}$')
+        self.assertEqual(candidate.birth_date, '2014-03-20')
+        self.assertEqual(candidate.city, 'Hà Nội')
+        result = RoundResult.objects.get(participation__candidate=candidate, round_name='Vòng 1')
+        self.assertEqual(result.exam_date, '2026-06-21')
+        self.assertEqual(result.time_slot, '09:00 - 10:00')
+        self.assertEqual(result.account, 'candidate.account')
+        self.assertEqual(result.password, 'candidate.password')
     def test_round_slots_persist_and_removal_updates_candidate_participation(self):
         from .views import upsert_participation_history
 
@@ -261,3 +286,74 @@ class CandidateRoundHistoryTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(CandidateParticipation.objects.filter(candidate=self.candidate, session=self.session).exists())
         self.assertEqual(response.data['candidate']['sessionIds'], [])
+
+class CandidateImportReuseTests(TestCase):
+    def setUp(self):
+        self.user = UserProfile.objects.create(email='reuse-admin@example.com', name='Reuse Admin', role='ADMIN')
+        self.client = APIClient()
+        django_user = get_user_model().objects.create_user(username='reuse-admin@example.com', email='reuse-admin@example.com', password='ReuseAdmin9921')
+        token = Token.objects.create(user=django_user).key
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
+        self.competition = Competition.objects.create(
+            id='aysbc-reuse', code='AYSBC', name='Huy hiệu các Nhà khoa học trẻ Châu Á',
+            parent='AYSBC', organizer='SCS và META Knowledge', sort_key='aysbc-reuse',
+        )
+        self.previous = ExamSession.objects.create(
+            id='aysbc-2026', competition_id=self.competition.id, code='AYSBC', name='T6/2026',
+            parent='AYSBC', organizer='SCS', time='', sort_key='aysbc-2026',
+        )
+        self.target = ExamSession.objects.create(
+            id='aysbc-2027', competition_id=self.competition.id, code='AYSBC', name='T6/2027',
+            parent='AYSBC', organizer='SCS', time='', sort_key='aysbc-2027',
+        )
+        self.candidate = Candidate.objects.create(
+            id='FT-00001', code='FT-00001', name='Nguyễn Minh Anh', identity='001214066182',
+            school='Trường A', birth_date='2014-03-20', session_ids=[self.previous.id],
+            contests='AYSBC', sort_key='nguyen-minh-anh',
+        )
+        CandidateParticipation.objects.create(candidate=self.candidate, session=self.previous)
+
+    def test_import_reuses_existing_profile_and_adds_new_session_history(self):
+        response = self.client.post('/api/examination/import/candidates', {
+            'sessionId': self.target.id,
+            'source': 'Danh sách AYSBC 2027.xlsx',
+            'records': [{
+                'code': '', 'name': 'Nguyễn Minh Anh', 'identity': '001214066182',
+                'school': 'Trường A', 'birthDate': '20/03/2014', 'city': 'Hà Nội',
+                'examHistory': [{'round': 'Vòng 1', 'account': 'minh.anh.2027'}],
+            }],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['created'], 0)
+        self.assertEqual(response.data['linkedExisting'], 1)
+        self.assertEqual(Candidate.objects.count(), 1)
+        self.candidate.refresh_from_db()
+        self.assertEqual(self.candidate.code, 'FT-00001')
+        self.assertIn(self.target.id, self.candidate.session_ids)
+        self.assertTrue(CandidateParticipation.objects.filter(candidate=self.candidate, session=self.target).exists())
+        note = LogNote.objects.filter(entity_key='candidate-FT-00001').latest('created_at')
+        self.assertIn('Hệ thống nhận diện hồ sơ đã có', note.content)
+        self.assertIn('T6/2026', note.content)
+
+
+class SessionCompetitionConsistencyTests(TestCase):
+    def test_legacy_session_is_relinked_and_serialized_with_the_competition_name(self):
+        competition = Competition.objects.create(
+            id='aysbc-consistent', code='AYSBC', name='Huy hiệu các Nhà khoa học trẻ Châu Á',
+            parent='AYSBC', organizer='SCS và META Knowledge', sort_key='aysbc-consistent',
+        )
+        session = ExamSession.objects.create(
+            id='aysbc-legacy-name', competition_id='', code='AYSBC', name='T10/2026',
+            parent='AYSBC', organizer='', time='', sort_key='legacy',
+        )
+
+        from .views import ensure_examination_seed, serialize_session
+        ensure_examination_seed()
+        session.refresh_from_db()
+        payload = serialize_session(session)
+
+        self.assertEqual(session.competition_id, competition.id)
+        self.assertEqual(session.parent, competition.name)
+        self.assertEqual(session.organizer, competition.organizer)
+        self.assertEqual(payload['competitionName'], competition.name)

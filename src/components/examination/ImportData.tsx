@@ -6,7 +6,7 @@ import {
   Trash2, Pencil, Plus,
 } from 'lucide-react';
 import type { Candidate, ExaminationSession } from './types';
-import { normaliseBirthDate } from './ui';
+import { formatBirthDate, normaliseBirthDate } from './ui';
 
 type ImportRow = Record<string, unknown>;
 type Props = {
@@ -79,7 +79,7 @@ const aliases: Record<string, string[]> = {
   address: ['dia chi lien he', 'dia chi', 'address'], updated: ['ngay cap nhat gan nhat', 'updated'],
 };
 const normalise = (value: unknown) => String(value ?? '').trim().toLocaleLowerCase('vi-VN')
-  .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9/ ]/g, ' ').replace(/\s+/g, ' ').trim();
+  .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 const text = (value: unknown) => String(value ?? '').trim();
 const valueFor = (entries: [string, string][], field: string) => aliases[field]?.map(alias => entries.find(([key]) => key.includes(alias))?.[1] || '').find(Boolean) || '';
 
@@ -90,7 +90,7 @@ function historyFromRow(row: ImportRow): RoundHistory[] {
     const prefix = `vong ${roundNumber}`;
     const entries = Object.entries(row).map(([key, value]) => [normalise(key), text(value)] as [string, string]).filter(([key]) => key.startsWith(prefix));
     const item: RoundHistory = { round: `Vòng ${roundNumber}` };
-    Object.entries(fields).forEach(([field, names]) => { const value = entries.find(([key]) => names.some(name => key.includes(name)))?.[1] || ''; if (value) item[field as keyof RoundHistory] = value as never; });
+    Object.entries(fields).forEach(([field, names]) => { const value = entries.find(([key]) => names.some(name => key.includes(name)))?.[1] || ''; if (value) item[field as keyof RoundHistory] = (field === 'date' ? normaliseBirthDate(value) : value) as never; });
     return item;
   }).filter(item => Object.keys(item).length > 1);
 }
@@ -128,6 +128,10 @@ function rowsFromSheet(sheet: XLSX.WorkSheet): ImportRow[] {
     .map(row => Object.fromEntries(headers.map((header, index) => [header || `column_${index + 1}`, (row as unknown[])[index] ?? ''])));
 }
 
+const sessionOptionLabel = (session: ExaminationSession) => {
+  const competition = session.competitionName || session.parent || 'Chưa có tên cuộc thi';
+  return `${session.code} · ${competition} · ${session.name}`;
+};
 const DEFAULT_SYNC_URL =
   'https://docs.google.com/spreadsheets/d/1kqztN_iCeZ9uR1mO7gz9j1TcUt8ZmCdpEv0TagTf4VA/edit?usp=sharing';
 
@@ -139,7 +143,8 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   const [source, setSource] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-  const sample = useMemo(() => rows.slice(0, 5), [rows]);
+  const previewLimit = 20;
+  const sample = useMemo(() => rows.slice(0, previewLimit), [rows]);
   const rowIndexForPreview = (row: Candidate) => rows.indexOf(row) + 1;
 
   // States mới cho việc quản lý đa nguồn Google Sheets
@@ -248,7 +253,8 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Không thể nhập dữ liệu.');
       onImported(body.items || []);
-      setMessage(`✅ Đã nhập ${body.created} mới và cập nhật ${body.updated} hồ sơ từ ${source}.`);
+      const linkedExisting = Number(body.linkedExisting || 0);
+      setMessage(`✅ Đã nhập ${body.created} mới và cập nhật ${body.updated} hồ sơ từ ${source}.${linkedExisting ? ` ${linkedExisting} hồ sơ đã có trên hệ thống được bổ sung vào kỳ tổ chức này.` : ''}`);
     } catch (err: any) { setMessage(err.message || 'Không thể nhập dữ liệu.'); }
     finally { setLoading(false); }
   };
@@ -389,7 +395,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
         </button>
       </div>
 
-      <section className="mb-5 rounded-2xl border border-blue-200 bg-blue-50/60 p-4"><label className="block max-w-xl"><span className="text-sm font-bold text-[#001e40]">Dữ liệu thuộc kỳ tổ chức</span><select value={targetSessionId} onChange={event => setTargetSessionId(event.target.value)} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Chọn kỳ tổ chức trước khi nhập</option>{sessions.map(item => <option key={item.id} value={item.id}>{item.code} · {item.name} · {item.time}</option>)}</select><p className="mt-2 text-xs text-slate-600">Hồ sơ trong file sẽ được bổ sung vào lịch sử của thí sinh, đồng thời liên kết với kỳ này.</p></label></section>
+      <section className="mb-5 rounded-2xl border border-blue-200 bg-blue-50/60 p-4"><label className="block max-w-xl"><span className="text-sm font-bold text-[#001e40]">Dữ liệu thuộc kỳ tổ chức</span><select value={targetSessionId} onChange={event => setTargetSessionId(event.target.value)} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Chọn kỳ tổ chức trước khi nhập</option>{sessions.map(item => <option key={item.id} value={item.id}>{sessionOptionLabel(item)} · {item.time}</option>)}</select><p className="mt-2 text-xs text-slate-600">Hồ sơ trong file sẽ được bổ sung vào lịch sử của thí sinh, đồng thời liên kết với kỳ này.</p></label></section>
 
       {!canImport && (
         <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
@@ -446,7 +452,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
                   placeholder="https://docs.google.com/spreadsheets/d/..."
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
               </label>
-              <div className="grid gap-3 sm:grid-cols-2"><label><span className="mb-1 block text-sm font-bold text-slate-700">Kỳ tổ chức</span><select value={newSheetSessionId} onChange={event => setNewSheetSessionId(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"><option value="">Chưa gán kỳ</option>{sessions.map(item => <option key={item.id} value={item.id}>{item.code} · {item.name}</option>)}</select></label><label><span className="mb-1 block text-sm font-bold text-slate-700">Phạm vi tab</span><select value={newSheetStage} onChange={event => setNewSheetStage(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"><option>Toàn bộ kỳ tổ chức</option><option>Bổ sung dữ liệu</option></select></label><label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold text-slate-700">Tên tab / sheet nhỏ</span><input value={newSheetTab} onChange={event => setNewSheetTab(event.target.value)} placeholder="Ví dụ: Dữ liệu thí sinh, Vòng quốc gia" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"/></label></div>
+              <div className="grid gap-3 sm:grid-cols-2"><label><span className="mb-1 block text-sm font-bold text-slate-700">Kỳ tổ chức</span><select value={newSheetSessionId} onChange={event => setNewSheetSessionId(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"><option value="">Chưa gán kỳ</option>{sessions.map(item => <option key={item.id} value={item.id}>{sessionOptionLabel(item)}</option>)}</select></label><label><span className="mb-1 block text-sm font-bold text-slate-700">Phạm vi tab</span><select value={newSheetStage} onChange={event => setNewSheetStage(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"><option>Toàn bộ kỳ tổ chức</option><option>Bổ sung dữ liệu</option></select></label><label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold text-slate-700">Tên tab / sheet nhỏ</span><input value={newSheetTab} onChange={event => setNewSheetTab(event.target.value)} placeholder="Ví dụ: Dữ liệu thí sinh, Vòng quốc gia" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"/></label></div>
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setShowAddModal(false)}
                   className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 transition-colors">
@@ -549,7 +555,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
                 {sample.map(row => {
                   const round = (number: number) => row.examHistory?.find(item => normalise(item.round) === `vong ${number}`);
                   const values = [
-                    String(rowIndexForPreview(row)), row.code || '—', row.name, row.birthDate, row.identity, row.nationality, row.parent, row.phone, row.email, row.city, row.ward, row.address, row.school, row.className, row.grade,
+                    String(rowIndexForPreview(row)), row.code || 'Tự sinh khi nhập', row.name, formatBirthDate(row.birthDate), row.identity, row.nationality, row.parent, row.phone, row.email, row.city, row.ward, row.address, row.school, row.className, row.grade,
                     row.subject, row.category, row.registrationMethod, row.teamName, row.examLanguage, row.generalNote,
                     ...[1, 2, 3].flatMap(number => roundPreviewFields.map(field => round(number)?.[field] || '—')),
                     row.highestRound, row.achievement, row.certificateLink, row.updated,
@@ -561,9 +567,9 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
               </tbody>
             </table>
           </div>
-          {rows.length > 5 && (
+          {rows.length > previewLimit && (
             <p className="mt-3 text-center text-xs text-slate-400">
-              Hiển thị 5/{rows.length} hồ sơ đầu tiên
+              Hiển thị {sample.length}/{rows.length} hồ sơ đầu tiên
             </p>
           )}
         </section>

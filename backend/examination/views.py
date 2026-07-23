@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 import uuid
 import json
+import re
 from django.utils import timezone
 from .models import Competition, ExamSession, Candidate, CandidateParticipation, RoundResult, LogNote, ExaminationSheet
 from authentication.models import SystemConfig
@@ -14,6 +15,7 @@ from .sync import (
     merge_contest_codes,
     same_candidate,
     next_code,
+    parse_dob,
     export_session_to_google_sheet
 )
 
@@ -164,13 +166,54 @@ def ensure_existing_session_rounds():
         session.save(update_fields=['rounds', 'updated_at'])
 
 
+def session_competition(session):
+    """Resolve a session to its canonical competition and repair legacy links."""
+    competition = Competition.objects.filter(id=session.competition_id).first()
+    if not competition:
+        candidates = list(Competition.objects.filter(code__iexact=str(session.code or '').strip()))
+        if len(candidates) == 1:
+            competition = candidates[0]
+    if not competition:
+        return None
+
+    updates = []
+    if session.competition_id != competition.id:
+        session.competition_id = competition.id
+        updates.append('competition_id')
+    if session.code != competition.code:
+        session.code = competition.code
+        updates.append('code')
+    # `parent` was used inconsistently by legacy session records. For a session,
+    # it is the human-readable competition name shown across list, edit and import.
+    if session.parent != competition.name:
+        session.parent = competition.name
+        updates.append('parent')
+    if session.organizer != competition.organizer:
+        session.organizer = competition.organizer
+        updates.append('organizer')
+    expected_sort_key = f"{competition.code.lower()}_{session.id}"
+    if session.sort_key != expected_sort_key:
+        session.sort_key = expected_sort_key
+        updates.append('sort_key')
+    if updates:
+        session.save(update_fields=updates + ['updated_at'])
+    return competition
+
+
+def normalize_session_competition_links():
+    """Repair historic sessions so every screen reads competition data consistently."""
+    for session in ExamSession.objects.all():
+        session_competition(session)
+
+
 def ensure_examination_seed():
     repair_legacy_seed_text()
-    if ExamSession.objects.exists():
-        ensure_existing_session_rounds()
-        return
-        
+    # Competitions must exist even when an older database already has sessions.
     for comp_data in EXAMINATION_SEED['competitions']:
+        # A user-created competition with the same code is already canonical;
+        # do not add a duplicate seed record with a second identity.
+        if Competition.objects.filter(code__iexact=comp_data['code']).exists():
+            continue
         Competition.objects.get_or_create(
             id=comp_data['id'],
             defaults={
@@ -181,28 +224,35 @@ def ensure_examination_seed():
                 'sort_key': f"{comp_data['code'].lower()}_{comp_data['id']}"
             }
         )
-        
+
+    if ExamSession.objects.exists():
+        normalize_session_competition_links()
+        ensure_existing_session_rounds()
+        return
+
     for sess_data in EXAMINATION_SEED['sessions']:
+        comp = Competition.objects.filter(id=sess_data['id']).first() or Competition.objects.get(code__iexact=sess_data['code'])
         ExamSession.objects.get_or_create(
             id=sess_data['id'],
             defaults={
-                'competition_id': sess_data['id'],
-                'code': sess_data['code'],
+                'competition_id': comp.id,
+                'code': comp.code,
                 'name': sess_data['name'],
-                'parent': sess_data['parent'],
-                'organizer': sess_data['organizer'],
+                'parent': comp.name,
+                'organizer': comp.organizer,
                 'time': sess_data['time'],
-                'candidates_count': sess_data['candidates_count'],
+                'candidates_count': 0,
                 'national': sess_data.get('national'),
                 'national_date': sess_data.get('national_date'),
                 'international': sess_data.get('international'),
                 'international_date': sess_data.get('international_date'),
                 'phase': sess_data['phase'],
                 'note': sess_data['note'],
-                'sort_key': f"{sess_data['code'].lower()}_{sess_data['id']}"
+                'sort_key': f"{comp.code.lower()}_{sess_data['id']}"
             }
         )
-        
+
+    normalize_session_competition_links()
     ensure_existing_session_rounds()
 
     for cand_data in EXAMINATION_SEED['candidates']:
@@ -225,7 +275,6 @@ def ensure_examination_seed():
                 'sort_key': f"{cand_data['name'].lower()}_{cand_data['identity'] or cand_data['id']}"
             }
         )
-
 def merge_exam_history(existing, incoming, session_id='', source=''):
     rows = [item for item in (existing or []) if isinstance(item, dict)]
     index = {}
@@ -311,6 +360,8 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
             model_field: str(item.get(payload_field) or '').strip()
             for payload_field, model_field in ROUND_FIELD_MAP.items()
         }
+        if values.get('exam_date'):
+            values['exam_date'] = parse_dob(values['exam_date']) or values['exam_date']
         values['raw_data'] = {str(key): value for key, value in item.items() if value not in (None, '')}
         existing_result = RoundResult.objects.filter(participation=participation, round_name=round_name).first()
         if existing_result:
@@ -370,9 +421,11 @@ def serialize_competition(comp):
     }
 
 def serialize_session(sess):
+    competition = session_competition(sess)
     return {
         'id': sess.id,
         'competitionId': sess.competition_id,
+        'competitionName': competition.name if competition else sess.parent,
         'code': sess.code,
         'name': sess.name,
         'parent': sess.parent,
@@ -652,7 +705,7 @@ def competition_detail(request, pk):
         sessions = ExamSession.objects.filter(competition_id=comp.id)
         for s in sessions:
             s.code = comp.code
-            s.parent = comp.parent
+            s.parent = comp.name
             s.organizer = comp.organizer
             s.save()
             append_audit(f'session-{s.id}', f'Hệ thống đồng bộ thông tin cuộc thi {comp.code}: ' + audit_values({}, {'code': s.code, 'parent': s.parent, 'organizer': s.organizer}, {'code':'Mã cuộc thi', 'parent':'Cuộc thi mẹ', 'organizer':'Ban tổ chức quốc tế'}), request, system=True)
@@ -742,7 +795,7 @@ def session_create(request):
         competition_id=comp.id,
         code=comp.code,
         name=name,
-        parent=comp.parent,
+        parent=comp.name,
         organizer=comp.organizer,
         time=time_str,
         candidates_count=0,
@@ -804,7 +857,7 @@ def session_detail(request, pk):
                 comp = Competition.objects.get(id=data['competitionId'])
                 sess.competition_id = comp.id
                 sess.code = comp.code
-                sess.parent = comp.parent
+                sess.parent = comp.name
                 sess.organizer = comp.organizer
                 sess.sort_key = f"{comp.code.lower()}_{sess.id}"
             except Competition.DoesNotExist:
@@ -1203,11 +1256,16 @@ def import_candidates(request):
         
         created = 0
         updated = 0
+        linked_existing = 0
         items_returned = []
         
         for idx, rec in enumerate(input_records):
             # Clean records
-            rec_code = str(rec.get('code', '')).replace('/', '-').replace('?', '-').replace('#', '-').strip().upper()
+            raw_code = str(rec.get('code', '')).replace('/', '-').replace('?', '-').replace('#', '-').strip().upper()
+            # Blank placeholders in a template are never stored as a profile
+            # code. They receive the next FT-00001 style code below; a supplied
+            # legacy code remains usable for re-import matching.
+            rec_code = '' if raw_code in {'', '-', '—', 'N/A', 'NA'} else raw_code
             rec_name = str(rec.get('name', '')).strip()
             if not rec_name:
                 continue
@@ -1229,7 +1287,7 @@ def import_candidates(request):
                 'phone': str(rec.get('phone', '')).strip(),
                 'identity': str(rec.get('identity', '')).strip(),
                 'address': str(rec.get('address', '')).strip(),
-                'birth_date': str(rec.get('birthDate', '')).strip(),
+                'birth_date': parse_dob(rec.get('birthDate', '')),
                 'registration': {
                     'subject': str(rec.get('subject', '')).strip(),
                     'category': str(rec.get('category', '')).strip(),
@@ -1268,6 +1326,8 @@ def import_candidates(request):
             ts_vn = timezone.now().strftime('%d/%m/%Y %H:%M')
             
             if base:
+                previous_session_ids = list(base.session_ids or [])
+                already_in_target_session = session_id in previous_session_ids or CandidateParticipation.objects.filter(candidate=base, session_id=session_id).exists()
                 base.name = rec_cand['name']
                 if rec_cand['school']: base.school = rec_cand['school']
                 if rec_cand['class_name']: base.class_name = rec_cand['class_name']
@@ -1294,6 +1354,16 @@ def import_candidates(request):
                 base.updated = ts_vn
                 base.save()
                 upsert_participation_history(base, session_id, rec_cand['exam_history'], source, rec_cand['registration'])
+                if not already_in_target_session:
+                    linked_existing += 1
+                    previous_sessions = list(ExamSession.objects.filter(id__in=previous_session_ids).exclude(id=session_id).values_list('code', 'name'))
+                    previous_label = ', '.join(f'{code} · {name}' for code, name in previous_sessions) or 'chưa có kỳ tổ chức khác được ghi nhận'
+                    append_audit(
+                        f'candidate-{base.code}',
+                        f'Hệ thống nhận diện hồ sơ đã có. Đã bổ sung dữ liệu vào kỳ tổ chức {target_session.code} · {target_session.name}. Thí sinh đã từng thi: {previous_label}.',
+                        request,
+                        system=True,
+                    )
                 updated += 1
                 items_returned.append(serialize_candidate(base))
             else:
@@ -1330,8 +1400,9 @@ def import_candidates(request):
                 
         sync_session_candidate_totals()
         source_label = str(source or 'nguồn nhập dữ liệu').strip()
-        append_audit(f'session-{session_id}', f'Hệ thống nhập dữ liệu từ {source_label}: thêm {created} thí sinh, cập nhật {updated} thí sinh.', request, system=True)
-        return Response({'created': created, 'updated': updated, 'items': items_returned})
+        existing_summary = f'; trong đó {linked_existing} hồ sơ đã có được bổ sung vào kỳ tổ chức này' if linked_existing else ''
+        append_audit(f'session-{session_id}', f'Hệ thống nhập dữ liệu từ {source_label}: thêm {created} thí sinh, cập nhật {updated} thí sinh{existing_summary}.', request, system=True)
+        return Response({'created': created, 'updated': updated, 'linkedExisting': linked_existing, 'items': items_returned})
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

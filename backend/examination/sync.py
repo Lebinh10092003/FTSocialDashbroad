@@ -6,7 +6,7 @@ import datetime
 import uuid
 import unicodedata
 from django.utils import timezone
-from .models import Candidate, CandidateParticipation, RoundResult, ExamSession, Competition, ExaminationSheet
+from .models import Candidate, CandidateParticipation, RoundResult, ExamSession, Competition, ExaminationSheet, LogNote
 from authentication.models import SystemConfig
 from integrations.google_sheets import build_sheets_service, extract_spreadsheet_id
 
@@ -75,37 +75,38 @@ def next_code(existing_codes_set, offset=0):
     return candidate
 
 def parse_dob(raw):
+    """Return a valid ISO date or a four-digit birth year from spreadsheet input."""
     cleaned = clean_txt(raw).replace(' ', '')
     cleaned = re.sub(r'[^0-9/\-.]', '', cleaned)
     if re.fullmatch(r'\d{4}', cleaned):
         return cleaned
-    parts = re.split(r'[/\-.]', cleaned)
+    parts = [part for part in re.split(r'[/\-.]', cleaned) if part]
     if len(parts) != 3:
         return ''
-        
-    day = ''
-    month = ''
-    year = ''
-    
-    if len(parts[2]) == 4:
-        day = parts[0].zfill(2)
-        month = parts[1].zfill(2)
-        year = parts[2]
-    elif len(parts[0]) == 4:
-        year = parts[0]
-        month = parts[1].zfill(2)
-        day = parts[2].zfill(2)
-    else:
-        return ''
-        
-    try:
-        d, m, y = int(day), int(month), int(year)
-        if d < 1 or d > 31 or m < 1 or m > 12 or y < 1990 or y > 2025:
-            return ''
-        return f"{year}-{month}-{day}"
-    except ValueError:
-        return ''
 
+    try:
+        if len(parts[0]) == 4:
+            year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+        else:
+            first, second, last = int(parts[0]), int(parts[1]), parts[2]
+            year = int(last)
+            if len(last) == 2:
+                year += 2000
+            # Vietnamese templates use DD/MM/YYYY. When one part exceeds 12,
+            # unambiguously accept the spreadsheet's US-style MM/DD/YY too.
+            if first > 12:
+                day, month = first, second
+            elif second > 12:
+                month, day = first, second
+            else:
+                day, month = first, second
+        date_value = datetime.date(year, month, day)
+        current_year = timezone.localdate().year
+        if date_value.year < 1900 or date_value.year > current_year:
+            return ''
+        return date_value.isoformat()
+    except (TypeError, ValueError):
+        return ''
 def resolve_column_indices(header):
     """Resolve both legacy sheets and the official two-row candidate template."""
     idx = {}
@@ -304,6 +305,8 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
             model_field: clean_txt(item.get(payload_field))
             for payload_field, model_field in ROUND_HISTORY_FIELD_MAP.items()
         }
+        if values.get('exam_date'):
+            values['exam_date'] = parse_dob(values['exam_date']) or values['exam_date']
         values['raw_data'] = {str(key): value for key, value in item.items() if value not in (None, '')}
         existing_result = RoundResult.objects.filter(participation=participation, round_name=round_name).first()
         if existing_result:
@@ -317,6 +320,20 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
         )
     return participation
 
+def append_existing_candidate_link_note(candidate, session_id, previous_session_ids):
+    """Leave a readable trace when an import reuses a profile in another session."""
+    session = ExamSession.objects.filter(id=session_id).first()
+    if not session:
+        return
+    previous_sessions = list(ExamSession.objects.filter(id__in=previous_session_ids).exclude(id=session_id).values_list('code', 'name'))
+    previous_label = ', '.join(f'{code} · {name}' for code, name in previous_sessions) or 'chưa có kỳ tổ chức khác được ghi nhận'
+    LogNote.objects.create(
+        key=f'candidate-{candidate.code}:import-link:{uuid.uuid4().hex}',
+        entity_key=f'candidate-{candidate.code}',
+        content=f'Hệ thống nhận diện hồ sơ đã có. Đã bổ sung dữ liệu vào kỳ tổ chức {session.code} · {session.name}. Thí sinh đã từng thi: {previous_label}.',
+        updated_by='Hệ thống FT Workspace',
+        system=True,
+    )
 def sync_session_candidate_totals():
     sessions = ExamSession.objects.all()
     totals = {}
@@ -610,6 +627,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
         existing_codes_set = {candidate.code for candidate in existing}
         created = 0
         updated = 0
+        linked_existing = 0
         for cand in incoming:
             matched = next((candidate for candidate in existing if same_candidate({
                 'name': candidate.name, 'birth_date': candidate.birth_date, 'identity': candidate.identity,
@@ -618,6 +636,8 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
             same_code = next((candidate for candidate in existing if cand['code'] and candidate.code.upper() == cand['code'].upper()), None)
             base = matched or same_code
             if base:
+                previous_session_ids = list(base.session_ids or [])
+                already_in_target_session = session_id in previous_session_ids or CandidateParticipation.objects.filter(candidate=base, session_id=session_id).exists()
                 base.name = cand['name']
                 for field, key in [('birth_date', 'birth_date'), ('identity', 'identity'), ('email', 'email'), ('phone', 'phone'), ('school', 'school'), ('class_name', 'class_name'), ('city', 'city'), ('ward', 'ward'), ('nationality', 'nationality'), ('grade', 'grade'), ('address', 'address'), ('achievement', 'achievement'), ('highest_round', 'highest_round')]:
                     if cand[key]:
@@ -633,6 +653,9 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
                 base.sort_key = f"{base.name.lower()}_{base.identity or base.id}"
                 base.save()
                 upsert_participation_history(base, session_id, cand['exam_history'], spreadsheet_url, cand['registration'])
+                if not already_in_target_session:
+                    linked_existing += 1
+                    append_existing_candidate_link_note(base, session_id, previous_session_ids)
                 updated += 1
                 continue
 
@@ -654,9 +677,10 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
         
         return {
             'success': True,
-            'message': f"Đồng bộ thành công – Thêm mới: {created}, Cập nhật: {updated}, Tổng: {len(incoming)}",
+            'message': f"Đồng bộ thành công – Thêm mới: {created}, Cập nhật: {updated}, Hồ sơ đã có được bổ sung kỳ tổ chức: {linked_existing}, Tổng: {len(incoming)}",
             'created': created,
             'updated': updated,
+            'linkedExisting': linked_existing,
             'total': len(incoming),
             'timestamp': ts_vn
         }
