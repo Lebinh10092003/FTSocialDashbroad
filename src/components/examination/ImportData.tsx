@@ -58,8 +58,12 @@ const aliases: Record<string, string[]> = {
   school: ['ten truong', 'truong hoc', 'truong', 'school'],
   className: ['lop dang hoc', 'hoc sinh lop', 'lop', 'class'],
   city: ['tinh thanh pho cu tru', 'tinh thanh pho', 'tinh thanhpho', 'dia phuong', 'city'],
+  ward: ['xa phuong', 'phuong xa', 'phuong', 'ward'], nationality: ['quoc tich', 'nationality'], grade: ['khoi lop hien tai', 'khoi lop', 'grade'],
+  subject: ['mon thi linh vuc', 'mon thi', 'linh vuc', 'subject'], category: ['bang thi category', 'bang thi', 'category'],
+  registrationMethod: ['hinh thuc dang ky', 'registration method'], registrationUnit: ['don vi dang ky', 'registration unit'], teamName: ['ten doi nhom', 'doi nhom', 'team'], examLanguage: ['ngon ngu thi', 'exam language'], generalNote: ['ghi chu chung', 'general note'], certificateLink: ['link chung nhan', 'certificate link'],
   contests: ['cuoc thi dang ky tham gia', 'cuoc thi dang ky', 'cuoc thi', 'mon thi', 'contest', 'ky thi', 'dang ky thi'],
-  achievement: ['ket qua giai thuong', 'ket qua thanh tich', 'ket qua', 'thanh tich', 'xep hang', 'result'],
+  achievement: ['tong hop ket qua cao nhat', 'ket qua cao nhat', 'ket qua giai thuong', 'ket qua thanh tich', 'ket qua', 'thanh tich', 'xep hang', 'result'],
+  highestRound: ['tong hop vong cao nhat da dat', 'vong cao nhat da dat', 'highest round'],
   birthDate: ['ngay sinh dd mm yyyy hoac yyyy', 'ngay sinh', 'ngay thang nam sinh', 'birth date', 'birthday'],
   email: ['email lien lac', 'email'], parent: ['ho ten phu huynh', 'phu huynh', 'parent'],
   phone: ['so dien thoai lien lac', 'so dien thoai', 'sdt', 'dien thoai', 'phone', 'so dien thoai nguoi giam ho'],
@@ -70,11 +74,11 @@ const aliases: Record<string, string[]> = {
 const normalise = (value: unknown) => String(value ?? '').trim().toLocaleLowerCase('vi-VN')
   .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9/ ]/g, ' ').replace(/\s+/g, ' ').trim();
 const text = (value: unknown) => String(value ?? '').trim();
-const valueFor = (entries: [string, string][], field: string) => entries.find(([key]) => aliases[field]?.some(alias => key.includes(alias)))?.[1] || '';
+const valueFor = (entries: [string, string][], field: string) => aliases[field]?.map(alias => entries.find(([key]) => key.includes(alias))?.[1] || '').find(Boolean) || '';
 
-type RoundHistory = { round: string; sbd?: string; date?: string; time?: string; mode?: string; location?: string; link?: string; account?: string; attendance?: string; score?: string; scoreRate?: string; rank?: string; result?: string; note?: string };
+type RoundHistory = { round: string; eligibility?: string; sbd?: string; date?: string; time?: string; mode?: string; location?: string; link?: string; account?: string; attendance?: string; score?: string; scoreRate?: string; rank?: string; result?: string; note?: string };
 function historyFromRow(row: ImportRow): RoundHistory[] {
-  const fields: Record<string, string[]> = { sbd: ['so bao danh'], date: ['ngay thi'], time: ['gio ca thi'], mode: ['hinh thuc thi'], location: ['dia diem phong thi'], link: ['link thi'], account: ['tai khoan ma truy cap'], attendance: ['trang thai du thi'], score: ['diem'], scoreRate: ['ty le diem'], rank: ['xep hang'], result: ['ket qua giai thuong'], note: ['ghi chu su co'] };
+  const fields: Record<string, string[]> = { eligibility: ['dieu kien tham gia'], sbd: ['so bao danh'], date: ['ngay thi'], time: ['gio ca thi'], mode: ['hinh thuc thi'], location: ['dia diem phong thi'], link: ['link thi'], account: ['tai khoan ma truy cap'], attendance: ['trang thai du thi'], score: ['diem'], scoreRate: ['ty le diem'], rank: ['xep hang'], result: ['ket qua giai thuong'], note: ['ghi chu su co'] };
   return [1, 2, 3].map(roundNumber => {
     const prefix = `vong ${roundNumber}`;
     const entries = Object.entries(row).map(([key, value]) => [normalise(key), text(value)] as [string, string]).filter(([key]) => key.startsWith(prefix));
@@ -89,7 +93,7 @@ function mapRows(rawRows: ImportRow[]): (Candidate & { examHistory?: RoundHistor
     const entries = Object.entries(row).map(([key, value]) => [normalise(key), text(value)] as [string, string]);
     const name = valueFor(entries, 'name');
     const code = valueFor(entries, 'code') || `IMPORT-${Date.now()}-${index + 1}`;
-    return { code, name, school: valueFor(entries, 'school'), className: valueFor(entries, 'className'), city: valueFor(entries, 'city'), contests: valueFor(entries, 'contests'), achievement: valueFor(entries, 'achievement'), email: valueFor(entries, 'email'), parent: valueFor(entries, 'parent'), phone: valueFor(entries, 'phone'), identity: valueFor(entries, 'identity'), address: valueFor(entries, 'address'), birthDate: valueFor(entries, 'birthDate'), updated: '', examHistory: historyFromRow(row) };
+    return { code, name, school: valueFor(entries, 'school'), className: valueFor(entries, 'className'), city: valueFor(entries, 'city'), ward: valueFor(entries, 'ward'), nationality: valueFor(entries, 'nationality'), grade: valueFor(entries, 'grade'), contests: valueFor(entries, 'contests'), subject: valueFor(entries, 'subject'), category: valueFor(entries, 'category'), registrationMethod: valueFor(entries, 'registrationMethod'), registrationUnit: valueFor(entries, 'registrationUnit'), teamName: valueFor(entries, 'teamName'), examLanguage: valueFor(entries, 'examLanguage'), generalNote: valueFor(entries, 'generalNote'), certificateLink: valueFor(entries, 'certificateLink'), achievement: valueFor(entries, 'achievement'), highestRound: valueFor(entries, 'highestRound'), email: valueFor(entries, 'email'), parent: valueFor(entries, 'parent'), phone: valueFor(entries, 'phone'), identity: valueFor(entries, 'identity'), address: valueFor(entries, 'address'), birthDate: valueFor(entries, 'birthDate'), updated: '', examHistory: historyFromRow(row) };
   }).filter(row => row.name);
 }
 
@@ -346,15 +350,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   };
 
   const downloadTemplate = () => {
-    const wb = XLSX.utils.book_new();
-    const data = [
-      columns.map(([, label]) => label),
-      ['FT26-0100', 'Nguyễn Minh Anh', 'THCS Cầu Giấy', '8A1', 'Hà Nội', 'IMO', 'Đạt giải Khuyến khích', '2012-05-18', 'minhanh@example.com', 'Nguyễn Thu Hà', '0988 123 456', '001212345678', 'Cầu Giấy, Hà Nội'],
-    ];
-    const sheet = XLSX.utils.aoa_to_sheet(data);
-    sheet['!cols'] = columns.map(([, l]) => ({ wch: Math.max(l.length + 4, 18) }));
-    XLSX.utils.book_append_sheet(wb, sheet, 'Danh sách thí sinh');
-    XLSX.writeFile(wb, 'Mau_nhap_thi_sinh_khao_thi.xlsx');
+    window.location.assign('/templates/Template_du_lieu_thi_sinh.xlsx');
   };
 
   return (

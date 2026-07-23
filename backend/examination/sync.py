@@ -222,6 +222,7 @@ def merged_headers(grid, header_index):
 
 def history_from_sheet_row(headers, row):
     field_aliases = {
+        'eligibility': ['dieukienduthi', 'dieukien'],
         'sbd': ['sobaodanh', 'sbd'],
         'date': ['ngaythi'],
         'time': ['giocathi', 'giothi'],

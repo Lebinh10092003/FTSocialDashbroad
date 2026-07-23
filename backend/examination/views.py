@@ -136,6 +136,7 @@ def merge_exam_history(existing, incoming, session_id='', source=''):
     return rows
 
 ROUND_FIELD_MAP = {
+    'eligibility': 'eligibility',
     'sbd': 'sbd',
     'date': 'exam_date',
     'time': 'time_slot',
@@ -152,7 +153,7 @@ ROUND_FIELD_MAP = {
 }
 
 
-def upsert_participation_history(candidate, session_id, history, source=''):
+def upsert_participation_history(candidate, session_id, history, source='', registration=None):
     """Store a source tab as one session and each populated round independently."""
     if not session_id:
         return None
@@ -164,9 +165,26 @@ def upsert_participation_history(candidate, session_id, history, source=''):
         session=session,
         defaults={'source': source or ''},
     )
+    updates = []
     if source and participation.source != source:
         participation.source = source
-        participation.save(update_fields=['source', 'updated_at'])
+        updates.append('source')
+    registration = registration or {}
+    registration_fields = {
+        'subject': 'subject', 'category': 'category', 'registrationMethod': 'registration_method',
+        'registrationUnit': 'registration_unit', 'teamName': 'team_name', 'examLanguage': 'exam_language',
+        'generalNote': 'general_note', 'certificateLink': 'certificate_link',
+    }
+    for payload_field, model_field in registration_fields.items():
+        value = str(registration.get(payload_field) or '').strip()
+        if value:
+            setattr(participation, model_field, value)
+            updates.append(model_field)
+    if registration:
+        participation.registration_data = {str(key): value for key, value in registration.items() if value not in (None, '')}
+        updates.append('registration_data')
+    if updates:
+        participation.save(update_fields=list(set(updates)) + ['updated_at'])
 
     for item in history or []:
         if not isinstance(item, dict):
@@ -193,9 +211,10 @@ def normalized_exam_history(candidate):
     for participation in participations:
         for result in participation.round_results.all():
             rows.append({
-                'sessionId': participation.session_id,
+            'sessionId': participation.session_id,
                 'sessionCode': participation.session.code,
                 'round': result.round_name,
+                'eligibility': result.eligibility,
                 'sbd': result.sbd,
                 'date': result.exam_date,
                 'time': result.time_slot,
@@ -247,6 +266,32 @@ def serialize_session(sess):
         'updatedAt': sess.updated_at.isoformat()
     }
 
+def serialize_candidate_participations(cand):
+    participations = CandidateParticipation.objects.filter(candidate=cand).select_related('session').prefetch_related('round_results')
+    rows = []
+    for participation in participations:
+        rows.append({
+            'sessionId': participation.session_id,
+            'sessionCode': participation.session.code,
+            'sessionName': participation.session.name,
+            'sessionTime': participation.session.time,
+            'registration': {
+                'subject': participation.subject, 'category': participation.category,
+                'registrationMethod': participation.registration_method, 'registrationUnit': participation.registration_unit,
+                'teamName': participation.team_name, 'examLanguage': participation.exam_language,
+                'generalNote': participation.general_note, 'certificateLink': participation.certificate_link,
+            },
+            'rounds': [{
+                'id': str(result.id),
+                'round': result.round_name, 'eligibility': result.eligibility, 'sbd': result.sbd,
+                'date': result.exam_date, 'time': result.time_slot, 'mode': result.mode,
+                'location': result.location, 'link': result.link, 'account': result.account,
+                'attendance': result.attendance, 'score': result.score, 'scoreRate': result.score_rate,
+                'rank': result.rank, 'result': result.result, 'note': result.note,
+            } for result in participation.round_results.all()],
+        })
+    return rows
+
 def serialize_candidate(cand):
     return {
         'id': cand.id,
@@ -255,8 +300,12 @@ def serialize_candidate(cand):
         'school': cand.school or '',
         'className': cand.class_name or '',
         'city': cand.city or '',
+        'ward': cand.ward or '',
+        'nationality': cand.nationality or '',
+        'grade': cand.grade or '',
         'contests': cand.contests or '',
         'achievement': cand.achievement or '',
+        'highestRound': cand.highest_round or '',
         'email': cand.email or '',
         'parent': cand.parent or '',
         'phone': cand.phone or '',
@@ -264,6 +313,7 @@ def serialize_candidate(cand):
         'address': cand.address or '',
         'birthDate': cand.birth_date or '',
         'sessionIds': cand.session_ids or [],
+        'participations': serialize_candidate_participations(cand),
         'examHistory': normalized_exam_history(cand) or cand.exam_history or [],
         'sortKey': cand.sort_key,
         'updated': cand.updated or ''
@@ -443,12 +493,13 @@ def session_create(request):
     processed_rounds = []
     if isinstance(rounds, list):
         for r in rounds:
-            if isinstance(r, dict) and r.get('name') and r.get('label'):
+            if isinstance(r, dict) and r.get('name'):
+                timing = r.get('time') if isinstance(r.get('time'), dict) else {}
                 processed_rounds.append({
                     'id': r.get('id') or f"round-{uuid.uuid4().hex[:10]}",
                     'name': str(r['name']).strip(),
-                    'label': str(r['label']).strip(),
-                    'date': r.get('date')
+                    'label': str(r.get('label') or timing.get('label') or '').strip(),
+                    'date': r.get('date') or timing.get('date')
                 })
                 
     time_str = f"{national.get('label', '')} · {international.get('label', '')}".strip()
@@ -499,12 +550,13 @@ def session_detail(request, pk):
         if 'rounds' in data and isinstance(data['rounds'], list):
             processed_rounds = []
             for r in data['rounds']:
-                if isinstance(r, dict) and r.get('name') and r.get('label'):
+                if isinstance(r, dict) and r.get('name'):
+                    timing = r.get('time') if isinstance(r.get('time'), dict) else {}
                     processed_rounds.append({
                         'id': r.get('id') or f"round-{uuid.uuid4().hex[:10]}",
                         'name': str(r['name']).strip(),
-                        'label': str(r['label']).strip(),
-                        'date': r.get('date')
+                        'label': str(r.get('label') or timing.get('label') or '').strip(),
+                    'date': r.get('date') or timing.get('date')
                     })
             sess.rounds = processed_rounds
             
@@ -555,7 +607,7 @@ def candidate_detail(request, pk):
     if request.method == 'PUT':
         data = request.data or {}
         
-        fields = ['name', 'school', 'className', 'city', 'contests', 'achievement', 'email', 'parent', 'phone', 'identity', 'address', 'birthDate']
+        fields = ['name', 'school', 'className', 'city', 'ward', 'nationality', 'grade', 'contests', 'achievement', 'highestRound', 'email', 'parent', 'phone', 'identity', 'address', 'birthDate']
         for field in fields:
             if field in data:
                 val = str(data[field]).strip()
@@ -563,8 +615,12 @@ def candidate_detail(request, pk):
                 elif field == 'school': cand.school = val
                 elif field == 'className': cand.class_name = val
                 elif field == 'city': cand.city = val
+                elif field == 'ward': cand.ward = val
+                elif field == 'nationality': cand.nationality = val
+                elif field == 'grade': cand.grade = val
                 elif field == 'contests': cand.contests = val
                 elif field == 'achievement': cand.achievement = val
+                elif field == 'highestRound': cand.highest_round = val
                 elif field == 'email': cand.email = val
                 elif field == 'parent': cand.parent = val
                 elif field == 'phone': cand.phone = val
@@ -593,6 +649,46 @@ def candidate_detail(request, pk):
         cand.delete()
         sync_session_candidate_totals()
         return Response({'success': True})
+
+@api_view(['PUT'])
+@permission_classes([IsManagerOrAdmin])
+def round_result_detail(request, pk):
+    try:
+        item = RoundResult.objects.select_related('participation__candidate').get(id=pk)
+    except RoundResult.DoesNotExist:
+        return Response({'error': 'Không tìm thấy dữ liệu vòng thi.'}, status=status.HTTP_404_NOT_FOUND)
+
+    data = request.data or {}
+    fields = {
+        'eligibility': 'eligibility', 'sbd': 'sbd', 'date': 'exam_date', 'time': 'time_slot',
+        'mode': 'mode', 'location': 'location', 'link': 'link', 'account': 'account',
+        'attendance': 'attendance', 'score': 'score', 'scoreRate': 'score_rate',
+        'rank': 'rank', 'result': 'result', 'note': 'note',
+    }
+    for payload_field, model_field in fields.items():
+        if payload_field in data:
+            setattr(item, model_field, str(data[payload_field] or '').strip())
+    registration = data.get('registration') if isinstance(data.get('registration'), dict) else {}
+    registration_fields = {
+        'subject': 'subject', 'category': 'category', 'registrationMethod': 'registration_method',
+        'registrationUnit': 'registration_unit', 'teamName': 'team_name', 'examLanguage': 'exam_language',
+        'generalNote': 'general_note', 'certificateLink': 'certificate_link',
+    }
+    participation_updates = []
+    for payload_field, model_field in registration_fields.items():
+        if payload_field in registration:
+            setattr(item.participation, model_field, str(registration[payload_field] or '').strip())
+            participation_updates.append(model_field)
+    if registration:
+        item.participation.registration_data = {str(key): value for key, value in registration.items() if value not in (None, '')}
+        participation_updates.append('registration_data')
+    item.save()
+    if participation_updates:
+        item.participation.save(update_fields=list(set(participation_updates)) + ['updated_at'])
+    candidate = item.participation.candidate
+    candidate.updated = timezone.now().strftime('%d/%m/%Y %H:%M')
+    candidate.save(update_fields=['updated'])
+    return Response({'candidate': serialize_candidate(candidate)})
 
 @api_view(['DELETE'])
 @permission_classes([IsAdmin])
@@ -831,14 +927,29 @@ def import_candidates(request):
                 'school': str(rec.get('school', '')).strip(),
                 'class_name': str(rec.get('className', '')).strip(),
                 'city': str(rec.get('city', '')).strip(),
+                'ward': str(rec.get('ward', '')).strip(),
+                'nationality': str(rec.get('nationality', '')).strip(),
+                'grade': str(rec.get('grade', '')).strip(),
                 'contests': str(rec.get('contests', '')).strip(),
                 'achievement': str(rec.get('achievement', '')).strip(),
+                'highest_round': str(rec.get('highestRound', '')).strip(),
                 'email': str(rec.get('email', '')).strip(),
                 'parent': str(rec.get('parent', '')).strip(),
                 'phone': str(rec.get('phone', '')).strip(),
                 'identity': str(rec.get('identity', '')).strip(),
                 'address': str(rec.get('address', '')).strip(),
                 'birth_date': str(rec.get('birthDate', '')).strip(),
+                'registration': {
+                    'subject': str(rec.get('subject', '')).strip(),
+                    'category': str(rec.get('category', '')).strip(),
+                    'registrationMethod': str(rec.get('registrationMethod', '')).strip(),
+                    'registrationUnit': str(rec.get('registrationUnit', '')).strip(),
+                    'teamName': str(rec.get('teamName', '')).strip(),
+                    'examLanguage': str(rec.get('examLanguage', '')).strip(),
+                    'generalNote': str(rec.get('generalNote', '')).strip(),
+                    'certificateLink': str(rec.get('certificateLink', '')).strip(),
+                },
+
                 'exam_history': rec.get('examHistory') or [],
             }
             
@@ -870,7 +981,11 @@ def import_candidates(request):
                 if rec_cand['school']: base.school = rec_cand['school']
                 if rec_cand['class_name']: base.class_name = rec_cand['class_name']
                 if rec_cand['city']: base.city = rec_cand['city']
+                if rec_cand['ward']: base.ward = rec_cand['ward']
+                if rec_cand['nationality']: base.nationality = rec_cand['nationality']
+                if rec_cand['grade']: base.grade = rec_cand['grade']
                 if rec_cand['achievement']: base.achievement = rec_cand['achievement']
+                if rec_cand['highest_round']: base.highest_round = rec_cand['highest_round']
                 if rec_cand['email']: base.email = rec_cand['email']
                 if rec_cand['parent']: base.parent = rec_cand['parent']
                 if rec_cand['phone']: base.phone = rec_cand['phone']
@@ -887,7 +1002,7 @@ def import_candidates(request):
                 base.exam_history = merge_exam_history(base.exam_history, rec_cand['exam_history'], session_id, source)
                 base.updated = ts_vn
                 base.save()
-                upsert_participation_history(base, session_id, rec_cand['exam_history'], source)
+                upsert_participation_history(base, session_id, rec_cand['exam_history'], source, rec_cand['registration'])
                 updated += 1
                 items_returned.append(serialize_candidate(base))
             else:
@@ -899,8 +1014,12 @@ def import_candidates(request):
                     school=rec_cand['school'],
                     class_name=rec_cand['class_name'],
                     city=rec_cand['city'],
+                    ward=rec_cand['ward'],
+                    nationality=rec_cand['nationality'],
+                    grade=rec_cand['grade'],
                     contests=rec_cand['contests'],
                     achievement=rec_cand['achievement'],
+                    highest_round=rec_cand['highest_round'],
                     email=rec_cand['email'],
                     parent=rec_cand['parent'],
                     phone=rec_cand['phone'],
@@ -912,7 +1031,7 @@ def import_candidates(request):
                     updated=ts_vn,
                     sort_key=f"{rec_cand['name'].lower()}_{rec_cand['identity'] or code}"
                 )
-                upsert_participation_history(new_c, session_id, rec_cand['exam_history'], source)
+                upsert_participation_history(new_c, session_id, rec_cand['exam_history'], source, rec_cand['registration'])
                 existing.append(new_c)
                 existing_codes_set.add(code)
                 created += 1

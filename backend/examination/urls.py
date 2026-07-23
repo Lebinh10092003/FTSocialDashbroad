@@ -8,6 +8,7 @@ urlpatterns = [
     path('examination/sessions', views.session_create, name='session_create'),
     path('examination/sessions/<str:pk>', views.session_detail, name='session_detail'),
     path('examination/candidates/<str:pk>', views.candidate_detail, name='candidate_detail'),
+    path('examination/round-results/<uuid:pk>', views.round_result_detail, name='round_result_detail'),
     path('examination/candidates/<str:pk>/sessions/<str:session_id>', views.candidate_remove_from_session, name='candidate_remove_from_session'),
     path('examination/sheets', views.sheets_list, name='sheets_list'),
     path('examination/sheets/<str:pk>', views.sheet_detail, name='sheet_detail'),
