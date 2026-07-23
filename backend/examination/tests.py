@@ -209,6 +209,11 @@ class CandidateRoundHistoryTests(TestCase):
         self.assertEqual(history[0]['sbd'], 'SBD-001')
         self.assertEqual(history[0]['score'], '91')
         self.assertEqual(history[1]['sbd'], 'SBD-002')
+    def test_sbd_column_is_never_used_as_profile_code(self):
+        from .sync import resolve_column_indices
+        columns = resolve_column_indices(['Hồ sơ thí sinh: Họ và tên thí sinh', 'Vòng 1: Số báo danh (SBD)'])
+        self.assertNotIn('code', columns)
+
     def test_manual_template_import_links_the_selected_competition(self):
         response = self.client.post('/api/examination/import/candidates', {
             'sessionId': self.session.id,

@@ -6,7 +6,7 @@ import {
   Trash2, Pencil, Plus,
 } from 'lucide-react';
 import type { Candidate, ExaminationSession } from './types';
-import { formatBirthDate, formatPersonName, normaliseBirthDate } from './ui';
+import { LIST_PAGE_SIZE, TablePagination, formatBirthDate, formatPersonName, normaliseBirthDate } from './ui';
 
 type ImportRow = Record<string, unknown>;
 type Props = {
@@ -68,7 +68,7 @@ const roundPreviewFields: (keyof Omit<RoundHistory, 'round'>)[] = [
 ];
 
 const aliases: Record<string, string[]> = {
-  code: ['ma ft', 'ma ho so', 'ma thi sinh', 'sbd', 'student code', 'code'],
+  code: ['ma ft', 'ma ho so', 'ma ho so ft', 'ft code', 'profile code'],
   name: ['ho va ten thi sinh', 'ho va ten', 'ho ten', 'thi sinh', 'full name', 'name'],
   school: ['ten truong', 'truong hoc', 'truong', 'school'],
   className: ['lop dang hoc', 'hoc sinh lop', 'lop', 'class'],
@@ -147,14 +147,17 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   const [sourceUrl, setSourceUrl] = useState('');
   const [targetSessionId, setTargetSessionId] = useState(sessionId || '');
   const [rows, setRows] = useState<Candidate[]>([]);
+  const [previewPage, setPreviewPage] = useState(1);
   const [source, setSource] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>([]);
   const [confirmedMatches, setConfirmedMatches] = useState<Record<string, string>>({});
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
-  const previewLimit = 20;
-  const sample = useMemo(() => rows.slice(0, previewLimit), [rows]);
+  const previewPageCount = Math.max(1, Math.ceil(rows.length / LIST_PAGE_SIZE));
+  const activePreviewPage = Math.min(previewPage, previewPageCount);
+  const sample = useMemo(() => rows.slice((activePreviewPage - 1) * LIST_PAGE_SIZE, activePreviewPage * LIST_PAGE_SIZE), [rows, activePreviewPage]);
+  useEffect(() => setPreviewPage(1), [rows]);
   const rowIndexForPreview = (row: Candidate) => rows.indexOf(row) + 1;
 
   // States mới cho việc quản lý đa nguồn Google Sheets
@@ -632,11 +635,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
               </tbody>
             </table>
           </div>
-          {rows.length > previewLimit && (
-            <p className="mt-3 text-center text-xs text-slate-400">
-              Hiển thị {sample.length}/{rows.length} hồ sơ đầu tiên
-            </p>
-          )}
+          <TablePagination total={rows.length} page={activePreviewPage} onPageChange={setPreviewPage} label="bản ghi"/>
         </section>
       )}
     </>

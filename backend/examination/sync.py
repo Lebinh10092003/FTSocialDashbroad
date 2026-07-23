@@ -188,7 +188,7 @@ def resolve_column_indices(header):
     idx = {}
     for i, title in enumerate(header):
         nh = normalise_str(title)
-        if 'code' not in idx and ('mahoso' in nh or 'maft' in nh or 'mathisinh' in nh or 'studentcode' in nh):
+        if 'code' not in idx and ('mahoso' in nh or 'maft' in nh):
             idx['code'] = i
         elif 'timestamp' not in idx and ('thoigian' in nh or 'timestamp' in nh):
             idx['timestamp'] = i
