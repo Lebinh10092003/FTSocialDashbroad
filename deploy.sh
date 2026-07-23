@@ -32,10 +32,8 @@ fi
 npm ci
 VITE_API_URL=/api npm run build
 
-sudo install -m 0644 nginx-workspace.conf /etc/nginx/sites-available/workspace.fermat.vn
-sudo ln -sfn /etc/nginx/sites-available/workspace.fermat.vn /etc/nginx/sites-enabled/workspace.fermat.vn
-sudo nginx -t
-sudo systemctl reload nginx
+sudo -n install -m 0644 nginx-workspace.conf /etc/nginx/sites-available/workspace.fermat.vn
+sudo -n systemctl reload nginx
 
 # On the first persistent deployment, freeze writes while the legacy database is
 # copied. This prevents losing a configuration or token change made mid-deploy.
