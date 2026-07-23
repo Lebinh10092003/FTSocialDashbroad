@@ -102,7 +102,7 @@ class CandidateRoundHistoryTests(TestCase):
 
         update = self.client.put(
             f'/api/examination/sessions/{self.session.id}',
-            {'rounds': [{'id': 'r1', 'name': 'Round 1', 'label': '', 'date': '', 'slots': [
+            {'rounds': [{'id': 'r1', 'name': 'V\u00f2ng Chung k\u1ebft Qu\u1ed1c gia', 'label': '26/7/2026', 'date': '2026-07-26', 'slots': [
                 {'id': 'slot-1', 'date': '2026-07-26', 'time': '09:00 - 10:00', 'mode': 'Trực tuyến', 'link': 'https://example.test/room', 'location': ''},
                 {'id': 'slot-2', 'date': '2026-07-27', 'time': '13:00 - 14:00', 'mode': 'Trực tiếp', 'link': '', 'location': 'Hà Nội'},
             ]}]},
@@ -110,6 +110,8 @@ class CandidateRoundHistoryTests(TestCase):
         )
         self.assertEqual(update.status_code, 200)
         self.assertEqual(len(update.data['rounds'][0]['slots']), 2)
+        self.assertEqual(update.data['nationalDate'], '2026-07-26')
+        self.assertEqual(update.data['national'], '26/7/2026')
 
         self.candidate.session_ids = [self.session.id]
         self.candidate.contests = 'SIMO'

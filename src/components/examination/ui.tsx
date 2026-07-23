@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { DraftDate, ExaminationSession } from './types';
 import { sessionRounds } from './rounds';
 
@@ -9,13 +9,15 @@ export const todayIso = (value = new Date()) => {
 };
 export const emptyDate = (): DraftDate => ({ day: '', month: '', year: '', planned: false, unknown: false });
 export function dateValue(value: DraftDate) {
-  if (value.unknown) return { label: 'Chưa có thông tin' };
-  const raw = value.day ? `${value.day}/${value.month}/${value.year}` : `Tháng ${value.month}/${value.year}`;
-  return { label: value.planned ? `Dự kiến ${raw}` : raw, date: value.day ? `${value.year}-${value.month.padStart(2, '0')}-${value.day.padStart(2, '0')}` : undefined };
+  if (value.unknown) return { label: 'Ch\u01b0a c\u00f3 th\u00f4ng tin', date: '' };
+  const hasMonthYear = Boolean(value.month && value.year);
+  const hasFullDate = Boolean(value.day && hasMonthYear);
+  if (!hasMonthYear) return { label: '', date: '' };
+  const raw = hasFullDate ? `${value.day}/${value.month}/${value.year}` : `Th\u00e1ng ${value.month}/${value.year}`;
+  return { label: value.planned ? `D\u1ef1 ki\u1ebfn ${raw}` : raw, date: hasFullDate ? `${value.year}-${value.month.padStart(2, '0')}-${value.day.padStart(2, '0')}` : '' };
 }
 export function DateBadge({ label, date }: { label: string; date?: string }) {
-  if (!date) return <span className="text-xs font-semibold text-slate-500">{label}</span>;
-// Refresh just after local midnight, even when the module stays open overnight.
+  // Refresh just after local midnight, even when the module stays open overnight.
   const [today, setToday] = useState(() => todayIso());
   useEffect(() => {
     const refresh = () => setToday(todayIso());
@@ -25,20 +27,23 @@ export function DateBadge({ label, date }: { label: string; date?: string }) {
     const timer = window.setTimeout(refresh, nextMidnight.getTime() - now.getTime());
     return () => window.clearTimeout(timer);
   }, [today]);
-  const days = Math.round((new Date(`${date}T00:00:00`).getTime() - new Date(`${today}T00:00:00`).getTime()) / 86400000);
+  const normalizedDate = String(date || '').trim();
+  const labelText = String(label || '').trim() || 'Ch\u01b0a c\u00f3 th\u00f4ng tin';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) return <span className="text-xs font-semibold text-slate-500">{labelText}</span>;
+  const target = new Date(`${normalizedDate}T00:00:00`).getTime();
+  const days = Math.round((target - new Date(`${today}T00:00:00`).getTime()) / 86400000);
+  if (!Number.isFinite(days)) return <span className="text-xs font-semibold text-slate-500">{labelText}</span>;
   const style = days < 0 ? 'border-blue-200 bg-blue-50 text-blue-700' : days <= 7 ? 'border-red-600 bg-red-600 text-white' : days <= 15 ? 'border-red-300 bg-white text-red-600' : days <= 31 ? 'border-orange-200 bg-orange-50 text-orange-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700';
-  return <span className={`inline-flex whitespace-nowrap rounded-lg border px-2.5 py-1 text-[11px] font-bold ${style}`}>{label} · {days < 0 ? 'Đã qua' : days === 0 ? 'Hôm nay' : `Còn ${days} ngày`}</span>;
-}
-export function Metric({ label, value, icon: Icon, onClick }: { label: string; value: string; icon: React.ElementType; onClick?: () => void }) {
+  return <span className={`inline-flex whitespace-nowrap rounded-lg border px-2.5 py-1 text-[11px] font-bold ${style}`}>{labelText} · {days < 0 ? '\u0110\u00e3 qua' : days === 0 ? 'H\u00f4m nay' : `C\u00f2n ${days} ng\u00e0y`}</span>;
+}export function Metric({ label, value, icon: Icon, onClick }: { label: string; value: string; icon: React.ElementType; onClick?: () => void }) {
   const body = <><div className="flex justify-between"><span className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</span><Icon className="h-5 w-5 text-[#001e40]" /></div><p className="mt-4 text-4xl font-extrabold text-[#001e40]">{value}</p></>;
   return onClick ? <button onClick={onClick} className="rounded-xl border border-slate-200 bg-white p-5 text-left transition hover:border-[#001e40] hover:shadow-sm">{body}</button> : <div className="rounded-xl border border-slate-200 bg-white p-5">{body}</div>;
 }
 export function DeadlineLegend() { return <div className="flex flex-wrap gap-2 text-[10px] font-semibold"><span className="text-blue-700">Đã qua</span><span className="text-emerald-700">›1 tháng</span><span className="text-orange-700">≤1 tháng</span><span className="text-red-600">≤15 ngày</span><span className="rounded bg-red-600 px-1 text-white">≤7 ngày</span></div>; }
 export function TimeField({ label, value, onChange }: { label: string; value: DraftDate; onChange: (value: DraftDate) => void }) {
-  const fieldId = useId();
   const update = (key: keyof DraftDate, next: string | boolean) => onChange({ ...value, [key]: next });
   const setUnknown = (unknown: boolean) => onChange({ ...value, unknown, planned: unknown ? false : value.planned });
-  return <fieldset className="rounded-lg border border-slate-200 p-3"><legend className="px-1 text-sm font-bold">{label}</legend><div className="mb-3 flex gap-4 text-xs font-semibold"><span className="inline-flex items-center gap-1"><input id={`${fieldId}-planned`} className="cursor-pointer" type="checkbox" checked={value.planned} disabled={value.unknown} onChange={event => update('planned', event.target.checked)} /><label className="cursor-pointer" htmlFor={`${fieldId}-planned`}>Thời gian dự kiến</label></span><span className="inline-flex items-center gap-1"><input id={`${fieldId}-unknown`} className="cursor-pointer" type="checkbox" checked={value.unknown} onChange={event => setUnknown(event.target.checked)} /><label className="cursor-pointer" htmlFor={`${fieldId}-unknown`}>Chưa có thông tin</label></span></div>{value.unknown ? <p className="rounded bg-slate-50 px-3 py-2 text-sm text-slate-500">Chưa có thông tin về thời gian.</p> : <><div className="grid grid-cols-3 gap-2">{(['day', 'month', 'year'] as const).map((part, index) => <select key={part} value={value[part]} onChange={event => update(part, event.target.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"><option value="">{index === 0 ? 'Ngày' : index === 1 ? 'Tháng' : 'Năm'}{index === 0 && value.planned ? ' (tuỳ chọn)' : ''}</option>{Array.from({ length: index === 0 ? 31 : index === 1 ? 12 : 4 }, (_, itemIndex) => { const option = index === 2 ? 2026 + itemIndex : itemIndex + 1; return <option key={option} value={String(option)}>{option}</option>; })}</select>)}</div><p className="mt-2 text-[11px] text-slate-500">{value.planned ? 'Dự kiến: bắt buộc tháng và năm; ngày có thể để trống.' : 'Chính thức: bắt buộc đủ ngày, tháng và năm.'}</p></>}</fieldset>;
+  return <fieldset className="rounded-lg border border-slate-200 p-3"><legend className="px-1 text-sm font-bold">{label}</legend><div className="mb-3 flex gap-4 text-xs font-semibold"><label className="inline-flex cursor-pointer items-center gap-1"><input className="cursor-pointer" type="checkbox" checked={Boolean(value.planned)} disabled={Boolean(value.unknown)} onChange={event => update('planned', event.currentTarget.checked)} /><span>Th\u1eddi gian d\u1ef1 ki\u1ebfn</span></label><label className="inline-flex cursor-pointer items-center gap-1"><input className="cursor-pointer" type="checkbox" checked={Boolean(value.unknown)} onChange={event => setUnknown(event.currentTarget.checked)} /><span>Ch\u01b0a c\u00f3 th\u00f4ng tin</span></label></div>{value.unknown ? <p className="rounded bg-slate-50 px-3 py-2 text-sm text-slate-500">Ch\u01b0a c\u00f3 th\u00f4ng tin v\u1ec1 th\u1eddi gian.</p> : <><div className="grid grid-cols-3 gap-2">{(['day', 'month', 'year'] as const).map((part, index) => <select key={part} value={value[part] || ''} onChange={event => update(part, event.currentTarget.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"><option value="">{index === 0 ? 'Ng\u00e0y' : index === 1 ? 'Th\u00e1ng' : 'N\u0103m'}{index === 0 && value.planned ? ' (tu\u1ef3 ch\u1ecdn)' : ''}</option>{Array.from({ length: index === 0 ? 31 : index === 1 ? 12 : 4 }, (_, itemIndex) => { const option = index === 2 ? 2026 + itemIndex : itemIndex + 1; return <option key={option} value={String(option)}>{option}</option>; })}</select>)}</div><p className="mt-2 text-[11px] text-slate-500">{value.planned ? 'D\u1ef1 ki\u1ebfn: b\u1eaft bu\u1ed9c th\u00e1ng v\u00e0 n\u0103m; ng\u00e0y c\u00f3 th\u1ec3 \u0111\u1ec3 tr\u1ed1ng.' : 'Ch\u00ednh th\u1ee9c: b\u1eaft bu\u1ed9c \u0111\u1ee7 ng\u00e0y, th\u00e1ng v\u00e0 n\u0103m.'}</p></>}</fieldset>;
 }export function sessionDisplayName(session: ExaminationSession) {
   const monthYear = (date?: string, fallback?: string) => { if (date) { const [year, month] = date.split('-'); return `T${Number(month)}/${year}`; } const match = fallback?.match(/T?(\d{1,2})\/(\d{4})/i); return match ? `T${Number(match[1])}/${match[2]}` : (fallback || 'Chưa có thông tin'); };
   return `${session.code}: ${monthYear(session.nationalDate, session.national)} - ${monthYear(session.internationalDate, session.international)}`;

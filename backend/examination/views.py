@@ -479,6 +479,24 @@ def competition_detail(request, pk):
         comp.delete()
         return Response({'success': True})
 
+def sync_legacy_round_milestones(session, rounds):
+    """Keep legacy summary fields in sync with named rounds for existing screens and exports."""
+    def find_round(marker):
+        for round_config in rounds:
+            name = str(round_config.get('name') or '').lower()
+            if marker in name:
+                return round_config
+        return None
+
+    national = find_round('qu\u1ed1c gia') or find_round('national')
+    international = find_round('qu\u1ed1c t\u1ebf') or find_round('international')
+    if national:
+        session.national = str(national.get('label') or '').strip()
+        session.national_date = str(national.get('date') or '').strip()
+    if international:
+        session.international = str(international.get('label') or '').strip()
+        session.international_date = str(international.get('date') or '').strip()
+
 @api_view(['POST'])
 @permission_classes([IsManagerOrAdmin])
 def session_create(request):
@@ -514,6 +532,12 @@ def session_create(request):
                     'slots': [{key: str(slot.get(key) or '').strip() for key in ('id', 'date', 'time', 'mode', 'link', 'location', 'note')} for slot in r.get('slots', []) if isinstance(slot, dict)]
                 })
                 
+    round_national = next((item for item in processed_rounds if 'qu\u1ed1c gia' in str(item.get('name') or '').lower() or 'national' in str(item.get('name') or '').lower()), None)
+    round_international = next((item for item in processed_rounds if 'qu\u1ed1c t\u1ebf' in str(item.get('name') or '').lower() or 'international' in str(item.get('name') or '').lower()), None)
+    if round_national:
+        national = round_national
+    if round_international:
+        international = round_international
     time_str = f"{national.get('label', '')} · {international.get('label', '')}".strip()
     sess = ExamSession.objects.create(
         id=sess_id,
@@ -572,6 +596,7 @@ def session_detail(request, pk):
                     'slots': [{key: str(slot.get(key) or '').strip() for key in ('id', 'date', 'time', 'mode', 'link', 'location', 'note')} for slot in r.get('slots', []) if isinstance(slot, dict)]
                     })
             sess.rounds = processed_rounds
+            sync_legacy_round_milestones(sess, processed_rounds)
             
         if 'competitionId' in data and data['competitionId'] and data['competitionId'] != sess.competition_id:
             try:
