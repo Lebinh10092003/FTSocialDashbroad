@@ -92,14 +92,23 @@ function mapRows(rawRows: ImportRow[]): (Candidate & { examHistory?: RoundHistor
   return rawRows.map((row, index) => {
     const entries = Object.entries(row).map(([key, value]) => [normalise(key), text(value)] as [string, string]);
     const name = valueFor(entries, 'name');
-    const code = valueFor(entries, 'code') || `IMPORT-${Date.now()}-${index + 1}`;
+    const code = valueFor(entries, 'code');
     return { code, name, school: valueFor(entries, 'school'), className: valueFor(entries, 'className'), city: valueFor(entries, 'city'), ward: valueFor(entries, 'ward'), nationality: valueFor(entries, 'nationality'), grade: valueFor(entries, 'grade'), contests: valueFor(entries, 'contests'), subject: valueFor(entries, 'subject'), category: valueFor(entries, 'category'), registrationMethod: valueFor(entries, 'registrationMethod'), registrationUnit: valueFor(entries, 'registrationUnit'), teamName: valueFor(entries, 'teamName'), examLanguage: valueFor(entries, 'examLanguage'), generalNote: valueFor(entries, 'generalNote'), certificateLink: valueFor(entries, 'certificateLink'), achievement: valueFor(entries, 'achievement'), highestRound: valueFor(entries, 'highestRound'), email: valueFor(entries, 'email'), parent: valueFor(entries, 'parent'), phone: valueFor(entries, 'phone'), identity: valueFor(entries, 'identity'), address: valueFor(entries, 'address'), birthDate: valueFor(entries, 'birthDate'), updated: '', examHistory: historyFromRow(row) };
-  }).filter(row => row.name);
+  }).filter(row => row.name && !['stt', 'họ và tên', 'ho va ten'].includes(normalise(row.name)));
 }
 
 function rowsFromSheet(sheet: XLSX.WorkSheet): ImportRow[] {
-  const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' });
-  const headerIndex = grid.findIndex(row => (row as unknown[]).some(cell => aliases.name.some(alias => normalise(cell).includes(alias))));
+  const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: false });
+  const headerScore = (row: unknown[]) => {
+    const cells = row.map(normalise).filter(Boolean);
+    const matchedFields = Object.entries(aliases).filter(([field, options]) => field !== 'code' && options.some(alias => alias.length > 3 && cells.some(cell => cell.includes(alias))));
+    const hasName = matchedFields.some(([field]) => field === 'name');
+    const hasProfileField = matchedFields.some(([field]) => ['birthDate', 'school', 'className', 'identity', 'email', 'phone'].includes(field));
+    return hasName && hasProfileField ? matchedFields.length : 0;
+  };
+  const scores = grid.map(row => headerScore(row as unknown[]));
+  const bestScore = Math.max(0, ...scores);
+  const headerIndex = bestScore >= 4 ? scores.indexOf(bestScore) : -1;
   if (headerIndex < 0) return [];
   const groups = headerIndex > 0 ? grid[headerIndex - 1] as unknown[] : [];
   let currentGroup = '';
@@ -107,7 +116,9 @@ function rowsFromSheet(sheet: XLSX.WorkSheet): ImportRow[] {
     const group = text(groups[index]); if (group) currentGroup = group;
     const label = text(header); return currentGroup && label ? `${currentGroup}: ${label}` : label;
   });
-  return grid.slice(headerIndex + 1).filter(row => (row as unknown[]).some(cell => text(cell))).map(row => Object.fromEntries(headers.map((header, index) => [header || `column_${index + 1}`, (row as unknown[])[index] ?? ''])));
+  return grid.slice(headerIndex + 1)
+    .filter(row => (row as unknown[]).some(cell => text(cell)))
+    .map(row => Object.fromEntries(headers.map((header, index) => [header || `column_${index + 1}`, (row as unknown[])[index] ?? ''])));
 }
 
 const DEFAULT_SYNC_URL =
@@ -530,13 +541,19 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
               </thead>
               <tbody>
                 {sample.map(row => (
-                  <tr key={row.code}>
-                    <td><code className="text-xs">{row.code}</code></td>
+                  <tr key={`${row.code || 'new'}-${row.name}`}>
+                    <td><code className="text-xs">{row.code || 'Tự tạo: FT-000…'}</code></td>
                     <td><b>{row.name}</b></td>
-                    <td>{row.school || '—'}</td>
                     <td>{row.birthDate || '—'}</td>
-                    <td>{row.contests || '—'}</td>
+                    <td>{row.identity || '—'}</td>
+                    <td>{row.school || '—'}</td>
+                    <td>{[row.className, row.grade].filter(Boolean).join(' · ') || '—'}</td>
                     <td>{row.city || '—'}</td>
+                    <td>{row.phone || '—'}</td>
+                    <td>{row.email || '—'}</td>
+                    <td>{row.contests || '—'}</td>
+                    <td>{[row.subject, row.category].filter(Boolean).join(' · ') || '—'}</td>
+                    <td>{row.registrationMethod || '—'}</td>
                   </tr>
                 ))}
               </tbody>

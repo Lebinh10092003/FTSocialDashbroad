@@ -979,7 +979,7 @@ def import_candidates(request):
                 same_code_cand = next((e for e in existing if e.code.upper() == rec_code), None)
                 
             base = matched or same_code_cand
-            code = matched.code if matched else (rec_code if (rec_code and rec_code not in existing_codes_set) else next_code(existing_codes_set, idx))
+            code = matched.code if matched else (rec_code if (rec_code and rec_code not in existing_codes_set) else next_code(existing_codes_set))
             
             ts_vn = timezone.now().strftime('%d/%m/%Y %H:%M')
             

@@ -64,13 +64,14 @@ def same_candidate(a, b):
     school_a, school_b = normalise_str(a.get('school')), normalise_str(b.get('school'))
     return bool(dob_a and dob_b and school_a and school_b and dob_a == dob_b and school_a == school_b)
 
-def next_code(existing_codes_set, offset):
-    yr = datetime.datetime.now().strftime('%y')
-    seq = offset + 1
-    candidate = f"FT{yr}-{seq:04d}"
+def next_code(existing_codes_set, offset=0):
+    """Return the next stable, human-readable FermatTech candidate code."""
+    numbers = [int(match.group(1)) for code in existing_codes_set if (match := re.fullmatch(r'FT-(\d+)', str(code).strip().upper()))]
+    seq = max(numbers, default=0) + 1 + max(offset, 0)
+    candidate = f"FT-{seq:06d}"
     while candidate in existing_codes_set:
         seq += 1
-        candidate = f"FT{yr}-{seq:04d}"
+        candidate = f"FT-{seq:06d}"
     return candidate
 
 def parse_dob(raw):
@@ -657,7 +658,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
                 upsert_participation_history(matched, session_id, cand.get('exam_history'), spreadsheet_url)
                 updated += 1
             else:
-                code = next_code(existing_codes_set, len(existing) + i)
+                code = next_code(existing_codes_set)
                 c_id = code
                 new_cand = Candidate.objects.create(
                     id=c_id,
