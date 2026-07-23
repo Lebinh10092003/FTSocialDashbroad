@@ -30,28 +30,32 @@ export default function LogNotes({ entityKey, title = 'Lognote & lịch sử tha
   });
 
   useEffect(() => {
-    // Tải dữ liệu lognotes từ SQLite backend
-    fetch(`/api/examination/lognotes/${encodeURIComponent(entityKey)}`)
-      .then(res => res.ok ? res.json() : [])
-      .then(data => {
-        if (Array.isArray(data)) {
-          setNotes(current => {
-            // Keep a local entry if the network is unavailable before it can be persisted.
-            if (!data.length && current.length) return current;
-            localStorage.setItem(storageKey(entityKey), JSON.stringify(data));
-            return data;
-          });
-        }
-      })
-      .catch(() => {});
-
+    const load = () => {
+      fetch(`/api/examination/lognotes/${encodeURIComponent(entityKey)}`, { headers: idToken ? { Authorization: `Bearer ${idToken}` } : {} })
+        .then(res => res.ok ? res.json() : [])
+        .then(data => {
+          if (Array.isArray(data)) {
+            setNotes(current => {
+              if (!data.length && current.length) return current;
+              localStorage.setItem(storageKey(entityKey), JSON.stringify(data));
+              return data;
+            });
+          }
+        })
+        .catch(() => {});
+    };
+    load();
     const refresh = (event: Event) => {
       if ((event as CustomEvent<string>).detail !== entityKey) return;
       try { setNotes(JSON.parse(localStorage.getItem(storageKey(entityKey)) || '[]')); } catch { setNotes([]); }
     };
     window.addEventListener('ft-examination-lognote', refresh);
-    return () => window.removeEventListener('ft-examination-lognote', refresh);
-  }, [entityKey]);
+    window.addEventListener('ft-examination-audit-refresh', load);
+    return () => {
+      window.removeEventListener('ft-examination-lognote', refresh);
+      window.removeEventListener('ft-examination-audit-refresh', load);
+    };
+  }, [entityKey, idToken]);
 
   const systemNotes = useMemo<LogNote[]>(() => {
     // Never generate a timestamp when opening a page. System notes are shown

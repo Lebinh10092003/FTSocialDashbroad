@@ -52,6 +52,25 @@ class CandidateRoundHistoryTests(TestCase):
         self.client = APIClient()
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
 
+    def test_candidate_update_writes_full_before_after_audit_to_candidate_and_session(self):
+        self.candidate.session_ids = [self.session.id]
+        self.candidate.school = 'Trường cũ'
+        self.candidate.phone = '0900000000'
+        self.candidate.save()
+
+        response = self.client.put(
+            f'/api/examination/candidates/{self.candidate.code}',
+            {'school': 'Trường mới', 'phone': '0911222333'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        candidate_note = LogNote.objects.filter(entity_key=f'candidate-{self.candidate.code}').latest('created_at')
+        self.assertIn('Trường học: “Trường cũ” → “Trường mới”', candidate_note.content)
+        self.assertIn('Điện thoại: “0900000000” → “0911222333”', candidate_note.content)
+        self.assertEqual(candidate_note.updated_by, 'round-admin@example.com')
+        self.assertFalse(candidate_note.system)
+        self.assertTrue(LogNote.objects.filter(entity_key=f'session-{self.session.id}', content__contains='Cập nhật hồ sơ thí sinh').exists())
+
     def test_one_session_tab_keeps_multiple_rounds_without_duplicates(self):
         from .views import serialize_candidate, upsert_participation_history
 

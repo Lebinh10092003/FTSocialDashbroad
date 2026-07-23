@@ -17,6 +17,36 @@ from .sync import (
     export_session_to_google_sheet
 )
 
+
+def audit_actor(request):
+    """Return the authenticated actor whenever a person initiated the change."""
+    return getattr(request.user, 'email', '') or getattr(request, 'user_email', '') or 'Nhân viên FT Workspace'
+
+
+def audit_values(before, after, labels):
+    """Build a readable, complete before/after trail for only changed fields."""
+    changes = []
+    for field, label in labels.items():
+        old_value = str(before.get(field) or '').strip() or '—'
+        new_value = str(after.get(field) or '').strip() or '—'
+        if old_value != new_value:
+            changes.append(f'{label}: “{old_value}” → “{new_value}”')
+    return '; '.join(changes)
+
+
+def append_audit(entity_key, content, request=None, system=False, actor=''):
+    """Persist an immutable audit note under the detail page which owns the data."""
+    if not content:
+        return
+    LogNote.objects.create(
+        key=f'{entity_key}:{uuid.uuid4().hex}',
+        entity_key=entity_key,
+        content=content,
+        updated_by=actor or (audit_actor(request) if request and not system else 'Hệ thống FT Workspace'),
+        system=system,
+    )
+
+
 EXAMINATION_SEED = {
     'competitions': [
         { 'id': 'aysbc', 'code': 'AYSBC', 'name': 'Huy hiệu các Nhà khoa học trẻ Châu Á', 'parent': 'AYSBC', 'organizer': 'SCS và META Knowledge' },
@@ -434,6 +464,7 @@ def competition_create(request):
         sort_key=f"{code.lower()}_{comp_id}",
         created_by=request.user.email if hasattr(request.user, 'email') else None
     )
+    append_audit(f'competition-{comp.id}', 'Tạo cuộc thi: ' + audit_values({}, {'code': comp.code, 'name': comp.name, 'parent': comp.parent, 'organizer': comp.organizer}, {'code':'Mã cuộc thi', 'name':'Tên cuộc thi', 'parent':'Cuộc thi mẹ', 'organizer':'Ban tổ chức quốc tế'}), request)
     return Response(serialize_competition(comp), status=status.HTTP_201_CREATED)
 
 @api_view(['PUT', 'DELETE'])
@@ -445,6 +476,7 @@ def competition_detail(request, pk):
         return Response({'error': 'Không tìm thấy cuộc thi.'}, status=status.HTTP_404_NOT_FOUND)
         
     if request.method == 'PUT':
+        before = {'code': comp.code, 'name': comp.name, 'parent': comp.parent, 'organizer': comp.organizer}
         data = request.data or {}
         if 'code' in data and data['code'].strip():
             comp.code = data['code'].strip().upper()
@@ -465,7 +497,10 @@ def competition_detail(request, pk):
             s.parent = comp.parent
             s.organizer = comp.organizer
             s.save()
+            append_audit(f'session-{s.id}', f'Hệ thống đồng bộ thông tin cuộc thi {comp.code}: ' + audit_values({}, {'code': s.code, 'parent': s.parent, 'organizer': s.organizer}, {'code':'Mã cuộc thi', 'parent':'Cuộc thi mẹ', 'organizer':'Ban tổ chức quốc tế'}), request, system=True)
             
+        change_text = audit_values(before, {'code': comp.code, 'name': comp.name, 'parent': comp.parent, 'organizer': comp.organizer}, {'code':'Mã cuộc thi', 'name':'Tên cuộc thi', 'parent':'Cuộc thi mẹ', 'organizer':'Ban tổ chức quốc tế'})
+        append_audit(f'competition-{comp.id}', 'Cập nhật cuộc thi: ' + (change_text or 'Không có thay đổi dữ liệu.'), request)
         return Response(serialize_competition(comp))
         
     elif request.method == 'DELETE':
@@ -558,6 +593,8 @@ def session_create(request):
         sort_key=f"{comp.code.lower()}_{sess_id}",
         created_by=request.user.email if hasattr(request.user, 'email') else None
     )
+    append_audit(f'session-{sess.id}', 'Tạo kỳ tổ chức: ' + audit_values({}, {'name': sess.name, 'competition': comp.code, 'phase': sess.phase, 'rounds': json.dumps(processed_rounds, ensure_ascii=False)}, {'name':'Tên kỳ tổ chức', 'competition':'Cuộc thi', 'phase':'Giai đoạn', 'rounds':'Các vòng thi'}), request)
+    append_audit(f'competition-{comp.id}', f'Tạo kỳ tổ chức {sess.name}.', request)
     return Response(serialize_session(sess), status=status.HTTP_201_CREATED)
 
 @api_view(['PUT', 'DELETE'])
@@ -569,6 +606,7 @@ def session_detail(request, pk):
         return Response({'error': 'Không tìm thấy kỳ tổ chức.'}, status=status.HTTP_404_NOT_FOUND)
         
     if request.method == 'PUT':
+        before = {'name': sess.name, 'phase': sess.phase, 'note': sess.note, 'national': sess.national, 'nationalDate': sess.national_date, 'international': sess.international, 'internationalDate': sess.international_date, 'competitionId': sess.competition_id, 'rounds': json.dumps(sess.rounds or [], ensure_ascii=False)}
         data = request.data or {}
         
         allowed_fields = ['name', 'phase', 'note', 'national', 'nationalDate', 'international', 'internationalDate']
@@ -614,6 +652,9 @@ def session_detail(request, pk):
         
         sync_session_candidate_totals()
         sess.refresh_from_db()
+        after = {'name': sess.name, 'phase': sess.phase, 'note': sess.note, 'national': sess.national, 'nationalDate': sess.national_date, 'international': sess.international, 'internationalDate': sess.international_date, 'competitionId': sess.competition_id, 'rounds': json.dumps(sess.rounds or [], ensure_ascii=False)}
+        change_text = audit_values(before, after, {'name':'Tên kỳ tổ chức', 'phase':'Giai đoạn hiện tại', 'note':'Ghi chú', 'national':'Mốc vòng quốc gia', 'nationalDate':'Ngày vòng quốc gia', 'international':'Mốc vòng quốc tế', 'internationalDate':'Ngày vòng quốc tế', 'competitionId':'Cuộc thi', 'rounds':'Thông tin các vòng thi'})
+        append_audit(f'session-{sess.id}', 'Cập nhật kỳ tổ chức: ' + (change_text or 'Không có thay đổi dữ liệu.'), request)
         return Response(serialize_session(sess))
         
     elif request.method == 'DELETE':
@@ -627,6 +668,7 @@ def session_detail(request, pk):
                 c.session_ids = [s_id for s_id in c.session_ids if s_id != sess.id]
                 c.save()
                 
+        append_audit(f'session-{sess.id}', f'Xóa kỳ tổ chức {sess.name}.', request)
         sess.delete()
         sync_session_candidate_totals()
         return Response({'success': True})
@@ -643,6 +685,7 @@ def candidate_detail(request, pk):
             return Response({'error': 'Không tìm thấy thí sinh.'}, status=status.HTTP_404_NOT_FOUND)
             
     if request.method == 'PUT':
+        before = {'name': cand.name, 'school': cand.school, 'className': cand.class_name, 'city': cand.city, 'ward': cand.ward, 'nationality': cand.nationality, 'grade': cand.grade, 'contests': cand.contests, 'achievement': cand.achievement, 'highestRound': cand.highest_round, 'email': cand.email, 'parent': cand.parent, 'phone': cand.phone, 'identity': cand.identity, 'address': cand.address, 'birthDate': cand.birth_date, 'sessionIds': ', '.join(sorted(cand.session_ids or []))}
         data = request.data or {}
         
         fields = ['name', 'school', 'className', 'city', 'ward', 'nationality', 'grade', 'contests', 'achievement', 'highestRound', 'email', 'parent', 'phone', 'identity', 'address', 'birthDate']
@@ -678,12 +721,22 @@ def candidate_detail(request, pk):
         
         sync_session_candidate_totals()
         cand.refresh_from_db()
+        after = {'name': cand.name, 'school': cand.school, 'className': cand.class_name, 'city': cand.city, 'ward': cand.ward, 'nationality': cand.nationality, 'grade': cand.grade, 'contests': cand.contests, 'achievement': cand.achievement, 'highestRound': cand.highest_round, 'email': cand.email, 'parent': cand.parent, 'phone': cand.phone, 'identity': cand.identity, 'address': cand.address, 'birthDate': cand.birth_date, 'sessionIds': ', '.join(sorted(cand.session_ids or []))}
+        labels = {'name':'Họ và tên', 'school':'Trường học', 'className':'Lớp đang học', 'city':'Tỉnh/Thành phố cư trú', 'ward':'Phường/Xã', 'nationality':'Quốc tịch', 'grade':'Khối lớp', 'contests':'Cuộc thi', 'achievement':'Thành tích cao nhất', 'highestRound':'Vòng cao nhất', 'email':'Email', 'parent':'Phụ huynh', 'phone':'Điện thoại', 'identity':'CCCD/Hộ chiếu', 'address':'Địa chỉ', 'birthDate':'Ngày sinh', 'sessionIds':'Các kỳ tổ chức'}
+        change_text = audit_values(before, after, labels)
+        append_audit(f'candidate-{cand.code}', 'Cập nhật hồ sơ thí sinh: ' + (change_text or 'Không có thay đổi dữ liệu.'), request)
+        for session_id in set((before.get('sessionIds') or '').split(', ')) | set(cand.session_ids or []):
+            if session_id:
+                append_audit(f'session-{session_id}', f'Cập nhật hồ sơ thí sinh {cand.code} ({cand.name}): ' + (change_text or 'Không có thay đổi dữ liệu.'), request)
         return Response(serialize_candidate(cand))
         
     elif request.method == 'DELETE':
         if getattr(request, 'user_role', 'EMPLOYEE') != 'ADMIN':
             return Response({'error': 'Quyền admin là bắt buộc để xóa.'}, status=status.HTTP_403_FORBIDDEN)
             
+        for session_id in cand.session_ids or []:
+            append_audit(f'session-{session_id}', f'Xóa thí sinh {cand.code} ({cand.name}) khỏi kỳ tổ chức.', request)
+        append_audit(f'candidate-{cand.code}', f'Xóa hồ sơ thí sinh {cand.code} ({cand.name}).', request)
         cand.delete()
         sync_session_candidate_totals()
         return Response({'success': True})
@@ -698,6 +751,8 @@ def round_result_detail(request, pk):
 
     if request.method == 'DELETE':
         candidate = item.participation.candidate
+        round_name = item.round_name
+        session_id_for_log = item.participation.session_id
         if request.query_params.get('removeFromSession') == '1':
             session_id = item.participation.session_id
             all_sessions = list(ExamSession.objects.all())
@@ -716,9 +771,13 @@ def round_result_detail(request, pk):
             item.delete()
         candidate.updated = timezone.now().strftime('%d/%m/%Y %H:%M')
         candidate.save()
+        action = f'Gỡ thí sinh {candidate.code} ({candidate.name}) khỏi toàn bộ kỳ tổ chức.' if request.query_params.get('removeFromSession') == '1' else f'Gỡ thí sinh {candidate.code} ({candidate.name}) khỏi {round_name}.'
+        append_audit(f'candidate-{candidate.code}', action, request)
+        append_audit(f'session-{session_id_for_log}', action, request)
         sync_session_candidate_totals()
         return Response({'candidate': serialize_candidate(candidate)})
     data = request.data or {}
+    before_round = {'eligibility': item.eligibility, 'sbd': item.sbd, 'date': item.exam_date, 'time': item.time_slot, 'mode': item.mode, 'location': item.location, 'link': item.link, 'account': item.account, 'password': item.password, 'attendance': item.attendance, 'score': item.score, 'scoreRate': item.score_rate, 'rank': item.rank, 'result': item.result, 'note': item.note, 'registration': json.dumps(item.participation.registration_data or {}, ensure_ascii=False)}
     fields = {
         'eligibility': 'eligibility', 'sbd': 'sbd', 'date': 'exam_date', 'time': 'time_slot',
         'mode': 'mode', 'location': 'location', 'link': 'link', 'account': 'account', 'password': 'password',
@@ -748,6 +807,12 @@ def round_result_detail(request, pk):
     candidate = item.participation.candidate
     candidate.updated = timezone.now().strftime('%d/%m/%Y %H:%M')
     candidate.save(update_fields=['updated'])
+    after_round = {'eligibility': item.eligibility, 'sbd': item.sbd, 'date': item.exam_date, 'time': item.time_slot, 'mode': item.mode, 'location': item.location, 'link': item.link, 'account': item.account, 'password': item.password, 'attendance': item.attendance, 'score': item.score, 'scoreRate': item.score_rate, 'rank': item.rank, 'result': item.result, 'note': item.note, 'registration': json.dumps(item.participation.registration_data or {}, ensure_ascii=False)}
+    round_labels = {'eligibility':'Điều kiện', 'sbd':'Số báo danh', 'date':'Ngày thi', 'time':'Giờ/ca thi', 'mode':'Hình thức', 'location':'Địa điểm', 'link':'Link/phòng thi', 'account':'Tài khoản', 'password':'Mật khẩu', 'attendance':'Điểm danh', 'score':'Điểm', 'scoreRate':'Tỷ lệ điểm', 'rank':'Xếp hạng', 'result':'Kết quả', 'note':'Ghi chú', 'registration':'Thông tin đăng ký'}
+    change_text = audit_values(before_round, after_round, round_labels)
+    audit_content = f'Cập nhật {item.round_name} cho {candidate.code} ({candidate.name}): ' + (change_text or 'Không có thay đổi dữ liệu.')
+    append_audit(f'candidate-{candidate.code}', audit_content, request)
+    append_audit(f'session-{item.participation.session_id}', audit_content, request)
     return Response({'candidate': serialize_candidate(candidate)})
 
 @api_view(['DELETE'])
@@ -772,6 +837,9 @@ def candidate_remove_from_session(request, pk, session_id):
     CandidateParticipation.objects.filter(candidate=cand, session_id=session_id).delete()
     cand.updated = timezone.now().strftime('%d/%m/%Y %H:%M')
     cand.save()
+    action = f'Gỡ thí sinh {cand.code} ({cand.name}) khỏi kỳ tổ chức.'
+    append_audit(f'candidate-{cand.code}', action, request)
+    append_audit(f'session-{session_id}', action, request)
     
     sync_session_candidate_totals()
     return Response(serialize_candidate(cand))
@@ -1098,6 +1166,8 @@ def import_candidates(request):
                 items_returned.append(serialize_candidate(new_c))
                 
         sync_session_candidate_totals()
+        source_label = str(source or 'nguồn nhập dữ liệu').strip()
+        append_audit(f'session-{session_id}', f'Hệ thống nhập dữ liệu từ {source_label}: thêm {created} thí sinh, cập nhật {updated} thí sinh.', request, system=True)
         return Response({'created': created, 'updated': updated, 'items': items_returned})
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
