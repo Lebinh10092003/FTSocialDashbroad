@@ -569,7 +569,8 @@ class DashboardFilterConsistencyTests(TestCase):
             [self.recent_post.post_key, self.old_top_post.post_key, self.too_old_post.post_key],
         )
         self.assertEqual([item['type'] for item in data['typeStats']], ['Ảnh / Album'])
-        self.assertEqual([item['date'] for item in data['trends']], [self.period_end.isoformat()])
+        expected_dates = [(self.period_start + timedelta(days=offset)).isoformat() for offset in range(7)]
+        self.assertEqual([item['date'] for item in data['trends']], expected_dates)
 
         top_viewed_keys = [item['postKey'] for item in data['topViewedPosts']]
         self.assertEqual(top_viewed_keys[0], self.old_top_post.post_key)

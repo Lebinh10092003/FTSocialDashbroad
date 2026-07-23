@@ -137,13 +137,40 @@ const getYAxisScale = (values: number[], divisions: number, includeZero = true):
   return { domain: [0, domainMax], ticks };
 };
 
-const getPastDateStr = (days: number) => {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
+const VIETNAM_TIME_ZONE = 'Asia/Ho_Chi_Minh';
+const getVietnamDateStr = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: VIETNAM_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const value = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${value.year}-${value.month}-${value.day}`;
+};
+const getVietnamHour = () => Number(new Intl.DateTimeFormat('en-GB', {
+  timeZone: VIETNAM_TIME_ZONE,
+  hour: '2-digit',
+  hourCycle: 'h23',
+}).format(new Date()));
+const shiftDateStr = (dateString: string, days: number) => {
+  const date = new Date(`${dateString}T12:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 };
-
-const getTodayStr = () => new Date().toISOString().slice(0, 10);
+const getPastDateStr = (days: number) => shiftDateStr(getVietnamDateStr(), -days);
+const getTodayStr = () => getVietnamDateStr();
+const getPresetRange = (preset: Exclude<DatePreset, 'custom'>) => {
+  const end = getTodayStr();
+  const offsets: Record<Exclude<DatePreset, 'custom'>, number> = {
+    '7days': 6,
+    '30days': 29,
+    '3months': 92,
+    '6months': 183,
+    '1year': 365,
+  };
+  return { startDate: shiftDateStr(end, -offsets[preset]), endDate: end };
+};
 
 export default function Dashboard({ idToken, googleAccessToken, channels }: DashboardProps) {
   const [platformFilter, setPlatformFilter] = useState('all');
@@ -227,6 +254,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
       if (channelFilter !== 'all') params.set('channelId', channelFilter);
 
       const response = await fetch(`/api/dashboard?${params.toString()}`, {
+        cache: 'no-store',
         headers: {
           Authorization: `Bearer ${idToken}`,
           'X-Google-OAuth-Token': googleAccessToken || '',
@@ -251,6 +279,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
       if (channelFilter !== 'all') params.set('channelId', channelFilter);
       if (platformFilter !== 'all') params.set('platform', platformFilter);
       const response = await fetch(`/api/followers/trend?${params.toString()}`, {
+        cache: 'no-store',
         headers: { Authorization: `Bearer ${idToken}` },
       });
       if (!response.ok) throw new Error('Không thể tải lịch sử người theo dõi.');
@@ -268,6 +297,23 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
   useEffect(() => {
     fetchFollowerTrend();
   }, [idToken, channelFilter, platformFilter, startDate, endDate]);
+  useEffect(() => {
+    const refreshAfterDailySync = () => {
+      if (getVietnamHour() < 6) return;
+      if (datePreset !== 'custom') {
+        const range = getPresetRange(datePreset);
+        if (range.startDate !== startDate || range.endDate !== endDate) {
+          setStartDate(range.startDate);
+          setEndDate(range.endDate);
+        }
+      }
+      void fetchDashboardData();
+      void fetchFollowerTrend();
+    };
+    refreshAfterDailySync();
+    const timer = window.setInterval(refreshAfterDailySync, 5 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [idToken, googleAccessToken, platformFilter, channelFilter, startDate, endDate, datePreset]);
 
   useEffect(() => {
     if (data) setSelectedChannels(new Set(data.channelStats.map(stat => stat.channelName)));
@@ -292,16 +338,9 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
     setDatePreset(preset);
     if (preset === 'custom') return;
 
-    const end = new Date();
-    const start = new Date();
-    if (preset === '7days') start.setDate(end.getDate() - 6);
-    if (preset === '30days') start.setDate(end.getDate() - 29);
-    if (preset === '3months') start.setMonth(end.getMonth() - 3);
-    if (preset === '6months') start.setMonth(end.getMonth() - 6);
-    if (preset === '1year') start.setFullYear(end.getFullYear() - 1);
-
-    setStartDate(start.toISOString().slice(0, 10));
-    setEndDate(end.toISOString().slice(0, 10));
+    const range = getPresetRange(preset);
+    setStartDate(range.startDate);
+    setEndDate(range.endDate);
   };
 
   const syncSelectedPeriod = async () => {
@@ -549,7 +588,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
           <section className="bg-white p-4 md:p-5 rounded-2xl border border-slate-200/70 shadow-sm space-y-4">
             <div className="flex flex-col lg:flex-row justify-between gap-4">
               <div>
-                <h3 className="text-lg font-extrabold text-slate-800">Xu hướng {isFollowerMetric ? 'lượt follow' : selectedMetricLabel[activeMetric]} {isFollowerMetric ? 'theo thời gian' : 'theo ngày đăng'}</h3>
+                <h3 className="text-lg font-extrabold text-slate-800">Xu hướng {isFollowerMetric ? 'lượt follow' : selectedMetricLabel[activeMetric]} {isFollowerMetric ? 'theo thời gian' : 'theo ngày cập nhật'}</h3>
                 <p className="text-sm text-slate-500 mt-1">{isFollowerMetric ? 'Chọn trang để xem biến động người theo dõi trong khoảng thời gian đang lọc.' : 'Chọn KPI phía trên để đổi chỉ số hiển thị trên biểu đồ.'}</p>
               </div>
               <div className="flex items-start gap-2">
