@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { DraftDate, ExaminationSession } from './types';
+import { sessionRounds } from './rounds';
 
 /** Local calendar date, avoiding UTC shifts in countdown labels. */
 export const todayIso = (value = new Date()) => {
@@ -42,6 +43,6 @@ export function sessionDisplayName(session: ExaminationSession) {
   return `${session.code}: ${monthYear(session.nationalDate, session.national)} - ${monthYear(session.internationalDate, session.international)}`;
 }
 export function SessionsTable({ items, onSelect }: { items: ExaminationSession[]; onSelect: (session: ExaminationSession) => void }) {
-  const rounds = (session: ExaminationSession) => [{ id: 'national', name: 'Vòng quốc gia', label: session.national, date: session.nationalDate }, { id: 'international', name: 'Vòng quốc tế', label: session.international, date: session.internationalDate }, ...(session.rounds || [])].sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
+  const rounds = (session: ExaminationSession) => sessionRounds(session).sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
   return <div className="overflow-x-auto"><table className="ft-table min-w-[1180px]"><thead><tr><th>Kỳ tổ chức</th><th>Cuộc thi mẹ</th><th>BTC quốc tế</th><th>Thời gian</th><th>Số thí sinh</th><th>Các vòng thi</th><th>Giai đoạn hiện tại</th><th>Ghi chú</th></tr></thead><tbody>{items.map(session => <tr key={session.id} onClick={() => onSelect(session)} className="cursor-pointer hover:bg-blue-50/50"><td><b className="text-[#001e40]">{sessionDisplayName(session)}</b><p className="mt-1 max-w-52 text-xs text-slate-500">{session.name}</p></td><td>{session.parent}</td><td>{session.organizer}</td><td>{session.time}</td><td className="text-center font-bold">{session.candidates.toLocaleString('vi-VN')}</td><td><div className="flex min-w-48 flex-col gap-1.5">{rounds(session).map(round => <div key={round.id}><p className="mb-0.5 text-[10px] font-bold text-slate-500">{round.name}</p><DateBadge label={round.label} date={round.date} /></div>)}</div></td><td><span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold">{session.phase}</span></td><td className="max-w-60 text-sm text-slate-600">{session.note}</td></tr>)}</tbody></table></div>;
 }
