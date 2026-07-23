@@ -78,7 +78,7 @@ def audit_values(before, after, labels):
             changes.append(f'Đã xóa {label} (trước đó: {old_value}).')
         else:
             changes.append(f'Đã đổi {label} từ "{old_value}" thành "{new_value}".')
-    return ' '.join(changes)
+    return '\n'.join(changes)
 
 
 def append_audit(entity_key, content, request=None, system=False, actor=''):
@@ -455,6 +455,79 @@ def serialize_lognote(note):
         'system': note.system,
     }
 
+PARTNER_CONFIG_KEY = 'examination_partners'
+
+
+def normalize_partners(rows):
+    normalized, seen = [], set()
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        partner_id = str(row.get('id') or '').strip()
+        school = str(row.get('school') or '').strip()
+        if not partner_id or not school or partner_id in seen:
+            continue
+        seen.add(partner_id)
+        counts = []
+        for item in row.get('studentCounts') or []:
+            if not isinstance(item, dict) or not str(item.get('session') or '').strip():
+                continue
+            try:
+                count = max(0, int(item.get('count') or 0))
+            except (TypeError, ValueError):
+                count = 0
+            counts.append({'session': str(item.get('session')).strip(), 'count': count})
+        normalized.append({
+            'id': partner_id, 'province': str(row.get('province') or '').strip(), 'ward': str(row.get('ward') or '').strip(),
+            'school': school, 'level': str(row.get('level') or '').strip(), 'representative': str(row.get('representative') or '').strip(),
+            'phone': str(row.get('phone') or '').strip(), 'email': str(row.get('email') or '').strip().lower(),
+            'contests': list(dict.fromkeys(str(item).strip() for item in row.get('contests') or [] if str(item).strip())),
+            'studentCounts': counts,
+        })
+    return normalized
+
+
+def recover_partners_from_lognotes():
+    recovered, marker = {}, '. Thông tin sau: '
+    for note in LogNote.objects.filter(entity_key__startswith='partner-').order_by('created_at'):
+        content = str(note.content or '')
+        if marker not in content:
+            continue
+        try:
+            after = content.split(marker, 1)[1].strip()
+            partner = normalize_partners([json.loads(after[:-1] if after.endswith('.') else after)])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            partner = []
+        if partner:
+            recovered[partner[0]['id']] = partner[0]
+    return list(recovered.values())
+
+
+def persisted_partners():
+    config, _ = SystemConfig.objects.get_or_create(key=PARTNER_CONFIG_KEY)
+    partners = normalize_partners((config.data or {}).get('partners'))
+    if partners:
+        return partners
+    recovered = recover_partners_from_lognotes()
+    if recovered:
+        config.data = {'partners': recovered}
+        config.save(update_fields=['data'])
+    return recovered
+
+
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated])
+def partners_detail(request):
+    if request.method == 'GET':
+        return Response({'partners': persisted_partners()})
+    if getattr(request, 'user_role', getattr(request.user, 'role', '')) not in {'ADMIN', 'MANAGER'}:
+        return Response({'error': 'Bạn không có quyền cập nhật đối tác.'}, status=status.HTTP_403_FORBIDDEN)
+    partners = normalize_partners((request.data or {}).get('partners'))
+    config, _ = SystemConfig.objects.get_or_create(key=PARTNER_CONFIG_KEY)
+    config.data = {'partners': partners}
+    config.save(update_fields=['data'])
+    return Response({'partners': partners})
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def examination_bootstrap(request):
@@ -469,7 +542,8 @@ def examination_bootstrap(request):
         return Response({
             'competitions': competitions,
             'sessions': sessions,
-            'candidates': candidates
+            'candidates': candidates,
+            'partners': persisted_partners()
         })
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -599,29 +673,28 @@ def competition_detail(request, pk):
         return Response({'success': True})
 
 def sync_legacy_round_milestones(session, rounds):
-    """Keep legacy summary fields in sync with named rounds for existing screens and exports."""
-    def find_round(marker):
+    """Keep legacy summary fields aligned with the named rounds when available."""
+    def find_round(*markers):
         matches = [
             round_config for round_config in rounds
-            if marker in str(round_config.get('name') or '').lower()
+            if any(marker in str(round_config.get('name') or '').lower() for marker in markers)
         ]
-        # A standard configuration can contain both a qualifying and a final
-        # national round. Prefer the one with timing data so a blank qualifier
-        # never wipes a configured final-round milestone.
         return next(
             (round_config for round_config in matches if round_config.get('label') or round_config.get('date')),
             matches[0] if matches else None,
         )
 
-    national = find_round('qu\u1ed1c gia') or find_round('national')
-    international = find_round('qu\u1ed1c t\u1ebf') or find_round('international')
-    if national:
-        session.national = str(national.get('label') or '').strip()
-        session.national_date = str(national.get('date') or '').strip()
-    if international:
-        session.international = str(international.get('label') or '').strip()
-        session.international_date = str(international.get('date') or '').strip()
-
+    # The legacy national field historically represents the national final.
+    # Prefer it over a qualifying round whenever both are configured.
+    national = (
+        find_round('chung k\u1ebft qu\u1ed1c gia', 'national final')
+        or find_round('qu\u1ed1c gia', 'national')
+    )
+    international = find_round('qu\u1ed1c t\u1ebf', 'international')
+    session.national = str(national.get('label') or '').strip() if national else ''
+    session.national_date = str(national.get('date') or '').strip() if national else ''
+    session.international = str(international.get('label') or '').strip() if international else ''
+    session.international_date = str(international.get('date') or '').strip() if international else ''
 @api_view(['POST'])
 @permission_classes([IsManagerOrAdmin])
 def session_create(request):
@@ -1118,7 +1191,7 @@ def import_candidates(request):
         if not session_id:
             return Response({'error': 'Chọn kỳ tổ chức trước khi nhập dữ liệu.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            ExamSession.objects.get(id=session_id)
+            target_session = ExamSession.objects.get(id=session_id)
         except ExamSession.DoesNotExist:
             return Response({'error': 'Không tìm thấy kỳ tổ chức đã chọn.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1148,7 +1221,7 @@ def import_candidates(request):
                 'ward': str(rec.get('ward', '')).strip(),
                 'nationality': str(rec.get('nationality', '')).strip(),
                 'grade': str(rec.get('grade', '')).strip(),
-                'contests': str(rec.get('contests', '')).strip(),
+                'contests': merge_contest_codes(str(rec.get('contests', '')).strip(), target_session.code),
                 'achievement': str(rec.get('achievement', '')).strip(),
                 'highest_round': str(rec.get('highestRound', '')).strip(),
                 'email': str(rec.get('email', '')).strip(),

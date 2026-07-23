@@ -77,6 +77,8 @@ def next_code(existing_codes_set, offset=0):
 def parse_dob(raw):
     cleaned = clean_txt(raw).replace(' ', '')
     cleaned = re.sub(r'[^0-9/\-.]', '', cleaned)
+    if re.fullmatch(r'\d{4}', cleaned):
+        return cleaned
     parts = re.split(r'[/\-.]', cleaned)
     if len(parts) != 3:
         return ''
@@ -105,40 +107,67 @@ def parse_dob(raw):
         return ''
 
 def resolve_column_indices(header):
-    n = lambda h: normalise_str(h)
+    """Resolve both legacy sheets and the official two-row candidate template."""
     idx = {}
-    
-    for i, h in enumerate(header):
-        nh = n(h)
-        if 'timestamp' not in idx and ('thoigian' in nh or 'timestamp' in nh):
+    for i, title in enumerate(header):
+        nh = normalise_str(title)
+        if 'code' not in idx and ('mahoso' in nh or 'maft' in nh or 'mathisinh' in nh or 'studentcode' in nh):
+            idx['code'] = i
+        elif 'timestamp' not in idx and ('thoigian' in nh or 'timestamp' in nh):
             idx['timestamp'] = i
-        elif 'stt' not in idx and (nh == 'stt' or nh.startswith('sott') or nh.startswith('sôtt')):
+        elif 'stt' not in idx and (nh == 'stt' or nh.startswith('sott')):
             idx['stt'] = i
-        elif 'name' not in idx and ('hovantenthisinh' in nh or 'hovaten' in nh or 'thisinh' in nh or 'ten' in nh):
+        elif 'name' not in idx and ('hovantenthisinh' in nh or 'hovaten' in nh or 'thisinh' in nh or nh == 'ten'):
             idx['name'] = i
-        elif 'amount' not in idx and ('tien' in nh or 'sotiendanop' in nh or 'lephi' in nh):
+        elif 'amount' not in idx and ('sotiendanop' in nh or 'lephi' in nh or nh == 'tien'):
             idx['amount'] = i
         elif 'invoice' not in idx and ('hoadon' in nh or 'hoadien' in nh):
             idx['invoice'] = i
-        elif 'contests' not in idx and ('kythidangky' in nh or 'dangkythi' in nh or 'monthi' in nh or 'dangthi' in nh or 'contest' in nh or 'kythi' in nh):
+        elif 'contests' not in idx and ('kythidangky' in nh or 'dangkythi' in nh or 'dangthi' in nh or 'contest' in nh or 'kythi' in nh):
             idx['contests'] = i
+        elif 'subject' not in idx and ('monthi' in nh or 'linhvuc' in nh):
+            idx['subject'] = i
+        elif 'category' not in idx and ('bangthi' in nh or 'category' in nh):
+            idx['category'] = i
+        elif 'registrationMethod' not in idx and ('hinhthucdangky' in nh or 'registrationmethod' in nh):
+            idx['registrationMethod'] = i
+        elif 'registrationUnit' not in idx and ('donvidangky' in nh or 'registrationunit' in nh):
+            idx['registrationUnit'] = i
+        elif 'teamName' not in idx and ('tendoinhom' in nh or 'doinhom' in nh or 'teamname' in nh):
+            idx['teamName'] = i
+        elif 'examLanguage' not in idx and ('ngonnguthi' in nh or 'examlanguage' in nh):
+            idx['examLanguage'] = i
+        elif 'generalNote' not in idx and ('ghichuchung' in nh or 'generalnote' in nh):
+            idx['generalNote'] = i
+        elif 'certificateLink' not in idx and ('linkchungnhan' in nh or 'certificatelink' in nh):
+            idx['certificateLink'] = i
+        elif 'highestRound' not in idx and ('vongcaonhatdadat' in nh or 'highestround' in nh):
+            idx['highestRound'] = i
+        elif 'achievement' not in idx and ('ketquacaonhat' in nh or 'ketquathanhthich' in nh or 'achievement' in nh):
+            idx['achievement'] = i
+        elif 'updated' not in idx and ('ngaycapnhatgannhat' in nh or nh == 'updated'):
+            idx['updated'] = i
         elif 'className' not in idx and ('hocsinhlop' in nh or ('lop' in nh and 'khoi' not in nh)):
             idx['className'] = i
         elif 'dob' not in idx and ('ngaythangnamsinh' in nh or 'namsinh' in nh or 'ngaysinh' in nh or 'dob' in nh or 'birthday' in nh):
             idx['dob'] = i
-        elif 'grade' not in idx and ('khoithi' in nh or 'khoi' in nh):
+        elif 'grade' not in idx and ('khoithi' in nh or 'khoilop' in nh or nh == 'khoi'):
             idx['grade'] = i
         elif 'school' not in idx and ('truong' in nh and 'email' not in nh):
             idx['school'] = i
         elif 'cccd' not in idx and ('cccd' in nh or 'canchuan' in nh or 'dinhdanh' in nh or 'identity' in nh or 'cmnd' in nh):
             idx['cccd'] = i
-        elif 'streetAddress' not in idx and ('diachinh' in nh or 'diachinharieng' in nh or ('diachi' in nh and len(nh) < 15)):
+        elif 'nationality' not in idx and ('quoctich' in nh or 'nationality' in nh):
+            idx['nationality'] = i
+        elif 'parent' not in idx and ('hotenphuhuynh' in nh or 'phuhuynh' in nh or 'parent' in nh):
+            idx['parent'] = i
+        elif 'streetAddress' not in idx and ('diachinh' in nh or 'diachinharieng' in nh):
             idx['streetAddress'] = i
-        elif 'ward' not in idx and ('xa' in nh or 'phuong' in nh):
+        elif 'ward' not in idx and ('xaphuong' in nh or 'phuongxa' in nh or nh == 'phuong' or nh == 'xa'):
             idx['ward'] = i
         elif 'city' not in idx and ('tinhthanhpho' in nh or 'tinh' in nh or 'thanhpho' in nh or 'city' in nh):
             idx['city'] = i
-        elif 'fullAddress' not in idx and (nh == 'diachi' or 'diachidaydu' in nh or 'address' in nh):
+        elif 'fullAddress' not in idx and ('diachilienhe' in nh or nh == 'diachi' or 'diachidaydu' in nh or 'address' in nh):
             idx['fullAddress'] = i
         elif 'email' not in idx and 'email' in nh:
             idx['email'] = i
@@ -148,50 +177,21 @@ def resolve_column_indices(header):
             idx['phone'] = i
         elif 'paymentStatus' not in idx and ('chuyenkhoan' in nh or 'noplephi' in nh or 'tinhtrangnop' in nh or 'thanhtoan' in nh):
             idx['paymentStatus'] = i
-        elif 'note' not in idx and ('ghichu' in nh or 'suco' in nh or 'note' in nh):
+        elif 'note' not in idx and ('ghichusuco' in nh or nh == 'note' or 'ghichu' in nh):
             idx['note'] = i
 
     is_am_format = len(header) <= 15 or idx.get('contests') == 12
-    
     if is_am_format:
-        if 'timestamp' not in idx: idx['timestamp'] = 0
-        if 'name' not in idx: idx['name'] = 1
-        if 'dob' not in idx: idx['dob'] = 2
-        if 'className' not in idx: idx['className'] = 3
-        if 'school' not in idx: idx['school'] = 4
-        if 'city' not in idx: idx['city'] = 5
-        if 'phone' not in idx: idx['phone'] = 6
-        if 'email' not in idx: idx['email'] = 7
-        if 'cccd' not in idx: idx['cccd'] = 8
-        if 'fullAddress' not in idx: idx['fullAddress'] = 9
-        if 'paymentStatus' not in idx: idx['paymentStatus'] = 10
-        if 'note' not in idx: idx['note'] = 11
-        if 'contests' not in idx: idx['contests'] = 12
+        defaults = {'timestamp': 0, 'name': 1, 'dob': 2, 'className': 3, 'school': 4, 'city': 5, 'phone': 6, 'email': 7, 'cccd': 8, 'fullAddress': 9, 'paymentStatus': 10, 'note': 11, 'contests': 12}
+    elif len(header) <= 25:
+        defaults = {'timestamp': 0, 'stt': 1, 'name': 2, 'amount': 3, 'invoice': 4, 'contests': 5, 'className': 6, 'dob': 7, 'grade': 8, 'school': 9, 'cccd': 10, 'streetAddress': 11, 'ward': 12, 'city': 13, 'fullAddress': 14, 'email': 15, 'emailStatus': 16, 'phone': 17, 'paymentStatus': 18, 'note': 19}
     else:
-        if 'timestamp' not in idx: idx['timestamp'] = 0
-        if 'stt' not in idx: idx['stt'] = 1
-        if 'name' not in idx: idx['name'] = 2
-        if 'amount' not in idx: idx['amount'] = 3
-        if 'invoice' not in idx: idx['invoice'] = 4
-        if 'contests' not in idx: idx['contests'] = 5
-        if 'className' not in idx: idx['className'] = 6
-        if 'dob' not in idx: idx['dob'] = 7
-        if 'grade' not in idx: idx['grade'] = 8
-        if 'school' not in idx: idx['school'] = 9
-        if 'cccd' not in idx: idx['cccd'] = 10
-        if 'streetAddress' not in idx: idx['streetAddress'] = 11
-        if 'ward' not in idx: idx['ward'] = 12
-        if 'city' not in idx: idx['city'] = 13
-        if 'fullAddress' not in idx: idx['fullAddress'] = 14
-        if 'email' not in idx: idx['email'] = 15
-        if 'emailStatus' not in idx: idx['emailStatus'] = 16
-        if 'phone' not in idx: idx['phone'] = 17
-        if 'paymentStatus' not in idx: idx['paymentStatus'] = 18
-        if 'note' not in idx: idx['note'] = 19
-        
+        defaults = {}
+    for key, value in defaults.items():
+        idx.setdefault(key, value)
     return idx
-
 ROUND_HISTORY_FIELD_MAP = {
+    'eligibility': 'eligibility',
     'sbd': 'sbd',
     'date': 'exam_date',
     'time': 'time_slot',
@@ -263,7 +263,7 @@ def history_from_sheet_row(headers, row):
     return rounds
 
 
-def upsert_participation_history(candidate, session_id, history, source=''):
+def upsert_participation_history(candidate, session_id, history, source='', registration=None):
     if not session_id:
         return None
     session = ExamSession.objects.filter(id=session_id).first()
@@ -274,9 +274,26 @@ def upsert_participation_history(candidate, session_id, history, source=''):
         session=session,
         defaults={'source': source or ''},
     )
+    updates = []
     if source and participation.source != source:
         participation.source = source
-        participation.save(update_fields=['source', 'updated_at'])
+        updates.append('source')
+    registration = registration or {}
+    registration_fields = {
+        'subject': 'subject', 'category': 'category', 'registrationMethod': 'registration_method',
+        'registrationUnit': 'registration_unit', 'teamName': 'team_name', 'examLanguage': 'exam_language',
+        'generalNote': 'general_note', 'certificateLink': 'certificate_link',
+    }
+    for payload_field, model_field in registration_fields.items():
+        value = clean_txt(registration.get(payload_field))
+        if value:
+            setattr(participation, model_field, value)
+            updates.append(model_field)
+    if registration:
+        participation.registration_data = {str(key): value for key, value in registration.items() if value not in (None, '')}
+        updates.append('registration_data')
+    if updates:
+        participation.save(update_fields=list(set(updates)) + ['updated_at'])
     for item in history or []:
         if not isinstance(item, dict):
             continue
@@ -299,7 +316,6 @@ def upsert_participation_history(candidate, session_id, history, source=''):
             defaults=values,
         )
     return participation
-
 
 def sync_session_candidate_totals():
     sessions = ExamSession.objects.all()
@@ -324,21 +340,27 @@ def sync_session_candidate_totals():
         session.candidates_count = totals.get(session.id, 0)
         session.save(update_fields=['candidates_count', 'updated_at'])
 
-EXPORT_HEADERS = [
-    'Mã FT', 'Họ và tên thí sinh', 'Trường học', 'Lớp đang học', 'Tỉnh/Thành phố cư trú',
-    'Cuộc thi đăng ký tham gia', 'Ngày sinh', 'Email liên lạc', 'Họ tên phụ huynh',
-    'Số điện thoại liên lạc', 'Số CCCD/Hộ chiếu', 'Địa chỉ liên hệ',
+PROFILE_EXPORT_HEADERS = [
+    'STT', 'Mã hồ sơ', 'Họ và tên thí sinh', 'Ngày sinh (DD/MM/YYYY hoặc YYYY)', 'Số CCCD/Hộ chiếu', 'Quốc tịch',
+    'Họ tên phụ huynh', 'Số điện thoại liên lạc', 'Email liên lạc', 'Tỉnh/Thành phố cư trú', 'Xã/phường', 'Địa chỉ liên hệ',
+    'Tên trường', 'Lớp đang học (ví dụ: 6A1)', 'Khối lớp hiện tại',
 ]
-for _round_number in (1, 2, 3):
-    _prefix = f'Vòng {_round_number}: '
-    EXPORT_HEADERS.extend([
-        _prefix + 'Số báo danh', _prefix + 'Ngày thi', _prefix + 'Giờ/ca thi',
-        _prefix + 'Hình thức thi', _prefix + 'Địa điểm/phòng thi', _prefix + 'Link thi',
-        _prefix + 'Tài khoản/mã truy cập', _prefix + 'Mật khẩu', _prefix + 'Trạng thái dự thi', _prefix + 'Điểm',
-        _prefix + 'Tỷ lệ điểm', _prefix + 'Xếp hạng', _prefix + 'Kết quả/giải thưởng',
-        _prefix + 'Ghi chú/sự cố',
-    ])
-
+REGISTRATION_EXPORT_HEADERS = ['Môn thi/Lĩnh vực', 'Bảng thi/Category', 'Hình thức đăng ký', 'Tên đội/Nhóm', 'Ngôn ngữ thi', 'Ghi chú chung']
+ROUND_EXPORT_HEADERS = [
+    'Điều kiện tham gia', 'Số báo danh (SBD)', 'Ngày thi', 'Giờ/Ca thi', 'Hình thức thi', 'Địa điểm/Phòng thi',
+    'Link thi', 'Tài khoản/Mã truy cập', 'Mật khẩu', 'Trạng thái dự thi', 'Điểm', 'Tỷ lệ điểm', 'Xếp hạng',
+    'Kết quả/Giải thưởng', 'Ghi chú/Sự cố',
+]
+SUMMARY_EXPORT_HEADERS = ['Vòng cao nhất đã đạt', 'Kết quả cao nhất', 'Link chứng nhận', 'Ngày cập nhật gần nhất']
+EXPORT_HEADERS = PROFILE_EXPORT_HEADERS + REGISTRATION_EXPORT_HEADERS + ROUND_EXPORT_HEADERS * 3 + SUMMARY_EXPORT_HEADERS
+EXPORT_GROUP_HEADERS = (
+    ['HỒ SƠ THÍ SINH'] + [''] * (len(PROFILE_EXPORT_HEADERS) - 1)
+    + ['THÔNG TIN ĐĂNG KÝ'] + [''] * (len(REGISTRATION_EXPORT_HEADERS) - 1)
+    + ['VÒNG 1'] + [''] * (len(ROUND_EXPORT_HEADERS) - 1)
+    + ['VÒNG 2'] + [''] * (len(ROUND_EXPORT_HEADERS) - 1)
+    + ['VÒNG 3'] + [''] * (len(ROUND_EXPORT_HEADERS) - 1)
+    + ['TỔNG HỢP'] + [''] * (len(SUMMARY_EXPORT_HEADERS) - 1)
+)
 
 def _round_slots(round_results):
     slots = {}
@@ -356,35 +378,37 @@ def _round_slots(round_results):
 
 
 def session_export_rows(session_id):
-    """Build a re-importable flat export: one row per candidate/session, three round groups."""
-    rows = [EXPORT_HEADERS]
+    """Build a re-importable export matching the official candidate template."""
+    rows = [EXPORT_GROUP_HEADERS, EXPORT_HEADERS]
     participations = (
         CandidateParticipation.objects.filter(session_id=session_id)
         .select_related('candidate')
         .prefetch_related('round_results')
         .order_by('candidate__sort_key', 'candidate__code')
     )
-    for participation in participations:
+    for sequence, participation in enumerate(participations, start=1):
         candidate = participation.candidate
         row = [
-            candidate.code, candidate.name, candidate.school or '', candidate.class_name or '',
-            candidate.city or '', candidate.contests or '', candidate.birth_date or '', candidate.email or '',
-            candidate.parent or '', candidate.phone or '', candidate.identity or '', candidate.address or '',
+            sequence, candidate.code, candidate.name, candidate.birth_date or '', candidate.identity or '', candidate.nationality or '',
+            candidate.parent or '', candidate.phone or '', candidate.email or '', candidate.city or '', candidate.ward or '', candidate.address or '',
+            candidate.school or '', candidate.class_name or '', candidate.grade or '',
+            participation.subject or '', participation.category or '', participation.registration_method or '', participation.team_name or '',
+            participation.exam_language or '', participation.general_note or '',
         ]
         slots = _round_slots(list(participation.round_results.all()))
         for number in (1, 2, 3):
             result = slots.get(number)
             if not result:
-                row.extend([''] * 14)
+                row.extend([''] * len(ROUND_EXPORT_HEADERS))
                 continue
             row.extend([
-                result.sbd, result.exam_date, result.time_slot, result.mode, result.location,
+                result.eligibility, result.sbd, result.exam_date, result.time_slot, result.mode, result.location,
                 result.link, result.account, result.password, result.attendance, result.score, result.score_rate,
                 result.rank, result.result, result.note,
             ])
+        row.extend([candidate.highest_round or '', candidate.achievement or '', participation.certificate_link or '', candidate.updated or ''])
         rows.append(row)
     return rows
-
 
 def _sheet_range_title(title):
     return "'" + title.replace("'", "''") + "'"
@@ -533,65 +557,43 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
         col = resolve_column_indices(header_row)
         
         incoming = []
-        for ri in range(header_index + 1, len(grid)):
-            row = grid[ri]
-            if not row or len(row) <= max(col.values()):
+        session_code = clean_txt(ExamSession.objects.filter(id=session_id).values_list('code', flat=True).first()) if session_id else ''
+        for row in grid[header_index + 1:]:
+            if not row:
                 continue
-                
-            name = clean_txt(row[col['name']])
+
+            def value(field):
+                index = col.get(field)
+                return clean_txt(row[index]) if index is not None and index < len(row) else ''
+
+            name = value('name')
             if not name:
                 continue
-                
-            raw_dob = clean_txt(row[col['dob']])
-            birth_date = parse_dob(raw_dob)
-            
-            raw_contests = clean_txt(row[col['contests']])
-            contests = ', '.join(get_contest_codes(raw_contests))
-            
-            identity = re.sub(r'\D', '', clean_txt(row[col['cccd']]))
-            
-            street = clean_txt(row[col.get('streetAddress', -1)]) if col.get('streetAddress', -1) >= 0 else ''
-            ward = clean_txt(row[col.get('ward', -1)]) if col.get('ward', -1) >= 0 else ''
-            city = clean_txt(row[col.get('city', -1)]) if col.get('city', -1) >= 0 else ''
-            full = clean_txt(row[col.get('fullAddress', -1)]) if col.get('fullAddress', -1) >= 0 else ''
-            address = full or ', '.join(filter(None, [street, ward, city]))
-            
-            amount = clean_txt(row[col.get('amount', -1)]) if col.get('amount', -1) >= 0 else ''
-            invoice = clean_txt(row[col.get('invoice', -1)]) if col.get('invoice', -1) >= 0 else ''
-            payment_status = clean_txt(row[col.get('paymentStatus', -1)]) if col.get('paymentStatus', -1) >= 0 else ''
-            note = clean_txt(row[col.get('note', -1)]) if col.get('note', -1) >= 0 else ''
-            
-            achievement_parts = []
+            raw_contests = value('contests')
+            contests = merge_contest_codes(raw_contests, session_code)
+            amount, invoice, payment_status = value('amount'), value('invoice'), value('paymentStatus')
+            legacy_achievement = []
             if amount:
-                achievement_parts.append(f"Lệ phí: {amount}")
+                legacy_achievement.append(f"Lệ phí: {amount}")
             if payment_status and payment_status != '—':
-                achievement_parts.append(payment_status)
+                legacy_achievement.append(payment_status)
             if invoice and invoice != 'x':
-                achievement_parts.append(f"HĐ: {invoice}")
-            achievement = ' | '.join(achievement_parts) or 'Đã nộp phí'
-            
-            email = clean_txt(row[col['email']])
-            phone = re.sub(r'[^\d+]', '', clean_txt(row[col['phone']]))
-            
+                legacy_achievement.append(f"HĐ: {invoice}")
+            registration = {
+                'subject': value('subject'), 'category': value('category'), 'registrationMethod': value('registrationMethod'),
+                'registrationUnit': value('registrationUnit'), 'teamName': value('teamName'), 'examLanguage': value('examLanguage'),
+                'generalNote': value('generalNote'), 'certificateLink': value('certificateLink'),
+            }
             cand = {
-                'name': name,
-                'birth_date': birth_date,
-                'identity': identity,
-                'email': email,
-                'phone': phone,
-                'school': clean_txt(row[col['school']]),
-                'class_name': clean_txt(row[col['className']]),
-                'city': city,
-                'address': address,
-                'contests': contests,
-                'achievement': achievement,
-                'note': note,
-                'parent': f"SĐT: {clean_txt(row[col['phone']])}" if phone else '',
-                'updated': ts_vn,
+                'code': value('code'), 'name': name, 'birth_date': parse_dob(value('dob')), 'identity': re.sub(r'\D', '', value('cccd')),
+                'email': value('email'), 'phone': re.sub(r'[^\d+]', '', value('phone')), 'school': value('school'),
+                'class_name': value('className'), 'city': value('city'), 'ward': value('ward'), 'nationality': value('nationality'),
+                'grade': value('grade'), 'address': value('fullAddress') or ', '.join(filter(None, [value('streetAddress'), value('ward'), value('city')])),
+                'contests': contests, 'achievement': value('achievement') or ' | '.join(legacy_achievement), 'highest_round': value('highestRound'),
+                'parent': value('parent'), 'updated': value('updated') or ts_vn, 'registration': registration,
                 'exam_history': history_from_sheet_row(header_row, row),
             }
             incoming.append(cand)
-            
         if not incoming:
             update_state({'status': 'success', 'error': None})
             return {
@@ -605,86 +607,48 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
             
         # Perform Sync
         existing = list(Candidate.objects.all())
-        existing_codes_set = {c.code for c in existing}
-        
+        existing_codes_set = {candidate.code for candidate in existing}
         created = 0
         updated = 0
-        
-        for i, cand in enumerate(incoming):
-            # Match
-            matched = None
-            for e in existing:
-                e_dict = {
-                    'name': e.name,
-                    'birth_date': e.birth_date,
-                    'identity': e.identity,
-                    'email': e.email,
-                    'school': e.school
-                }
-                if same_candidate(e_dict, cand):
-                    matched = e
-                    break
-                    
-            if matched:
-                matched.name = cand['name']
-                if cand['birth_date']:
-                    matched.birth_date = cand['birth_date']
-                if cand['identity']:
-                    matched.identity = cand['identity']
-                if cand['email']:
-                    matched.email = cand['email']
-                if cand['phone']:
-                    matched.phone = cand['phone']
-                    matched.parent = cand['parent']
-                if cand['school']:
-                    matched.school = cand['school']
-                if cand['class_name']:
-                    matched.class_name = cand['class_name']
-                if cand['city']:
-                    matched.city = cand['city']
-                if cand['address']:
-                    matched.address = cand['address']
-                # note is parsed but not stored on Candidate model
-                    
-                matched.contests = merge_contest_codes(matched.contests, cand['contests'])
-                if session_id:
-                    linked_sessions = list(matched.session_ids or [])
-                    if session_id not in linked_sessions:
-                        linked_sessions.append(session_id)
-                    matched.session_ids = linked_sessions
-                matched.updated = ts_vn
-                matched.sort_key = f"{matched.name.lower()}_{matched.identity or matched.id}"
-                matched.save()
-                upsert_participation_history(matched, session_id, cand.get('exam_history'), spreadsheet_url)
+        for cand in incoming:
+            matched = next((candidate for candidate in existing if same_candidate({
+                'name': candidate.name, 'birth_date': candidate.birth_date, 'identity': candidate.identity,
+                'email': candidate.email, 'school': candidate.school,
+            }, cand)), None)
+            same_code = next((candidate for candidate in existing if cand['code'] and candidate.code.upper() == cand['code'].upper()), None)
+            base = matched or same_code
+            if base:
+                base.name = cand['name']
+                for field, key in [('birth_date', 'birth_date'), ('identity', 'identity'), ('email', 'email'), ('phone', 'phone'), ('school', 'school'), ('class_name', 'class_name'), ('city', 'city'), ('ward', 'ward'), ('nationality', 'nationality'), ('grade', 'grade'), ('address', 'address'), ('achievement', 'achievement'), ('highest_round', 'highest_round')]:
+                    if cand[key]:
+                        setattr(base, field, cand[key])
+                if cand['parent']:
+                    base.parent = cand['parent']
+                base.contests = merge_contest_codes(base.contests, cand['contests'])
+                linked_sessions = list(base.session_ids or [])
+                if session_id and session_id not in linked_sessions:
+                    linked_sessions.append(session_id)
+                base.session_ids = linked_sessions
+                base.updated = ts_vn
+                base.sort_key = f"{base.name.lower()}_{base.identity or base.id}"
+                base.save()
+                upsert_participation_history(base, session_id, cand['exam_history'], spreadsheet_url, cand['registration'])
                 updated += 1
-            else:
+                continue
+
+            code = cand['code'].replace('/', '-').replace('?', '-').replace('#', '-').strip().upper() if cand['code'] else ''
+            if not code or code in existing_codes_set:
                 code = next_code(existing_codes_set)
-                c_id = code
-                new_cand = Candidate.objects.create(
-                    id=c_id,
-                    code=code,
-                    name=cand['name'],
-                    birth_date=cand['birth_date'],
-                    identity=cand['identity'],
-                    email=cand['email'],
-                    phone=cand['phone'],
-                    school=cand['school'],
-                    class_name=cand['class_name'],
-                    city=cand['city'],
-                    address=cand['address'],
-                    contests=cand['contests'],
-                    achievement=cand['achievement'],
-                    # note is not a Candidate model field
-                    parent=cand['parent'],
-                    session_ids=[session_id] if session_id else [],
-                    updated=ts_vn,
-                    sort_key=f"{cand['name'].lower()}_{cand['identity'] or c_id}"
-                )
-                upsert_participation_history(new_cand, session_id, cand.get('exam_history'), spreadsheet_url)
-                existing.append(new_cand)
-                existing_codes_set.add(code)
-                created += 1
-                
+            new_candidate = Candidate.objects.create(
+                id=code, code=code, name=cand['name'], school=cand['school'], class_name=cand['class_name'], city=cand['city'], ward=cand['ward'],
+                nationality=cand['nationality'], grade=cand['grade'], contests=cand['contests'], achievement=cand['achievement'], highest_round=cand['highest_round'],
+                email=cand['email'], parent=cand['parent'], phone=cand['phone'], identity=cand['identity'], address=cand['address'], birth_date=cand['birth_date'],
+                session_ids=[session_id] if session_id else [], updated=ts_vn, sort_key=f"{cand['name'].lower()}_{cand['identity'] or code}",
+            )
+            upsert_participation_history(new_candidate, session_id, cand['exam_history'], spreadsheet_url, cand['registration'])
+            existing.append(new_candidate)
+            existing_codes_set.add(code)
+            created += 1
         sync_session_candidate_totals()
         update_state({'status': 'success', 'error': None})
         

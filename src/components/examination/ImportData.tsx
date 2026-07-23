@@ -46,12 +46,19 @@ interface SheetSource {
 }
 
 // ─── Cột & alias cho import từ file ──────────────────────────────────────────
-const columns = [
-  ['code', 'Mã FT'], ['name', 'Họ và tên'], ['school', 'Trường học'], ['className', 'Lớp'],
-  ['city', 'Tỉnh/Thành phố'], ['contests', 'Cuộc thi'], ['achievement', 'Kết quả/Thành tích'],
-  ['birthDate', 'Ngày sinh'], ['email', 'Email'], ['parent', 'Phụ huynh'],
-  ['phone', 'Số điện thoại'], ['identity', 'CCCD/Định danh'], ['address', 'Địa chỉ'],
+// Mẫu chính thức có 2 hàng tiêu đề: nhóm thông tin và tên cột.
+const previewGroups = [
+  { label: 'HỒ SƠ THÍ SINH', columns: ['STT', 'Mã hồ sơ', 'Họ và tên thí sinh', 'Ngày sinh', 'Số CCCD/Hộ chiếu', 'Quốc tịch', 'Họ tên phụ huynh', 'Số điện thoại liên lạc', 'Email liên lạc', 'Tỉnh/Thành phố cư trú', 'Xã/phường', 'Địa chỉ liên hệ', 'Tên trường', 'Lớp đang học', 'Khối lớp hiện tại'] },
+  { label: 'THÔNG TIN ĐĂNG KÝ', columns: ['Môn thi/Lĩnh vực', 'Bảng thi/Category', 'Hình thức đăng ký', 'Tên đội/Nhóm', 'Ngôn ngữ thi', 'Ghi chú chung'] },
+  { label: 'VÒNG 1', columns: ['Điều kiện tham gia', 'Số báo danh (SBD)', 'Ngày thi', 'Giờ/Ca thi', 'Hình thức thi', 'Địa điểm/Phòng thi', 'Link thi', 'Tài khoản/Mã truy cập', 'Mật khẩu', 'Trạng thái dự thi', 'Điểm', 'Tỷ lệ điểm', 'Xếp hạng', 'Kết quả/Giải thưởng', 'Ghi chú/Sự cố'] },
+  { label: 'VÒNG 2', columns: ['Điều kiện tham gia', 'Số báo danh (SBD)', 'Ngày thi', 'Giờ/Ca thi', 'Hình thức thi', 'Địa điểm/Phòng thi', 'Link thi', 'Tài khoản/Mã truy cập', 'Mật khẩu', 'Trạng thái dự thi', 'Điểm', 'Tỷ lệ điểm', 'Xếp hạng', 'Kết quả/Giải thưởng', 'Ghi chú/Sự cố'] },
+  { label: 'VÒNG 3', columns: ['Điều kiện tham gia', 'Số báo danh (SBD)', 'Ngày thi', 'Giờ/Ca thi', 'Hình thức thi', 'Địa điểm/Phòng thi', 'Link thi', 'Tài khoản/Mã truy cập', 'Mật khẩu', 'Trạng thái dự thi', 'Điểm', 'Tỷ lệ điểm', 'Xếp hạng', 'Kết quả/Giải thưởng', 'Ghi chú/Sự cố'] },
+  { label: 'TỔNG HỢP', columns: ['Vòng cao nhất đã đạt', 'Kết quả cao nhất', 'Link chứng nhận', 'Ngày cập nhật gần nhất'] },
 ] as const;
+
+const roundPreviewFields: (keyof Omit<RoundHistory, 'round'>)[] = [
+  'eligibility', 'sbd', 'date', 'time', 'mode', 'location', 'link', 'account', 'password', 'attendance', 'score', 'scoreRate', 'rank', 'result', 'note',
+];
 
 const aliases: Record<string, string[]> = {
   code: ['ma ft', 'ma ho so', 'ma thi sinh', 'sbd', 'student code', 'code'],
@@ -62,16 +69,15 @@ const aliases: Record<string, string[]> = {
   ward: ['xa phuong', 'phuong xa', 'phuong', 'ward'], nationality: ['quoc tich', 'nationality'], grade: ['khoi lop hien tai', 'khoi lop', 'khoi', 'grade'],
   subject: ['mon thi linh vuc', 'mon thi', 'linh vuc', 'subject'], category: ['bang thi category', 'bang thi', 'category'],
   registrationMethod: ['hinh thuc dang ky', 'registration method'], registrationUnit: ['don vi dang ky', 'registration unit'], teamName: ['ten doi nhom', 'doi nhom', 'team'], examLanguage: ['ngon ngu thi', 'exam language'], generalNote: ['ghi chu chung', 'general note'], certificateLink: ['link chung nhan', 'certificate link'],
-  contests: ['cuoc thi dang ky tham gia', 'cuoc thi dang ky', 'cuoc thi', 'mon thi', 'contest', 'ky thi', 'dang ky thi'],
+  contests: ['cuoc thi dang ky tham gia', 'cuoc thi dang ky', 'cuoc thi', 'contest', 'ky thi', 'dang ky thi'],
   achievement: ['tong hop ket qua cao nhat', 'ket qua cao nhat', 'ket qua giai thuong', 'ket qua thanh tich', 'ket qua', 'thanh tich', 'xep hang', 'result'],
   highestRound: ['tong hop vong cao nhat da dat', 'vong cao nhat da dat', 'highest round'],
   birthDate: ['ngay sinh dd mm yyyy hoac yyyy', 'ngay sinh', 'ngay thang nam sinh', 'birth date', 'birthday'],
   email: ['email lien lac', 'email'], parent: ['ho ten phu huynh', 'phu huynh', 'parent'],
   phone: ['so dien thoai lien lac', 'so dien thoai', 'sdt', 'dien thoai', 'phone', 'so dien thoai nguoi giam ho'],
   identity: ['so cccd ho chieu', 'cccd dinh danh', 'cccd', 'cmnd', 'dinh danh', 'identity', 'so cccd'],
-  address: ['dia chi lien he', 'dia chi', 'address'],
+  address: ['dia chi lien he', 'dia chi', 'address'], updated: ['ngay cap nhat gan nhat', 'updated'],
 };
-
 const normalise = (value: unknown) => String(value ?? '').trim().toLocaleLowerCase('vi-VN')
   .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9/ ]/g, ' ').replace(/\s+/g, ' ').trim();
 const text = (value: unknown) => String(value ?? '').trim();
@@ -94,7 +100,7 @@ function mapRows(rawRows: ImportRow[]): (Candidate & { examHistory?: RoundHistor
     const entries = Object.entries(row).map(([key, value]) => [normalise(key), text(value)] as [string, string]);
     const name = valueFor(entries, 'name');
     const code = valueFor(entries, 'code');
-    return { code, name, school: valueFor(entries, 'school'), className: valueFor(entries, 'className'), city: valueFor(entries, 'city'), ward: valueFor(entries, 'ward'), nationality: valueFor(entries, 'nationality'), grade: valueFor(entries, 'grade'), contests: valueFor(entries, 'contests'), subject: valueFor(entries, 'subject'), category: valueFor(entries, 'category'), registrationMethod: valueFor(entries, 'registrationMethod'), registrationUnit: valueFor(entries, 'registrationUnit'), teamName: valueFor(entries, 'teamName'), examLanguage: valueFor(entries, 'examLanguage'), generalNote: valueFor(entries, 'generalNote'), certificateLink: valueFor(entries, 'certificateLink'), achievement: valueFor(entries, 'achievement'), highestRound: valueFor(entries, 'highestRound'), email: valueFor(entries, 'email'), parent: valueFor(entries, 'parent'), phone: valueFor(entries, 'phone'), identity: valueFor(entries, 'identity'), address: valueFor(entries, 'address'), birthDate: normaliseBirthDate(valueFor(entries, 'birthDate')), updated: '', examHistory: historyFromRow(row) };
+    return { code, name, school: valueFor(entries, 'school'), className: valueFor(entries, 'className'), city: valueFor(entries, 'city'), ward: valueFor(entries, 'ward'), nationality: valueFor(entries, 'nationality'), grade: valueFor(entries, 'grade'), contests: valueFor(entries, 'contests'), subject: valueFor(entries, 'subject'), category: valueFor(entries, 'category'), registrationMethod: valueFor(entries, 'registrationMethod'), registrationUnit: valueFor(entries, 'registrationUnit'), teamName: valueFor(entries, 'teamName'), examLanguage: valueFor(entries, 'examLanguage'), generalNote: valueFor(entries, 'generalNote'), certificateLink: valueFor(entries, 'certificateLink'), achievement: valueFor(entries, 'achievement'), highestRound: valueFor(entries, 'highestRound'), email: valueFor(entries, 'email'), parent: valueFor(entries, 'parent'), phone: valueFor(entries, 'phone'), identity: valueFor(entries, 'identity'), address: valueFor(entries, 'address'), birthDate: normaliseBirthDate(valueFor(entries, 'birthDate')), updated: valueFor(entries, 'updated'), examHistory: historyFromRow(row) };
   }).filter(row => row.name && !['stt', 'họ và tên', 'ho va ten'].includes(normalise(row.name)));
 }
 
@@ -534,31 +540,22 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
             </button>
           </div>
           <div className="overflow-x-auto">
-            <table className="ft-table min-w-[4800px]">
+            <table className="ft-table min-w-[8400px]">
               <thead>
-                <tr>
-                  <th colSpan={15}>HỒ SƠ THÍ SINH</th>
-                  <th colSpan={7}>THÔNG TIN ĐĂNG KÝ</th>
-                  <th colSpan={15}>VÒNG 1</th>
-                </tr>
-                <tr>
-                  <th>Mã FT</th><th>Cuộc thi đăng ký tham gia</th><th>Họ và tên thí sinh</th><th>Ngày sinh</th><th>Số CCCD/Hộ chiếu</th>
-                  <th>Quốc tịch</th><th>Họ tên phụ huynh</th><th>Số điện thoại liên lạc</th><th>Email liên lạc</th><th>Tỉnh/Thành phố cư trú</th>
-                  <th>Xã/phường</th><th>Địa chỉ liên hệ</th><th>Tên trường</th><th>Lớp đang học</th><th>Khối lớp hiện tại</th>
-                  <th>Môn thi/Lĩnh vực</th><th>Bảng thi/Category</th><th>Hình thức đăng ký</th><th>Đơn vị đăng ký</th><th>Tên đội/Nhóm</th><th>Ngôn ngữ thi</th><th>Ghi chú chung</th>
-                  <th>Điều kiện tham gia</th><th>Số báo danh (SBD)</th><th>Ngày thi</th><th>Giờ/Ca thi</th><th>Hình thức thi</th><th>Địa điểm/Phòng thi</th><th>Link thi</th><th>Tài khoản/Mã truy cập</th><th>Mật khẩu (Nếu có)</th><th>Trạng thái dự thi</th><th>Điểm</th><th>Tỷ lệ điểm</th><th>Xếp hạng</th><th>Kết quả/Giải thưởng</th><th>Ghi chú/Sự cố</th>
-                </tr>
+                <tr>{previewGroups.map(group => <th key={group.label} colSpan={group.columns.length}>{group.label}</th>)}</tr>
+                <tr>{previewGroups.flatMap(group => group.columns).map((label, index) => <th key={`${label}-${index}`}>{label}</th>)}</tr>
               </thead>
               <tbody>
                 {sample.map(row => {
-                  const roundOne = row.examHistory?.find(item => normalise(item.round) === 'vong 1');
+                  const round = (number: number) => row.examHistory?.find(item => normalise(item.round) === `vong ${number}`);
+                  const values = [
+                    String(rowIndexForPreview(row)), row.code || '—', row.name, row.birthDate, row.identity, row.nationality, row.parent, row.phone, row.email, row.city, row.ward, row.address, row.school, row.className, row.grade,
+                    row.subject, row.category, row.registrationMethod, row.teamName, row.examLanguage, row.generalNote,
+                    ...[1, 2, 3].flatMap(number => roundPreviewFields.map(field => round(number)?.[field] || '—')),
+                    row.highestRound, row.achievement, row.certificateLink, row.updated,
+                  ];
                   return <tr key={`${row.code || 'new'}-${row.name}`}>
-                    <td><code className="text-xs">{row.code || ('FT-' + String(rowIndexForPreview(row)).padStart(5, '0'))}</code></td>
-                    <td>{row.contests || '—'}</td><td><b>{row.name}</b></td><td>{row.birthDate || '—'}</td><td>{row.identity || '—'}</td>
-                    <td>{row.nationality || '—'}</td><td>{row.parent || '—'}</td><td>{row.phone || '—'}</td><td>{row.email || '—'}</td><td>{row.city || '—'}</td>
-                    <td>{row.ward || '—'}</td><td>{row.address || '—'}</td><td>{row.school || '—'}</td><td>{row.className || '—'}</td><td>{row.grade || '—'}</td>
-                    <td>{row.subject || '—'}</td><td>{row.category || '—'}</td><td>{row.registrationMethod || '—'}</td><td>{row.registrationUnit || '—'}</td><td>{row.teamName || '—'}</td><td>{row.examLanguage || '—'}</td><td>{row.generalNote || '—'}</td>
-                    <td>{roundOne?.eligibility || '—'}</td><td>{roundOne?.sbd || '—'}</td><td>{roundOne?.date || '—'}</td><td>{roundOne?.time || '—'}</td><td>{roundOne?.mode || '—'}</td><td>{roundOne?.location || '—'}</td><td>{roundOne?.link || '—'}</td><td>{roundOne?.account || '—'}</td><td>{roundOne?.password || '—'}</td><td>{roundOne?.attendance || '—'}</td><td>{roundOne?.score || '—'}</td><td>{roundOne?.scoreRate || '—'}</td><td>{roundOne?.rank || '—'}</td><td>{roundOne?.result || '—'}</td><td>{roundOne?.note || '—'}</td>
+                    {values.map((value, index) => <td key={index}>{index === 2 ? <b>{value || '—'}</b> : value || '—'}</td>)}
                   </tr>;
                 })}
               </tbody>

@@ -43,6 +43,24 @@ class ExistingSessionRoundBackfillTests(TestCase):
         self.assertEqual(session.national_date, '2026-07-26')
         self.assertEqual(session.national, '26/7/2026')
 
+    def test_legacy_summary_prefers_national_final_and_clears_removed_international_round(self):
+        session = ExamSession.objects.create(
+            id='round-summary', competition_id='aysbc', code='AYSBC', name='Round summary',
+            parent='AYSBC', organizer='SCS', time='', sort_key='round-summary',
+            international='Stale date', international_date='2026-09-01',
+        )
+        from .views import sync_legacy_round_milestones
+
+        sync_legacy_round_milestones(session, [
+            {'id': 'qualifier', 'name': 'V\u00f2ng lo\u1ea1i Qu\u1ed1c gia', 'label': '17/5/2026', 'date': '2026-05-17'},
+            {'id': 'final', 'name': 'V\u00f2ng Chung k\u1ebft Qu\u1ed1c gia', 'label': '7/6/2026', 'date': '2026-06-07'},
+            {'id': 'regional', 'name': 'V\u00f2ng Khu v\u1ef1c', 'label': 'Th\u00e1ng 10/2026', 'date': ''},
+        ])
+
+        self.assertEqual(session.national, '7/6/2026')
+        self.assertEqual(session.national_date, '2026-06-07')
+        self.assertEqual(session.international, '')
+        self.assertEqual(session.international_date, '')
 
 class LogNoteApiTests(TestCase):
     def setUp(self):
@@ -68,6 +86,18 @@ class LogNoteApiTests(TestCase):
         self.assertEqual(persisted_first['time'], first_time)
         self.assertEqual(LogNote.objects.filter(entity_key='session-demo').count(), 2)
 
+    def test_partners_are_persisted_and_returned_in_bootstrap(self):
+        payload = {'partners': [{
+            'id': 'partner-persisted', 'province': 'Hà Nội', 'ward': 'Yên Hòa', 'school': 'Trường A', 'level': 'THCS',
+            'representative': 'Nguyễn A', 'phone': '0900000000', 'email': 'a@example.com', 'contests': ['AYSBC'],
+            'studentCounts': [{'session': 'AYSBC', 'count': 8}],
+        }]}
+        saved = self.client.put('/api/examination/partners', payload, format='json')
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.data['partners'][0]['school'], 'Trường A')
+        bootstrap = self.client.get('/api/examination/bootstrap')
+        self.assertEqual(bootstrap.status_code, 200)
+        self.assertEqual(bootstrap.data['partners'][0]['studentCounts'][0]['count'], 8)
     def test_get_does_not_create_or_retime_a_log_note(self):
         self.assertEqual(self.client.get(self.url).data, [])
         self.assertFalse(LogNote.objects.exists())
@@ -149,10 +179,51 @@ class CandidateRoundHistoryTests(TestCase):
             ],
         )
         rows = session_export_rows(self.session.id)
-        self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[1][0], 'FT26-9001')
-        self.assertIn('A-001', rows[1])
-        self.assertIn('B-001', rows[1])
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0][0], 'HỒ SƠ THÍ SINH')
+        self.assertEqual(rows[1][1], 'Mã hồ sơ')
+        self.assertEqual(rows[2][1], 'FT26-9001')
+        self.assertIn('A-001', rows[2])
+        self.assertIn('B-001', rows[2])
+
+    def test_official_template_headers_keep_registration_and_all_rounds(self):
+        from .sync import EXPORT_GROUP_HEADERS, EXPORT_HEADERS, history_from_sheet_row, merged_headers, resolve_column_indices
+
+        headers = merged_headers([EXPORT_GROUP_HEADERS, EXPORT_HEADERS], 1)
+        columns = resolve_column_indices(headers)
+        self.assertEqual(columns['code'], 1)
+        self.assertEqual(columns['subject'], 15)
+        self.assertEqual(columns['highestRound'], 66)
+        self.assertEqual(columns['achievement'], 67)
+        self.assertEqual(columns['certificateLink'], 68)
+
+        row = [''] * len(headers)
+        row[21] = 'Đủ điều kiện'
+        row[22] = 'SBD-001'
+        row[31] = '91'
+        row[37] = 'SBD-002'
+        history = history_from_sheet_row(headers, row)
+        self.assertEqual(len(history), 2)
+        self.assertEqual(history[0]['eligibility'], 'Đủ điều kiện')
+        self.assertEqual(history[0]['sbd'], 'SBD-001')
+        self.assertEqual(history[0]['score'], '91')
+        self.assertEqual(history[1]['sbd'], 'SBD-002')
+    def test_manual_template_import_links_the_selected_competition(self):
+        response = self.client.post('/api/examination/import/candidates', {
+            'sessionId': self.session.id,
+            'source': 'Template XLSX',
+            'records': [{
+                'code': 'HS-0001', 'name': 'Candidate Template', 'school': 'School A', 'birthDate': '2014',
+                'subject': 'Toán', 'category': 'Bảng A', 'teamName': 'Nhóm 1', 'highestRound': 'Vòng 2',
+            }],
+        }, format='json')
+        self.assertEqual(response.status_code, 200)
+        candidate = Candidate.objects.get(code='HS-0001')
+        self.assertEqual(candidate.contests, 'SIMO')
+        participation = CandidateParticipation.objects.get(candidate=candidate, session=self.session)
+        self.assertEqual(participation.subject, 'Toán')
+        self.assertEqual(participation.category, 'Bảng A')
+        self.assertEqual(participation.team_name, 'Nhóm 1')
     def test_round_slots_persist_and_removal_updates_candidate_participation(self):
         from .views import upsert_participation_history
 

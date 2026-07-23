@@ -98,17 +98,56 @@ export function TimeField({ label, value, onChange }: { label: string; value: Dr
   const unknownText = 'Chưa có thông tin';
   return <fieldset className="rounded-lg border border-slate-200 p-3"><legend className="px-1 text-sm font-bold">{label}</legend><div className="mb-3 flex gap-4 text-xs font-semibold"><label className="inline-flex cursor-pointer items-center gap-1"><input className="cursor-pointer" type="checkbox" checked={Boolean(draftValue.planned)} disabled={Boolean(draftValue.unknown)} onChange={event => update('planned', event.currentTarget.checked)} /><span>{plannedText}</span></label><label className="inline-flex cursor-pointer items-center gap-1"><input className="cursor-pointer" type="checkbox" checked={Boolean(draftValue.unknown)} onChange={event => setUnknown(event.currentTarget.checked)} /><span>{unknownText}</span></label></div>{draftValue.unknown ? <p className="rounded bg-slate-50 px-3 py-2 text-sm text-slate-500">{'Chưa có thông tin về thời gian.'}</p> : <><div className="grid grid-cols-3 gap-2">{(['day', 'month', 'year'] as const).map((part, index) => <select key={part} value={draftValue[part] || ''} onChange={event => update(part, event.currentTarget.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"><option value="">{index === 0 ? 'Ngày' : index === 1 ? 'Tháng' : 'Năm'}{index === 0 && draftValue.planned ? ' (tuỳ chọn)' : ''}</option>{Array.from({ length: index === 0 ? 31 : index === 1 ? 12 : 31 }, (_, itemIndex) => { const option = index === 2 ? new Date().getFullYear() - 10 + itemIndex : itemIndex + 1; return <option key={option} value={String(option)}>{option}</option>; })}</select>)}</div><p className="mt-2 text-[11px] text-slate-500">{draftValue.planned ? 'Dự kiến: bắt buộc tháng và năm; ngày có thể để trống.' : 'Chính thức: bắt buộc đủ ngày, tháng và năm.'}</p></>}</fieldset>;
 }
-export function sessionDisplayName(session: ExaminationSession) {
-  const monthYear = (date?: string, fallback?: string) => {
-    const iso = String(date || '').trim().match(/^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/);
-    if (iso && Number(iso[2]) >= 1 && Number(iso[2]) <= 12) return `T${Number(iso[2])}/${iso[1]}`;
-    const text = String(fallback || '').trim();
-    const match = text.match(/T?(\d{1,2})\/(\d{4})/i);
-    return match ? `T${Number(match[1])}/${match[2]}` : (/^(none|null|nan)$/i.test(text) ? 'Chưa có thông tin' : (text || 'Chưa có thông tin'));
+type RoundMonthYear = { month: number; year: string };
+const UNKNOWN_SESSION_TIME = 'Ch\u01b0a c\u00f3 th\u00f4ng tin';
+
+function roundMonthYear(round: Pick<import('./types').SessionRound, 'date' | 'label'>): RoundMonthYear | null {
+  const iso = String(round.date || '').trim().match(/^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/);
+  if (iso && Number(iso[2]) >= 1 && Number(iso[2]) <= 12) return { year: iso[1], month: Number(iso[2]) };
+  const label = String(round.label || '').trim();
+  const monthYear = label.match(/(?:th\u00e1ng\s*)?(\d{1,2})\s*\/\s*(\d{4})/i);
+  if (monthYear && Number(monthYear[1]) >= 1 && Number(monthYear[1]) <= 12) return { year: monthYear[2], month: Number(monthYear[1]) };
+  return null;
+}
+
+function monthYearText(value: RoundMonthYear) { return `T${value.month}/${value.year}`; }
+
+export function sessionTimelineLabel(session: ExaminationSession) {
+  const rounds = sessionRounds(session);
+  const timings = rounds.map(roundMonthYear);
+  if (timings.length && timings.every((timing): timing is RoundMonthYear => Boolean(timing))) {
+    const first = timings[0];
+    const last = timings[timings.length - 1];
+    const firstText = monthYearText(first), lastText = monthYearText(last);
+    return firstText === lastText ? firstText : `${firstText} - ${lastText}`;
+  }
+  const fallback = [
+    ...timings,
+    roundMonthYear({ date: session.nationalDate, label: session.national }),
+    roundMonthYear({ date: session.internationalDate, label: session.international }),
+  ].find((timing): timing is RoundMonthYear => Boolean(timing));
+  return fallback?.year || UNKNOWN_SESSION_TIME;
+}
+
+export function sessionRecencyKey(session: ExaminationSession) {
+  const keyOf = (round: Pick<import('./types').SessionRound, 'date' | 'label'>) => {
+    const date = String(round.date || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+    const timing = roundMonthYear(round);
+    return timing ? `${timing.year}-${String(timing.month).padStart(2, '0')}-01` : '';
   };
-  return `${session.code}: ${monthYear(session.nationalDate, session.national)} - ${monthYear(session.internationalDate, session.international)}`;
+  const keys = [
+    ...sessionRounds(session).map(keyOf),
+    keyOf({ date: session.nationalDate, label: session.national }),
+    keyOf({ date: session.internationalDate, label: session.international }),
+  ].filter(Boolean).sort();
+  return keys[keys.length - 1] || '0000-00-00';
+}
+
+export function sessionDisplayName(session: ExaminationSession) {
+  return `${session.code}: ${sessionTimelineLabel(session)}`;
 }
 export function SessionsTable({ items, onSelect }: { items: ExaminationSession[]; onSelect: (session: ExaminationSession) => void }) {
   const rounds = (session: ExaminationSession) => sessionRounds(session).sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
-  return <div className="overflow-x-auto"><table className="ft-table min-w-[1180px]"><thead><tr><th>Kỳ tổ chức</th><th>Cuộc thi mẹ</th><th>BTC quốc tế</th><th>Thời gian</th><th>Số thí sinh</th><th>Các vòng thi</th><th>Giai đoạn hiện tại</th><th>Ghi chú</th></tr></thead><tbody>{items.map(session => <tr key={session.id} onClick={() => onSelect(session)} className="cursor-pointer hover:bg-blue-50/50"><td><b className="text-[#001e40]">{sessionDisplayName(session)}</b><p className="mt-1 max-w-52 text-xs text-slate-500">{session.name}</p></td><td>{session.parent}</td><td>{session.organizer}</td><td>{session.time}</td><td className="text-center font-bold">{session.candidates.toLocaleString('vi-VN')}</td><td><div className="flex min-w-48 flex-col gap-1.5">{rounds(session).map(round => <div key={round.id}><p className="mb-0.5 text-[10px] font-bold text-slate-500">{round.name}</p><DateBadge label={round.label} date={round.date} /></div>)}</div></td><td><span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold">{session.phase}</span></td><td className="max-w-60 text-sm text-slate-600">{session.note}</td></tr>)}</tbody></table></div>;
+  return <div className="overflow-x-auto"><table className="ft-table min-w-[1180px]"><thead><tr><th>Kỳ tổ chức</th><th>Cuộc thi mẹ</th><th>BTC quốc tế</th><th>Thời gian</th><th>Số thí sinh</th><th>Các vòng thi</th><th>Giai đoạn hiện tại</th><th>Ghi chú</th></tr></thead><tbody>{items.map(session => <tr key={session.id} onClick={() => onSelect(session)} className="cursor-pointer hover:bg-blue-50/50"><td><b className="text-[#001e40]">{sessionDisplayName(session)}</b><p className="mt-1 max-w-52 text-xs text-slate-500">{session.name}</p></td><td>{session.parent}</td><td>{session.organizer}</td><td>{sessionTimelineLabel(session)}</td><td className="text-center font-bold">{session.candidates.toLocaleString('vi-VN')}</td><td><div className="flex min-w-48 flex-col gap-1.5">{rounds(session).map(round => <div key={round.id}><p className="mb-0.5 text-[10px] font-bold text-slate-500">{round.name}</p><DateBadge label={round.label} date={round.date} /></div>)}</div></td><td><span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-semibold">{session.phase}</span></td><td className="max-w-60 text-sm text-slate-600">{session.note}</td></tr>)}</tbody></table></div>;
 }
