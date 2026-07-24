@@ -152,7 +152,9 @@ export function sessionRecencyKey(session: ExaminationSession) {
 export function sessionDisplayName(session: ExaminationSession) {
   return `${session.code}: ${sessionTimelineLabel(session)}`;
 }
-export const LIST_PAGE_SIZE = 30;
+// A full page should remain easy to scan while avoiding the unbounded long lists.
+// that made roster and import screens difficult to use.
+export const LIST_PAGE_SIZE = 50;
 export function TablePagination({ total, page, onPageChange, pageSize = LIST_PAGE_SIZE, label = 'mục' }: { total: number; page: number; onPageChange: (page: number) => void; pageSize?: number; label?: string }) {
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const current = Math.min(Math.max(1, page), pageCount);
