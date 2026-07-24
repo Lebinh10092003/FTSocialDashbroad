@@ -34,6 +34,14 @@ const DigitalTraining = lazyWithRecovery(() => import('./components/digital-trai
 
 type ViewMode = 'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training' | 'account-management';
 
+const SOCIAL_TABS = ['dashboard', 'media', 'posts', 'sync', 'config'] as const;
+type SocialTab = typeof SOCIAL_TABS[number];
+const socialTabFromPath = (pathname: string): SocialTab => {
+  const segment = pathname.replace(/^\/+|\/+$/g, '').split('/')[1] || 'dashboard';
+  return (SOCIAL_TABS as readonly string[]).includes(segment) ? segment as SocialTab : 'dashboard';
+};
+const socialPathFor = (tab: string) => tab === 'dashboard' ? '/social-dashboard' : `/social-dashboard/${tab}`;
+
 type AppUser = {
   uid: string;
   email: string;
@@ -136,7 +144,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
 
   const [viewMode, setViewModeState] = useState<ViewMode>(getInitialViewMode());
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState<SocialTab>(() => socialTabFromPath(window.location.pathname));
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -190,7 +198,9 @@ export default function App() {
 
   useEffect(() => {
     const handleLocationChange = () => {
-      setViewModeState(getInitialViewMode());
+      const nextMode = getInitialViewMode();
+      setViewModeState(nextMode);
+      if (nextMode === 'social-dashboard') setActiveTab(socialTabFromPath(window.location.pathname));
     };
     window.addEventListener('popstate', handleLocationChange);
     return () => window.removeEventListener('popstate', handleLocationChange);
@@ -202,8 +212,16 @@ export default function App() {
     if (window.location.pathname !== path) window.history.pushState(null, '', path);
   };
 
+  const setSocialTab = (tab: string) => {
+    const nextTab = (SOCIAL_TABS as readonly string[]).includes(tab) ? tab as SocialTab : 'dashboard';
+    setActiveTab(nextTab);
+    setViewModeState('social-dashboard');
+    const path = socialPathFor(nextTab);
+    if (window.location.pathname !== path) window.history.pushState(null, '', path);
+  };
+
   const openProtectedView = (mode: ViewMode, tab?: string) => {
-    if (tab) setActiveTab(tab);
+    if (mode === 'social-dashboard' && tab) { setSocialTab(tab); return; }
     setViewMode(mode);
   };
 
@@ -478,7 +496,7 @@ export default function App() {
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
       <Sidebar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={setSocialTab}
         user={user}
         userRole={userRole}
         idToken={idToken || ''}

@@ -40,6 +40,21 @@ const FERMAT_PRESETS = [
   { pageId: '1166180133241854', pageName: 'International Entrepreneurship & Innovation Olympiad - IEIO Việt Nam' }
 ];
 
+type ConfigTab = 'manual' | 'fb_scan' | 'presets';
+
+const configTabFromPath = (pathname: string): ConfigTab => {
+  const segment = pathname.replace(/^\/+|\/+$/g, '').split('/')[2] || 'manual';
+  if (segment === 'facebook-scan') return 'fb_scan';
+  if (segment === 'token-presets') return 'presets';
+  return 'manual';
+};
+
+const configPathFor = (tab: ConfigTab) => {
+  if (tab === 'fb_scan') return '/social-dashboard/config/facebook-scan';
+  if (tab === 'presets') return '/social-dashboard/config/token-presets';
+  return '/social-dashboard/config';
+};
+
 interface ConfigProps {
   idToken: string;
   googleAccessToken: string | null;
@@ -69,7 +84,18 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
   const [visibleTokens, setVisibleTokens] = useState<Record<string, boolean>>({});
 
   // Redesigned smart states for multi-token configuration
-  const [activeTab, setActiveTab] = useState<'manual' | 'fb_scan' | 'presets'>('manual');
+  const [activeTab, setActiveTab] = useState<ConfigTab>(() => configTabFromPath(window.location.pathname));
+  const navigateConfigTab = (tab: ConfigTab) => {
+    setActiveTab(tab);
+    const path = configPathFor(tab);
+    if (window.location.pathname !== path) window.history.pushState(null, '', path);
+  };
+
+  useEffect(() => {
+    const onPopState = () => setActiveTab(configTabFromPath(window.location.pathname));
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
   const [fbUserToken, setFbUserToken] = useState('');
   const [scanningFb, setScanningFb] = useState(false);
   const [scannedPages, setScannedPages] = useState<{ id: string; name: string; access_token: string; checked: boolean }[]>([]);
@@ -635,14 +661,14 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
                     <div className="flex bg-slate-200/60 p-1 rounded-xl text-[11px] font-bold text-slate-600 gap-1 self-start">
                       <button
                         type="button"
-                        onClick={() => setActiveTab('manual')}
+                        onClick={() => navigateConfigTab('manual')}
                         className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${activeTab === 'manual' ? 'bg-white text-slate-900 shadow-sm' : 'hover:text-slate-800'}`}
                       >
                         Thủ công
                       </button>
                       <button
                         type="button"
-                        onClick={() => setActiveTab('fb_scan')}
+                        onClick={() => navigateConfigTab('fb_scan')}
                         className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${activeTab === 'fb_scan' ? 'bg-white text-slate-900 shadow-sm' : 'hover:text-slate-800'}`}
                       >
                         <Search className="w-3 h-3 text-blue-500 shrink-0" />
@@ -650,7 +676,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
                       </button>
                       <button
                         type="button"
-                        onClick={() => setActiveTab('presets')}
+                        onClick={() => navigateConfigTab('presets')}
                         className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${activeTab === 'presets' ? 'bg-white text-slate-900 shadow-sm' : 'hover:text-slate-800'}`}
                       >
                         <Sparkles className="w-3 h-3 text-indigo-500 shrink-0" />

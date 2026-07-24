@@ -1027,7 +1027,7 @@ def round_result_detail(request, pk):
     candidate.updated = timezone.now().strftime('%d/%m/%Y %H:%M')
     candidate.save(update_fields=['updated'])
     after_round = {'eligibility': item.eligibility, 'sbd': item.sbd, 'date': item.exam_date, 'time': item.time_slot, 'mode': item.mode, 'location': item.location, 'link': item.link, 'account': item.account, 'password': item.password, 'attendance': item.attendance, 'score': item.score, 'scoreRate': item.score_rate, 'rank': item.rank, 'result': item.result, 'note': item.note, 'registration': json.dumps(item.participation.registration_data or {}, ensure_ascii=False)}
-    round_labels = {'eligibility':'Điều kiện', 'sbd':'Số báo danh', 'date':'Ngày thi', 'time':'Giờ/ca thi', 'mode':'Hình thức', 'location':'Địa điểm', 'link':'Link/phòng thi', 'account':'Tài khoản', 'password':'Mật khẩu', 'attendance':'Điểm danh', 'score':'Điểm', 'scoreRate':'Tỷ lệ điểm', 'rank':'Xếp hạng', 'result':'Kết quả', 'note':'Ghi chú', 'registration':'Thông tin đăng ký'}
+    round_labels = {'eligibility':'Điều kiện', 'sbd':'Số báo danh', 'date':'Ngày thi', 'time':'Giờ/ca thi', 'mode':'Hình thức', 'location':'Địa điểm', 'link':'Link dự thi (Nếu có)', 'account':'Tài khoản', 'password':'Mật khẩu', 'attendance':'Trạng thái dự thi', 'score':'Điểm', 'scoreRate':'Tỷ lệ điểm', 'rank':'Xếp hạng', 'result':'Kết quả', 'note':'Ghi chú', 'registration':'Thông tin đăng ký'}
     change_text = audit_values(before_round, after_round, round_labels)
     audit_content = f'Cập nhật {item.round_name} cho {candidate.code} ({candidate.name}): ' + (change_text or 'Không có thay đổi dữ liệu.')
     append_audit(f'candidate-{candidate.code}', audit_content, request)

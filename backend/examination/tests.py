@@ -209,6 +209,18 @@ class CandidateRoundHistoryTests(TestCase):
         self.assertEqual(history[0]['sbd'], 'SBD-001')
         self.assertEqual(history[0]['score'], '91')
         self.assertEqual(history[1]['sbd'], 'SBD-002')
+    def test_round_score_does_not_match_exam_location(self):
+        from .sync import history_from_sheet_row
+        headers = [
+            'V\u00f2ng 1: \u0110\u1ecba \u0111i\u1ec3m/Ph\u00f2ng thi', 'V\u00f2ng 1: \u0110i\u1ec3m',
+            'V\u00f2ng 1: Tr\u1ea1ng th\u00e1i d\u1ef1 thi', 'V\u00f2ng 1: Link thi',
+        ]
+        history = history_from_sheet_row(headers, ['Room 1', '91/105', '\u0110\u00e3 c\u00f3 k\u1ebft qu\u1ea3', 'https://exam.example.test'])
+        self.assertEqual(history[0]['location'], 'Room 1')
+        self.assertEqual(history[0]['score'], '91/105')
+        self.assertEqual(history[0]['attendance'], '\u0110\u00e3 c\u00f3 k\u1ebft qu\u1ea3')
+        self.assertEqual(history[0]['link'], 'https://exam.example.test')
+
     def test_sbd_column_is_never_used_as_profile_code(self):
         from .sync import resolve_column_indices
         columns = resolve_column_indices(['Hồ sơ thí sinh: Họ và tên thí sinh', 'Vòng 1: Số báo danh (SBD)'])

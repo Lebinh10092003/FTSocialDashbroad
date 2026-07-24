@@ -10,7 +10,7 @@ type Registration = NonNullable<Candidate['participations']>[number]['registrati
 type RoundEditor = { index: number; slots: SessionRoundSlot[] };
 
 const dash = (value?: string) => value || '—';
-const roundFields: Array<[keyof CandidateExamHistory, string]> = [['eligibility', 'Điều kiện dự thi'], ['sbd', 'Số báo danh'], ['date', 'Ngày thi'], ['time', 'Giờ / ca thi'], ['mode', 'Hình thức'], ['location', 'Địa điểm / phòng'], ['link', 'Link phòng thi'], ['account', 'Tài khoản'], ['password', 'Mật khẩu'], ['attendance', 'Điểm danh'], ['score', 'Điểm'], ['scoreRate', 'Tỷ lệ điểm'], ['rank', 'Xếp hạng'], ['result', 'Kết quả'], ['note', 'Ghi chú']];
+const roundFields: Array<[keyof CandidateExamHistory, string]> = [['eligibility', 'Điều kiện dự thi'], ['sbd', 'Số báo danh'], ['date', 'Ngày thi'], ['time', 'Giờ / ca thi'], ['mode', 'Hình thức'], ['location', 'Địa điểm / phòng'], ['link', 'Link dự thi (Nếu có)'], ['account', 'Tài khoản'], ['password', 'Mật khẩu'], ['attendance', 'Trạng thái dự thi'], ['score', 'Điểm'], ['scoreRate', 'Tỷ lệ điểm'], ['rank', 'Xếp hạng'], ['result', 'Kết quả'], ['note', 'Ghi chú']];
 const registrationFields = [['subject', 'Môn / lĩnh vực'], ['category', 'Bảng thi'], ['registrationMethod', 'Hình thức đăng ký'], ['registrationUnit', 'Đơn vị đăng ký'], ['teamName', 'Đội / nhóm'], ['examLanguage', 'Ngôn ngữ thi'], ['generalNote', 'Ghi chú chung'], ['certificateLink', 'Link chứng nhận']] as const;
 const blankSlot = (): SessionRoundSlot => ({ id: `slot-${Date.now()}-${Math.random().toString(16).slice(2)}`, date: '', time: '', mode: '', link: '', location: '', note: '' });
 

@@ -93,11 +93,16 @@ const valueFor = (entries: [string, string][], field: string) => aliases[field]?
 type RoundHistory = { round: string; eligibility?: string; sbd?: string; date?: string; time?: string; mode?: string; location?: string; link?: string; account?: string; password?: string; attendance?: string; score?: string; scoreRate?: string; rank?: string; result?: string; note?: string };
 function historyFromRow(row: ImportRow): RoundHistory[] {
   const fields: Record<string, string[]> = { eligibility: ['dieu kien tham gia'], sbd: ['so bao danh'], date: ['ngay thi'], time: ['gio ca thi'], mode: ['hinh thuc thi'], location: ['dia diem phong thi'], link: ['link thi'], account: ['tai khoan ma truy cap'], password: ['mat khau', 'password'], attendance: ['trang thai du thi'], score: ['diem'], scoreRate: ['ty le diem'], rank: ['xep hang'], result: ['ket qua giai thuong'], note: ['ghi chu su co'] };
+  const matchesField = (field: string, key: string, names: string[]) => names.some(name => {
+    // A score must not accidentally match the location column.
+    if (field === 'score') return key.endsWith(' diem') && !key.includes('dia diem') && !key.includes('ty le diem');
+    return key.includes(name);
+  });
   return [1, 2, 3].map(roundNumber => {
     const prefix = `vong ${roundNumber}`;
     const entries = Object.entries(row).map(([key, value]) => [normalise(key), text(value)] as [string, string]).filter(([key]) => key.startsWith(prefix));
     const item: RoundHistory = { round: `Vòng ${roundNumber}` };
-    Object.entries(fields).forEach(([field, names]) => { const value = entries.find(([key]) => names.some(name => key.includes(name)))?.[1] || ''; if (value) item[field as keyof RoundHistory] = (field === 'date' ? normaliseBirthDate(value) : value) as never; });
+    Object.entries(fields).forEach(([field, names]) => { const value = entries.find(([key]) => matchesField(field, key, names))?.[1] || ''; if (value) item[field as keyof RoundHistory] = (field === 'date' ? normaliseBirthDate(value) : value) as never; });
     return item;
   }).filter(item => Object.keys(item).length > 1);
 }

@@ -1,0 +1,51 @@
+import type { ExaminationPage } from './types';
+
+export type ExaminationRoute = { page: ExaminationPage; id?: string };
+
+const listRoutes: Record<string, ExaminationPage> = {
+  '': 'overview',
+  'competitions': 'competitions',
+  'sessions': 'sessions',
+  'candidates': 'candidates',
+  'classes': 'classes',
+  'teachers': 'teachers',
+  'partners': 'partners',
+  'import': 'import',
+};
+
+const decodePart = (value?: string) => {
+  try { return value ? decodeURIComponent(value) : ''; } catch { return value || ''; }
+};
+
+export function examinationRouteFromPath(pathname: string): ExaminationRoute {
+  const parts = pathname.replace(/^\/+|\/+$/g, '').split('/');
+  if (parts[0] !== 'examination') return { page: 'overview' };
+  const section = parts[1] || '';
+  const id = decodePart(parts[2]);
+  if (section === 'sessions' && id) return { page: 'session-detail', id };
+  if (section === 'competitions' && id) return { page: 'competition-detail', id };
+  if (section === 'candidates' && id) return { page: 'candidate-detail', id };
+  if (section === 'teachers' && id) return { page: 'teacher-detail', id };
+  if (section === 'classes' && id) return { page: 'class-detail', id };
+  if (section === 'partners' && id) return { page: 'partners', id };
+  return { page: listRoutes[section] || 'overview' };
+}
+
+export function examinationPathFor(page: ExaminationPage, id = ''): string {
+  const encoded = encodeURIComponent(id);
+  switch (page) {
+    case 'competitions': return '/examination/competitions';
+    case 'competition-detail': return encoded ? `/examination/competitions/${encoded}` : '/examination/competitions';
+    case 'sessions': return '/examination/sessions';
+    case 'session-detail': return encoded ? `/examination/sessions/${encoded}` : '/examination/sessions';
+    case 'candidates': return '/examination/candidates';
+    case 'candidate-detail': return encoded ? `/examination/candidates/${encoded}` : '/examination/candidates';
+    case 'classes': return '/examination/classes';
+    case 'class-detail': return encoded ? `/examination/classes/${encoded}` : '/examination/classes';
+    case 'teachers': return '/examination/teachers';
+    case 'teacher-detail': return encoded ? `/examination/teachers/${encoded}` : '/examination/teachers';
+    case 'partners': return encoded ? `/examination/partners/${encoded}` : '/examination/partners';
+    case 'import': return '/examination/import';
+    default: return '/examination';
+  }
+}

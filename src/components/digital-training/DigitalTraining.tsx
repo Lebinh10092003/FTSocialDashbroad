@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   BookOpen,
@@ -28,6 +28,13 @@ const sessions = [
   { date: '2026-07-29', title: 'Xây dựng lớp học số', partner: 'Tiểu học Đoàn Thị Điểm', category: categories[3], attendees: 54 },
 ];
 
+const trainingTabFromPath = (pathname: string): Tab => {
+  const segment = pathname.replace(/^\/+|\/+$/g, '').split('/')[1] || 'calendar';
+  return ['calendar', 'sessions', 'partners', 'survey', 'materials'].includes(segment) ? segment as Tab : 'calendar';
+};
+
+const trainingPathFor = (tab: Tab) => tab === 'calendar' ? '/digital-training' : `/digital-training/${tab}`;
+
 const tabs = [
   { id: 'calendar' as Tab, label: 'Lịch tập huấn', icon: CalendarDays },
   { id: 'sessions' as Tab, label: 'Danh sách buổi', icon: ClipboardList },
@@ -37,7 +44,18 @@ const tabs = [
 ];
 
 export default function DigitalTraining({ onBackToWorkspace, onAccountClick, isGuest, userName }: { onBackToWorkspace: () => void; onAccountClick: () => void; isGuest: boolean; userName?: string | null }) {
-  const [tab, setTab] = useState<Tab>('calendar');
+  const [tab, setTab] = useState<Tab>(() => trainingTabFromPath(window.location.pathname));
+  const navigateTab = (nextTab: Tab) => {
+    setTab(nextTab);
+    const path = trainingPathFor(nextTab);
+    if (window.location.pathname !== path) window.history.pushState(null, '', path);
+  };
+
+  useEffect(() => {
+    const onPopState = () => setTab(trainingTabFromPath(window.location.pathname));
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
   const byDay = useMemo(() => Object.fromEntries(sessions.map(item => [Number(item.date.slice(-2)), item])), []);
   const days = Array.from({ length: 31 }, (_, index) => index + 1);
   const activeLabel = tabs.find(item => item.id === tab)?.label || '';
@@ -51,7 +69,7 @@ export default function DigitalTraining({ onBackToWorkspace, onAccountClick, isG
       <div className="p-4">
         <button onClick={onBackToWorkspace} className="flex w-full items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"><ArrowLeft className="h-4 w-4" />{'Quay lại Workspace'}</button>
       </div>
-      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-4 py-2">{tabs.map(item => { const Icon = item.icon; const active = tab === item.id; return <button key={item.id} onClick={() => setTab(item.id)} className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold transition ${active ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}><Icon className="h-4 w-4" />{item.label}</button>; })}</nav>
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-4 py-2">{tabs.map(item => { const Icon = item.icon; const active = tab === item.id; return <button key={item.id} onClick={() => navigateTab(item.id)} className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold transition ${active ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}><Icon className="h-4 w-4" />{item.label}</button>; })}</nav>
       <div className="border-t border-slate-100 p-4">
         <button onClick={onAccountClick} className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-600 px-3 py-2.5 text-xs font-bold text-white transition hover:bg-cyan-700">{isGuest && <LogIn className="h-4 w-4" />}{isGuest ? 'Đăng nhập' : userName || 'Tài khoản'}</button>
       </div>

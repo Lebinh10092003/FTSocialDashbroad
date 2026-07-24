@@ -331,7 +331,14 @@ def history_from_sheet_row(headers, row):
             if not value:
                 continue
             for key, aliases in field_aliases.items():
-                if any(alias in normalized for alias in aliases):
+                # The generic alias "diem" also occurs inside a location header.
+                # A score is the terminal field, never location or score rate.
+                matches = (
+                    normalized.endswith('diem') and 'diadiem' not in normalized and 'tylediem' not in normalized
+                    if key == 'score'
+                    else any(alias in normalized for alias in aliases)
+                )
+                if matches:
                     values[key] = value
                     break
         if values:
