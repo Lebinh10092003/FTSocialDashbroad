@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.contrib.auth import get_user_model
@@ -7,7 +8,7 @@ from django.utils import timezone
 
 from social.models import Channel
 from .models import SystemConfig, UserProfile
-from .views import SENSITIVE_CONFIG_KEYS, _get_config, _normalise_token_rows, _sync_channels
+from .views import SENSITIVE_CONFIG_KEYS, _bootstrap_admin, _get_config, _normalise_token_rows, _sync_channels
 
 
 class TokenLifecycleTests(TestCase):
@@ -66,7 +67,8 @@ class TokenLifecycleTests(TestCase):
             },
         )
 
-        config = _get_config()
+        with patch.dict("os.environ", {"CURRENT_FACEBOOK_ACCESS_TOKEN": ""}, clear=False):
+            config = _get_config()
         rows = config.data["detailedTokensList"]
 
         self.assertEqual(len(rows), 1)
@@ -80,6 +82,13 @@ class TokenLifecycleTests(TestCase):
     def test_scan_tokens_are_hidden_from_non_admin_config_payloads(self):
         self.assertIn("facebookScanTokens", SENSITIVE_CONFIG_KEYS)
 
+class BootstrapAdminTests(TestCase):
+    def test_json_bootstrap_provisions_additional_admin(self):
+        with patch.dict("os.environ", {"BOOTSTRAP_ADMINS_JSON": "[{\"email\": \"extra-admin@example.com\", \"password\": \"StrongPassword9921\"}]", "BOOTSTRAP_ADMIN_EMAIL": "", "BOOTSTRAP_ADMIN_PASSWORD": ""}, clear=False):
+            user = _bootstrap_admin("extra-admin@example.com", "StrongPassword9921")
+        self.assertIsNotNone(user)
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.check_password("StrongPassword9921"))
 class AccountAdministrationTests(TestCase):
     def _token_for(self, email, role):
         user = get_user_model().objects.create_user(username=email, email=email, password="StrongPassword9921")

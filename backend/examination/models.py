@@ -154,3 +154,104 @@ class ExaminationSheet(models.Model):
 
     def __str__(self):
         return self.name
+
+class ExamPaper(models.Model):
+    STATUS_DRAFT = 'DRAFT'
+    STATUS_READY = 'READY'
+    STATUS_REVIEW = 'REVIEW'
+    STATUS_ARCHIVED = 'ARCHIVED'
+    STATUS_CHOICES = [(STATUS_DRAFT, 'Bản nháp'), (STATUS_READY, 'Sẵn sàng'), (STATUS_REVIEW, 'Cần kiểm tra'), (STATUS_ARCHIVED, 'Lưu trữ')]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    title = models.CharField(max_length=500)
+    competition = models.ForeignKey(Competition, on_delete=models.SET_NULL, null=True, blank=True, related_name='exam_papers')
+    session = models.ForeignKey(ExamSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='exam_papers')
+    subject = models.CharField(max_length=255, blank=True, default='')
+    grade_or_category = models.CharField(max_length=255, blank=True, default='')
+    language = models.CharField(max_length=50, default='Tiếng Việt')
+    duration_minutes = models.PositiveIntegerField(default=60)
+    total_questions = models.PositiveIntegerField(default=0)
+    difficulty_distribution = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default=STATUS_DRAFT)
+    description = models.TextField(blank=True, default='')
+    ai_generation_status = models.CharField(max_length=30, blank=True, default='idle')
+    ai_generation_message = models.CharField(max_length=500, blank=True, default='')
+    created_by = models.CharField(max_length=255, blank=True, default='')
+    updated_by = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return self.title
+
+
+class ExamQuestion(models.Model):
+    DIFFICULTIES = [('EASY', 'Dễ'), ('MEDIUM', 'Trung bình'), ('HARD', 'Khó'), ('VERY_HARD', 'Rất khó')]
+    CHECK_STATUS = [('PENDING', 'Chưa kiểm tra'), ('PASSED', 'Đạt yêu cầu'), ('AI_FIXED', 'Đã được AI chỉnh sửa'), ('NEEDS_REVIEW', 'Cần người dùng kiểm tra'), ('WARNING', 'Có cảnh báo')]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    paper = models.ForeignKey(ExamPaper, on_delete=models.CASCADE, related_name='questions')
+    order = models.PositiveIntegerField(default=1)
+    content = models.TextField()
+    choices = models.JSONField(default=list)  # Designed for future variable option counts; MVP validates A-D.
+    correct_answer = models.CharField(max_length=10)
+    explanation = models.TextField(blank=True, default='')
+    difficulty = models.CharField(max_length=20, choices=DIFFICULTIES, default='MEDIUM')
+    topic = models.CharField(max_length=255, blank=True, default='')
+    check_status = models.CharField(max_length=30, choices=CHECK_STATUS, default='PENDING')
+    warnings = models.JSONField(default=list, blank=True)
+    ai_metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['order', 'created_at']
+        constraints = [models.UniqueConstraint(fields=['paper', 'order'], name='unique_question_order_per_paper')]
+
+
+class ExamSourceDocument(models.Model):
+    SOURCE_TYPES = [('UPLOAD', 'Tệp tải lên'), ('PAPER', 'Đề trong kho'), ('SYLLABUS', 'Syllabus'), ('DESCRIPTION', 'Mô tả')]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    paper = models.ForeignKey(ExamPaper, on_delete=models.CASCADE, related_name='sources')
+    source_type = models.CharField(max_length=30, choices=SOURCE_TYPES)
+    name = models.CharField(max_length=500)
+    file = models.FileField(upload_to='exam-paper-sources/%Y/%m/', blank=True, null=True)
+    referenced_paper = models.ForeignKey(ExamPaper, on_delete=models.SET_NULL, blank=True, null=True, related_name='used_as_source_by')
+    extracted_text = models.TextField(blank=True, default='')
+    metadata = models.JSONField(default=dict, blank=True)
+    created_by = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class AiProviderConfig(models.Model):
+    provider = models.CharField(max_length=100, unique=True, default='openai')
+    base_url = models.URLField(blank=True, default='https://api.openai.com/v1')
+    api_key_encrypted = models.TextField(blank=True, default='')
+    generation_model = models.CharField(max_length=255, blank=True, default='gpt-4.1-mini')
+    review_model = models.CharField(max_length=255, blank=True, default='gpt-4.1-mini')
+    temperature = models.FloatField(default=0.4)
+    max_tokens = models.PositiveIntegerField(default=12000)
+    timeout_seconds = models.PositiveIntegerField(default=120)
+    max_retries = models.PositiveIntegerField(default=2)
+    updated_by = models.CharField(max_length=255, blank=True, default='')
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class AiUsageLog(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    paper = models.ForeignKey(ExamPaper, on_delete=models.SET_NULL, null=True, blank=True, related_name='ai_usage_logs')
+    user_email = models.CharField(max_length=255, blank=True, default='')
+    task_type = models.CharField(max_length=100)
+    provider = models.CharField(max_length=100, default='openai')
+    model = models.CharField(max_length=255, blank=True, default='')
+    input_tokens = models.PositiveIntegerField(default=0)
+    output_tokens = models.PositiveIntegerField(default=0)
+    estimated_cost = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    duration_ms = models.PositiveIntegerField(default=0)
+    success = models.BooleanField(default=False)
+    error_message = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)

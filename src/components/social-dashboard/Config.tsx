@@ -82,6 +82,11 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
   const [editingTokenId, setEditingTokenId] = useState<string | null>(null);
   const [showAdvancedJson, setShowAdvancedJson] = useState(false);
   const [visibleTokens, setVisibleTokens] = useState<Record<string, boolean>>({});
+  const [, setTokenClock] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setTokenClock(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Redesigned smart states for multi-token configuration
   const [activeTab, setActiveTab] = useState<ConfigTab>(() => configTabFromPath(window.location.pathname));
@@ -152,6 +157,18 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
     return { id: previous?.id || `facebook-scan-${Date.now()}-${Math.random().toString(16).slice(2)}`, platform: 'facebook', label: 'Token quét Facebook', accessToken, issuedAt, expiresAt, pageIds: [...mergedPages.keys()], pageNames: [...mergedPages.values()] };
   };
   const remainingDays = (expiresAt?: string) => expiresAt ? Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86_400_000)) : null;
+  const tokenExpiryLabel = (expiresAt?: string) => {
+    const days = remainingDays(expiresAt);
+    if (days === null) return 'Chưa có hạn';
+    if (days <= 0) return 'Đã hết hạn';
+    return days === 1 ? 'Còn 1 ngày (sắp hết hạn)' : `Còn ${days} ngày`;
+  };
+  const tokenExpiryClass = (expiresAt?: string) => {
+    const days = remainingDays(expiresAt);
+    if (days !== null && days <= 1) return 'text-red-600';
+    if (days !== null && days <= 5) return 'text-amber-600';
+    return 'text-slate-600';
+  };
 
   const fetchUsers = async () => {
     setLoadingUsers(true);
@@ -434,18 +451,24 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
     if (!presetToken.trim()) { alert('Vui lòng dán mã Access Token áp dụng cho các trang mẫu!'); return; }
     const selectedList = FERMAT_PRESETS.filter(page => selectedPresets[page.pageId]);
     if (selectedList.length === 0) { alert('Vui lòng tích chọn ít nhất một Trang mẫu để nhập!'); return; }
+    const selectedPages = selectedList.map(page => ({ id: page.pageId, name: page.pageName }));
+    const selectedIds = new Set(selectedList.map(page => page.pageId));
+    const existingScanToken = facebookScanTokens.find(token => token.accessToken === presetToken.trim()) || facebookScanTokens.find(token => token.pageIds.some(id => selectedIds.has(id)));
+    const nextScanToken = scanTokenLifetime(presetToken.trim(), selectedPages, existingScanToken);
     const nextList = [...tokensList];
     selectedList.forEach(page => {
       const id = `facebook-${page.pageId}`;
       const index = nextList.findIndex(token => token.id === id);
-      const row = tokenLifetime({ id, platform: 'facebook', pageId: page.pageId, pageName: page.pageName, accessToken: presetToken.trim() }, index >= 0 ? nextList[index] : undefined);
+      const row = tokenLifetime({ id, platform: 'facebook', pageId: page.pageId, pageName: page.pageName, accessToken: presetToken.trim(), sourceTokenId: nextScanToken.id }, index >= 0 ? nextList[index] : undefined);
+      row.issuedAt = nextScanToken.issuedAt;
+      row.expiresAt = nextScanToken.expiresAt;
       if (index >= 0) nextList[index] = row; else nextList.push(row);
     });
-    setTokensList(nextList); void autoSaveTokensList(nextList);
+    const nextScanTokens = existingScanToken ? facebookScanTokens.map(token => token.id === existingScanToken.id ? nextScanToken : token) : [...facebookScanTokens, nextScanToken];
+    setTokensList(nextList); setFacebookScanTokens(nextScanTokens); void autoSaveTokensList(nextList, nextScanTokens);
     alert(`Đã nạp thành công ${selectedList.length} trang mẫu của Fermat vào bảng cấu hình!`);
     setShowAddForm(false); setPresetToken('');
   };
-
   const toggleAllPresets = (checked: boolean) => {
     const next: Record<string, boolean> = {};
     FERMAT_PRESETS.forEach(p => {
@@ -1011,7 +1034,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
                               </button>
                             </div>
                           </td>
-                          <td className="p-4 text-xs font-semibold text-slate-600">{remainingDays(token.expiresAt) === null ? 'Chưa có hạn' : `Còn ${remainingDays(token.expiresAt)} ngày`}</td>
+                          <td className={`p-4 text-xs font-semibold ${tokenExpiryClass(token.expiresAt)}`}>{tokenExpiryLabel(token.expiresAt)}</td>
                           {isAdmin && (
                             <td className="p-4 text-center">
                               <div className="inline-flex items-center gap-1">
@@ -1082,7 +1105,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
           {facebookScanTokens.length > 0 && <section className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
             <h3 className="text-sm font-extrabold text-slate-800">Token quét Facebook đã lưu</h3>
             <p className="mt-1 text-xs text-slate-500">Mỗi token có mốc hết hạn riêng; các trang nạp từ cùng token sẽ dùng chung mốc này.</p>
-            <div className="mt-3 grid gap-2 md:grid-cols-2">{facebookScanTokens.map(token => <div key={token.id} className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs"><b className="block text-slate-700">{token.label}</b><span className="text-slate-500">{token.pageNames.length} trang · Còn {remainingDays(token.expiresAt) ?? 0} ngày</span></div>)}</div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">{facebookScanTokens.map(token => <div key={token.id} className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs"><b className="block text-slate-700">{token.label}</b><span className={tokenExpiryClass(token.expiresAt)}>{token.pageNames.length} trang · {tokenExpiryLabel(token.expiresAt)}</span></div>)}</div>
           </section>}
         </div>
 

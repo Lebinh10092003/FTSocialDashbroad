@@ -1,8 +1,22 @@
 from django.urls import path
-from . import views
+from . import views, paper_views
 
 urlpatterns = [
     path('examination/bootstrap', views.examination_bootstrap, name='examination_bootstrap'),
+    path('examination/papers', paper_views.papers_list, name='papers_list'),
+    path('examination/papers/<uuid:pk>', paper_views.paper_detail, name='paper_detail'),
+    path('examination/papers/<uuid:pk>/duplicate', paper_views.paper_duplicate, name='paper_duplicate'),
+    path('examination/papers/<uuid:pk>/sources/upload', paper_views.paper_source_upload, name='paper_source_upload'),
+    path('examination/papers/<uuid:pk>/sources/reference', paper_views.paper_source_reference, name='paper_source_reference'),
+    path('examination/papers/<uuid:pk>/sources/<uuid:source_id>', paper_views.paper_source_delete, name='paper_source_delete'),
+    path('examination/papers/<uuid:pk>/questions', paper_views.paper_questions_replace, name='paper_questions_replace'),
+    path('examination/papers/<uuid:pk>/questions/<uuid:question_id>', paper_views.paper_question_detail, name='paper_question_detail'),
+    path('examination/papers/<uuid:pk>/questions/<uuid:question_id>/ai/<str:action>', paper_views.paper_question_ai_action, name='paper_question_ai_action'),
+    path('examination/papers/<uuid:pk>/generate', paper_views.paper_generate, name='paper_generate'),
+    path('examination/papers/<uuid:pk>/review', paper_views.paper_review, name='paper_review'),
+    path('examination/papers/<uuid:pk>/export/<str:export_type>', paper_views.paper_export, name='paper_export'),
+    path('examination/ai-config', paper_views.ai_config, name='ai_config'),
+    path('examination/ai-config/test', paper_views.ai_config_test, name='ai_config_test'),
     path('examination/partners', views.partners_detail, name='partners_detail'),
     path('examination/competitions', views.competition_create, name='competition_create'),
     path('examination/competitions/<str:pk>', views.competition_detail, name='competition_detail'),

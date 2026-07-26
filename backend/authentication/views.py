@@ -102,33 +102,54 @@ def _profile_for_user(django_user) -> UserProfile:
     return profile
 
 
+def _bootstrap_admin_credentials() -> list[tuple[str, str]]:
+    """Return all configured emergency admin credentials."""
+    credentials: list[tuple[str, str]] = []
+    raw = str(os.getenv("BOOTSTRAP_ADMINS_JSON", "") or "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                parsed = [parsed]
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if not isinstance(item, dict):
+                        continue
+                    configured_email = _normalise_email(item.get("email"))
+                    configured_password = str(item.get("password") or "")
+                    if configured_email and configured_password:
+                        credentials.append((configured_email, configured_password))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    configured_email = _normalise_email(os.getenv("BOOTSTRAP_ADMIN_EMAIL", ""))
+    configured_password = str(os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "") or "")
+    if configured_email and configured_password:
+        credentials.append((configured_email, configured_password))
+    unique: dict[str, str] = {}
+    for configured_email, configured_password in credentials:
+        unique[configured_email] = configured_password
+    return list(unique.items())
+
+
 def _bootstrap_admin(email: str, password: str):
-    configured_email = _normalise_email(
-        os.getenv("BOOTSTRAP_ADMIN_EMAIL", "")
-        or next(iter(get_admin_emails()), "")
-    )
-    configured_password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "")
-    if not configured_email or not configured_password:
-        return None
-    if email != configured_email or password != configured_password:
+    configured_password = dict(_bootstrap_admin_credentials()).get(email)
+    if not configured_password or password != configured_password:
         return None
     django_user, created = User.objects.get_or_create(
-        username=configured_email,
-        defaults={"email": configured_email, "is_staff": True, "is_superuser": True, "is_active": True},
+        username=email,
+        defaults={"email": email, "is_staff": True, "is_superuser": True, "is_active": True},
     )
     if created or not django_user.check_password(configured_password):
         django_user.set_password(configured_password)
-    django_user.email = configured_email
+    django_user.email = email
     django_user.is_staff = True
     django_user.is_superuser = True
     django_user.is_active = True
     django_user.save()
     return django_user
 
-
-
 TOKEN_LIFETIME_DAYS = 60
-TOKEN_WARNING_DAYS = 5
+TOKEN_WARNING_DAYS = 1
 
 
 def _token_dates(previous: dict | None, access_token: str, now) -> tuple[str, str]:
@@ -221,7 +242,7 @@ def _normalise_scan_tokens(rows, previous_rows, now):
         item.update({
             "id": token_id,
             "platform": "facebook",
-            "label": str(item.get("label") or "Token quet Facebook").strip(),
+            "label": str(item.get("label") or "Token quét Facebook").strip(),
             "accessToken": access_token,
             "issuedAt": issued_at,
             "expiresAt": expires_at,
@@ -231,6 +252,44 @@ def _normalise_scan_tokens(rows, previous_rows, now):
         normalised.append(item)
     return normalised
 
+
+def _sync_environment_scan_token(data: dict, now) -> bool:
+    """Import the configured current token; a changed token gets 60 days."""
+    access_token = str(os.getenv("CURRENT_FACEBOOK_ACCESS_TOKEN", "") or "").strip()
+    if not access_token:
+        return False
+    rows = [item for item in data.get("facebookScanTokens", []) if isinstance(item, dict)]
+    current_index = next((index for index, item in enumerate(rows) if str(item.get("id") or "") == "facebook-scan-current"), None)
+    matching_index = next((index for index, item in enumerate(rows) if str(item.get("accessToken") or "") == access_token), None)
+    index = matching_index if matching_index is not None else current_index
+    if index is None:
+        rows.append({
+            "id": "facebook-scan-current", "platform": "facebook", "label": "Token quét Facebook",
+            "accessToken": access_token, "issuedAt": now.isoformat(),
+            "expiresAt": (now + timedelta(days=TOKEN_LIFETIME_DAYS)).isoformat(),
+            "pageIds": [], "pageNames": [],
+        })
+        data["facebookScanTokens"] = rows
+        return True
+    current = dict(rows[index])
+    token_changed = str(current.get("accessToken") or "") != access_token
+    current.update({"id": str(current.get("id") or "facebook-scan-current"), "platform": "facebook", "label": str(current.get("label") or "Token quét Facebook")})
+    if token_changed or not current.get("issuedAt") or not current.get("expiresAt"):
+        current.update({"accessToken": access_token, "issuedAt": now.isoformat(), "expiresAt": (now + timedelta(days=TOKEN_LIFETIME_DAYS)).isoformat()})
+    else:
+        current["accessToken"] = access_token
+        try:
+            issued_at = timezone.datetime.fromisoformat(str(current["issuedAt"]).replace("Z", "+00:00"))
+            expected_expiry = (issued_at + timedelta(days=TOKEN_LIFETIME_DAYS)).isoformat()
+            if current.get("expiresAt") != expected_expiry:
+                current["expiresAt"] = expected_expiry
+        except (TypeError, ValueError, KeyError):
+            current.update({"issuedAt": now.isoformat(), "expiresAt": (now + timedelta(days=TOKEN_LIFETIME_DAYS)).isoformat()})
+    rows[index] = current
+    if rows != data.get("facebookScanTokens", []):
+        data["facebookScanTokens"] = rows
+        return True
+    return changed
 
 def _days_remaining(expires_at: str, now) -> tuple[int, object] | None:
     try:
@@ -247,10 +306,7 @@ def _seed_config() -> dict:
     scan_tokens = []
     current_facebook_token = os.getenv("CURRENT_FACEBOOK_ACCESS_TOKEN", "").strip()
     if current_facebook_token:
-        try:
-            ttl_days = max(1, int(os.getenv("CURRENT_FACEBOOK_TOKEN_TTL_DAYS", "60")))
-        except ValueError:
-            ttl_days = 60
+        ttl_days = TOKEN_LIFETIME_DAYS
         scan_tokens.append({
             "id": "facebook-scan-current",
             "platform": "facebook",
@@ -311,6 +367,12 @@ def _get_config() -> SystemConfig:
                 }], [], now)
         normalised_rows = _normalise_token_rows(rows, rows, now, scan_tokens)
         data["facebookScanTokens"] = scan_tokens
+        env_token_changed = _sync_environment_scan_token(data, now)
+        scan_tokens = _normalise_scan_tokens(data.get("facebookScanTokens", []), data.get("facebookScanTokens", []), now)
+        data["facebookScanTokens"] = scan_tokens
+        env_token_changed = env_token_changed or scan_tokens != raw_scan_tokens
+        if env_token_changed:
+            normalised_rows = _normalise_token_rows(rows, rows, now, scan_tokens)
         if normalised_rows != rows or data != config.data:
             data["detailedTokensList"] = normalised_rows
             data["updatedAt"] = now.isoformat()
