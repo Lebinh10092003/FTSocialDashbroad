@@ -50,19 +50,25 @@ class Command(BaseCommand):
             raise CommandError('Candidate header row was not found.')
         headers = merged_headers(grid, header_index)
         columns = resolve_column_indices(headers)
+        profile_columns = {}
+        profile_labels = {'code': 'mahoso', 'name': 'hovatenthisinh', 'dob': 'ngaysinh'}
+        for field, label in profile_labels.items():
+            profile_columns[field] = next((index for index, header in enumerate(headers)
+                if label in normalise_str(str(header).split(':')[-1])), None)
+        if any(index is None for index in profile_columns.values()):
+            raise CommandError('Profile code, name, or birth-date columns were not found.')
 
         configured_rounds = [str(item.get('name') or '').strip() for item in (session.rounds or []) if isinstance(item, dict)]
         changed = unmatched = missing_participation = skipped = 0
         for row in grid[header_index + 1:]:
             if not row:
                 continue
-            def cell(field):
-                index = columns.get(field)
-                return clean_txt(row[index]) if index is not None and index < len(row) else ''
-
             def raw_cell(field):
-                index = columns.get(field)
+                index = profile_columns.get(field, columns.get(field))
                 return row[index] if index is not None and index < len(row) else ''
+
+            def cell(field):
+                return clean_txt(raw_cell(field))
 
             code, name, birth_date = cell('code'), cell('name'), normalise_birth_date(raw_cell('dob'))
             if not name:
@@ -71,6 +77,14 @@ class Command(BaseCommand):
             if candidate is None and birth_date:
                 candidates = Candidate.objects.filter(name__iexact=name, birth_date=birth_date)
                 candidate = candidates.first() if candidates.count() == 1 else None
+            if candidate is None and birth_date:
+                # Source files can differ only in capitalization, spacing, or accents.
+                # Keep this fallback strict by still requiring the full birth date.
+                matches = [
+                    item for item in Candidate.objects.filter(birth_date=birth_date)
+                    if normalise_str(item.name) == normalise_str(name)
+                ]
+                candidate = matches[0] if len(matches) == 1 else None
             if candidate is None:
                 unmatched += 1
                 continue
