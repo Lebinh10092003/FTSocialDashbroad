@@ -86,6 +86,16 @@ class Command(BaseCommand):
                 ]
                 candidate = matches[0] if len(matches) == 1 else None
             if candidate is None:
+                # Some historical files have no FT code or birth date. It is still
+                # safe to repair when exactly one same-name profile is already
+                # enrolled in this exact session; never select an outside profile.
+                same_name_in_session = [
+                    item for item in Candidate.objects.all()
+                    if normalise_str(item.name) == normalise_str(name)
+                    and CandidateParticipation.objects.filter(candidate=item, session=session).exists()
+                ]
+                candidate = same_name_in_session[0] if len(same_name_in_session) == 1 else None
+            if candidate is None:
                 unmatched += 1
                 continue
             participation = CandidateParticipation.objects.filter(candidate=candidate, session=session).first()
