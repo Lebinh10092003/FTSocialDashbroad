@@ -1,3 +1,4 @@
+from datetime import date, datetime
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
@@ -5,6 +6,14 @@ from openpyxl import load_workbook
 
 from examination.models import Candidate, CandidateParticipation, ExamSession, LogNote, RoundResult
 from examination.sync import clean_txt, history_from_sheet_row, merged_headers, normalise_str, parse_dob, resolve_column_indices
+
+
+def normalise_birth_date(value):
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return parse_dob(value)
 
 
 class Command(BaseCommand):
@@ -51,7 +60,11 @@ class Command(BaseCommand):
                 index = columns.get(field)
                 return clean_txt(row[index]) if index is not None and index < len(row) else ''
 
-            code, name, birth_date = cell('code'), cell('name'), parse_dob(cell('dob'))
+            def raw_cell(field):
+                index = columns.get(field)
+                return row[index] if index is not None and index < len(row) else ''
+
+            code, name, birth_date = cell('code'), cell('name'), normalise_birth_date(raw_cell('dob'))
             if not name:
                 continue
             candidate = Candidate.objects.filter(code__iexact=code).first() if code else None
