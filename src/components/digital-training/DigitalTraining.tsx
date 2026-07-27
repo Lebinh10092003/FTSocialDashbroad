@@ -10,7 +10,8 @@ type Material = {id:number;title:string;file_url:string;external_url:string;file
 type Survey = {id:number;title:string;form_type:'end_session'|'end_course';session?:number|null;session_name?:string;partner?:number|null;partner_name?:string;notes:string};
 const categories=['Triển khai BNDC','Ứng dụng AI trong quản lý hành chính','Ứng dụng AI trong giảng dạy','Đào tạo lớp học số'];
 const tabs:{id:Tab;label:string;icon:React.ElementType}[]=[{id:'calendar',label:'Lịch tập huấn',icon:CalendarDays},{id:'sessions',label:'Danh sách buổi',icon:ClipboardList},{id:'partners',label:'Đối tác',icon:Handshake},{id:'survey',label:'Khảo sát',icon:Users},{id:'materials',label:'Tài liệu',icon:BookOpen}];
-const today=()=>new Date().toISOString().slice(0,10);
+const localDateKey=(value:Date)=>String(value.getFullYear())+'-'+String(value.getMonth()+1).padStart(2,'0')+'-'+String(value.getDate()).padStart(2,'0');
+const today=()=>localDateKey(new Date());
 const showDate=(v?:string)=>v?new Date(`${v}T00:00:00`).toLocaleDateString('vi-VN'):'—';
 const showTime=(s:Session)=>[s.start_time?.slice(0,5),s.end_time?.slice(0,5)].filter(Boolean).join(' – ')||'Chưa đặt giờ';
 const status:{[key:string]:string}={planned:'Đã lên lịch',completed:'Đã thực hiện',cancelled:'Đã hủy'};
@@ -26,7 +27,7 @@ function ContentsPicker({value,onChange}:{value:string[];onChange:(value:string[
   const [drag,setDrag]=useState<{date:string;minute:number}|null>(null);
   const [hover,setHover]=useState<{date:string;minute:number}|null>(null);
   const draggedRef=useRef(false);
-  const iso=(value:Date)=>new Date(value.getFullYear(),value.getMonth(),value.getDate()).toISOString().slice(0,10);
+  const iso=(value:Date)=>localDateKey(value);
   const addDays=(value:Date,days:number)=>new Date(value.getFullYear(),value.getMonth(),value.getDate()+days);
   const weekStart=(value:Date)=>addDays(value,-((value.getDay()+6)%7));
   const toTime=(minute:number)=>`${String(Math.floor(minute/60)).padStart(2,'0')}:${String(minute%60).padStart(2,'0')}`;
