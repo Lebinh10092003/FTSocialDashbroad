@@ -106,17 +106,17 @@ def append_audit(entity_key, content, request=None, system=False, actor=''):
 EXAMINATION_SEED = {
     'competitions': [
         { 'id': 'aysbc', 'code': 'AYSBC', 'name': 'Huy hiệu các Nhà khoa học trẻ Châu Á', 'parent': 'AYSBC', 'organizer': 'SCS và META Knowledge' },
-        { 'id': 'imo', 'code': 'SIMO', 'name': 'International Maths Olympiad', 'parent': 'SCO - IMO', 'organizer': 'SCO' },
-        { 'id': 'ieo', 'code': 'SIEO', 'name': 'International English Olympiad', 'parent': 'SCO - IEO', 'organizer': 'SCO' },
-        { 'id': 'iso', 'code': 'SISO', 'name': 'International Science Olympiad', 'parent': 'SCO - ISO', 'organizer': 'SCO' },
+        { 'id': 'imo', 'code': 'IMO', 'name': 'International Maths Olympiad', 'parent': 'SCO - IMO', 'organizer': 'SCO' },
+        { 'id': 'ieo', 'code': 'IEO', 'name': 'International English Olympiad', 'parent': 'SCO - IEO', 'organizer': 'SCO' },
+        { 'id': 'iso', 'code': 'ISO', 'name': 'International Science Olympiad', 'parent': 'SCO - ISO', 'organizer': 'SCO' },
         { 'id': 'fimo', 'code': 'FIMO', 'name': 'FermatTech International Mathematics Olympiad', 'parent': 'FIMO', 'organizer': 'FermatTech' },
         { 'id': 'fieo', 'code': 'FIEO', 'name': 'FermatTech International English Olympiad', 'parent': 'FIEO - Tiếng Anh', 'organizer': 'FermatTech' },
     ],
     'sessions': [
         { 'id': 'aysbc', 'code': 'AYSBC', 'name': 'Huy hiệu các Nhà khoa học trẻ Châu Á', 'parent': 'AYSBC', 'organizer': 'SCS và META Knowledge', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Chưa cập nhật', 'note': '' },
-        { 'id': 'imo', 'code': 'SIMO', 'name': 'International Maths Olympiad', 'parent': 'SCO - IMO', 'organizer': 'SCO', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Chưa cập nhật', 'note': '' },
-        { 'id': 'ieo', 'code': 'SIEO', 'name': 'International English Olympiad', 'parent': 'SCO - IEO', 'organizer': 'SCO', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Chưa cập nhật', 'note': '' },
-        { 'id': 'iso', 'code': 'SISO', 'name': 'International Science Olympiad', 'parent': 'SCO - ISO', 'organizer': 'SCO', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Chưa cập nhật', 'note': '' },
+        { 'id': 'imo', 'code': 'IMO', 'name': 'International Maths Olympiad', 'parent': 'SCO - IMO', 'organizer': 'SCO', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Chưa cập nhật', 'note': '' },
+        { 'id': 'ieo', 'code': 'IEO', 'name': 'International English Olympiad', 'parent': 'SCO - IEO', 'organizer': 'SCO', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Chưa cập nhật', 'note': '' },
+        { 'id': 'iso', 'code': 'ISO', 'name': 'International Science Olympiad', 'parent': 'SCO - ISO', 'organizer': 'SCO', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Chưa cập nhật', 'note': '' },
         { 'id': 'fimo', 'code': 'FIMO', 'name': 'FermatTech International Mathematics Olympiad', 'parent': 'FIMO', 'organizer': 'FermatTech', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Chưa cập nhật', 'note': '' },
         { 'id': 'fieo', 'code': 'FIEO', 'name': 'FermatTech International English Olympiad', 'parent': 'FIEO - Tiếng Anh', 'organizer': 'FermatTech', 'time': '', 'candidates_count': 0, 'national': '', 'international': '', 'phase': 'Chưa cập nhật', 'note': '' },
     ],
@@ -180,6 +180,16 @@ def session_competition(session):
         candidates = list(Competition.objects.filter(code__iexact=str(session.code or '').strip()))
         if len(candidates) == 1:
             competition = candidates[0]
+        elif len(candidates) > 1:
+            # A legacy session may share a short code with a newer plan. Prefer
+            # the uniquely matching human-readable parent/name before giving up.
+            context = str(session.parent or '').strip().casefold()
+            matches = [item for item in candidates if context and context in {
+                str(item.name or '').strip().casefold(),
+                str(item.parent or '').strip().casefold(),
+            }]
+            if len(matches) == 1:
+                competition = matches[0]
     if not competition:
         return None
 

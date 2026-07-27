@@ -3,9 +3,9 @@ import type { Candidate, Competition, ExaminationPage, ExaminationSession } from
 
 export const initialSessions: ExaminationSession[] = [
   { id: 'aysbc', code: 'AYSBC', name: 'Huy hiệu các Nhà khoa học trẻ Châu Á', parent: 'AYSBC', organizer: 'SCS và META Knowledge', time: '', candidates: 0, national: '', international: '', phase: 'Chưa cập nhật', note: '' },
-  { id: 'imo', code: 'SIMO', name: 'International Maths Olympiad', parent: 'SCO - IMO', organizer: 'SCO', time: '', candidates: 0, national: '', international: '', phase: 'Chưa cập nhật', note: '' },
-  { id: 'ieo', code: 'SIEO', name: 'International English Olympiad', parent: 'SCO - IEO', organizer: 'SCO', time: '', candidates: 0, national: '', international: '', phase: 'Chưa cập nhật', note: '' },
-  { id: 'iso', code: 'SISO', name: 'International Science Olympiad', parent: 'SCO - ISO', organizer: 'SCO', time: '', candidates: 0, national: '', international: '', phase: 'Chưa cập nhật', note: '' },
+  { id: 'imo', code: 'IMO', name: 'International Maths Olympiad', parent: 'SCO - IMO', organizer: 'SCO', time: '', candidates: 0, national: '', international: '', phase: 'Chưa cập nhật', note: '' },
+  { id: 'ieo', code: 'IEO', name: 'International English Olympiad', parent: 'SCO - IEO', organizer: 'SCO', time: '', candidates: 0, national: '', international: '', phase: 'Chưa cập nhật', note: '' },
+  { id: 'iso', code: 'ISO', name: 'International Science Olympiad', parent: 'SCO - ISO', organizer: 'SCO', time: '', candidates: 0, national: '', international: '', phase: 'Chưa cập nhật', note: '' },
   { id: 'fimo', code: 'FIMO', name: 'FermatTech International Mathematics Olympiad', parent: 'FIMO', organizer: 'FermatTech', time: '', candidates: 0, national: '', international: '', phase: 'Chưa cập nhật', note: '' },
   { id: 'fieo', code: 'FIEO', name: 'FermatTech International English Olympiad', parent: 'FIEO - Tiếng Anh', organizer: 'FermatTech', time: '', candidates: 0, national: '', international: '', phase: 'Chưa cập nhật', note: '' },
 ];
