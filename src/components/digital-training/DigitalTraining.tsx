@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, BookOpen, CalendarDays, CheckCircle2, ClipboardList, ExternalLink, GraduationCap, Handshake, LogIn, Plus, Search, Users, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, CalendarDays, ChevronLeft, ChevronRight, CheckCircle2, ClipboardList, ExternalLink, GraduationCap, Handshake, LogIn, Plus, Search, Users, X } from 'lucide-react';
 
 type Tab = 'calendar' | 'sessions' | 'partners' | 'survey' | 'materials';
 type Mode = 'week' | 'month' | 'quarter' | 'year';
