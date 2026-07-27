@@ -831,8 +831,8 @@ a { color: inherit; text-decoration: none; }
 
 /* Unified module navigation: light blue canvas, with the identity and exit actions clearly framed. */
 .ft-module-sidebar {
-  background: linear-gradient(180deg, #eaf6ff 0%, #dcefff 100%) !important;
-  border-color: #c6e1f4 !important;
+  background: linear-gradient(180deg, #c8e7fa 0%, #b6dcf5 100%) !important;
+  border-color: #9fcce8 !important;
 }
 .ft-module-sidebar .ft-sidebar-brand {
   margin: .75rem .75rem .5rem;

@@ -122,3 +122,18 @@ class AccountAdministrationTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertFalse(UserProfile.objects.filter(email="blocked-admin@example.com").exists())
+class PersistentLoginTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="remember@example.com", email="remember@example.com", password="StrongPassword9921"
+        )
+        UserProfile.objects.create(email="remember@example.com", name="Remember", role="EMPLOYEE")
+
+    def test_login_reuses_existing_token_for_remembered_browser_session(self):
+        first = self.client.post('/api/auth/login', {'email': 'remember@example.com', 'password': 'StrongPassword9921'}, content_type='application/json')
+        second = self.client.post('/api/auth/login', {'email': 'remember@example.com', 'password': 'StrongPassword9921'}, content_type='application/json')
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.json()['token'], second.json()['token'])
+        self.assertEqual(Token.objects.filter(user=self.user).count(), 1)

@@ -449,8 +449,9 @@ def login_view(request):
     profile.save(update_fields=["last_login", "updated_at"])
     _record_login(request, profile)
 
-    Token.objects.filter(user=django_user).delete()
-    token = Token.objects.create(user=django_user)
+    # Keep a browser's remembered sign-in valid when the same account signs in
+    # elsewhere. The token is still revoked by an explicit logout.
+    token, _ = Token.objects.get_or_create(user=django_user)
     return Response({"token": token.key, "user": _user_payload(profile)})
 
 

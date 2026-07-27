@@ -4,7 +4,7 @@ from django.test import TestCase
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
-from .models import Candidate, CandidateParticipation, Competition, ExamSession, LogNote, RoundResult
+from .models import Candidate, CandidateParticipation, Competition, ExamSession, ExaminationSheet, LogNote, RoundResult
 
 
 class ExistingSessionRoundBackfillTests(TestCase):
@@ -589,3 +589,32 @@ class SheetPublicationTests(TestCase):
         self.assertEqual(PARTNERS_TAB, 'ĐỐI TÁC')
         self.assertEqual(SUMMARY_TAB, 'TỔNG QUAN KỲ THI')
         self.assertEqual(partner_values[1][-1], 8)
+
+
+class SessionOutputSheetTests(TestCase):
+    def setUp(self):
+        user = get_user_model().objects.create_user(
+            username='manager@example.com', email='manager@example.com', password='StrongPassword9921'
+        )
+        UserProfile.objects.create(email='manager@example.com', name='Manager', role='MANAGER')
+        token = Token.objects.create(user=user).key
+        self.client = APIClient()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
+        self.session = ExamSession.objects.create(
+            id='output-only-session', competition_id='demo', code='DEMO', name='Output only',
+            parent='Demo', organizer='Fermat', time='', sort_key='demo-output-only'
+        )
+
+    def test_output_sheet_can_be_saved_without_registration_sheet(self):
+        response = self.client.put(
+            f'/api/examination/sessions/{self.session.id}',
+            {'outputSheetUrl': 'https://docs.google.com/spreadsheets/d/output-only', 'outputSheetTab': 'SCO - IEO'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.registration_sheet_url, '')
+        output = ExaminationSheet.objects.get(session_id=self.session.id, stage='session-output')
+        self.assertEqual(output.url, 'https://docs.google.com/spreadsheets/d/output-only')
+        self.assertEqual(output.sheet_tab, 'SCO - IEO')
