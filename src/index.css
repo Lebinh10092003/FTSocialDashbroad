@@ -847,3 +847,24 @@ a { color: inherit; text-decoration: none; }
 .ft-sidebar-back { background: #fff !important; border-color: #c6e1f4 !important; box-shadow: 0 2px 8px rgba(15, 102, 163, .06) !important; }
 .ft-nav-item:hover { background: rgba(255,255,255,.72) !important; }
 .ft-nav-item-active { background: linear-gradient(90deg, #fff 0%, #d8efff 100%) !important; }
+/* Digital Training calendar: stable weekday headers and a complete month grid. */
+.dt-calendar-head { position:static; min-height:74px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; }
+.dt-calendar-head strong { margin-top:0; line-height:1; }
+.dt-calendar-head.is-filtered, .dt-calendar-cell.is-filtered { opacity:.38; }
+.dt-calendar-range { display:flex; flex-wrap:wrap; align-items:end; gap:8px; }
+.dt-calendar-range label { display:grid; gap:3px; color:#54718c; font-size:11px; font-weight:800; }
+.dt-calendar-range input { height:34px; border:1px solid #c7ddf0; border-radius:8px; background:#fff; color:#17324d; padding:4px 7px; font-size:12px; }
+.dt-calendar-month { display:grid; grid-template-columns:repeat(7,minmax(112px,1fr)); min-width:780px; }
+.dt-month-head { border-bottom:1px solid #d7e7f5; background:#f7fbff; padding:10px 6px; text-align:center; color:#54718c; font-size:11px; font-weight:800; text-transform:uppercase; }
+.dt-month-day { min-height:142px; border-right:1px solid #d7e7f5; border-bottom:1px solid #e1edf7; background:#fff; padding:8px; text-align:left; transition:background .15s ease; }
+.dt-month-day:hover { background:#f1f9ff; }
+.dt-month-day.is-outside { background:#f9fcff; color:#8aa0b5; }
+.dt-month-day.is-filtered { opacity:.42; }
+.dt-month-number { display:inline-grid; min-width:26px; height:26px; place-items:center; border-radius:50%; color:#17324d; font-size:12px; font-weight:800; }
+.dt-month-day.is-today .dt-month-number { background:#1681c5; color:#fff; }
+.dt-month-events { display:grid; gap:3px; margin-top:6px; }
+.dt-month-event { overflow:hidden; border-left:3px solid #1386ce; border-radius:4px; background:#dff3ff; color:#075487; padding:3px 5px; font-size:10px; font-weight:800; line-height:1.25; text-overflow:ellipsis; white-space:nowrap; }
+.dt-month-event.is-completed { border-left-color:#22a06b; background:#e8f8ef; color:#147247; }
+.dt-month-event.is-cancelled { border-left-color:#e56b75; background:#fff0f1; color:#b34752; }
+.dt-month-more { color:#1681c5; font-size:10px; font-weight:800; }
+@media (max-width: 1023px) { .dt-calendar-month { overflow-x:auto; } }
