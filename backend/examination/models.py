@@ -133,6 +133,8 @@ class LogNote(models.Model):
     entity_key = models.CharField(max_length=255, db_index=True, default='')
     content = models.TextField()
     updated_by = models.CharField(max_length=255, blank=True, null=True)
+    actor_email = models.EmailField(blank=True, null=True)
+    actor_photo_url = models.CharField(max_length=1000, blank=True, null=True)
     system = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

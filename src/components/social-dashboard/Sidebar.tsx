@@ -20,10 +20,11 @@ interface SidebarProps {
   idToken: string;
   onLogout: () => void;
   onLogin: () => void;
+  onAccountClick: () => void;
   onBackToWorkspace: () => void;
 }
 
-export default function Sidebar({ activeTab, setActiveTab, user, userRole, idToken, onLogout, onLogin, onBackToWorkspace }: SidebarProps) {
+export default function Sidebar({ activeTab, setActiveTab, user, userRole, idToken, onLogout, onLogin, onAccountClick, onBackToWorkspace }: SidebarProps) {
   const isGuest = user?.email === 'guest@ftsocial.com';
   const menuItems = [
     { id: 'dashboard', label: 'Biểu đồ tổng quan', icon: LayoutDashboard },
@@ -82,7 +83,7 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
         <div className="mb-2 flex justify-end">
           <TokenNotifications idToken={idToken} userRole={userRole} />
         </div>
-        <div className="flex items-center gap-3 mb-3 bg-white p-2.5 rounded-xl border border-slate-200/40 shadow-sm">
+        <button onClick={onAccountClick} className="ft-sidebar-account mb-3 flex w-full items-center gap-3 rounded-xl border p-2.5 text-left shadow-sm">
           {user?.photoURL ? (
             <img src={user.photoURL} alt={user.displayName} className="w-8.5 h-8.5 rounded-xl border border-slate-100 object-cover" />
           ) : (
@@ -97,7 +98,7 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
               <span className="text-[9px] font-bold text-slate-400 tracking-wider uppercase">{userRole}</span>
             </div>
           </div>
-        </div>
+        </button>
         {user?.email === 'guest@ftsocial.com' ? (
           <button
             onClick={onLogin}

@@ -4,6 +4,7 @@ import { ChartColumnBig, ClipboardList, GraduationCap, LogIn, LogOut, Mail, Shie
 import { Channel, UserRole } from './types';
 import Sidebar from './components/social-dashboard/Sidebar';
 import LoginModal from './components/LoginModal';
+import AccountProfileModal from './components/AccountProfileModal';
 
 const lazyWithRecovery = <T extends React.ComponentType<any>>(loader: () => Promise<{ default: T }>) => lazy(async () => {
   const retryKey = `ft-workspace-lazy-reload:${window.location.pathname}`;
@@ -142,6 +143,7 @@ export default function App() {
   const [loginPassword, setLoginPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
 
   const [viewMode, setViewModeState] = useState<ViewMode>(getInitialViewMode());
   const [activeTab, setActiveTab] = useState<SocialTab>(() => socialTabFromPath(window.location.pathname));
@@ -301,6 +303,15 @@ export default function App() {
       .finally(() => setLoading(false));
   }, [idToken]);
 
+  const openAccount = () => {
+    if (isGuest) { setAuthError(''); setShowLoginModal(true); return; }
+    setShowProfile(true);
+  };
+
+  const handleProfileSaved = (nextUser: AppUser) => {
+    setUser(nextUser);
+    if (idToken) persistSession(idToken, nextUser, userRole);
+  };
   const loginModal = (
     <LoginModal
       open={showLoginModal}
@@ -315,6 +326,9 @@ export default function App() {
     />
   );
 
+  const profileModal = (
+    <AccountProfileModal open={showProfile} user={user} idToken={idToken} onClose={() => setShowProfile(false)} onSaved={handleProfileSaved}/>
+  );
   if (authChecking) {
     return (
       <div className="grid min-h-screen place-items-center bg-slate-50">
@@ -383,7 +397,7 @@ export default function App() {
               </button>
             ) : (
               <div className="flex items-center gap-3">
-                <span className="hidden sm:block text-xs font-semibold text-slate-600">{user.displayName}</span>
+                <button onClick={openAccount} className="hidden rounded-lg px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-sky-50 sm:block">{user.displayName}</button>
                 <button onClick={handleLogout} className="ft-btn ft-btn-secondary text-rose-600">
                   <LogOut className="w-4 h-4" /> Đăng xuất
                 </button>
@@ -420,7 +434,7 @@ export default function App() {
             })}
           </div>
         </main>
-        {loginModal}
+        {loginModal}{profileModal}
       </div>
     );
   }
@@ -433,7 +447,7 @@ export default function App() {
           <header className="border-b border-slate-200 bg-white"><div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4 sm:px-8"><button onClick={() => setViewMode('workspace')} className="ft-btn ft-btn-secondary">Quay lại Workspace</button><span className="text-sm font-bold text-slate-700">Quản trị Workspace</span></div></header>
           <main className="mx-auto max-w-6xl px-5 py-8 sm:px-8"><Suspense fallback={<div className="py-16 text-center text-sm text-slate-500">Đang tải quản lý tài khoản...</div>}><AccountManagement idToken={idToken || ''} userRole={userRole} /></Suspense></main>
         </div>
-        {loginModal}
+        {loginModal}{profileModal}
       </>
     );
   }
@@ -444,12 +458,12 @@ export default function App() {
         <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp Trình tạo Email...</div>}>
           <EmailTemplateBuilder
             onBackToWorkspace={() => setViewMode('workspace')}
-            onAccountClick={isGuest ? () => { setAuthError(''); setShowLoginModal(true); } : handleLogout}
+            onAccountClick={openAccount}
             isGuest={isGuest}
             userName={user.displayName}
           />
         </Suspense>
-        {loginModal}
+        {loginModal}{profileModal}
       </>
     );
   }
@@ -460,13 +474,13 @@ export default function App() {
         <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp mô-đun Đào tạo số...</div>}>
           <DigitalTraining
             onBackToWorkspace={() => setViewMode('workspace')}
-            onAccountClick={isGuest ? () => { setAuthError(''); setShowLoginModal(true); } : handleLogout}
+            onAccountClick={openAccount}
             isGuest={isGuest}
             userName={user.displayName}
             idToken={idToken || ''}
           />
         </Suspense>
-        {loginModal}
+        {loginModal}{profileModal}
       </>
     );
   }
@@ -484,11 +498,11 @@ export default function App() {
               googleAccessToken={googleAccessToken}
               userRole={userRole}
               isGuest={isGuest}
-              onAccountClick={isGuest ? () => { setAuthError(''); setShowLoginModal(true); } : handleLogout}
+              onAccountClick={openAccount}
             />
           </Suspense>
         </ExaminationErrorBoundary>
-        {loginModal}
+        {loginModal}{profileModal}
       </>
     );
   }
@@ -503,6 +517,7 @@ export default function App() {
         idToken={idToken || ''}
         onLogout={handleLogout}
         onLogin={() => { setAuthError(''); setShowLoginModal(true); }}
+        onAccountClick={openAccount}
         onBackToWorkspace={() => setViewMode('workspace')}
       />
       <main className="flex-1 overflow-y-auto"><header className="ft-module-header sticky top-0 z-10 flex h-16 items-center justify-between border-b px-5 md:px-7"><div><p className="text-xs font-bold uppercase tracking-wide text-sky-700">Truyền thông</p><h1 className="text-base font-extrabold text-slate-900">{({dashboard:'Biểu đồ tổng quan',media:'Báo cáo tổng hợp',posts:'Bài đăng',sync:'Đồng bộ dữ liệu',config:'Cấu hình hệ thống'} as Record<string,string>)[activeTab]}</h1></div><span className="hidden rounded-full bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-800 sm:block">Fermat Workspace</span></header><div className="ft-module-content px-5 py-6 md:px-7 md:py-7">
@@ -541,7 +556,7 @@ export default function App() {
         )}
       </div>
       </main>
-      {loginModal}
+      {loginModal}{profileModal}
     </div>
   );
 }

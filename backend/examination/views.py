@@ -6,7 +6,7 @@ import json
 import re
 from django.utils import timezone
 from .models import Competition, ExamSession, Candidate, CandidateParticipation, RoundResult, LogNote, ExaminationSheet
-from authentication.models import SystemConfig
+from authentication.models import SystemConfig, UserProfile
 from authentication.permissions import IsAuthenticated, IsManagerOrAdmin, IsAdmin
 from .sync import (
     sync_session_candidate_totals,
@@ -90,11 +90,15 @@ def append_audit(entity_key, content, request=None, system=False, actor=''):
     """Persist an immutable audit note under the detail page which owns the data."""
     if not content:
         return
+    actor_email = '' if system or not request else (getattr(request.user, 'email', '') or getattr(request, 'user_email', ''))
+    profile = UserProfile.objects.filter(email=actor_email).first() if actor_email else None
     LogNote.objects.create(
         key=f'{entity_key}:{uuid.uuid4().hex}',
         entity_key=entity_key,
         content=content,
         updated_by=actor or (audit_actor(request) if request and not system else 'Hệ thống FT Workspace'),
+        actor_email=actor_email or None,
+        actor_photo_url=(profile.photo_url or '') if profile else '',
         system=system,
     )
 
@@ -507,6 +511,8 @@ def serialize_lognote(note):
         'time': timezone.localtime(note.created_at).strftime('%d/%m/%Y %H:%M'),
         'createdAt': note.created_at.isoformat(),
         'actor': note.updated_by or 'Nhân viên FT Workspace',
+        'actorEmail': note.actor_email or '',
+        'actorPhotoURL': note.actor_photo_url or '',
         'content': note.content,
         'system': note.system,
     }
@@ -1537,11 +1543,15 @@ def lognotes_detail(request, entityKey):
         if not content:
             return Response({'error': 'Nội dung không được để trống.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        actor_email = getattr(request.user, 'email', '') or ''
+        profile = UserProfile.objects.filter(email=actor_email).first() if actor_email else None
         note = LogNote.objects.create(
             key=f"{entityKey}:{uuid.uuid4().hex}",
             entity_key=entityKey,
             content=content,
             updated_by=actor or getattr(request.user, 'email', '') or 'Nhân viên FT Workspace',
+            actor_email=actor_email or None,
+            actor_photo_url=(profile.photo_url or '') if profile else '',
             system=system,
         )
         return Response({'success': True, 'note': serialize_lognote(note)}, status=status.HTTP_201_CREATED)
