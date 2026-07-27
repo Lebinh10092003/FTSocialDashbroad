@@ -7,9 +7,11 @@ import re
 import unicodedata
 from datetime import datetime, timedelta
 from django.utils import timezone
-from .models import Competition, ExamSession, Candidate, CandidateParticipation, RoundResult, LogNote, ExaminationSheet
+from .models import Competition, ExamSession, Candidate, CandidateParticipation, RoundResult, LogNote, ExaminationSheet, ExaminationSheetPublication
 from authentication.models import SystemConfig, UserProfile
 from authentication.permissions import IsAuthenticated, IsManagerOrAdmin, IsAdmin
+from .sheet_publication import academic_year_for_date, publication_payload, session_academic_year, session_tab_name, sync_publication
+
 from .sync import (
     sync_session_candidate_totals,
     sync_examination_from_google_sheet,
@@ -427,6 +429,52 @@ def normalized_exam_history(candidate):
     return rows
 
 
+def ensure_output_sheet_source(session, url, sheet_tab='', created_by=None):
+    """Keep one dedicated output Sheet per examination session."""
+    url = str(url or '').strip()
+    existing = ExaminationSheet.objects.filter(session_id=session.id, stage='session-output').first()
+    if not url:
+        if existing:
+            existing.delete()
+        return None
+    name = f'Du lieu xuat - {session.code} - {session.name}'
+    if existing:
+        existing.name = name
+        existing.url = url
+        existing.sheet_tab = str(sheet_tab or '').strip()
+        existing.updated_at = timezone.now()
+        existing.save(update_fields=['name', 'url', 'sheet_tab', 'updated_at'])
+        return existing
+    return ExaminationSheet.objects.create(
+        id=f"sheet-{uuid.uuid4().hex[:10]}", name=name, url=url, status='idle',
+        session_id=session.id, sheet_tab=str(sheet_tab or '').strip(),
+        stage='session-output', created_at=timezone.now(), updated_at=timezone.now(),
+        created_by=created_by or None,
+    )
+
+def ensure_registration_sheet_source(session, created_by=None):
+    """Keep the registration Sheet link available as an importable source for a session."""
+    url = str(session.registration_sheet_url or '').strip()
+    existing = ExaminationSheet.objects.filter(session_id=session.id, stage='registration-source').first()
+    if not url:
+        if existing:
+            existing.delete()
+        return None
+    name = f'Danh sach dang ky - {session.code} - {session.name}'
+    if existing:
+        existing.name = name
+        existing.url = url
+        existing.sheet_tab = str(session.registration_sheet_tab or '').strip()
+        existing.updated_at = timezone.now()
+        existing.save(update_fields=['name', 'url', 'sheet_tab', 'updated_at'])
+        return existing
+    return ExaminationSheet.objects.create(
+        id=f"sheet-{uuid.uuid4().hex[:10]}", name=name, url=url, status='idle',
+        session_id=session.id, sheet_tab=str(session.registration_sheet_tab or '').strip(),
+        stage='registration-source', created_at=timezone.now(), updated_at=timezone.now(),
+        created_by=created_by or None,
+    )
+
 def serialize_competition(comp):
     return {
         'id': comp.id,
@@ -441,6 +489,7 @@ def serialize_competition(comp):
 
 def serialize_session(sess):
     competition = session_competition(sess)
+    output_sheet = ExaminationSheet.objects.filter(session_id=sess.id, stage='session-output').first()
     return {
         'id': sess.id,
         'competitionId': sess.competition_id,
@@ -457,6 +506,10 @@ def serialize_session(sess):
         'internationalDate': sess.international_date,
         'phase': sess.phase,
         'note': sess.note,
+        'registrationSheetUrl': sess.registration_sheet_url,
+        'registrationSheetTab': sess.registration_sheet_tab,
+        'outputSheetUrl': output_sheet.url if output_sheet else '',
+        'outputSheetTab': output_sheet.sheet_tab if output_sheet else '',
         'rounds': sess.rounds or [],
         'sortKey': sess.sort_key,
         'createdBy': sess.created_by,
@@ -822,11 +875,20 @@ def automatic_session_phase(session, current_date=None):
     if not rounds:
         return str(session.phase or '').strip() or 'Chuẩn bị/Truyền thông'
 
-    final_date, _, _ = rounds[-1]
+    final_date, final_position, final_name = rounds[-1]
+    configured_rounds = [item for item in (session.rounds or []) if isinstance(item, dict)]
+    has_later_planned_round = any(
+        position > final_position and str(item.get('name') or '').strip() and not _parse_round_date(item.get('date'))
+        for position, item in enumerate(configured_rounds)
+    )
+    if has_later_planned_round and today > final_date:
+        if 'quoc gia' in _phase_key(final_name):
+            return '\u00d4n t\u1eadp V\u00f2ng qu\u1ed1c t\u1ebf'
+        return str(session.phase or '').strip() or 'Chu\u1ea9n b\u1ecb/Truy\u1ec1n th\u00f4ng'
     if today >= final_date + timedelta(days=30):
-        return 'Hoàn thành'
+        return 'Ho\u00e0n th\u00e0nh'
     if today > final_date:
-        return 'Công bố kết quả'
+        return 'C\u00f4ng b\u1ed1 k\u1ebft qu\u1ea3'
 
     upcoming = next((round_item for round_item in rounds if round_item[0] >= today), None)
     if upcoming:
@@ -917,8 +979,12 @@ def session_create(request):
         note=note or 'Kỳ tổ chức mới tạo.',
         rounds=processed_rounds,
         sort_key=f"{comp.code.lower()}_{sess_id}",
-        created_by=request.user.email if hasattr(request.user, 'email') else None
+        created_by=request.user.email if hasattr(request.user, 'email') else None,
+        registration_sheet_url=str(data.get('registrationSheetUrl') or '').strip(),
+        registration_sheet_tab=str(data.get('registrationSheetTab') or '').strip()
     )
+    ensure_registration_sheet_source(sess, getattr(request.user, 'email', ''))
+    ensure_output_sheet_source(sess, data.get('outputSheetUrl'), data.get('outputSheetTab'), getattr(request.user, 'email', ''))
     append_audit(f'session-{sess.id}', 'Tạo kỳ tổ chức: ' + audit_values({}, {'name': sess.name, 'competition': comp.code, 'phase': sess.phase, 'rounds': processed_rounds}, {'name':'Tên kỳ tổ chức', 'competition':'Cuộc thi', 'phase':'Giai đoạn', 'rounds':'Các vòng thi'}), request)
     append_audit(f'competition-{comp.id}', f'Tạo kỳ tổ chức {sess.name}.', request)
     return Response(serialize_session(sess), status=status.HTTP_201_CREATED)
@@ -932,16 +998,18 @@ def session_detail(request, pk):
         return Response({'error': 'Không tìm thấy kỳ tổ chức.'}, status=status.HTTP_404_NOT_FOUND)
         
     if request.method == 'PUT':
-        before = {'name': sess.name, 'phase': sess.phase, 'note': sess.note, 'national': sess.national, 'nationalDate': sess.national_date, 'international': sess.international, 'internationalDate': sess.international_date, 'competitionId': sess.competition_id, 'rounds': sess.rounds or []}
+        before = {'name': sess.name, 'phase': sess.phase, 'note': sess.note, 'registrationSheetUrl': sess.registration_sheet_url, 'registrationSheetTab': sess.registration_sheet_tab, 'outputSheetUrl': (ExaminationSheet.objects.filter(session_id=sess.id, stage='session-output').first().url if ExaminationSheet.objects.filter(session_id=sess.id, stage='session-output').first() else ''), 'outputSheetTab': (ExaminationSheet.objects.filter(session_id=sess.id, stage='session-output').first().sheet_tab if ExaminationSheet.objects.filter(session_id=sess.id, stage='session-output').first() else ''), 'national': sess.national, 'nationalDate': sess.national_date, 'international': sess.international, 'internationalDate': sess.international_date, 'competitionId': sess.competition_id, 'rounds': sess.rounds or []}
         data = request.data or {}
         
-        allowed_fields = ['name', 'phase', 'note', 'national', 'nationalDate', 'international', 'internationalDate']
+        allowed_fields = ['name', 'phase', 'note', 'national', 'nationalDate', 'international', 'internationalDate', 'registrationSheetUrl', 'registrationSheetTab', 'outputSheetUrl', 'outputSheetTab']
         for field in allowed_fields:
             if field in data:
                 val = str(data[field]).strip()
                 if field == 'name': sess.name = val
                 elif field == 'phase': sess.phase = val
                 elif field == 'note': sess.note = val
+                elif field == 'registrationSheetUrl': sess.registration_sheet_url = val
+                elif field == 'registrationSheetTab': sess.registration_sheet_tab = val
                 elif field == 'national': sess.national = val
                 elif field == 'nationalDate': sess.national_date = val
                 elif field == 'international': sess.international = val
@@ -977,9 +1045,11 @@ def session_detail(request, pk):
         sess.save()
         
         sync_session_candidate_totals()
+        ensure_registration_sheet_source(sess, getattr(request.user, 'email', ''))
+        ensure_output_sheet_source(sess, data.get('outputSheetUrl'), data.get('outputSheetTab'), getattr(request.user, 'email', ''))
         sess.refresh_from_db()
-        after = {'name': sess.name, 'phase': sess.phase, 'note': sess.note, 'national': sess.national, 'nationalDate': sess.national_date, 'international': sess.international, 'internationalDate': sess.international_date, 'competitionId': sess.competition_id, 'rounds': sess.rounds or []}
-        change_text = audit_values(before, after, {'name':'Tên kỳ tổ chức', 'phase':'Giai đoạn hiện tại', 'note':'Ghi chú', 'national':'Mốc vòng quốc gia', 'nationalDate':'Ngày vòng quốc gia', 'international':'Mốc vòng quốc tế', 'internationalDate':'Ngày vòng quốc tế', 'competitionId':'Cuộc thi', 'rounds':'Thông tin các vòng thi'})
+        after = {'name': sess.name, 'phase': sess.phase, 'note': sess.note, 'registrationSheetUrl': sess.registration_sheet_url, 'registrationSheetTab': sess.registration_sheet_tab, 'outputSheetUrl': (ExaminationSheet.objects.filter(session_id=sess.id, stage='session-output').first().url if ExaminationSheet.objects.filter(session_id=sess.id, stage='session-output').first() else ''), 'outputSheetTab': (ExaminationSheet.objects.filter(session_id=sess.id, stage='session-output').first().sheet_tab if ExaminationSheet.objects.filter(session_id=sess.id, stage='session-output').first() else ''), 'national': sess.national, 'nationalDate': sess.national_date, 'international': sess.international, 'internationalDate': sess.international_date, 'competitionId': sess.competition_id, 'rounds': sess.rounds or []}
+        change_text = audit_values(before, after, {'name':'Tên kỳ tổ chức', 'phase':'Giai đoạn hiện tại', 'note':'Ghi chú', 'registrationSheetUrl':'Danh sách đăng ký', 'registrationSheetTab':'Tab danh sách đăng ký', 'outputSheetUrl':'Google Sheet output', 'outputSheetTab':'Tab Google Sheet output', 'national':'Mốc vòng quốc gia', 'nationalDate':'Ngày vòng quốc gia', 'international':'Mốc vòng quốc tế', 'internationalDate':'Ngày vòng quốc tế', 'competitionId':'Cuộc thi', 'rounds':'Thông tin các vòng thi'})
         append_audit(f'session-{sess.id}', 'Cập nhật kỳ tổ chức: ' + (change_text or 'Không có thay đổi dữ liệu.'), request)
         return Response(serialize_session(sess))
         
@@ -1169,6 +1239,54 @@ def candidate_remove_from_session(request, pk, session_id):
     
     sync_session_candidate_totals()
     return Response(serialize_candidate(cand))
+
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated])
+def sheet_publication_config(request):
+    requested_year = str((request.query_params.get('academicYear') if request.method == 'GET' else (request.data or {}).get('academicYear')) or '').strip()
+    academic_year = requested_year if re.fullmatch(r'\d{4}-\d{4}', requested_year) else academic_year_for_date(timezone.localdate())
+    publication, _ = ExaminationSheetPublication.objects.get_or_create(academic_year=academic_year)
+    if request.method == 'GET':
+        payload = publication_payload(publication)
+        payload['availableAcademicYears'] = list(ExaminationSheetPublication.objects.exclude(academic_year='').order_by('-academic_year').values_list('academic_year', flat=True))
+        return Response(payload)
+    if getattr(request, 'user_role', getattr(request.user, 'role', '')) not in {'ADMIN', 'MANAGER'}:
+        return Response({'error': 'Ban khong co quyen cau hinh Google Sheet xuat ban.'}, status=status.HTTP_403_FORBIDDEN)
+    data = request.data or {}
+    if 'spreadsheetUrl' in data:
+        publication.spreadsheet_url = str(data.get('spreadsheetUrl') or '').strip()
+    if 'enabled' in data:
+        publication.enabled = bool(data.get('enabled'))
+    publication.save(update_fields=['spreadsheet_url', 'enabled', 'updated_at'])
+    append_audit('sheet-publication', f'Cap nhat cau hinh Google Sheet xuat ban nam hoc {academic_year}.', request)
+    return Response(publication_payload(publication))
+
+
+@api_view(['POST'])
+@permission_classes([IsManagerOrAdmin])
+def sheet_publication_sync(request):
+    data = request.data or {}
+    requested_year = str(data.get('academicYear') or '').strip()
+    academic_year = requested_year if re.fullmatch(r'\d{4}-\d{4}', requested_year) else academic_year_for_date(timezone.localdate())
+    publication, _ = ExaminationSheetPublication.objects.get_or_create(academic_year=academic_year)
+    if not publication.enabled:
+        return Response({'error': 'Kenh xuat ban Google Sheet dang tam tat.'}, status=status.HTTP_400_BAD_REQUEST)
+    scope = str(data.get('scope') or 'all').strip()
+    session_ids = data.get('sessionIds') if isinstance(data.get('sessionIds'), list) else []
+    try:
+        result = sync_publication(
+            publication, persisted_partners(),
+            session_ids=session_ids if scope == 'sessions' else None,
+            include_summary=scope == 'all',
+            include_partners=scope in {'all', 'partners'},
+        )
+    except Exception as exc:
+        publication.last_status = 'failed'
+        publication.last_error = str(exc)
+        publication.save(update_fields=['last_status', 'last_error', 'updated_at'])
+        return Response({'error': str(exc), 'publication': publication_payload(publication)}, status=status.HTTP_400_BAD_REQUEST)
+    append_audit('sheet-publication', f'Dong bo Google Sheet nam hoc {academic_year}: {result["sessions"]} ky to chuc, {result["partners"]} doi tac.', request)
+    return Response({'success': True, 'result': result, 'publication': publication_payload(publication)})
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])

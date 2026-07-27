@@ -35,6 +35,14 @@ type DuplicateCandidate = {
   matchBy: string;
   existing: { code: string; name: string; birthDate?: string; identity?: string; email?: string; phone?: string; school?: string; className?: string; city?: string; ward?: string; address?: string; sessions?: { id: string; code: string; name: string }[] };
 };
+type Publication = {
+  spreadsheetUrl: string;
+  enabled: boolean;
+  lastSyncedAt?: string | null;
+  lastStatus?: string;
+  lastError?: string;
+  lastSummary?: { sessions?: number; partners?: number };
+};
 interface SheetSource {
   id: string;
   name: string;
@@ -177,6 +185,12 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   const [newSheetSessionId, setNewSheetSessionId] = useState('');
   const [newSheetTab, setNewSheetTab] = useState('');
   const [newSheetStage, setNewSheetStage] = useState('Toàn bộ kỳ tổ chức');
+  const [publication, setPublication] = useState<Publication | null>(null);
+  const [publicationUrl, setPublicationUrl] = useState('');
+  const defaultAcademicYear = (() => { const now = new Date(); const start = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1; return `${start}-${start + 1}`; })();
+  const [publicationAcademicYear, setPublicationAcademicYear] = useState(defaultAcademicYear);
+  const [publicationBusy, setPublicationBusy] = useState(false);
+  const [publicationMessage, setPublicationMessage] = useState('');
 
   const authHeaders = {
     'Content-Type': 'application/json',
@@ -233,9 +247,49 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     }
   }, [idToken]);
 
+  const loadPublication = useCallback(async () => {
+    if (!idToken) return;
+    try {
+      const response = await fetch(`/api/examination/sheet-publication?academicYear=${encodeURIComponent(publicationAcademicYear)}`, { headers: { Authorization: `Bearer ${idToken}` } });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Không thể tải cấu hình Google Sheet.');
+      setPublication(data);
+      setPublicationUrl(data.spreadsheetUrl || '');
+    } catch (error) {
+      console.warn('Không thể tải cấu hình xuất bản Google Sheet:', error);
+    }
+  }, [idToken, publicationAcademicYear]);
+
   useEffect(() => {
     loadSheets();
   }, [loadSheets]);
+
+  const savePublication = async () => {
+    if (!canImport) return;
+    setPublicationBusy(true); setPublicationMessage('');
+    try {
+      const response = await fetch('/api/examination/sheet-publication', { method: 'PUT', headers: authHeaders, body: JSON.stringify({ academicYear: publicationAcademicYear, spreadsheetUrl: publicationUrl.trim(), enabled: true }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Không thể lưu cấu hình.');
+      setPublication(data); setPublicationMessage('Đã lưu Google Sheet trung tâm.');
+    } catch (error: any) { setPublicationMessage(error.message || 'Không thể lưu cấu hình.'); }
+    finally { setPublicationBusy(false); }
+  };
+
+  const syncPublication = async (scope: 'all' | 'partners' | 'sessions') => {
+    if (!canImport) return;
+    if (!publicationUrl.trim()) { setPublicationMessage('Hãy lưu đường dẫn Google Sheet trung tâm trước.'); return; }
+    if (scope === 'sessions' && !targetSessionId) { setPublicationMessage('Hãy chọn kỳ tổ chức trước khi đồng bộ riêng kỳ đó.'); return; }
+    setPublicationBusy(true); setPublicationMessage('Đang xuất bản dữ liệu sang Google Sheet…');
+    try {
+      const response = await fetch('/api/examination/sheet-publication/sync', { method: 'POST', headers: authHeaders, body: JSON.stringify({ academicYear: publicationAcademicYear, scope, sessionIds: scope === 'sessions' ? [targetSessionId] : [] }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Đồng bộ Google Sheet không thành công.');
+      setPublication(data.publication || publication);
+      setPublicationMessage(`Đã đồng bộ ${data.result.sessions} kỳ tổ chức và ${data.result.partners} đối tác.`);
+    } catch (error: any) { setPublicationMessage(error.message || 'Đồng bộ Google Sheet không thành công.'); }
+    finally { setPublicationBusy(false); }
+  };
 
   const setParsedRows = (rawRows: ImportRow[], sourceName: string) => {
     const parsed = mapRows(rawRows);
@@ -436,7 +490,9 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
 
       <section className="mb-5 rounded-2xl border border-blue-200 bg-blue-50/60 p-4"><label className="block max-w-xl"><span className="text-sm font-bold text-[#001e40]">Dữ liệu thuộc kỳ tổ chức</span><select value={targetSessionId} onChange={event => setTargetSessionId(event.target.value)} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Chọn kỳ tổ chức trước khi nhập</option>{sessions.map(item => <option key={item.id} value={item.id}>{sessionOptionLabel(item)} · {item.time}</option>)}</select><p className="mt-2 text-xs text-slate-600">Hồ sơ trong file sẽ được bổ sung vào lịch sử của thí sinh, đồng thời liên kết với kỳ này.</p></label></section>
 
-      {!canImport && (
+      <section className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5 shadow-sm">
+        <div className="max-w-3xl"><h2 className="flex items-center gap-2 text-xl font-bold text-emerald-950"><FileSpreadsheet className="h-5 w-5 text-emerald-700"/>Google Sheets theo từng kỳ tổ chức</h2><p className="mt-1 text-sm text-emerald-900/80">Mỗi kỳ có hai liên kết độc lập: Sheet đăng ký là nguồn nhập dữ liệu, còn Google Sheet output là nơi xuất dữ liệu của riêng kỳ đó. Thiết lập hai link tại phần “Thay đổi thông tin” của kỳ tổ chức.</p></div>
+      </section>      {!canImport && (
         <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           Chỉ quản lý hoặc quản trị viên mới có thể nhập dữ liệu.
         </div>

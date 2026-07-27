@@ -32,6 +32,8 @@ class ExamSession(models.Model):
     rounds = models.JSONField(default=list, blank=True)
     sort_key = models.CharField(max_length=255)
     created_by = models.CharField(max_length=255, blank=True, null=True)
+    registration_sheet_url = models.CharField(max_length=1000, blank=True, default='')
+    registration_sheet_tab = models.CharField(max_length=255, blank=True, default='')
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
@@ -156,6 +158,26 @@ class ExaminationSheet(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class ExaminationSheetPublication(models.Model):
+    """One read-only Google Sheets publication workbook per academic year."""
+    academic_year = models.CharField(max_length=20, unique=True, default='')
+    spreadsheet_url = models.CharField(max_length=1000, blank=True, default='')
+    enabled = models.BooleanField(default=True)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+    last_status = models.CharField(max_length=30, default='idle')
+    last_error = models.TextField(blank=True, default='')
+    last_summary = models.JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Google Sheets publication'
+        verbose_name_plural = 'Google Sheets publications'
+
+    def __str__(self):
+        return self.spreadsheet_url or 'Google Sheets publication not configured'
+
 
 class Blueprint(models.Model):
     """Reusable assessment blueprint. Slots only live in immutable versions."""

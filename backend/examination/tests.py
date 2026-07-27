@@ -535,9 +535,57 @@ class AutomaticSessionPhaseTests(TestCase):
         self.assertEqual(automatic_session_phase(self.session, date(2026, 7, 27)), 'Ôn tập Vòng quốc tế')
         self.assertEqual(automatic_session_phase(self.session, date(2026, 8, 2)), 'Vòng Quốc tế')
 
+    def test_undated_later_round_blocks_false_results_and_completion(self):
+        from datetime import date
+        from .views import automatic_session_phase
+
+        self.session.rounds = [
+            {'id': 'national', 'name': 'Vòng Chung kết Quốc gia', 'date': '2026-07-26', 'label': '26/7/2026'},
+            {'id': 'regional', 'name': 'Vòng Khu vực', 'date': '', 'label': 'Dự kiến Tháng 10/2026'},
+        ]
+        self.session.phase = 'Hoàn thành'
+        self.assertEqual(automatic_session_phase(self.session, date(2026, 7, 27)), 'Ôn tập Vòng quốc tế')
+        self.assertEqual(automatic_session_phase(self.session, date(2026, 9, 15)), 'Ôn tập Vòng quốc tế')
     def test_final_round_moves_to_results_then_completed_after_one_month(self):
         from datetime import date
         from .views import automatic_session_phase
 
         self.assertEqual(automatic_session_phase(self.session, date(2026, 8, 10)), 'Công bố kết quả')
         self.assertEqual(automatic_session_phase(self.session, date(2026, 9, 8)), 'Hoàn thành')
+class SheetPublicationTests(TestCase):
+    def setUp(self):
+        self.user = UserProfile.objects.create(email='sheets-admin@example.com', name='Sheets Admin', role='ADMIN')
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_publication_configuration_is_persisted(self):
+        response = self.client.get('/api/examination/sheet-publication')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['spreadsheetUrl'], '')
+
+        updated = self.client.put('/api/examination/sheet-publication', {
+            'spreadsheetUrl': 'https://docs.google.com/spreadsheets/d/demo-sheet-id/edit',
+            'enabled': True,
+        }, format='json')
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.data['spreadsheetUrl'], 'https://docs.google.com/spreadsheets/d/demo-sheet-id/edit')
+
+    def test_publication_rows_use_the_fixed_partner_and_session_layout(self):
+        from .sheet_publication import PARTNERS_TAB, SUMMARY_TAB, partner_rows, session_tab_name, summary_rows
+
+        session = ExamSession.objects.create(
+            id='sheet-session', competition_id='sheet-competition', code='IMO', name='IMO 2026',
+            parent='International Maths Olympiad', organizer='SCO', time='T5/2026 - T8/2026',
+            phase='Ôn tập Vòng quốc tế', candidates_count=12, sort_key='sheet-session',
+        )
+        rows = summary_rows([session])
+        self.assertEqual(rows[0][0], 'STT')
+        self.assertEqual(rows[1][7], 12)
+        self.assertTrue(session_tab_name(session).startswith('TS — IMO'))
+        partner_values = partner_rows([{
+            'province': 'Hà Nội', 'school': 'THCS FT', 'contests': ['IMO'],
+            'studentCounts': [{'session': 'sheet-session', 'count': 8}],
+        }])
+        self.assertEqual(PARTNERS_TAB, 'ĐỐI TÁC')
+        self.assertEqual(SUMMARY_TAB, 'TỔNG QUAN KỲ THI')
+        self.assertEqual(partner_values[1][-1], 8)
