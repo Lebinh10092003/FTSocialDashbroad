@@ -44,18 +44,6 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
           <p className="text-[9px] uppercase font-bold text-indigo-650 tracking-wider mt-1">Phân tích MXH</p>
         </div>
       </div>
-
-      {/* Back to Workspace button */}
-      <div className="px-4 pt-4">
-        <button
-          onClick={onBackToWorkspace}
-          className="ft-sidebar-back w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer active:scale-[0.98]"
-        >
-          <ArrowLeft className="w-4 h-4 text-slate-500" />
-          <span>Quay lại Workspace</span>
-        </button>
-      </div>
-
       {/* Navigation menu items */}
       <nav className="flex-1 px-4 py-5 space-y-1 overflow-y-auto">
         {menuItems.map((item) => {
@@ -79,7 +67,14 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
       </nav>
 
       {/* User profile section */}
-      <div className="p-4 border-t border-slate-100 bg-slate-50/40">
+      <div className="ft-sidebar-footer p-4 border-t border-slate-100 bg-slate-50/40">
+        <button
+          onClick={onBackToWorkspace}
+          className="ft-sidebar-back mb-3 w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer active:scale-[0.98]"
+        >
+          <ArrowLeft className="w-4 h-4 text-slate-500" />
+          <span>Quay lại Workspace</span>
+        </button>
         <div className="mb-2 flex justify-end">
           <TokenNotifications idToken={idToken} userRole={userRole} />
         </div>
