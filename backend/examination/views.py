@@ -4,6 +4,8 @@ from rest_framework import status
 import uuid
 import json
 import re
+import unicodedata
+from datetime import datetime, timedelta
 from django.utils import timezone
 from .models import Competition, ExamSession, Candidate, CandidateParticipation, RoundResult, LogNote, ExaminationSheet
 from authentication.models import SystemConfig, UserProfile
@@ -606,6 +608,8 @@ def examination_bootstrap(request):
     try:
         ensure_examination_seed()
         sync_session_candidate_totals()
+        for session in ExamSession.objects.all():
+            refresh_automatic_session_phase(session)
         
         competitions = [serialize_competition(c) for c in Competition.objects.all().order_by('sort_key')[:1000]]
         sessions = [serialize_session(s) for s in ExamSession.objects.all().order_by('sort_key')[:1000]]
@@ -642,6 +646,8 @@ def get_resource_list(request, resource):
             })
             
         elif resource == 'sessions':
+            for session in ExamSession.objects.all():
+                refresh_automatic_session_phase(session)
             queryset = ExamSession.objects.all().order_by('sort_key')
             if cursor:
                 queryset = queryset.filter(sort_key__gt=cursor)
@@ -767,6 +773,91 @@ def sync_legacy_round_milestones(session, rounds):
     session.national_date = str(national.get('date') or '').strip() if national else ''
     session.international = str(international.get('label') or '').strip() if international else ''
     session.international_date = str(international.get('date') or '').strip() if international else ''
+
+
+def _phase_key(value):
+    """Normalize Vietnamese phase/round labels for phase automation."""
+    return ''.join(
+        char for char in unicodedata.normalize('NFD', str(value or '').casefold())
+        if unicodedata.category(char) != 'Mn'
+    ).replace('đ', 'd')
+
+
+def _parse_round_date(value):
+    """Accept ISO dates and the date labels used by legacy examination sessions."""
+    raw = str(value or '').strip()
+    if not raw:
+        return None
+    for pattern in ('%Y-%m-%d', '%d/%m/%Y', '%d/%m/%y', '%m/%d/%Y', '%m/%d/%y'):
+        try:
+            return datetime.strptime(raw[:10], pattern).date()
+        except ValueError:
+            continue
+    return None
+
+
+def dated_session_rounds(session):
+    """Return configured rounds with a concrete date, sorted in examination order."""
+    configured = session.rounds or []
+    if not configured:
+        configured = [
+            {'name': 'Vòng Chung kết Quốc gia', 'date': session.national_date},
+            {'name': 'Vòng Quốc tế', 'date': session.international_date},
+        ]
+    rows = []
+    for position, round_config in enumerate(configured):
+        if not isinstance(round_config, dict):
+            continue
+        round_date = _parse_round_date(round_config.get('date'))
+        name = str(round_config.get('name') or '').strip()
+        if name and round_date:
+            rows.append((round_date, position, name))
+    return sorted(rows, key=lambda item: (item[0], item[1]))
+
+
+def automatic_session_phase(session, current_date=None):
+    """Derive the operational phase from dated rounds without changing the round plan."""
+    today = current_date or timezone.localdate()
+    rounds = dated_session_rounds(session)
+    if not rounds:
+        return str(session.phase or '').strip() or 'Chuẩn bị/Truyền thông'
+
+    final_date, _, _ = rounds[-1]
+    if today >= final_date + timedelta(days=30):
+        return 'Hoàn thành'
+    if today > final_date:
+        return 'Công bố kết quả'
+
+    upcoming = next((round_item for round_item in rounds if round_item[0] >= today), None)
+    if upcoming:
+        upcoming_date, _, upcoming_name = upcoming
+        # The actual round takes precedence during the seven-day run-up.
+        if today >= upcoming_date - timedelta(days=7):
+            return upcoming_name
+
+        completed = [round_item for round_item in rounds if round_item[0] < today]
+        if completed:
+            _, _, last_completed_name = completed[-1]
+            if 'quoc gia' in _phase_key(last_completed_name) and 'quoc te' in _phase_key(upcoming_name):
+                return 'Ôn tập Vòng quốc tế'
+
+    return str(session.phase or '').strip() or 'Chuẩn bị/Truyền thông'
+
+
+def refresh_automatic_session_phase(session, current_date=None):
+    """Persist the calculated phase so lists, details and integrations agree."""
+    phase = automatic_session_phase(session, current_date=current_date)
+    if phase != session.phase:
+        previous = session.phase
+        session.phase = phase
+        session.save(update_fields=['phase', 'updated_at'])
+        append_audit(
+            f'session-{session.id}',
+            f'Hệ thống tự chuyển giai đoạn từ "{previous or "Chưa cập nhật"}" thành "{phase}" theo lịch các vòng thi.',
+            system=True,
+        )
+    return phase
+
 @api_view(['POST'])
 @permission_classes([IsManagerOrAdmin])
 def session_create(request):

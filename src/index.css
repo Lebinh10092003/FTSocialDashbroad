@@ -790,3 +790,41 @@ a { color: inherit; text-decoration: none; }
   .dt-calendar-toolbar { align-items: flex-start; flex-direction: column; }
   .dt-calendar-scroll { -webkit-overflow-scrolling: touch; }
 }
+/* Digital Training uses the same left navigation on every viewport; compact icon rail on narrow screens. */
+@media (max-width: 1023px) {
+  .dt-sidebar { width: 4.75rem !important; }
+  .dt-sidebar .ft-sidebar-brand > div, .dt-sidebar .ft-sidebar-account > span:last-child { display: none; }
+  .dt-sidebar .ft-sidebar-brand { justify-content: center; padding-left: .5rem; padding-right: .5rem; }
+  .dt-sidebar nav { padding-left: .5rem; padding-right: .5rem; }
+  .dt-sidebar .ft-nav-item { justify-content: center; font-size: 0; padding-left: .5rem; padding-right: .5rem; }
+  .dt-sidebar .ft-nav-item svg { width: 1.25rem; height: 1.25rem; }
+  .dt-sidebar .ft-sidebar-back { justify-content: center; font-size: 0; padding-left: .5rem; padding-right: .5rem; }
+  .dt-sidebar .ft-sidebar-back svg { width: 1.25rem; height: 1.25rem; }
+  .dt-sidebar .ft-sidebar-account { justify-content: center; }
+  .dt-sidebar .ft-primary { font-size: 0; min-height: 2.75rem; }
+  .dt-sidebar .ft-primary svg { width: 1.1rem; height: 1.1rem; }
+}
+.dt-calendar-cell.is-selecting { background: #dff3ff; box-shadow: inset 0 0 0 2px #38a8e6; }
+
+/* On phones, navigation remains a left-side icon rail instead of moving to a horizontal tab bar. */
+@media (max-width: 767px) {
+  .ft-mobile-nav { display: none !important; }
+  .ft-module-shell > aside.ft-module-sidebar.hidden {
+    display: flex !important;
+    position: sticky !important;
+    top: 0;
+    align-self: flex-start;
+    width: 4.75rem !important;
+    min-width: 4.75rem !important;
+    height: 100dvh !important;
+  }
+  .ft-module-shell > aside.ft-module-sidebar.hidden .ft-sidebar-brand > :not(img),
+  .ft-module-shell > aside.ft-module-sidebar.hidden .ft-sidebar-brand p { display: none !important; }
+  .ft-module-shell > aside.ft-module-sidebar.hidden nav { padding-left: .45rem; padding-right: .45rem; }
+  .ft-module-shell > aside.ft-module-sidebar.hidden .ft-nav-item { justify-content: center; font-size: 0; padding-left: .45rem; padding-right: .45rem; }
+  .ft-module-shell > aside.ft-module-sidebar.hidden .ft-nav-item svg { width: 1.25rem; height: 1.25rem; }
+  .ft-module-shell > aside.ft-module-sidebar.hidden .ft-sidebar-back { justify-content: center; font-size: 0; padding-left: .45rem; padding-right: .45rem; }
+  .ft-module-shell > aside.ft-module-sidebar.hidden .ft-sidebar-back svg { width: 1.25rem; height: 1.25rem; }
+  .ft-module-shell > aside.ft-module-sidebar.hidden .ft-sidebar-account > span:last-child { display: none; }
+  .ft-module-shell > aside.ft-module-sidebar.hidden .ft-sidebar-account { justify-content: center; }
+}

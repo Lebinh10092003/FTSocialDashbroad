@@ -28,7 +28,7 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
         model = TrainingSession
         fields = [
             "id", "title", "date", "start_time", "end_time", "partner", "partner_id", "partner_name",
-            "category", "attendees", "location", "status", "notes", "has_materials", "created_at", "updated_at",
+            "category", "contents", "attendees", "location", "status", "notes", "has_materials", "created_at", "updated_at",
         ]
 
     def get_partner_name(self, obj):
@@ -37,13 +37,27 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
     def get_has_materials(self, obj):
         return obj.materials.exists()
 
+    def validate_contents(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Nội dung tập huấn phải là danh sách.")
+        return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+    def _sync_primary_category(self, validated_data):
+        contents = validated_data.get("contents")
+        if contents:
+            validated_data["category"] = " · ".join(contents)
+        elif validated_data.get("category"):
+            validated_data["contents"] = [validated_data["category"]]
+        return validated_data
     def create(self, validated_data):
+        validated_data = self._sync_primary_category(validated_data)
         partner = validated_data.get("partner_ref")
         if partner:
             validated_data["partner"] = partner.name
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
+        validated_data = self._sync_primary_category(validated_data)
         partner = validated_data.get("partner_ref")
         if partner:
             validated_data["partner"] = partner.name

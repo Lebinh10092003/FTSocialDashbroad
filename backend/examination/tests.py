@@ -516,3 +516,28 @@ class CandidateIdentityMatchingTests(TestCase):
 
         self.assertIsNone(candidate_match_assessment(previous, incoming))
         self.assertFalse(same_candidate(previous, incoming))
+
+class AutomaticSessionPhaseTests(TestCase):
+    def setUp(self):
+        self.session = ExamSession.objects.create(
+            id='phase-rules', competition_id='', code='TEST', name='Phase rules',
+            parent='Test', organizer='FT', time='', sort_key='phase-rules', phase='Tuyển sinh',
+            rounds=[
+                {'id': 'national', 'name': 'Vòng Chung kết Quốc gia', 'date': '2026-07-26', 'label': '26/7/2026'},
+                {'id': 'international', 'name': 'Vòng Quốc tế', 'date': '2026-08-09', 'label': '9/8/2026'},
+            ],
+        )
+
+    def test_phase_moves_from_national_to_international_preparation_and_round(self):
+        from datetime import date
+        from .views import automatic_session_phase
+
+        self.assertEqual(automatic_session_phase(self.session, date(2026, 7, 27)), 'Ôn tập Vòng quốc tế')
+        self.assertEqual(automatic_session_phase(self.session, date(2026, 8, 2)), 'Vòng Quốc tế')
+
+    def test_final_round_moves_to_results_then_completed_after_one_month(self):
+        from datetime import date
+        from .views import automatic_session_phase
+
+        self.assertEqual(automatic_session_phase(self.session, date(2026, 8, 10)), 'Công bố kết quả')
+        self.assertEqual(automatic_session_phase(self.session, date(2026, 9, 8)), 'Hoàn thành')

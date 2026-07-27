@@ -34,6 +34,8 @@ class TrainingSession(models.Model):
     partner = models.CharField(max_length=255, blank=True)
     partner_ref = models.ForeignKey(TrainingPartner, null=True, blank=True, on_delete=models.SET_NULL, related_name="sessions")
     category = models.CharField(max_length=255, blank=True)
+    # A session can cover multiple standard or ad-hoc training topics.
+    contents = models.JSONField(default=list, blank=True)
     attendees = models.PositiveIntegerField(default=0)
     location = models.CharField(max_length=500, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="planned")
