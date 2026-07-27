@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views, paper_views
+from . import views, paper_views, blueprint_views
 
 urlpatterns = [
     path('examination/bootstrap', views.examination_bootstrap, name='examination_bootstrap'),
@@ -17,6 +17,14 @@ urlpatterns = [
     path('examination/papers/<uuid:pk>/export/<str:export_type>', paper_views.paper_export, name='paper_export'),
     path('examination/ai-config', paper_views.ai_config, name='ai_config'),
     path('examination/ai-config/test', paper_views.ai_config_test, name='ai_config_test'),
+    path('examination/blueprints', blueprint_views.blueprints_list, name='blueprints_list'),
+    path('examination/blueprints/draft-from-config', blueprint_views.blueprint_draft_from_config, name='blueprint_draft_from_config'),
+    path('examination/blueprints/<uuid:pk>', blueprint_views.blueprint_detail, name='blueprint_detail'),
+    path('examination/blueprints/<uuid:pk>/duplicate', blueprint_views.blueprint_duplicate, name='blueprint_duplicate'),
+    path('examination/blueprints/<uuid:pk>/versions', blueprint_views.blueprint_new_version, name='blueprint_new_version'),
+    path('examination/blueprint-versions/<uuid:pk>', blueprint_views.blueprint_version_detail, name='blueprint_version_detail'),
+    path('examination/blueprint-versions/<uuid:pk>/lock', blueprint_views.blueprint_version_lock, name='blueprint_version_lock'),
+    path('examination/blueprint-versions/<uuid:pk>/import', blueprint_views.blueprint_version_import, name='blueprint_version_import'),
     path('examination/partners', views.partners_detail, name='partners_detail'),
     path('examination/competitions', views.competition_create, name='competition_create'),
     path('examination/competitions/<str:pk>', views.competition_detail, name='competition_detail'),

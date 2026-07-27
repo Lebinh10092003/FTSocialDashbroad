@@ -2,16 +2,17 @@ from __future__ import annotations
 
 from django.db import transaction
 from django.http import HttpResponse
+from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework import permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from authentication.permissions import IsAdmin, IsAuthenticated, IsManagerOrAdmin
-from .models import AiProviderConfig, Competition, ExamPaper, ExamQuestion, ExamSession, ExamSourceDocument
+from .models import AiProviderConfig, BlueprintVersion, Competition, ExamGenerationJob, ExamPaper, ExamQuestion, ExamSession, ExamSourceDocument
 from .paper_services import (
     default_distribution, document_export, encrypt_secret, generate_questions_with_ai,
-    normalize_question, read_uploaded_source, review_questions_with_ai, revise_question_with_ai, serialize_ai_config,
+    normalize_question, normalize_question_for_slot, read_uploaded_source, review_questions_with_ai, revise_question_with_ai, serialize_ai_config,
     serialize_paper, serialize_question, validate_distribution, xlsx_export,
 )
 
@@ -27,45 +28,52 @@ def actor(request):
 
 def get_paper(pk):
     try:
-        return ExamPaper.objects.select_related('competition', 'session').prefetch_related('questions', 'sources__referenced_paper').get(pk=pk)
+        return ExamPaper.objects.select_related('competition', 'session', 'blueprint_version__blueprint').prefetch_related('questions__blueprint_slot', 'sources__referenced_paper').get(pk=pk)
     except ExamPaper.DoesNotExist:
         return None
 
 
 def paper_payload(data, current=None):
     source = data or {}
-    total = int(source.get('totalQuestions', getattr(current, 'total_questions', 0)) or 0)
+    version_id = str(source.get('blueprintVersionId', getattr(current, 'blueprint_version_id', '') or '')).strip()
+    version = BlueprintVersion.objects.select_related('blueprint__competition', 'blueprint__session').prefetch_related('slots').filter(pk=version_id).first() if version_id else None
+    if not current and not version:
+        raise ValueError('Chọn phiên bản ma trận đã khóa trước khi tạo đề.')
+    if version and version.status != BlueprintVersion.STATUS_LOCKED:
+        raise ValueError('Chỉ có thể tạo đề từ phiên bản ma trận đã khóa.')
+    if current and current.blueprint_version_id and version and str(current.blueprint_version_id) != str(version.id):
+        raise ValueError('Không thể đổi phiên bản ma trận của đề đã tạo.')
+    if version:
+        blueprint = version.blueprint
+        total = version.slots.count()
+        if not total:
+            raise ValueError('Phiên bản ma trận chưa có slot.')
+        distribution = {key: version.slots.filter(difficulty=key).count() for key in ('EASY', 'MEDIUM', 'HARD', 'VERY_HARD')}
+        competition, session = blueprint.competition, blueprint.session
+        if not competition and session:
+            competition = Competition.objects.filter(pk=session.competition_id).first()
+        subject, grade, language = blueprint.subject, blueprint.grade_or_category, blueprint.language
+    else:
+        total = int(source.get('totalQuestions', getattr(current, 'total_questions', 0)) or 0)
+        distribution = validate_distribution(total, source.get('difficultyDistribution', getattr(current, 'difficulty_distribution', None) or default_distribution(total)))
+        competition, session = current.competition, current.session
+        subject, grade, language = current.subject, current.grade_or_category, current.language
     if total < 1 or total > 200:
         raise ValueError('Tổng số câu phải từ 1 đến 200.')
-    competition_id = str(source.get('competitionId', getattr(current, 'competition_id', '') or '')).strip()
-    session_id = str(source.get('sessionId', getattr(current, 'session_id', '') or '')).strip()
-    competition = Competition.objects.filter(pk=competition_id).first() if competition_id else None
-    session = ExamSession.objects.filter(pk=session_id).first() if session_id else None
-    if competition_id and not competition:
-        raise ValueError('Không tìm thấy cuộc thi đã chọn.')
-    if session_id and not session:
-        raise ValueError('Không tìm thấy kỳ thi đã chọn.')
-    if session and not competition:
-        competition = Competition.objects.filter(pk=session.competition_id).first()
-    distribution = validate_distribution(total, source.get('difficultyDistribution', getattr(current, 'difficulty_distribution', None) or default_distribution(total)))
     return {
-        'title': str(source.get('title', getattr(current, 'title', '') or '')).strip(),
-        'competition': competition, 'session': session,
-        'subject': str(source.get('subject', getattr(current, 'subject', '') or '')).strip(),
-        'grade_or_category': str(source.get('gradeOrCategory', getattr(current, 'grade_or_category', '') or '')).strip(),
-        'language': str(source.get('language', getattr(current, 'language', 'Tiếng Việt') or 'Tiếng Việt')).strip(),
+        'title': str(source.get('title', getattr(current, 'title', '') or '')).strip(), 'blueprint_version': version or getattr(current, 'blueprint_version', None),
+        'competition': competition, 'session': session, 'subject': subject, 'grade_or_category': grade, 'language': language,
         'duration_minutes': int(source.get('durationMinutes', getattr(current, 'duration_minutes', 60)) or 60),
         'total_questions': total, 'difficulty_distribution': distribution,
         'description': str(source.get('description', getattr(current, 'description', '') or '')).strip(),
         'status': str(source.get('status', getattr(current, 'status', 'DRAFT') or 'DRAFT')).strip().upper(),
     }
 
-
 @api_view(['GET', 'POST'])
 @permission_classes([IsWorkspaceUser])
 def papers_list(request):
     if request.method == 'GET':
-        rows = ExamPaper.objects.select_related('competition', 'session').prefetch_related('questions').all()
+        rows = ExamPaper.objects.select_related('competition', 'session', 'blueprint_version__blueprint').prefetch_related('questions').all()
         query = str(request.query_params.get('query', '')).strip()
         if query:
             rows = rows.filter(title__icontains=query)
@@ -168,13 +176,16 @@ def paper_questions_replace(request, pk):
     if not isinstance(rows, list) or not rows:
         return Response({'error': 'Đề thi phải có ít nhất một câu hỏi.'}, status=status.HTTP_400_BAD_REQUEST)
     try:
-        normalized = [normalize_question(row, index + 1) for index, row in enumerate(rows)]
-        if len(normalized) != paper.total_questions:
-            raise ValueError('Số câu hỏi phải đúng bằng tổng số câu đã khai báo.')
+        if not paper.blueprint_version_id or paper.blueprint_version.status != 'LOCKED':
+            raise ValueError('Chỉ có thể thay câu hỏi của đề đã gắn phiên bản ma trận khóa.')
+        slots = list(paper.blueprint_version.slots.all().order_by('position'))
+        if len(rows) != len(slots):
+            raise ValueError('Số câu hỏi phải đúng bằng số slot của ma trận.')
+        normalized = [normalize_question_for_slot(row, index + 1, slots[index]) for index, row in enumerate(rows)]
         with transaction.atomic():
             paper.questions.all().delete()
             for row in normalized:
-                ExamQuestion.objects.create(paper=paper, order=row['order'], content=row['content'], choices=row['choices'], correct_answer=row['correctAnswer'], explanation=row['explanation'], difficulty=row['difficulty'], topic=row['topic'])
+                ExamQuestion.objects.create(paper=paper, blueprint_slot_id=row.get('blueprintSlotId'), question_type=row.get('questionType', 'single_choice'), score=row.get('score', 1), slot_metadata=row.get('slotMetadata', {}), order=row['order'], content=row['content'], choices=row['choices'], correct_answer=row['correctAnswer'], explanation=row['explanation'], difficulty=row['difficulty'], topic=row['topic'])
             paper.status = 'DRAFT'; paper.updated_by = actor(request); paper.save(update_fields=['status', 'updated_by', 'updated_at'])
         return Response(serialize_paper(get_paper(pk), include_questions=True))
     except ValueError as exc:
@@ -190,8 +201,8 @@ def paper_question_detail(request, pk, question_id):
     if request.method == 'DELETE':
         question.delete(); return Response({'success': True})
     try:
-        row = normalize_question({**request.data, 'order': request.data.get('order', question.order)}, question.order)
-        for key, value in {'order': row['order'], 'content': row['content'], 'choices': row['choices'], 'correct_answer': row['correctAnswer'], 'explanation': row['explanation'], 'difficulty': row['difficulty'], 'topic': row['topic']}.items(): setattr(question, key, value)
+        row = normalize_question_for_slot({**request.data, 'order': question.order}, question.order, question.blueprint_slot) if question.blueprint_slot_id else normalize_question({**request.data, 'order': request.data.get('order', question.order)}, question.order)
+        for key, value in {'order': row['order'], 'content': row['content'], 'choices': row['choices'], 'correct_answer': row['correctAnswer'], 'explanation': row['explanation'], 'difficulty': row['difficulty'], 'topic': row['topic'], 'question_type': row.get('questionType', question.question_type), 'score': row.get('score', question.score), 'slot_metadata': row.get('slotMetadata', question.slot_metadata)}.items(): setattr(question, key, value)
         question.check_status = 'PENDING'; question.warnings = []; question.save()
         return Response({'question': serialize_question(question)})
     except ValueError as exc:
@@ -208,7 +219,7 @@ def paper_question_ai_action(request, pk, question_id, action):
     try:
         row = revise_question_with_ai(paper, question, action, actor(request))
         question.content = row['content']; question.choices = row['choices']; question.correct_answer = row['correctAnswer']
-        question.explanation = row['explanation']; question.difficulty = row['difficulty']; question.topic = row['topic']
+        question.explanation = row['explanation']; question.difficulty = row['difficulty']; question.topic = row['topic']; question.question_type = row.get('questionType', question.question_type); question.score = row.get('score', question.score); question.slot_metadata = row.get('slotMetadata', question.slot_metadata)
         question.check_status = 'AI_FIXED'; question.warnings = []; question.save()
         return Response({'question': serialize_question(question)})
     except ValueError as exc:
@@ -223,13 +234,17 @@ def paper_generate(request, pk):
     if paper.ai_generation_status in {'reading', 'generating', 'reviewing', 'saving'}:
         return Response({'error': 'Đề đang được AI xử lý.'}, status=status.HTTP_409_CONFLICT)
     try:
-        paper.ai_generation_status = 'generating'; paper.ai_generation_message = 'Đang tạo câu hỏi bằng AI...'; paper.save(update_fields=['ai_generation_status', 'ai_generation_message', 'updated_at'])
+        if not paper.blueprint_version_id or paper.blueprint_version.status != 'LOCKED':
+            raise ValueError('Đề phải gắn với phiên bản ma trận đã khóa.')
+        job = ExamGenerationJob.objects.create(paper=paper, blueprint_version=paper.blueprint_version, status='GENERATING', message='Đang sinh câu hỏi theo từng slot...', requested_by=actor(request), started_at=timezone.now())
+        paper.ai_generation_status = 'generating'; paper.ai_generation_message = 'Đang tạo câu hỏi theo ma trận...'; paper.save(update_fields=['ai_generation_status', 'ai_generation_message', 'updated_at'])
         rows = generate_questions_with_ai(paper, actor(request))
         with transaction.atomic():
             paper.questions.all().delete()
             for row in rows:
-                ExamQuestion.objects.create(paper=paper, order=row['order'], content=row['content'], choices=row['choices'], correct_answer=row['correctAnswer'], explanation=row['explanation'], difficulty=row['difficulty'], topic=row['topic'])
-            paper.status = 'REVIEW'; paper.ai_generation_status = 'done'; paper.ai_generation_message = 'Đã tạo đề. Sẵn sàng kiểm tra AI.'; paper.updated_by = actor(request); paper.save()
+                ExamQuestion.objects.create(paper=paper, blueprint_slot_id=row.get('blueprintSlotId'), question_type=row.get('questionType', 'single_choice'), score=row.get('score', 1), slot_metadata=row.get('slotMetadata', {}), order=row['order'], content=row['content'], choices=row['choices'], correct_answer=row['correctAnswer'], explanation=row['explanation'], difficulty=row['difficulty'], topic=row['topic'])
+            job.status = 'COMPLETED'; job.message = 'Đã sinh đủ câu theo slot.'; job.completed_at = timezone.now(); job.save(update_fields=['status', 'message', 'completed_at'])
+            paper.status = 'REVIEW'; paper.ai_generation_status = 'done'; paper.ai_generation_message = 'Đã tạo đề theo ma trận. Sẵn sàng kiểm tra AI.'; paper.updated_by = actor(request); paper.save()
         return Response(serialize_paper(get_paper(pk), include_questions=True))
     except ValueError as exc:
         paper.ai_generation_status = 'error'; paper.ai_generation_message = str(exc)[:500]; paper.save(update_fields=['ai_generation_status', 'ai_generation_message', 'updated_at'])

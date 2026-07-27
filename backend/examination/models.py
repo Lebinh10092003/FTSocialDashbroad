@@ -157,6 +157,91 @@ class ExaminationSheet(models.Model):
     def __str__(self):
         return self.name
 
+class Blueprint(models.Model):
+    """Reusable assessment blueprint. Slots only live in immutable versions."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=500)
+    competition = models.ForeignKey(Competition, on_delete=models.SET_NULL, null=True, blank=True, related_name='blueprints')
+    session = models.ForeignKey(ExamSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='blueprints')
+    round_name = models.CharField(max_length=255, blank=True, default='')
+    subject = models.CharField(max_length=255, blank=True, default='')
+    grade_or_category = models.CharField(max_length=255, blank=True, default='')
+    language = models.CharField(max_length=50, default='Tiếng Việt')
+    metadata_schema = models.JSONField(default=dict, blank=True)
+    description = models.TextField(blank=True, default='')
+    created_by = models.CharField(max_length=255, blank=True, default='')
+    updated_by = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return self.name
+
+
+class BlueprintVersion(models.Model):
+    STATUS_DRAFT = 'DRAFT'
+    STATUS_LOCKED = 'LOCKED'
+    STATUS_ARCHIVED = 'ARCHIVED'
+    STATUS_CHOICES = [(STATUS_DRAFT, 'Bản nháp'), (STATUS_LOCKED, 'Đã khóa'), (STATUS_ARCHIVED, 'Lưu trữ')]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    blueprint = models.ForeignKey(Blueprint, on_delete=models.CASCADE, related_name='versions')
+    version_number = models.PositiveIntegerField(default=1)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT)
+    note = models.TextField(blank=True, default='')
+    created_by = models.CharField(max_length=255, blank=True, default='')
+    locked_by = models.CharField(max_length=255, blank=True, default='')
+    locked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-version_number']
+        constraints = [models.UniqueConstraint(fields=['blueprint', 'version_number'], name='unique_blueprint_version_number')]
+
+    def __str__(self):
+        return f'{self.blueprint.name} v{self.version_number}'
+
+
+class BlueprintSlot(models.Model):
+    QUESTION_TYPES = [('single_choice', 'Trắc nghiệm một đáp án'), ('numeric_input', 'Điền đáp số')]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    version = models.ForeignKey(BlueprintVersion, on_delete=models.CASCADE, related_name='slots')
+    position = models.PositiveIntegerField()
+    question_type = models.CharField(max_length=40, choices=QUESTION_TYPES, default='single_choice')
+    option_count = models.PositiveSmallIntegerField(default=4)
+    score = models.DecimalField(max_digits=8, decimal_places=2, default=1)
+    difficulty = models.CharField(max_length=20, choices=ExamQuestion.DIFFICULTIES if 'ExamQuestion' in globals() else [('EASY', 'Dễ'), ('MEDIUM', 'Trung bình'), ('HARD', 'Khó'), ('VERY_HARD', 'Rất khó')], default='MEDIUM')
+    topic = models.CharField(max_length=255, blank=True, default='')
+    knowledge_source = models.CharField(max_length=500, blank=True, default='')
+    knowledge_requirements = models.TextField(blank=True, default='')
+    prohibited_knowledge = models.TextField(blank=True, default='')
+    assessment_intent = models.TextField(blank=True, default='')
+    estimated_seconds = models.PositiveIntegerField(default=90)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['position']
+        constraints = [models.UniqueConstraint(fields=['version', 'position'], name='unique_blueprint_slot_position')]
+
+
+class ExamGenerationJob(models.Model):
+    STATUS_CHOICES = [('QUEUED', 'Đang chờ'), ('GENERATING', 'Đang sinh'), ('COMPLETED', 'Hoàn thành'), ('FAILED', 'Lỗi')]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    paper = models.ForeignKey('ExamPaper', on_delete=models.CASCADE, related_name='generation_jobs')
+    blueprint_version = models.ForeignKey(BlueprintVersion, on_delete=models.PROTECT, related_name='generation_jobs')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='QUEUED')
+    message = models.CharField(max_length=500, blank=True, default='')
+    requested_by = models.CharField(max_length=255, blank=True, default='')
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
 class ExamPaper(models.Model):
     STATUS_DRAFT = 'DRAFT'
     STATUS_READY = 'READY'
@@ -168,6 +253,7 @@ class ExamPaper(models.Model):
     title = models.CharField(max_length=500)
     competition = models.ForeignKey(Competition, on_delete=models.SET_NULL, null=True, blank=True, related_name='exam_papers')
     session = models.ForeignKey(ExamSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='exam_papers')
+    blueprint_version = models.ForeignKey(BlueprintVersion, on_delete=models.PROTECT, null=True, blank=True, related_name='exam_papers')
     subject = models.CharField(max_length=255, blank=True, default='')
     grade_or_category = models.CharField(max_length=255, blank=True, default='')
     language = models.CharField(max_length=50, default='Tiếng Việt')
@@ -196,6 +282,10 @@ class ExamQuestion(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     paper = models.ForeignKey(ExamPaper, on_delete=models.CASCADE, related_name='questions')
+    blueprint_slot = models.ForeignKey(BlueprintSlot, on_delete=models.PROTECT, null=True, blank=True, related_name='questions')
+    question_type = models.CharField(max_length=40, default='single_choice')
+    score = models.DecimalField(max_digits=8, decimal_places=2, default=1)
+    slot_metadata = models.JSONField(default=dict, blank=True)
     order = models.PositiveIntegerField(default=1)
     content = models.TextField()
     choices = models.JSONField(default=list)  # Designed for future variable option counts; MVP validates A-D.

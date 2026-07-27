@@ -18,7 +18,7 @@ from jsonschema import Draft202012Validator
 from openpyxl import Workbook, load_workbook
 from pypdf import PdfReader
 
-from .models import AiProviderConfig, AiUsageLog, ExamPaper, ExamQuestion, ExamSourceDocument
+from .models import AiProviderConfig, AiUsageLog, BlueprintSlot, ExamPaper, ExamQuestion, ExamSourceDocument
 
 DIFFICULTIES = ('EASY', 'MEDIUM', 'HARD', 'VERY_HARD')
 DIFFICULTY_LABELS = {'EASY': 'Dễ', 'MEDIUM': 'Trung bình', 'HARD': 'Khó', 'VERY_HARD': 'Rất khó'}
@@ -109,6 +109,7 @@ def serialize_question(question: ExamQuestion) -> dict:
         'choices': question.choices or [], 'correctAnswer': question.correct_answer,
         'explanation': question.explanation, 'difficulty': question.difficulty, 'topic': question.topic,
         'checkStatus': question.check_status, 'warnings': question.warnings or [], 'aiMetadata': question.ai_metadata or {},
+        'blueprintSlotId': str(question.blueprint_slot_id or ''), 'questionType': question.question_type, 'score': float(question.score), 'slotMetadata': question.slot_metadata or {},
     }
 
 
@@ -122,7 +123,7 @@ def serialize_source(source: ExamSourceDocument) -> dict:
 
 def serialize_paper(paper: ExamPaper, include_questions: bool = False) -> dict:
     data = {
-        'id': str(paper.id), 'title': paper.title,
+        'id': str(paper.id), 'title': paper.title, 'blueprintVersionId': str(paper.blueprint_version_id or ''), 'blueprintName': paper.blueprint_version.blueprint.name if paper.blueprint_version_id else 'Đề cũ chưa có ma trận', 'blueprintVersion': paper.blueprint_version.version_number if paper.blueprint_version_id else None,
         'competitionId': paper.competition_id or '', 'competitionName': paper.competition.name if paper.competition else '',
         'sessionId': paper.session_id or '', 'sessionName': paper.session.name if paper.session else '',
         'subject': paper.subject, 'gradeOrCategory': paper.grade_or_category, 'language': paper.language,
@@ -283,3 +284,81 @@ def revise_question_with_ai(paper: ExamPaper, question: ExamQuestion, action: st
     if not isinstance(row, dict):
         raise ValueError('AI không trả về câu hỏi hợp lệ.')
     return normalize_question({**row, 'order': question.order}, question.order)
+# Blueprint-aware generation overrides. Every AI call receives one immutable slot;
+# the returned question is normalised back against that slot rather than AI choices.
+def normalize_question_for_slot(value: dict, order: int, slot: BlueprintSlot) -> dict:
+    raw = dict(value or {})
+    question_type = slot.question_type
+    choices = raw.get('choices') or raw.get('options') or []
+    if isinstance(choices, dict):
+        choices = [choices.get(chr(65 + index), '') for index in range(slot.option_count)]
+    if isinstance(choices, list):
+        choices = [str(item.get('text', '')) if isinstance(item, dict) else str(item) for item in choices]
+    answer = str(raw.get('correctAnswer') or raw.get('correct_answer') or '').strip().upper()
+    if question_type == 'single_choice':
+        if len(choices) != slot.option_count or any(not choice.strip() for choice in choices):
+            raise ValueError(f'Slot {slot.position} cần đúng {slot.option_count} phương án.')
+        valid = [chr(65 + index) for index in range(slot.option_count)]
+        if answer not in valid:
+            raise ValueError(f'Slot {slot.position} có đáp án không hợp lệ.')
+    else:
+        choices = []
+        if not answer:
+            raise ValueError(f'Slot {slot.position} cần đáp số đúng.')
+    content = str(raw.get('content') or raw.get('question') or '').strip()
+    if len(content) < 3:
+        raise ValueError(f'Slot {slot.position} chưa có nội dung hợp lệ.')
+    return {'content': content, 'choices': choices, 'correctAnswer': answer,
+            'explanation': str(raw.get('explanation') or '').strip(), 'difficulty': slot.difficulty,
+            'topic': slot.topic, 'order': order, 'blueprintSlotId': str(slot.id),
+            'questionType': question_type, 'score': float(slot.score), 'slotMetadata': slot.metadata or {}}
+
+
+def generate_questions_with_ai(paper: ExamPaper, user_email: str) -> list[dict]:
+    version = paper.blueprint_version
+    if not version or version.status != 'LOCKED':
+        raise ValueError('Mỗi đề phải dùng một phiên bản ma trận đã khóa trước khi sinh AI.')
+    slots = list(version.slots.all().order_by('position'))
+    if not slots:
+        raise ValueError('Phiên bản ma trận chưa có slot.')
+    if paper.total_questions != len(slots):
+        raise ValueError('Số câu của đề không khớp số slot trong phiên bản ma trận.')
+    rows = []
+    for slot in slots:
+        prompt = f'''Sinh DUY NHẤT câu hỏi cho slot cố định sau, không đổi loại câu, số phương án, điểm, độ khó, chủ đề hay metadata bắt buộc.
+Đề: {paper.title}; Cuộc thi: {paper.competition.name if paper.competition else ''}; Môn: {paper.subject}; Khối/Bảng: {paper.grade_or_category}; Ngôn ngữ: {paper.language}.
+Slot: {json.dumps({'position': slot.position, 'questionType': slot.question_type, 'optionCount': slot.option_count, 'score': float(slot.score), 'difficulty': slot.difficulty, 'topic': slot.topic, 'knowledgeSource': slot.knowledge_source, 'knowledgeRequirements': slot.knowledge_requirements, 'prohibitedKnowledge': slot.prohibited_knowledge, 'assessmentIntent': slot.assessment_intent, 'estimatedSeconds': slot.estimated_seconds, 'metadata': slot.metadata}, ensure_ascii=False)}
+Trả JSON đúng dạng {{"question":{{"content":"","choices":[],"correctAnswer":"","explanation":""}}}}. Với numeric_input: choices phải là mảng rỗng và correctAnswer là đáp số. Không sao chép nguyên văn nguồn.
+Nguồn tham chiếu:
+{source_context(paper)}'''
+        result = call_ai_json(paper=paper, task_type='generate_slot', model=_config().generation_model, user_email=user_email, system='Bạn là chuyên gia ra đề. Chỉ trả JSON hợp lệ; tuân thủ tuyệt đối slot ma trận.', prompt=prompt)
+        row = result.get('question') if isinstance(result, dict) else None
+        if not isinstance(row, dict):
+            raise ValueError(f'AI không trả về câu hợp lệ cho slot {slot.position}.')
+        rows.append(normalize_question_for_slot(row, slot.position, slot))
+    return rows
+
+
+def revise_question_with_ai(paper: ExamPaper, question: ExamQuestion, action: str, user_email: str) -> dict:
+    slot = question.blueprint_slot
+    if not slot:
+        raise ValueError('Câu hỏi cũ chưa gắn slot ma trận; hãy tạo đề mới từ ma trận.')
+    instructions = {
+        'rewrite': 'Viết lại cho rõ ràng hơn nhưng giữ nguyên mọi ràng buộc của slot.',
+        'distractors': 'Giữ nội dung và đáp án đúng, tạo phương án nhiễu hợp lý theo slot.',
+        'increase-difficulty': 'Không được thay đổi độ khó vì độ khó đã khóa trong slot; cải thiện chất lượng diễn đạt.',
+        'decrease-difficulty': 'Không được thay đổi độ khó vì độ khó đã khóa trong slot; cải thiện chất lượng diễn đạt.',
+        'replace': 'Thay bằng câu khác nhưng giữ nguyên toàn bộ ràng buộc slot.',
+    }
+    if action not in instructions:
+        raise ValueError('Thao tác AI cho câu hỏi không hợp lệ.')
+    prompt = f'''{instructions[action]}
+Slot bắt buộc: {json.dumps({'questionType': slot.question_type, 'optionCount': slot.option_count, 'score': float(slot.score), 'difficulty': slot.difficulty, 'topic': slot.topic, 'metadata': slot.metadata}, ensure_ascii=False)}
+Trả JSON {{"question":{{"content":"","choices":[],"correctAnswer":"","explanation":""}}}}.
+Câu hiện tại: {json.dumps(serialize_question(question), ensure_ascii=False)}
+Nguồn: {source_context(paper)}'''
+    result = call_ai_json(paper=paper, task_type=f'question_{action}', model=_config().generation_model, user_email=user_email, system='Chỉ trả JSON hợp lệ và tuyệt đối không đổi ràng buộc của slot.', prompt=prompt)
+    row = result.get('question') if isinstance(result, dict) else None
+    if not isinstance(row, dict):
+        raise ValueError('AI không trả về câu hỏi hợp lệ.')
+    return normalize_question_for_slot(row, question.order, slot)

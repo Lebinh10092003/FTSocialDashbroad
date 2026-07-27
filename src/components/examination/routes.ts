@@ -12,6 +12,7 @@ const listRoutes: Record<string, ExaminationPage> = {
   'partners': 'partners',
   'import': 'import',
   'papers': 'papers',
+  'blueprints': 'blueprints',
   'ai-config': 'ai-config',
 };
 
@@ -25,6 +26,7 @@ export function examinationRouteFromPath(pathname: string): ExaminationRoute {
   const section = parts[1] || '';
   const id = decodePart(parts[2]);
   if (section === 'papers' && parts[2] === 'new') return { page: 'paper-create' };
+  if (section === 'blueprints' && id) return { page: 'blueprint-detail', id };
   if (section === 'papers' && id) return { page: 'paper-detail', id };
   if (section === 'sessions' && id) return { page: 'session-detail', id };
   if (section === 'competitions' && id) return { page: 'competition-detail', id };
@@ -51,6 +53,8 @@ export function examinationPathFor(page: ExaminationPage, id = ''): string {
     case 'partners': return encoded ? `/examination/partners/${encoded}` : '/examination/partners';
     case 'import': return '/examination/import';
     case 'papers': return '/examination/papers';
+    case 'blueprints': return '/examination/blueprints';
+    case 'blueprint-detail': return encoded ? '/examination/blueprints/' + encoded : '/examination/blueprints';
     case 'paper-create': return '/examination/papers/new';
     case 'paper-detail': return encoded ? '/examination/papers/' + encoded : '/examination/papers';
     case 'ai-config': return '/examination/ai-config';
