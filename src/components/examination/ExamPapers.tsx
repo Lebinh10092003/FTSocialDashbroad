@@ -16,7 +16,7 @@ function usePaperApi(idToken?: string | null) {
     const response = await fetch(`/api/examination${path}`, { ...options, headers:{ Authorization:`Bearer ${idToken||''}`, ...(isForm?{}:{'Content-Type':'application/json'}), ...(options.headers||{}) } });
     const type=response.headers.get('content-type')||'';
     const body=type.includes('application/json') ? await response.json() : await response.blob();
-    if(!response.ok) throw new Error((body as any)?.error || 'Không thể xử lý yêu cầu.');
+    if(!response.ok){const detail=(body as any)?.error;const guidance=response.status===401?'Phiên đăng nhập đã hết. Hãy đăng nhập lại.':response.status===403?'Tài khoản của bạn chưa có quyền thực hiện thao tác này.':`Yêu cầu không thành công (mã ${response.status}). Hãy thử Đồng bộ lại; nếu vẫn lỗi, gửi mã này cho quản trị viên.`;throw new Error(detail||guidance);}
     return body;
   };
 }

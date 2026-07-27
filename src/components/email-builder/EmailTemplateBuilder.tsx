@@ -696,11 +696,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
         {/* Top Header */}
         <header className="ft-module-header bg-white border-b px-6 py-4.5 flex items-center justify-between shrink-0 z-20 sticky top-0 shadow-sm">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-tr from-blue-600 to-indigo-650 rounded-2xl flex items-center justify-center text-white shadow-md">
-              <svg className="w-5.5 h-5.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-            </div>
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-sky-100 bg-white shadow-sm"><img src="/logo.png" alt="Fermat" className="h-7 w-auto object-contain"/></div>
             <div>
               <h1 className="text-sm font-black text-slate-900 tracking-wide">Trình quản lý mẫu Email</h1>
               <p className="text-[10px] text-slate-400 font-extrabold uppercase mt-0.5">FermatTech Workspace</p>
