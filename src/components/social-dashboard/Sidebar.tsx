@@ -34,9 +34,9 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
   ];
 
   return (
-    <div className="w-64 bg-white text-slate-800 flex flex-col h-screen sticky top-0 border-r border-slate-200/60 shadow-[2px_0_12px_rgba(15,23,42,0.02)]">
+    <div className="ft-module-sidebar w-64 flex h-screen flex-col sticky top-0 border-r">
       {/* Brand logo & title */}
-      <div className="p-5 border-b border-slate-100 flex items-center gap-3">
+      <div className="ft-sidebar-brand p-5 border-b flex items-center gap-3">
         <img src="/logo.png" alt="FermatTech Logo" className="h-8 object-contain" />
         <div className="border-l border-slate-200 pl-3">
           <h1 className="font-extrabold text-slate-900 text-sm leading-none tracking-tight" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>Fermat</h1>
@@ -48,7 +48,7 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
       <div className="px-4 pt-4">
         <button
           onClick={onBackToWorkspace}
-          className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-650 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 border border-slate-200/50 transition-all cursor-pointer shadow-sm active:scale-[0.98]"
+          className="ft-sidebar-back w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer active:scale-[0.98]"
         >
           <ArrowLeft className="w-4 h-4 text-slate-500" />
           <span>Quay lại Workspace</span>
@@ -66,8 +66,8 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
               onClick={() => setActiveTab(item.id)}
               className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 isActive
-                  ? 'border-l-4 border-[#ff6b00] bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm sidebar-glow-active'
-                  : 'border-l-4 border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                  ? 'ft-nav-item ft-nav-item-active'
+                  : 'ft-nav-item'
               }`}
             >
               <IconComponent className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />

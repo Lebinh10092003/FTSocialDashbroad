@@ -463,6 +463,7 @@ export default function App() {
             onAccountClick={isGuest ? () => { setAuthError(''); setShowLoginModal(true); } : handleLogout}
             isGuest={isGuest}
             userName={user.displayName}
+            idToken={idToken || ''}
           />
         </Suspense>
         {loginModal}
@@ -493,7 +494,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
+    <div className="ft-module-shell flex h-screen overflow-hidden font-sans">
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setSocialTab}
@@ -504,7 +505,7 @@ export default function App() {
         onLogin={() => { setAuthError(''); setShowLoginModal(true); }}
         onBackToWorkspace={() => setViewMode('workspace')}
       />
-      <main className="flex-1 overflow-y-auto px-5 py-6 md:px-7 md:py-7">
+      <main className="flex-1 overflow-y-auto"><header className="ft-module-header sticky top-0 z-10 flex h-16 items-center justify-between border-b px-5 md:px-7"><div><p className="text-xs font-bold uppercase tracking-wide text-sky-700">Truyền thông</p><h1 className="text-base font-extrabold text-slate-900">{({dashboard:'Biểu đồ tổng quan',media:'Báo cáo tổng hợp',posts:'Bài đăng',sync:'Đồng bộ dữ liệu',config:'Cấu hình hệ thống'} as Record<string,string>)[activeTab]}</h1></div><span className="hidden rounded-full bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-800 sm:block">Fermat Workspace</span></header><div className="ft-module-content px-5 py-6 md:px-7 md:py-7">
         {loading ? (
           <div className="grid h-full place-items-center text-sm font-semibold text-slate-500">Đang tải dữ liệu...</div>
         ) : (
@@ -538,6 +539,7 @@ export default function App() {
             </Suspense>
           </div>
         )}
+      </div>
       </main>
       {loginModal}
     </div>

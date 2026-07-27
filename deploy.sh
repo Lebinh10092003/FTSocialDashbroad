@@ -7,6 +7,8 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 SERVICE_NAME="${SERVICE_NAME:-workspace-django.service}"
 SYNC_SERVICE_NAME="${SYNC_SERVICE_NAME:-workspace-social-sync.service}"
 SYNC_TIMER_NAME="${SYNC_TIMER_NAME:-workspace-social-sync.timer}"
+DB_BACKUP_SERVICE_NAME="${DB_BACKUP_SERVICE_NAME:-workspace-db-backup.service}"
+DB_BACKUP_TIMER_NAME="${DB_BACKUP_TIMER_NAME:-workspace-db-backup.timer}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8001/api/health/}"
 HEALTH_HOST="${HEALTH_HOST:-workspace.fermat.vn}"
 HEALTH_RETRIES="${HEALTH_RETRIES:-30}"
@@ -52,9 +54,12 @@ fi
 sudo install -m 0644 workspace-django.service "/etc/systemd/system/$SERVICE_NAME"
 sudo install -m 0644 workspace-social-sync.service "/etc/systemd/system/$SYNC_SERVICE_NAME"
 sudo install -m 0644 workspace-social-sync.timer "/etc/systemd/system/$SYNC_TIMER_NAME"
+sudo install -m 0644 workspace-db-backup.service "/etc/systemd/system/$DB_BACKUP_SERVICE_NAME"
+sudo install -m 0644 workspace-db-backup.timer "/etc/systemd/system/$DB_BACKUP_TIMER_NAME"
 sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME"
 sudo systemctl enable --now "$SYNC_TIMER_NAME"
+sudo systemctl enable --now "$DB_BACKUP_TIMER_NAME"
 sudo systemctl restart "$SERVICE_NAME"
 
 for attempt in $(seq 1 "$HEALTH_RETRIES"); do

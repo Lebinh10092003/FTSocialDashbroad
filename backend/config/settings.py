@@ -55,11 +55,19 @@ TEMPLATES = [{
     ]},
 }]
 
-# Local development keeps the database in backend/db.sqlite3.  Production can set
-# DJANGO_DB_PATH in backend/.env to a durable directory outside the release tree.
+# Local development keeps the database in backend/db.sqlite3. On the production
+# host, even an ad-hoc `manage.py` command must use the durable data directory;
+# otherwise it silently opens a second, empty SQLite file inside a Git release.
 _default_database_path = BASE_DIR / "db.sqlite3"
 _configured_database_path = os.getenv("DJANGO_DB_PATH", "").strip()
-DATABASE_PATH = Path(_configured_database_path).expanduser() if _configured_database_path else _default_database_path
+_workspace_data_dir = Path(os.getenv("WORKSPACE_DATA_DIR", "/home/workspace/ft-workspace-data")).expanduser()
+_is_workspace_production = os.name != "nt" and str(PROJECT_ROOT).startswith("/var/www/ft-workspace")
+if _configured_database_path:
+    DATABASE_PATH = Path(_configured_database_path).expanduser()
+elif _is_workspace_production:
+    DATABASE_PATH = _workspace_data_dir / "workspace.sqlite3"
+else:
+    DATABASE_PATH = _default_database_path
 if not DATABASE_PATH.is_absolute():
     DATABASE_PATH = (PROJECT_ROOT / DATABASE_PATH).resolve()
 

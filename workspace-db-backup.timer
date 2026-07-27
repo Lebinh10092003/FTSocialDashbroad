@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily FT Workspace database backup
+
+[Timer]
+OnCalendar=*-*-* 02:15:00
+Persistent=true
+RandomizedDelaySec=8m
+Unit=workspace-db-backup.service
+
+[Install]
+WantedBy=timers.target
