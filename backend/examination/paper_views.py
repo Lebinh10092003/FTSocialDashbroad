@@ -123,9 +123,9 @@ def paper_duplicate(request, pk):
     if not source:
         return Response({'error': 'Không tìm thấy đề thi.'}, status=status.HTTP_404_NOT_FOUND)
     with transaction.atomic():
-        copy = ExamPaper.objects.create(title=f'{source.title} — Bản sao', competition=source.competition, session=source.session, subject=source.subject, grade_or_category=source.grade_or_category, language=source.language, duration_minutes=source.duration_minutes, total_questions=source.total_questions, difficulty_distribution=source.difficulty_distribution, status='DRAFT', description=source.description, created_by=actor(request), updated_by=actor(request))
+        copy = ExamPaper.objects.create(title=f'{source.title} — Bản sao', blueprint_version=source.blueprint_version, competition=source.competition, session=source.session, subject=source.subject, grade_or_category=source.grade_or_category, language=source.language, duration_minutes=source.duration_minutes, total_questions=source.total_questions, difficulty_distribution=source.difficulty_distribution, status='DRAFT', description=source.description, created_by=actor(request), updated_by=actor(request))
         for item in source.questions.all():
-            ExamQuestion.objects.create(paper=copy, order=item.order, content=item.content, choices=item.choices, correct_answer=item.correct_answer, explanation=item.explanation, difficulty=item.difficulty, topic=item.topic, check_status='PENDING')
+            ExamQuestion.objects.create(paper=copy, blueprint_slot=item.blueprint_slot, question_type=item.question_type, score=item.score, slot_metadata=item.slot_metadata, order=item.order, content=item.content, choices=item.choices, correct_answer=item.correct_answer, explanation=item.explanation, difficulty=item.difficulty, topic=item.topic, check_status='PENDING')
     return Response(serialize_paper(get_paper(copy.pk), include_questions=True), status=status.HTTP_201_CREATED)
 
 
