@@ -742,3 +742,51 @@ a { color: inherit; text-decoration: none; }
 .dt-calendar-event.is-completed { background:#e8f8ef; border-left-color:#22a06b; color:#147247; }
 .dt-calendar-event.is-cancelled { background:#fff0f1; border-left-color:#e56b75; color:#b34752; }
 @media (max-width: 1023px) { .dt-calendar-scroll { overflow-x:auto; } }
+/* Responsive density: keep desktop information-rich without requiring browser zoom.
+   Mobile keeps a readable base size while panels, toolbars and data tables reflow. */
+@media (min-width: 1024px) {
+  html { font-size: 14px; }
+  .ft-module-header { min-height: 3.5rem; }
+  .ft-module-content { max-width: 1600px; }
+  .ft-module-sidebar { width: 16rem; }
+}
+
+.ft-mobile-nav {
+  display: flex;
+  gap: .45rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  border-bottom: 1px solid #d9e9f7;
+  background: rgba(255,255,255,.96);
+  padding: .55rem .9rem;
+}
+.ft-mobile-nav button {
+  flex: 0 0 auto;
+  min-height: 2.35rem;
+  border: 1px solid #cfe4f5;
+  border-radius: .65rem;
+  background: #fff;
+  color: #41627e;
+  padding: .45rem .72rem;
+  font-size: .75rem;
+  font-weight: 700;
+}
+.ft-mobile-nav button[aria-current="page"] { background: #e7f4ff; border-color: #8fc7ec; color: #075da7; }
+
+@media (max-width: 767px) {
+  html { font-size: 15px; }
+  body { overflow-x: hidden; background-attachment: scroll; }
+  .ft-module-shell { width: 100%; min-height: 100dvh; }
+  .ft-module-header { min-height: 3.75rem; height: auto !important; padding: .65rem 1rem !important; }
+  .ft-module-content { width: 100%; max-width: none; padding: 1rem !important; }
+  .ft-module-content > * { min-width: 0; }
+  .ft-page-header, .ft-toolbar, .ft-surface, .ft-dialog-panel { border-radius: .9rem; }
+  .ft-table { min-width: max-content; font-size: .78rem; }
+  .ft-table th, .ft-table td { padding: .65rem .75rem !important; }
+  .ft-dialog-backdrop { padding: .5rem; }
+  .ft-dialog-panel { max-height: calc(100dvh - 1rem) !important; }
+  input, select, textarea { font-size: 16px; }
+  .dt-calendar-toolbar { align-items: flex-start; flex-direction: column; }
+  .dt-calendar-scroll { -webkit-overflow-scrolling: touch; }
+}

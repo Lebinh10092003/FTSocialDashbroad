@@ -35,7 +35,7 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
   ];
 
   return (
-    <div className="ft-module-sidebar w-64 flex h-screen flex-col sticky top-0 border-r">
+    <div className="ft-module-sidebar hidden w-64 h-screen flex-col sticky top-0 border-r md:flex">
       {/* Brand logo & title */}
       <div className="ft-sidebar-brand p-5 border-b flex items-center gap-3">
         <img src="/logo.png" alt="FermatTech Logo" className="h-8 object-contain" />
