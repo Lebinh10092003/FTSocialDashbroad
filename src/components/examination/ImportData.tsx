@@ -157,7 +157,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   const duplicateCheckRef = useRef(0);
   const [sourceUrl, setSourceUrl] = useState('');
   const [targetSessionId, setTargetSessionId] = useState(sessionId || '');
-  const [sessionTimeFilter, setSessionTimeFilter] = useState('');
+  const [sessionYearFilter, setSessionYearFilter] = useState('');
   const [sessionOrganizerFilter, setSessionOrganizerFilter] = useState('');
   const [rows, setRows] = useState<Candidate[]>([]);
   const [previewPage, setPreviewPage] = useState(1);
@@ -228,11 +228,15 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
       return !lastRelevantDate || lastRelevantDate >= today;
     });
   }, [sheets, sessions]);
-  const sessionTimeOptions = useMemo(() => [...new Set(sessions.map(sessionTimelineLabel))].filter(Boolean).sort(), [sessions]);
+  const sessionYears = (session: ExaminationSession) => [...new Set([
+    ...(sessionTimelineLabel(session).match(/20\d{2}/g) || []),
+    ...(String(session.academicYear || '').match(/20\d{2}/g) || []),
+  ])];
+  const sessionYearOptions = useMemo(() => [...new Set(sessions.flatMap(sessionYears))].sort(), [sessions]);
   const sessionOrganizerOptions = useMemo(() => [...new Set(sessions.map(item => item.organizer).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'vi')), [sessions]);
   const selectableSessions = useMemo(() => sessions
-    .filter(item => (!sessionTimeFilter || sessionTimelineLabel(item) === sessionTimeFilter) && (!sessionOrganizerFilter || item.organizer === sessionOrganizerFilter))
-    .sort((left, right) => sessionRecencyKey(right).localeCompare(sessionRecencyKey(left))), [sessions, sessionTimeFilter, sessionOrganizerFilter]);
+    .filter(item => (!sessionYearFilter || sessionYears(item).includes(sessionYearFilter)) && (!sessionOrganizerFilter || item.organizer === sessionOrganizerFilter))
+    .sort((left, right) => sessionRecencyKey(right).localeCompare(sessionRecencyKey(left))), [sessions, sessionYearFilter, sessionOrganizerFilter]);
 
   // Load danh sách sheet nguồn từ DB
   const loadSheets = useCallback(async () => {
@@ -501,7 +505,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
 
       <section className="mb-5 rounded-2xl border border-blue-200 bg-blue-50/60 p-4">
         <div className="grid gap-3 md:grid-cols-3">
-          <label className="block"><span className="text-sm font-bold text-[#001e40]">Thời gian</span><select value={sessionTimeFilter} onChange={event => { setSessionTimeFilter(event.target.value); setTargetSessionId(''); }} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Tất cả thời gian</option>{sessionTimeOptions.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label className="block"><span className="text-sm font-bold text-[#001e40]">Năm</span><select value={sessionYearFilter} onChange={event => { setSessionYearFilter(event.target.value); setTargetSessionId(''); }} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Tất cả năm</option>{sessionYearOptions.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
           <label className="block"><span className="text-sm font-bold text-[#001e40]">BTC quốc tế</span><select value={sessionOrganizerFilter} onChange={event => { setSessionOrganizerFilter(event.target.value); setTargetSessionId(''); }} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Tất cả BTC quốc tế</option>{sessionOrganizerOptions.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
           <label className="block md:col-span-3"><span className="text-sm font-bold text-[#001e40]">Dữ liệu thuộc kỳ tổ chức</span><select value={targetSessionId} onChange={event => setTargetSessionId(event.target.value)} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Chọn kỳ tổ chức trước khi nhập</option>{selectableSessions.map(item => <option key={item.id} value={item.id}>{sessionOptionLabel(item)}</option>)}</select><p className="mt-2 text-xs text-slate-600">Hồ sơ trong file sẽ được bổ sung vào lịch sử của thí sinh, đồng thời liên kết với kỳ này.</p></label>
         </div>
