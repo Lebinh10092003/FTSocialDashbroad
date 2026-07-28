@@ -55,7 +55,7 @@ class TrainingPartnerSerializer(serializers.ModelSerializer):
             if not isinstance(item, dict) or item.get("unscheduled") or not item.get("date"):
                 continue
             TrainingSession.objects.create(
-                title=f"Buổi {number} · {partner.name}",
+                title=f"Buổi chung {number} · {partner.name}",
                 session_number=number,
                 session_date=item["date"],
                 partner=partner.name,
@@ -63,7 +63,7 @@ class TrainingPartnerSerializer(serializers.ModelSerializer):
                 category=" · ".join(contents),
                 contents=contents,
                 status="planned",
-                notes=f"{prefix}: buổi {number}.",
+                notes=f"{prefix}: buổi chung {number}.",
             )
 
     def create(self, validated_data):
