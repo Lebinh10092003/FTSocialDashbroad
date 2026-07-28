@@ -10,7 +10,7 @@ class TrainingPartnerSerializer(serializers.ModelSerializer):
     class Meta:
         model = TrainingPartner
         fields = [
-            "id", "name", "address", "contact_person", "phone", "email",
+            "id", "name", "address", "contact_person", "phone", "email", "additional_contacts",
             "contract_start", "contract_end", "training_content", "planned_sessions",
             "partner_type", "products", "contract_duration", "contract_duration_unit",
             "contract_signed_date", "contract_status", "budget", "ai_account_count", "training_contents",
@@ -20,6 +20,21 @@ class TrainingPartnerSerializer(serializers.ModelSerializer):
     def get_completed_sessions(self, obj):
         return obj.sessions.filter(status="completed").count()
 
+    def validate_additional_contacts(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Danh sach dau moi phai la danh sach.")
+        cleaned = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            contact = {
+                "contact_person": str(item.get("contact_person", "")).strip(),
+                "phone": str(item.get("phone", "")).strip(),
+                "email": str(item.get("email", "")).strip(),
+            }
+            if any(contact.values()):
+                cleaned.append(contact)
+        return cleaned
     def validate_products(self, value):
         if not isinstance(value, list):
             raise serializers.ValidationError("San pham dang ky phai la danh sach.")

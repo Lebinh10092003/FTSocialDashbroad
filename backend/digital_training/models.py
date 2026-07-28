@@ -7,6 +7,7 @@ class TrainingPartner(models.Model):
     contact_person = models.CharField(max_length=255, blank=True)
     phone = models.CharField(max_length=50, blank=True)
     email = models.EmailField(blank=True)
+    additional_contacts = models.JSONField(default=list, blank=True)
     contract_start = models.CharField(max_length=20, blank=True)
     contract_end = models.CharField(max_length=20, blank=True)
     training_content = models.TextField(blank=True)
