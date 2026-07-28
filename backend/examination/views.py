@@ -883,17 +883,37 @@ def automatic_session_phase(session, current_date=None):
     )
     if has_later_planned_round and today > final_date:
         if 'quoc gia' in _phase_key(final_name):
-            return '\u00d4n t\u1eadp V\u00f2ng qu\u1ed1c t\u1ebf'
-        return str(session.phase or '').strip() or 'Chu\u1ea9n b\u1ecb/Truy\u1ec1n th\u00f4ng'
-    if today >= final_date + timedelta(days=30):
-        return 'Ho\u00e0n th\u00e0nh'
-    if today > final_date:
-        return 'C\u00f4ng b\u1ed1 k\u1ebft qu\u1ea3'
+            return 'Ôn tập Vòng quốc tế'
+        return str(session.phase or '').strip() or 'Chuẩn bị/Truyền thông'
+
+    phase = str(session.phase or '').strip()
+    phase_key = _phase_key(phase)
+    automatic_phase_keys = {
+        'tuyen sinh', 'chuan bi', 'chuan bi/truyen thong',
+        'on tap vong quoc gia', 'on tap vong quoc te',
+        'vong quoc gia', 'vong chung ket quoc gia', 'vong quoc te',
+        'tong hop ket qua', 'cong bo ket qua', 'cong bo ket qua, phuc khao',
+        'vinh danh', 'hoan thanh',
+    }
+    # Operational teams can keep a special post-final phase open beyond the
+    # default timetable. Only recognised automatic phases are advanced here.
+    if today > final_date and phase and phase_key not in automatic_phase_keys:
+        return phase
+
+    if today >= final_date + timedelta(days=35):
+        return 'Hoàn thành'
+    if today >= final_date + timedelta(days=28):
+        return 'Vinh danh'
+    if today >= final_date + timedelta(days=21):
+        return 'Công bố kết quả, phúc khảo'
+    if today >= final_date + timedelta(days=14):
+        return 'Tổng hợp kết quả'
+    if today >= final_date:
+        return final_name
 
     upcoming = next((round_item for round_item in rounds if round_item[0] >= today), None)
     if upcoming:
         upcoming_date, _, upcoming_name = upcoming
-        # The actual round takes precedence during the seven-day run-up.
         if today >= upcoming_date - timedelta(days=7):
             return upcoming_name
 
@@ -903,8 +923,7 @@ def automatic_session_phase(session, current_date=None):
             if 'quoc gia' in _phase_key(last_completed_name) and 'quoc te' in _phase_key(upcoming_name):
                 return 'Ôn tập Vòng quốc tế'
 
-    return str(session.phase or '').strip() or 'Chuẩn bị/Truyền thông'
-
+    return phase or 'Chuẩn bị/Truyền thông'
 
 def refresh_automatic_session_phase(session, current_date=None):
     """Persist the calculated phase so lists, details and integrations agree."""

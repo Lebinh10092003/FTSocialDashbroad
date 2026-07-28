@@ -546,12 +546,22 @@ class AutomaticSessionPhaseTests(TestCase):
         self.session.phase = 'Hoàn thành'
         self.assertEqual(automatic_session_phase(self.session, date(2026, 7, 27)), 'Ôn tập Vòng quốc tế')
         self.assertEqual(automatic_session_phase(self.session, date(2026, 9, 15)), 'Ôn tập Vòng quốc tế')
-    def test_final_round_moves_to_results_then_completed_after_one_month(self):
+    def test_final_round_moves_through_results_honouring_and_completion(self):
         from datetime import date
         from .views import automatic_session_phase
 
-        self.assertEqual(automatic_session_phase(self.session, date(2026, 8, 10)), 'Công bố kết quả')
-        self.assertEqual(automatic_session_phase(self.session, date(2026, 9, 8)), 'Hoàn thành')
+        self.assertEqual(automatic_session_phase(self.session, date(2026, 8, 10)), 'Vòng Quốc tế')
+        self.assertEqual(automatic_session_phase(self.session, date(2026, 8, 23)), 'Tổng hợp kết quả')
+        self.assertEqual(automatic_session_phase(self.session, date(2026, 8, 30)), 'Công bố kết quả, phúc khảo')
+        self.assertEqual(automatic_session_phase(self.session, date(2026, 9, 6)), 'Vinh danh')
+        self.assertEqual(automatic_session_phase(self.session, date(2026, 9, 13)), 'Hoàn thành')
+
+    def test_special_post_final_phase_is_not_automatically_completed(self):
+        from datetime import date
+        from .views import automatic_session_phase
+
+        self.session.phase = 'Chờ quyết định Hội đồng'
+        self.assertEqual(automatic_session_phase(self.session, date(2026, 11, 1)), 'Chờ quyết định Hội đồng')
 class SheetPublicationTests(TestCase):
     def setUp(self):
         self.user = UserProfile.objects.create(email='sheets-admin@example.com', name='Sheets Admin', role='ADMIN')
