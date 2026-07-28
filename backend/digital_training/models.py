@@ -23,6 +23,8 @@ class TrainingPartner(models.Model):
     ai_account_count = models.PositiveIntegerField(default=0)
     training_contents = models.JSONField(default=list, blank=True)
     training_schedule = models.JSONField(default=list, blank=True)
+    training_location = models.CharField(max_length=500, blank=True)
+    training_staff = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -45,10 +47,10 @@ class TrainingClass(models.Model):
 
 
 class TrainingSession(models.Model):
-    STATUS_CHOICES = [("planned", "Scheduled"), ("completed", "Completed"), ("cancelled", "Cancelled")]
+    STATUS_CHOICES = [("unscheduled", "Unscheduled"), ("planned", "Scheduled"), ("completed", "Completed"), ("cancelled", "Cancelled")]
     title = models.CharField(max_length=255)
     session_number = models.PositiveIntegerField(null=True, blank=True)
-    session_date = models.DateField()
+    session_date = models.DateField(null=True, blank=True)
     start_time = models.TimeField(null=True, blank=True)
     end_time = models.TimeField(null=True, blank=True)
     partner = models.CharField(max_length=255, blank=True)
@@ -60,6 +62,7 @@ class TrainingSession(models.Model):
     location = models.CharField(max_length=500, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="planned")
     notes = models.TextField(blank=True)
+    staff_name = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

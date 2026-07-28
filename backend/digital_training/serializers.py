@@ -14,7 +14,7 @@ class TrainingPartnerSerializer(serializers.ModelSerializer):
             "contract_start", "contract_end", "training_content", "planned_sessions",
             "partner_type", "products", "contract_duration", "contract_duration_unit",
             "contract_signed_date", "contract_status", "budget", "ai_account_count", "training_contents",
-            "training_schedule", "completed_sessions", "notes", "created_at", "updated_at",
+            "training_schedule", "training_location", "training_staff", "completed_sessions", "notes", "created_at", "updated_at",
         ]
 
     def get_completed_sessions(self, obj):
@@ -52,17 +52,21 @@ class TrainingPartnerSerializer(serializers.ModelSerializer):
             return
         contents = partner.training_contents or []
         for number, item in enumerate(partner.training_schedule or [], start=1):
-            if not isinstance(item, dict) or item.get("unscheduled") or not item.get("date"):
+            if not isinstance(item, dict):
                 continue
+            unscheduled = bool(item.get("unscheduled")) or not item.get("date")
             TrainingSession.objects.create(
                 title=f"Buổi chung {number} · {partner.name}",
                 session_number=number,
-                session_date=item["date"],
+                session_date=None if unscheduled else item.get("date"),
+                start_time=None if unscheduled else (item.get("start_time") or None),
                 partner=partner.name,
                 partner_ref=partner,
                 category=" · ".join(contents),
                 contents=contents,
-                status="planned",
+                location=partner.training_location,
+                staff_name=partner.training_staff,
+                status="unscheduled" if unscheduled else "planned",
                 notes=f"{prefix}: buổi chung {number}.",
             )
 
@@ -92,7 +96,7 @@ class TrainingClassSerializer(serializers.ModelSerializer):
 
 
 class TrainingSessionSerializer(serializers.ModelSerializer):
-    date = serializers.DateField(source="session_date")
+    date = serializers.DateField(source="session_date", required=False, allow_null=True)
     partner_id = serializers.PrimaryKeyRelatedField(source="partner_ref", queryset=TrainingPartner.objects.all(), required=False, allow_null=True)
     partner_name = serializers.SerializerMethodField()
     class_group_id = serializers.PrimaryKeyRelatedField(source="training_class", queryset=TrainingClass.objects.all(), required=False, allow_null=True)
@@ -104,7 +108,7 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
         fields = [
             "id", "title", "session_number", "date", "start_time", "end_time", "partner", "partner_id", "partner_name",
             "class_group_id", "class_group_name", "category", "contents", "attendees", "location",
-            "status", "notes", "has_materials", "created_at", "updated_at",
+            "status", "notes", "staff_name", "has_materials", "created_at", "updated_at",
         ]
 
     def get_partner_name(self, obj):
