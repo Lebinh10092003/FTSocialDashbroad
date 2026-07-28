@@ -312,6 +312,12 @@ export default function App() {
     setUser(nextUser);
     if (idToken) persistSession(idToken, nextUser, userRole);
   };
+
+  const handlePasswordChanged = (nextToken: string, nextUser: AppUser) => {
+    setIdToken(nextToken);
+    setUser(nextUser);
+    persistSession(nextToken, nextUser, userRole);
+  };
   const loginModal = (
     <LoginModal
       open={showLoginModal}
@@ -327,7 +333,7 @@ export default function App() {
   );
 
   const profileModal = (
-    <AccountProfileModal open={showProfile} user={user} idToken={idToken} onClose={() => setShowProfile(false)} onSaved={handleProfileSaved}/>
+    <AccountProfileModal open={showProfile} user={user} idToken={idToken} onClose={() => setShowProfile(false)} onSaved={handleProfileSaved} onTokenChanged={handlePasswordChanged}/>
   );
   if (authChecking) {
     return (

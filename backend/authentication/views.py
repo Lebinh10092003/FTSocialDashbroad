@@ -499,6 +499,34 @@ def update_profile(request):
     return Response(_user_payload(profile))
 
 
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    """Change the signed-in user's password and revoke other remembered sessions."""
+    current_password = str(request.data.get("currentPassword") or "")
+    new_password = str(request.data.get("newPassword") or "")
+    if not current_password or not new_password:
+        return Response({"error": "Vui lòng nhập mật khẩu hiện tại và mật khẩu mới."}, status=status.HTTP_400_BAD_REQUEST)
+
+    profile = request.user
+    django_user = User.objects.filter(username__iexact=profile.email).first()
+    if django_user is None:
+        return Response({"error": "Không tìm thấy tài khoản đăng nhập tương ứng."}, status=status.HTTP_404_NOT_FOUND)
+    if not django_user.check_password(current_password):
+        return Response({"error": "Mật khẩu hiện tại chưa chính xác."}, status=status.HTTP_400_BAD_REQUEST)
+    if current_password == new_password:
+        return Response({"error": "Mật khẩu mới cần khác mật khẩu hiện tại."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        validate_password(new_password, django_user)
+    except ValidationError as exc:
+        return Response({"error": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+    django_user.set_password(new_password)
+    django_user.save(update_fields=["password"])
+    Token.objects.filter(user=django_user).delete()
+    token = Token.objects.create(user=django_user)
+    return Response({"success": True, "token": token.key, "user": _user_payload(_profile_for_user(django_user))})
+
 @api_view(["GET", "POST"])
 @permission_classes([IsManagerOrAdmin])
 def manage_users(request):

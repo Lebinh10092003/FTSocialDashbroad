@@ -137,3 +137,28 @@ class PersistentLoginTests(TestCase):
         self.assertEqual(second.status_code, 200)
         self.assertEqual(first.json()['token'], second.json()['token'])
         self.assertEqual(Token.objects.filter(user=self.user).count(), 1)
+    def test_user_can_change_password_with_the_current_password(self):
+        previous_token = Token.objects.create(user=self.user).key
+        response = self.client.post(
+            '/api/auth/change-password',
+            {'currentPassword': 'StrongPassword9921', 'newPassword': 'ChangedPassword9921'},
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {previous_token}',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('ChangedPassword9921'))
+        self.assertNotEqual(response.json()['token'], previous_token)
+        self.assertEqual(Token.objects.filter(user=self.user).count(), 1)
+
+    def test_password_change_requires_current_password(self):
+        token = Token.objects.create(user=self.user).key
+        response = self.client.post(
+            '/api/auth/change-password',
+            {'currentPassword': 'incorrect', 'newPassword': 'ChangedPassword9921'},
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token}',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(self.user.check_password('StrongPassword9921'))
