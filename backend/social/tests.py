@@ -440,6 +440,30 @@ class MediaSummaryTrendTests(TestCase):
         self.assertEqual(trend[current_period]['postsCount'], 1)
         self.assertEqual(trend[current_period]['followers'], 120)
 
+    def test_monthly_trend_uses_first_recorded_metric_as_historical_baseline(self):
+        published_day = self.previous_month_start - timedelta(days=70)
+        baseline_post = Post.objects.create(
+            post_key='facebook:trend:baseline', platform='facebook', channel_id=self.channel.id,
+            external_post_id='baseline', post_url='https://example.com/baseline', post_type='photo',
+            published_at=timezone.make_aware(datetime.datetime.combine(published_day, datetime.time(hour=8))),
+            imported_at=timezone.now(), updated_at=timezone.now(),
+        )
+        DailySnapshot.objects.create(
+            snapshot_key=f'{baseline_post.post_key}:{self.current_day.isoformat()}', snapshot_date=self.current_day.isoformat(),
+            platform=self.channel.platform, channel_id=self.channel.id, post_key=baseline_post.post_key,
+            views=77, reach=77, impressions=77, reactions=11, likes=11, total_engagement=11, fetched_at=timezone.now(),
+        )
+
+        response = self.client.get('/api/media-summary/trend', {'groupBy': 'month'})
+        trend = {point['period']: point for point in response.json()['trend']}
+        period = published_day.strftime('%Y-%m')
+        self.assertEqual(trend[period]['views'], 77)
+        self.assertEqual(trend[period]['engagement'], 11)
+
+    def test_quarterly_report_returns_eight_quarters(self):
+        response = self.client.get('/api/media-summary/trend', {'groupBy': 'quarter'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()['trend']), 8)
 
 class DashboardFilterConsistencyTests(TestCase):
     def setUp(self):

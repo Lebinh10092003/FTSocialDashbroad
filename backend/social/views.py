@@ -314,6 +314,14 @@ def media_summary_trend(request):
                 if candidate.snapshot_date > b_end:
                     break
                 snap = candidate
+            # Historical imports may first record a post's lifetime metrics
+            # after its publication period. Use that first recorded value as a
+            # baseline instead of showing every earlier period as a false zero.
+            # Once normal daily snapshots exist, the latest snapshot at each
+            # period boundary still takes precedence.
+            if snap is None:
+                recorded = snapshots_by_post.get(p.post_key, [])
+                snap = recorded[0] if recorded else None
             if snap:
                 views_sum += getattr(snap, 'views', 0) or getattr(snap, 'impressions', 0) or getattr(snap, 'reach', 0) or 0
                 engagement_sum += getattr(snap, 'total_engagement', 0) or 0
