@@ -18,6 +18,7 @@ class TrainingPartner(models.Model):
     contract_duration_unit = models.CharField(max_length=10, blank=True)
     contract_signed_date = models.DateField(null=True, blank=True)
     contract_status = models.CharField(max_length=30, blank=True)
+    budget = models.DecimalField(max_digits=15, decimal_places=0, null=True, blank=True)
     ai_account_count = models.PositiveIntegerField(default=0)
     training_contents = models.JSONField(default=list, blank=True)
     training_schedule = models.JSONField(default=list, blank=True)

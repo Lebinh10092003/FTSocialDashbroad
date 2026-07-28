@@ -13,7 +13,7 @@ class TrainingPartnerSerializer(serializers.ModelSerializer):
             "id", "name", "address", "contact_person", "phone", "email",
             "contract_start", "contract_end", "training_content", "planned_sessions",
             "partner_type", "products", "contract_duration", "contract_duration_unit",
-            "contract_signed_date", "contract_status", "ai_account_count", "training_contents",
+            "contract_signed_date", "contract_status", "budget", "ai_account_count", "training_contents",
             "training_schedule", "completed_sessions", "notes", "created_at", "updated_at",
         ]
 
