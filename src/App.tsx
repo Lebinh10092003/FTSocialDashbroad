@@ -352,28 +352,28 @@ export default function App() {
         mode: 'social-dashboard',
         title: 'Phân tích Mạng xã hội',
         description: 'Theo dõi Facebook, Zalo OA, báo cáo tương tác và đồng bộ dữ liệu.',
-        gradient: 'from-blue-500 to-indigo-600',
+        gradient: 'from-[#0055DA] to-[#0042AD]',
         icon: ChartColumnBig,
       },
       {
         mode: 'email-builder',
         title: 'Trình tạo Email',
         description: 'Thiết kế email trực quan và lưu mẫu dùng chung.',
-        gradient: 'from-indigo-500 to-violet-600',
+        gradient: 'from-[#FF0052] to-[#d90045]',
         icon: Mail,
       },
       {
         mode: 'examination',
         title: 'Khảo thí',
         description: 'Quản lý cuộc thi, kỳ tổ chức, thí sinh và nguồn dữ liệu Google Sheets.',
-        gradient: 'from-emerald-500 to-teal-600',
+        gradient: 'from-[#00C68D] to-[#008f68]',
         icon: ClipboardList,
       },
       {
         mode: 'digital-training',
         title: 'Đào tạo số',
         description: 'Quản lý nội dung đào tạo chuyển đổi số và ứng dụng AI.',
-        gradient: 'from-cyan-500 to-blue-600',
+        gradient: 'from-[#0055DA] to-[#00C68D]',
         icon: GraduationCap,
       },
     ];
@@ -382,7 +382,7 @@ export default function App() {
         mode: 'account-management',
         title: 'Quản lý tài khoản',
         description: 'Tạo, phân quyền và quản lý thành viên Workspace.',
-        gradient: 'from-slate-600 to-blue-700',
+        gradient: 'from-[#101114] to-[#0055DA]',
         icon: ShieldUser,
       });
     }

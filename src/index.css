@@ -868,3 +868,85 @@ a { color: inherit; text-decoration: none; }
 .dt-month-event.is-cancelled { border-left-color:#e56b75; background:#fff0f1; color:#b34752; }
 .dt-month-more { color:#1681c5; font-size:10px; font-weight:800; }
 @media (max-width: 1023px) { .dt-calendar-month { overflow-x:auto; } }
+/* FT core palette: #0055DA is the primary brand color; the remaining palette is reserved for meaning and emphasis. */
+:root {
+  --ft-blue: #0055DA;
+  --ft-blue-dark: #0042AD;
+  --ft-blue-light: #EAF1FF;
+  --ft-pink: #FF0052;
+  --ft-yellow: #FFD400;
+  --ft-green: #00C68D;
+  --ft-white: #FFFFFF;
+  --ft-black: #101114;
+  --ft-primary: var(--ft-blue);
+  --ft-primary-hover: var(--ft-blue-dark);
+  --ft-primary-light: var(--ft-blue-light);
+  --ft-accent: var(--ft-pink);
+  --ft-accent-amber: var(--ft-yellow);
+  --ft-success: var(--ft-green);
+  --ft-danger: var(--ft-pink);
+  --ft-warning: var(--ft-yellow);
+  --ft-bg: #F6F8FC;
+  --ft-surface: var(--ft-white);
+  --ft-surface-2: #EEF3FB;
+  --ft-surface-3: #DCE5F2;
+  --ft-border: #D9E2F0;
+  --ft-border-strong: #B9C9E1;
+  --ft-border-focus: var(--ft-blue);
+  --ft-text-primary: var(--ft-black);
+  --ft-text-secondary: #374151;
+  --ft-text-muted: #718096;
+  --ft-text-placeholder: #AAB6C8;
+  --ft-shadow-blue: 0 4px 20px rgba(0, 85, 218, .26);
+  --ft-shadow-glow: 0 0 0 3px rgba(0, 85, 218, .20);
+}
+
+body {
+  background-image: radial-gradient(at 0% 0%, rgba(0,85,218,.055) 0px, transparent 50%), radial-gradient(at 100% 0%, rgba(0,198,141,.035) 0px, transparent 50%);
+}
+::selection { background: rgba(0,85,218,.16); color: var(--ft-black); }
+.liquid-bg { background: linear-gradient(150deg, #F6F8FC 0%, #EEF3FB 42%, #EAF1FF 72%, #FFFFFF 100%); }
+.ft-gradient-text { background: linear-gradient(135deg, #0055DA 0%, #0042AD 55%, #00C68D 100%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+.ft-gradient-text-warm { background: linear-gradient(135deg, #FF0052 0%, #FFD400 52%, #0055DA 100%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+.glass-card:hover { box-shadow: var(--ft-shadow-lg), 0 0 0 1px rgba(0,85,218,.16); border-color: rgba(0,85,218,.24); }
+.glow-sphere-1 { background: radial-gradient(circle, rgba(0,85,218,.10) 0%, transparent 70%); }
+.glow-sphere-2 { background: radial-gradient(circle, rgba(0,198,141,.07) 0%, transparent 70%); }
+.glow-sphere-3 { background: radial-gradient(circle, rgba(255,212,0,.08) 0%, transparent 70%); }
+.sidebar-glow-active { box-shadow: 0 2px 12px rgba(0,85,218,.26), 0 0 0 1px rgba(0,85,218,.10); }
+.ft-primary { background: linear-gradient(135deg, #0055DA, #0042AD) !important; box-shadow: 0 4px 14px rgba(0,85,218,.30) !important; color: #fff !important; }
+.ft-primary:hover { background: linear-gradient(135deg, #0042AD, #00358B) !important; box-shadow: 0 6px 18px rgba(0,85,218,.36) !important; }
+.ft-input:focus, .ft-input-wrap:focus-within { border-color: #0055DA !important; box-shadow: 0 0 0 3px rgba(0,85,218,.14) !important; }
+.ft-page.active { background:#0055DA; border-color:#0055DA; box-shadow:0 2px 8px rgba(0,85,218,.30); }
+
+/* Unified module navigation keeps the white identity frame, inside a sapphire blue navigation surface. */
+.ft-module-shell { background: linear-gradient(135deg, #F6F8FC 0%, #EEF3FB 54%, #F6F8FC 100%); }
+.ft-module-sidebar { background: linear-gradient(180deg, #0055DA 0%, #0042AD 100%) !important; border-color: #003A98 !important; box-shadow: 5px 0 24px rgba(0,55,150,.19); color:#fff !important; }
+.ft-module-sidebar .ft-sidebar-brand { background:#fff !important; border-color:#D9E2F0 !important; box-shadow:0 4px 14px rgba(0,36,104,.17); }
+.ft-module-sidebar .ft-sidebar-brand .text-slate-900, .ft-module-sidebar .ft-sidebar-brand b, .ft-module-sidebar .ft-sidebar-brand h1 { color:#0055DA !important; }
+.ft-module-sidebar .ft-sidebar-brand .text-indigo-650, .ft-module-sidebar .ft-sidebar-brand .text-cyan-600 { color:#0055DA !important; }
+.ft-nav-item { color:#EAF1FF !important; }
+.ft-nav-item svg { color:#C9DBFF !important; }
+.ft-nav-item:hover { background:rgba(255,255,255,.12) !important; color:#fff !important; }
+.ft-nav-item-active { border-left-color:#FFD400 !important; background:linear-gradient(90deg, rgba(255,255,255,.22), rgba(255,255,255,.08)) !important; color:#fff !important; box-shadow:inset 0 0 0 1px rgba(255,255,255,.25),0 4px 12px rgba(0,36,104,.19) !important; }
+.ft-nav-item-active svg { color:#fff !important; }
+.ft-sidebar-footer { border-color:rgba(255,255,255,.22) !important; }
+.ft-sidebar-back { border-color:#D9E2F0 !important; color:#0055DA !important; background:#fff !important; }
+.ft-sidebar-back:hover { background:#EAF1FF !important; color:#0042AD !important; }
+.ft-sidebar-account { background:#fff !important; border-color:#D9E2F0 !important; color:#101114 !important; }
+.ft-sidebar-account:hover { background:#EAF1FF !important; border-color:#91B6F6 !important; }
+.ft-sidebar-account .text-slate-800 { color:#101114 !important; }
+.ft-module-header { border-bottom-color:#D9E2F0 !important; background:rgba(255,255,255,.94) !important; }
+.ft-page-header { border-color:#D9E2F0; background:linear-gradient(135deg,#fff 0%,#F4F7FF 100%); }
+.ft-toolbar, .ft-surface { border-color:#D9E2F0; background:#fff; }
+.ft-table th { background:linear-gradient(to bottom,#F4F7FF,#EAF1FF); color:#25415F; }
+.ft-table tbody tr:hover { background:#F7F9FF; }
+
+/* Calendar uses the same palette: blue for navigation, green for complete, pink for cancelled, yellow for a small emphasis. */
+.dt-calendar, .dt-calendar-toolbar, .dt-calendar-head, .dt-month-head { border-color:#D9E2F0; }
+.dt-calendar-toolbar button { border-color:#B9C9E1; color:#0055DA; }
+.dt-calendar-toolbar button:hover { background:#EAF1FF; border-color:#7EA7F3; }
+.dt-calendar-head.is-today strong, .dt-month-day.is-today .dt-month-number { background:#0055DA; }
+.dt-calendar-event, .dt-month-event { border-left-color:#0055DA; background:#EAF1FF; color:#0042AD; }
+.dt-calendar-event.is-completed, .dt-month-event.is-completed { border-left-color:#00C68D; background:#E5FBF3; color:#007D5A; }
+.dt-calendar-event.is-cancelled, .dt-month-event.is-cancelled { border-left-color:#FF0052; background:#FFF0F5; color:#B00039; }
+.dt-month-more { color:#0055DA; }
