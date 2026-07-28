@@ -159,6 +159,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   const [targetSessionId, setTargetSessionId] = useState(sessionId || '');
   const [sessionYearFilter, setSessionYearFilter] = useState('');
   const [sessionOrganizerFilter, setSessionOrganizerFilter] = useState('');
+  const [sessionCompetitionFilter, setSessionCompetitionFilter] = useState('');
   const [rows, setRows] = useState<Candidate[]>([]);
   const [previewPage, setPreviewPage] = useState(1);
   const [source, setSource] = useState('');
@@ -232,11 +233,20 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     ...(sessionTimelineLabel(session).match(/20\d{2}/g) || []),
     ...(String(session.academicYear || '').match(/20\d{2}/g) || []),
   ])];
-  const sessionYearOptions = useMemo(() => [...new Set(sessions.flatMap(sessionYears))].sort(), [sessions]);
-  const sessionOrganizerOptions = useMemo(() => [...new Set(sessions.map(item => item.organizer).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'vi')), [sessions]);
+  const sessionCompetitionLabel = (session: ExaminationSession) => `${session.code} · ${session.competitionName || session.parent || session.code}`;
+  const matchesImportFilters = (session: ExaminationSession, ignored: 'year' | 'organizer' | 'competition' | null = null) =>
+    (ignored === 'year' || !sessionYearFilter || sessionYears(session).includes(sessionYearFilter))
+    && (ignored === 'organizer' || !sessionOrganizerFilter || session.organizer === sessionOrganizerFilter)
+    && (ignored === 'competition' || !sessionCompetitionFilter || session.code === sessionCompetitionFilter);
+  const sessionYearOptions = useMemo(() => [...new Set(sessions.filter(item => matchesImportFilters(item, 'year')).flatMap(sessionYears))].sort(), [sessions, sessionOrganizerFilter, sessionCompetitionFilter]);
+  const sessionOrganizerOptions = useMemo(() => [...new Set(sessions.filter(item => matchesImportFilters(item, 'organizer')).map(item => item.organizer).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'vi')), [sessions, sessionYearFilter, sessionCompetitionFilter]);
+  const sessionCompetitionOptions = useMemo(() => [...new Map(sessions.filter(item => matchesImportFilters(item, 'competition')).map(item => [item.code, sessionCompetitionLabel(item)])).entries()].sort((left, right) => left[1].localeCompare(right[1], 'vi')), [sessions, sessionYearFilter, sessionOrganizerFilter]);
+  useEffect(() => { if (sessionYearFilter && !sessionYearOptions.includes(sessionYearFilter)) setSessionYearFilter(''); }, [sessionYearFilter, sessionYearOptions]);
+  useEffect(() => { if (sessionOrganizerFilter && !sessionOrganizerOptions.includes(sessionOrganizerFilter)) setSessionOrganizerFilter(''); }, [sessionOrganizerFilter, sessionOrganizerOptions]);
+  useEffect(() => { if (sessionCompetitionFilter && !sessionCompetitionOptions.some(([value]) => value === sessionCompetitionFilter)) setSessionCompetitionFilter(''); }, [sessionCompetitionFilter, sessionCompetitionOptions]);
   const selectableSessions = useMemo(() => sessions
-    .filter(item => (!sessionYearFilter || sessionYears(item).includes(sessionYearFilter)) && (!sessionOrganizerFilter || item.organizer === sessionOrganizerFilter))
-    .sort((left, right) => sessionRecencyKey(right).localeCompare(sessionRecencyKey(left))), [sessions, sessionYearFilter, sessionOrganizerFilter]);
+    .filter(item => matchesImportFilters(item))
+    .sort((left, right) => sessionRecencyKey(right).localeCompare(sessionRecencyKey(left))), [sessions, sessionYearFilter, sessionOrganizerFilter, sessionCompetitionFilter]);
 
   // Load danh sách sheet nguồn từ DB
   const loadSheets = useCallback(async () => {
@@ -507,6 +517,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
         <div className="grid gap-3 md:grid-cols-3">
           <label className="block"><span className="text-sm font-bold text-[#001e40]">Năm</span><select value={sessionYearFilter} onChange={event => { setSessionYearFilter(event.target.value); setTargetSessionId(''); }} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Tất cả năm</option>{sessionYearOptions.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
           <label className="block"><span className="text-sm font-bold text-[#001e40]">BTC quốc tế</span><select value={sessionOrganizerFilter} onChange={event => { setSessionOrganizerFilter(event.target.value); setTargetSessionId(''); }} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Tất cả BTC quốc tế</option>{sessionOrganizerOptions.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label className="block"><span className="text-sm font-bold text-[#001e40]">Cuộc thi</span><select value={sessionCompetitionFilter} onChange={event => { setSessionCompetitionFilter(event.target.value); setTargetSessionId(''); }} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Tất cả cuộc thi</option>{sessionCompetitionOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label className="block md:col-span-3"><span className="text-sm font-bold text-[#001e40]">Dữ liệu thuộc kỳ tổ chức</span><select value={targetSessionId} onChange={event => setTargetSessionId(event.target.value)} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Chọn kỳ tổ chức trước khi nhập</option>{selectableSessions.map(item => <option key={item.id} value={item.id}>{sessionOptionLabel(item)}</option>)}</select><p className="mt-2 text-xs text-slate-600">Hồ sơ trong file sẽ được bổ sung vào lịch sử của thí sinh, đồng thời liên kết với kỳ này.</p></label>
         </div>
       </section>
