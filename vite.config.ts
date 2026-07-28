@@ -7,6 +7,10 @@ export default defineConfig(() => {
   return {
     base: '/', // Hỗ trợ đường dẫn tương đối khi deploy lên GitHub Pages
     plugins: [react(), tailwindcss()],
+    build: {
+      // Giữ bundle có hash cũ trong một chu kỳ deploy để các tab đang mở không trắng trang khi tải route động.
+      emptyOutDir: false,
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
