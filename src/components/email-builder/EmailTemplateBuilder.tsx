@@ -661,7 +661,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
   // LOADING SKELETON khi đang fetch templates từ server
   if (isLoading) {
     return (
-      <div className="ft-module-shell flex flex-col h-screen font-sans items-center justify-center gap-4">
+      <div className="ft-module-shell ft-email-builder flex flex-col h-screen font-sans items-center justify-center gap-4">
         <div className="flex flex-col items-center gap-3">
           <div className="w-12 h-12 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg animate-pulse">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -683,7 +683,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
   // RENDER LIST MODE
   if (editorMode === 'list') {
     return (
-      <div className="ft-module-shell flex flex-col h-screen font-sans overflow-y-auto">
+      <div className="ft-module-shell ft-email-builder flex flex-col h-screen font-sans overflow-y-auto">
         
         {/* Toast Notification */}
         {toastMessage && (

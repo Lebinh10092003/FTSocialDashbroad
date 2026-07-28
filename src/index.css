@@ -593,6 +593,15 @@ a { color: inherit; text-decoration: none; }
   --ft-shell-sky: #f1f9ff;
 }
 
+/* Operational modules use a denser desktop canvas; the email builder is intentionally excluded. */
+@media (min-width: 768px) {
+  .ft-module-shell:not(.ft-email-builder) {
+    zoom: .8;
+    width: 125%;
+    min-height: 125dvh;
+  }
+  .ft-module-shell:not(.ft-email-builder).h-screen { height: 125dvh !important; }
+}
 .ft-module-shell {
   min-height: 100dvh;
   background: linear-gradient(135deg, #f8fbff 0%, #eef7ff 54%, #f8fbff 100%);
@@ -950,3 +959,13 @@ body {
 .dt-calendar-event.is-completed, .dt-month-event.is-completed { border-left-color:#00C68D; background:#E5FBF3; color:#007D5A; }
 .dt-calendar-event.is-cancelled, .dt-month-event.is-cancelled { border-left-color:#FF0052; background:#FFF0F5; color:#B00039; }
 .dt-month-more { color:#0055DA; }
+.dt-partner-table th:nth-child(1), .dt-partner-table td:nth-child(1) { width: 3rem; text-align: center; }
+.dt-partner-table th:nth-child(2), .dt-partner-table td:nth-child(2) { min-width: 12rem; width: 15%; }
+.dt-partner-table th:nth-child(3), .dt-partner-table td:nth-child(3) { min-width: 8.5rem; width: 11%; }
+.dt-partner-table th:nth-child(4), .dt-partner-table td:nth-child(4) { width: 6.5rem; white-space: normal; }
+.dt-partner-table th:nth-child(5), .dt-partner-table td:nth-child(5) { min-width: 10rem; width: 14%; }
+.dt-partner-table th:nth-child(6), .dt-partner-table td:nth-child(6), .dt-partner-table th:nth-child(7), .dt-partner-table td:nth-child(7) { width: 4.5rem; text-align: center; }
+.dt-partner-table th:nth-last-child(-n+6), .dt-partner-table td:nth-last-child(-n+6) { min-width: 6.75rem; text-align: center; }
+.dt-session-completed { color: #15803d; font-weight: 700; }
+.dt-session-planned { color: #1d4ed8; font-weight: 700; }
+.dt-session-missing, .dt-session-cancelled { color: #dc2626; font-weight: 700; }

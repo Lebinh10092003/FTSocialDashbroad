@@ -111,22 +111,27 @@ function writeLocalPrefs(prefs: Record<string, unknown>): void {
  */
 export async function loadTemplatesAsync(): Promise<EmailTemplate[]> {
   const serverTemplates = await apiCall<EmailTemplate[]>('GET', '/email-templates');
-  if (serverTemplates && Array.isArray(serverTemplates) && serverTemplates.length > 0) {
-    writeLocalCache(serverTemplates);
-    return serverTemplates;
-  }
-
-  // Fallback: localStorage
   const cached = readLocalCache();
+  if (serverTemplates && Array.isArray(serverTemplates)) {
+    const byId = new Map(serverTemplates.map(template => [template.id, template]));
+    const localChanges = cached.filter(template => {
+      const server = byId.get(template.id);
+      return !server || Number(template.lastUpdated || 0) > Number(server.lastUpdated || 0);
+    });
+    // A template may have been created before the device had a valid login token.
+    // Keep it visible and upsert it, rather than losing it when the server has other templates.
+    localChanges.forEach(template => byId.set(template.id, template));
+    if (localChanges.length) void syncTemplatesToServer(localChanges);
+    const merged = Array.from(byId.values());
+    writeLocalCache(merged);
+    return merged;
+  }
   if (cached.length > 0) {
-    // Cố gắng migrate lên server (background, không await)
     migrateLocalTemplatesInBackground(cached);
     return cached;
   }
-
   return [];
 }
-
 /**
  * Lưu toàn bộ danh sách templates (batch save).
  * Ghi localStorage ngay, rồi sync lên server trong background.
