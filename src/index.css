@@ -983,7 +983,7 @@ body {
 .dt-partner-management { min-width: 1120px; table-layout: fixed; border: 1px solid #94a3b8; }
 .dt-partner-management th, .dt-partner-management td { border-right: 1px solid #cbd5e1 !important; border-bottom: 1px solid #cbd5e1 !important; vertical-align: middle; overflow-wrap: anywhere; white-space: normal; }
 .dt-partner-management th { line-height: 1.25; }
-.dt-partner-management th:nth-child(1), .dt-partner-management td:nth-child(1) { width: 3.5rem; text-align: center; }
+.dt-partner-management th:nth-child(1), .dt-partner-management td:nth-child(1) { width: 3rem; min-width: 3rem; text-align: center; white-space: nowrap !important; overflow-wrap: normal; word-break: keep-all; }
 .dt-partner-management th:nth-child(2), .dt-partner-management td:nth-child(2) { width: 13rem; }
 .dt-partner-management th:nth-child(3), .dt-partner-management td:nth-child(3) { width: 9rem; }
 .dt-partner-management th:nth-child(4), .dt-partner-management td:nth-child(4) { width: 8rem; }
