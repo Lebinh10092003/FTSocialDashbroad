@@ -1,3 +1,4 @@
+from django.db.models import Max
 from rest_framework import serializers
 
 from .models import TrainingClass, TrainingMaterial, TrainingPartner, TrainingSession, TrainingSurvey
@@ -44,7 +45,7 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
     class Meta:
         model = TrainingSession
         fields = [
-            "id", "title", "date", "start_time", "end_time", "partner", "partner_id", "partner_name",
+            "id", "title", "session_number", "date", "start_time", "end_time", "partner", "partner_id", "partner_name",
             "class_group_id", "class_group_name", "category", "contents", "attendees", "location",
             "status", "notes", "has_materials", "created_at", "updated_at",
         ]
@@ -78,7 +79,12 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
         return validated_data
 
     def create(self, validated_data):
-        return super().create(self._sync_partner_from_class(self._sync_primary_category(validated_data)))
+        validated_data = self._sync_partner_from_class(self._sync_primary_category(validated_data))
+        training_class = validated_data.get("training_class")
+        if training_class and not validated_data.get("session_number"):
+            last_number = training_class.sessions.aggregate(Max("session_number"))["session_number__max"] or 0
+            validated_data["session_number"] = last_number + 1
+        return super().create(validated_data)
 
     def update(self, instance, validated_data):
         return super().update(instance, self._sync_partner_from_class(self._sync_primary_category(validated_data)))

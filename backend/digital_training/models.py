@@ -41,6 +41,7 @@ class TrainingSession(models.Model):
     ]
 
     title = models.CharField(max_length=255)
+    session_number = models.PositiveIntegerField(null=True, blank=True)
     session_date = models.DateField()
     start_time = models.TimeField(null=True, blank=True)
     end_time = models.TimeField(null=True, blank=True)
