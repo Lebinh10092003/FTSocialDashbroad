@@ -20,6 +20,19 @@ class TrainingPartner(models.Model):
         ordering = ["name"]
 
 
+class TrainingClass(models.Model):
+    partner = models.ForeignKey(TrainingPartner, on_delete=models.CASCADE, related_name="classes")
+    name = models.CharField(max_length=255)
+    members = models.CharField(max_length=500, blank=True)
+    planned_sessions = models.PositiveIntegerField(default=0)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["partner__name", "name"]
+        constraints = [models.UniqueConstraint(fields=["partner", "name"], name="unique_training_class_per_partner")]
+
 class TrainingSession(models.Model):
     STATUS_CHOICES = [
         ("planned", "Đã lên lịch"),
@@ -33,6 +46,7 @@ class TrainingSession(models.Model):
     end_time = models.TimeField(null=True, blank=True)
     partner = models.CharField(max_length=255, blank=True)
     partner_ref = models.ForeignKey(TrainingPartner, null=True, blank=True, on_delete=models.SET_NULL, related_name="sessions")
+    training_class = models.ForeignKey(TrainingClass, null=True, blank=True, on_delete=models.SET_NULL, related_name="sessions")
     category = models.CharField(max_length=255, blank=True)
     # A session can cover multiple standard or ad-hoc training topics.
     contents = models.JSONField(default=list, blank=True)

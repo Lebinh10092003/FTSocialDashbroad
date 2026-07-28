@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import TrainingMaterial, TrainingPartner, TrainingSession, TrainingSurvey
+from .models import TrainingClass, TrainingMaterial, TrainingPartner, TrainingSession, TrainingSurvey
 
 
 class TrainingPartnerSerializer(serializers.ModelSerializer):
@@ -18,17 +18,35 @@ class TrainingPartnerSerializer(serializers.ModelSerializer):
         return obj.sessions.filter(status="completed").count()
 
 
+class TrainingClassSerializer(serializers.ModelSerializer):
+    partner_name = serializers.CharField(source="partner.name", read_only=True)
+    completed_sessions = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TrainingClass
+        fields = [
+            "id", "partner", "partner_name", "name", "members", "planned_sessions",
+            "completed_sessions", "notes", "created_at", "updated_at",
+        ]
+
+    def get_completed_sessions(self, obj):
+        return obj.sessions.filter(status="completed").count()
+
+
 class TrainingSessionSerializer(serializers.ModelSerializer):
     date = serializers.DateField(source="session_date")
     partner_id = serializers.PrimaryKeyRelatedField(source="partner_ref", queryset=TrainingPartner.objects.all(), required=False, allow_null=True)
     partner_name = serializers.SerializerMethodField()
+    class_group_id = serializers.PrimaryKeyRelatedField(source="training_class", queryset=TrainingClass.objects.all(), required=False, allow_null=True)
+    class_group_name = serializers.CharField(source="training_class.name", read_only=True)
     has_materials = serializers.SerializerMethodField()
 
     class Meta:
         model = TrainingSession
         fields = [
             "id", "title", "date", "start_time", "end_time", "partner", "partner_id", "partner_name",
-            "category", "contents", "attendees", "location", "status", "notes", "has_materials", "created_at", "updated_at",
+            "class_group_id", "class_group_name", "category", "contents", "attendees", "location",
+            "status", "notes", "has_materials", "created_at", "updated_at",
         ]
 
     def get_partner_name(self, obj):
@@ -39,7 +57,7 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
 
     def validate_contents(self, value):
         if not isinstance(value, list):
-            raise serializers.ValidationError("Nội dung tập huấn phải là danh sách.")
+            raise serializers.ValidationError("Noi dung tap huan phai la danh sach.")
         return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
 
     def _sync_primary_category(self, validated_data):
@@ -49,19 +67,21 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
         elif validated_data.get("category"):
             validated_data["contents"] = [validated_data["category"]]
         return validated_data
+
+    def _sync_partner_from_class(self, validated_data):
+        training_class = validated_data.get("training_class")
+        if training_class:
+            validated_data["partner_ref"] = training_class.partner
+            validated_data["partner"] = training_class.partner.name
+        elif validated_data.get("partner_ref"):
+            validated_data["partner"] = validated_data["partner_ref"].name
+        return validated_data
+
     def create(self, validated_data):
-        validated_data = self._sync_primary_category(validated_data)
-        partner = validated_data.get("partner_ref")
-        if partner:
-            validated_data["partner"] = partner.name
-        return super().create(validated_data)
+        return super().create(self._sync_partner_from_class(self._sync_primary_category(validated_data)))
 
     def update(self, instance, validated_data):
-        validated_data = self._sync_primary_category(validated_data)
-        partner = validated_data.get("partner_ref")
-        if partner:
-            validated_data["partner"] = partner.name
-        return super().update(instance, validated_data)
+        return super().update(instance, self._sync_partner_from_class(self._sync_primary_category(validated_data)))
 
 
 class TrainingMaterialSerializer(serializers.ModelSerializer):

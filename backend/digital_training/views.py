@@ -4,8 +4,8 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from authentication.permissions import IsManagerOrAdmin
-from .models import TrainingMaterial, TrainingPartner, TrainingSession, TrainingSurvey
-from .serializers import TrainingMaterialSerializer, TrainingPartnerSerializer, TrainingSessionSerializer, TrainingSurveySerializer
+from .models import TrainingClass, TrainingMaterial, TrainingPartner, TrainingSession, TrainingSurvey
+from .serializers import TrainingClassSerializer, TrainingMaterialSerializer, TrainingPartnerSerializer, TrainingSessionSerializer, TrainingSurveySerializer
 
 
 def _can_manage(request):
@@ -46,13 +46,13 @@ def _crud_detail(request, queryset, serializer_class, pk):
 @api_view(["GET", "POST"])
 @permission_classes([AllowAny])
 def training_sessions(request):
-    return _crud_collection(request, TrainingSession.objects.select_related("partner_ref").all(), TrainingSessionSerializer)
+    return _crud_collection(request, TrainingSession.objects.select_related("partner_ref", "training_class").all(), TrainingSessionSerializer)
 
 
 @api_view(["GET", "PATCH", "DELETE"])
 @permission_classes([AllowAny])
 def training_session_detail(request, pk):
-    return _crud_detail(request, TrainingSession.objects.select_related("partner_ref").all(), TrainingSessionSerializer, pk)
+    return _crud_detail(request, TrainingSession.objects.select_related("partner_ref", "training_class").all(), TrainingSessionSerializer, pk)
 
 
 @api_view(["GET", "POST"])
@@ -69,13 +69,24 @@ def training_partner_detail(request, pk):
         return Response({"error": "Không tìm thấy đối tác."}, status=status.HTTP_404_NOT_FOUND)
     if request.method == "GET":
         data = TrainingPartnerSerializer(partner, context={"request": request}).data
-        data["sessions"] = TrainingSessionSerializer(partner.sessions.all(), many=True, context={"request": request}).data
+        data["classes"] = TrainingClassSerializer(partner.classes.all(), many=True, context={"request": request}).data
+        data["sessions"] = TrainingSessionSerializer(partner.sessions.select_related("partner_ref", "training_class").all(), many=True, context={"request": request}).data
         data["materials"] = TrainingMaterialSerializer(partner.materials.all(), many=True, context={"request": request}).data
         data["surveys"] = TrainingSurveySerializer(partner.surveys.all(), many=True, context={"request": request}).data
         return Response(data)
     return _crud_detail(request, TrainingPartner.objects.all(), TrainingPartnerSerializer, pk)
 
 
+@api_view(["GET", "POST"])
+@permission_classes([AllowAny])
+def training_classes(request):
+    return _crud_collection(request, TrainingClass.objects.select_related("partner").all(), TrainingClassSerializer)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([AllowAny])
+def training_class_detail(request, pk):
+    return _crud_detail(request, TrainingClass.objects.select_related("partner").all(), TrainingClassSerializer, pk)
 @api_view(["GET", "POST"])
 @permission_classes([AllowAny])
 def training_materials(request):
