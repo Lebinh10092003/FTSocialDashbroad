@@ -979,3 +979,16 @@ body {
 .dt-session-completed { color: #15803d; font-weight: 700; }
 .dt-session-planned { color: #1d4ed8; font-weight: 700; }
 .dt-session-missing, .dt-session-cancelled { color: #dc2626; font-weight: 700; }
+/* Digital Training: partner management table */
+.dt-partner-management { min-width: 1120px; table-layout: fixed; border: 1px solid #94a3b8; }
+.dt-partner-management th, .dt-partner-management td { border-right: 1px solid #cbd5e1 !important; border-bottom: 1px solid #cbd5e1 !important; vertical-align: middle; overflow-wrap: anywhere; white-space: normal; }
+.dt-partner-management th { line-height: 1.25; }
+.dt-partner-management th:nth-child(1), .dt-partner-management td:nth-child(1) { width: 3.5rem; text-align: center; }
+.dt-partner-management th:nth-child(2), .dt-partner-management td:nth-child(2) { width: 13rem; }
+.dt-partner-management th:nth-child(3), .dt-partner-management td:nth-child(3) { width: 9rem; }
+.dt-partner-management th:nth-child(4), .dt-partner-management td:nth-child(4) { width: 8rem; }
+.dt-partner-management th:nth-child(5), .dt-partner-management td:nth-child(5) { width: 13rem; }
+.dt-partner-management th:nth-child(6), .dt-partner-management td:nth-child(6) { width: 17rem; }
+.dt-partner-management th:nth-child(7), .dt-partner-management td:nth-child(7) { width: 10rem; }
+.dt-partner-management th:nth-child(8), .dt-partner-management td:nth-child(8) { width: 13rem; }
+.dt-partner-management th:nth-child(9), .dt-partner-management td:nth-child(9), .dt-partner-management th:nth-child(10), .dt-partner-management td:nth-child(10) { width: 3.25rem; text-align: center; }
