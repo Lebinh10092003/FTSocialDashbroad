@@ -6,7 +6,7 @@ import {
   Trash2, Pencil, Plus,
 } from 'lucide-react';
 import type { Candidate, ExaminationSession } from './types';
-import { LIST_PAGE_SIZE, TablePagination, formatBirthDate, formatPersonName, normaliseBirthDate } from './ui';
+import { LIST_PAGE_SIZE, TablePagination, formatBirthDate, formatPersonName, normaliseBirthDate, sessionDisplayName, sessionRecencyKey, sessionTimelineLabel } from './ui';
 
 type ImportRow = Record<string, unknown>;
 type Props = {
@@ -148,17 +148,17 @@ function rowsFromSheet(sheet: XLSX.WorkSheet): ImportRow[] {
     .map(row => Object.fromEntries(headers.map((header, index) => [header || `column_${index + 1}`, (row as unknown[])[index] ?? ''])));
 }
 
-const sessionOptionLabel = (session: ExaminationSession) => {
-  const competition = session.competitionName || session.parent || 'Chưa có tên cuộc thi';
-  return `${session.code} · ${competition} · ${session.name}`;
-};
+const sessionOptionLabel = (session: ExaminationSession) => sessionDisplayName(session);
 const DEFAULT_SYNC_URL =
   'https://docs.google.com/spreadsheets/d/1kqztN_iCeZ9uR1mO7gz9j1TcUt8ZmCdpEv0TagTf4VA/edit?usp=sharing';
 
 export default function ImportData({ idToken, googleAccessToken, canImport, sessionId, sessions, onImported }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const duplicateCheckRef = useRef(0);
   const [sourceUrl, setSourceUrl] = useState('');
   const [targetSessionId, setTargetSessionId] = useState(sessionId || '');
+  const [sessionTimeFilter, setSessionTimeFilter] = useState('');
+  const [sessionOrganizerFilter, setSessionOrganizerFilter] = useState('');
   const [rows, setRows] = useState<Candidate[]>([]);
   const [previewPage, setPreviewPage] = useState(1);
   const [source, setSource] = useState('');
@@ -200,6 +200,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
 
 
   const checkDuplicateCandidates = async (records: Candidate[]) => {
+    const requestId = ++duplicateCheckRef.current;
     setDuplicates([]);
     if (!records.length || !idToken) return;
     setCheckingDuplicates(true);
@@ -211,11 +212,11 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || 'Không thể kiểm tra hồ sơ trùng.');
-      setDuplicates(Array.isArray(body.duplicates) ? body.duplicates : []);
+      if (requestId === duplicateCheckRef.current) setDuplicates(Array.isArray(body.duplicates) ? body.duplicates : []);
     } catch (error) {
       console.warn('Không thể kiểm tra hồ sơ trùng:', error);
     } finally {
-      setCheckingDuplicates(false);
+      if (requestId === duplicateCheckRef.current) setCheckingDuplicates(false);
     }
   };
   const activeSheetSources = useMemo(() => {
@@ -227,6 +228,11 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
       return !lastRelevantDate || lastRelevantDate >= today;
     });
   }, [sheets, sessions]);
+  const sessionTimeOptions = useMemo(() => [...new Set(sessions.map(sessionTimelineLabel))].filter(Boolean).sort(), [sessions]);
+  const sessionOrganizerOptions = useMemo(() => [...new Set(sessions.map(item => item.organizer).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'vi')), [sessions]);
+  const selectableSessions = useMemo(() => sessions
+    .filter(item => (!sessionTimeFilter || sessionTimelineLabel(item) === sessionTimeFilter) && (!sessionOrganizerFilter || item.organizer === sessionOrganizerFilter))
+    .sort((left, right) => sessionRecencyKey(right).localeCompare(sessionRecencyKey(left))), [sessions, sessionTimeFilter, sessionOrganizerFilter]);
 
   // Load danh sách sheet nguồn từ DB
   const loadSheets = useCallback(async () => {
@@ -345,9 +351,14 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Không thể nhập dữ liệu.');
-      onImported(body.items || []);
+      const importedItems = body.items || [];
+      onImported(importedItems);
       const linkedExisting = Number(body.linkedExisting || 0);
-      setMessage(`✅ Đã nhập ${body.created} mới và cập nhật ${body.updated} hồ sơ từ ${source}.${linkedExisting ? ` ${linkedExisting} hồ sơ đã có trên hệ thống được bổ sung vào kỳ tổ chức này.` : ''}`);
+      const importedCount = importedItems.length || Number(body.created || 0) + Number(body.updated || 0);
+      duplicateCheckRef.current += 1;
+      setRows([]); setDuplicates([]); setCheckingDuplicates(false); setConfirmedMatches({}); setSource('');
+      if (inputRef.current) inputRef.current.value = '';
+      setMessage(`✅ Đã nhập ${importedCount} hồ sơ: ${body.created} mới, ${body.updated} cập nhật từ ${source}.${linkedExisting ? ` ${linkedExisting} hồ sơ đã có được bổ sung vào kỳ tổ chức này.` : ''}`);
     } catch (err: any) { setMessage(err.message || 'Không thể nhập dữ liệu.'); }
     finally { setLoading(false); }
   };
@@ -488,7 +499,13 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
         </button>
       </div>
 
-      <section className="mb-5 rounded-2xl border border-blue-200 bg-blue-50/60 p-4"><label className="block max-w-xl"><span className="text-sm font-bold text-[#001e40]">Dữ liệu thuộc kỳ tổ chức</span><select value={targetSessionId} onChange={event => setTargetSessionId(event.target.value)} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Chọn kỳ tổ chức trước khi nhập</option>{sessions.map(item => <option key={item.id} value={item.id}>{sessionOptionLabel(item)} · {item.time}</option>)}</select><p className="mt-2 text-xs text-slate-600">Hồ sơ trong file sẽ được bổ sung vào lịch sử của thí sinh, đồng thời liên kết với kỳ này.</p></label></section>
+      <section className="mb-5 rounded-2xl border border-blue-200 bg-blue-50/60 p-4">
+        <div className="grid gap-3 md:grid-cols-3">
+          <label className="block"><span className="text-sm font-bold text-[#001e40]">Thời gian</span><select value={sessionTimeFilter} onChange={event => { setSessionTimeFilter(event.target.value); setTargetSessionId(''); }} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Tất cả thời gian</option>{sessionTimeOptions.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label className="block"><span className="text-sm font-bold text-[#001e40]">BTC quốc tế</span><select value={sessionOrganizerFilter} onChange={event => { setSessionOrganizerFilter(event.target.value); setTargetSessionId(''); }} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Tất cả BTC quốc tế</option>{sessionOrganizerOptions.map(item => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label className="block md:col-span-3"><span className="text-sm font-bold text-[#001e40]">Dữ liệu thuộc kỳ tổ chức</span><select value={targetSessionId} onChange={event => setTargetSessionId(event.target.value)} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Chọn kỳ tổ chức trước khi nhập</option>{selectableSessions.map(item => <option key={item.id} value={item.id}>{sessionOptionLabel(item)}</option>)}</select><p className="mt-2 text-xs text-slate-600">Hồ sơ trong file sẽ được bổ sung vào lịch sử của thí sinh, đồng thời liên kết với kỳ này.</p></label>
+        </div>
+      </section>
 
       <section className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5 shadow-sm">
         <div className="max-w-3xl"><h2 className="flex items-center gap-2 text-xl font-bold text-emerald-950"><FileSpreadsheet className="h-5 w-5 text-emerald-700"/>Google Sheets theo từng kỳ tổ chức</h2><p className="mt-1 text-sm text-emerald-900/80">Mỗi kỳ có hai liên kết độc lập: Sheet đăng ký là nguồn nhập dữ liệu, còn Google Sheet output là nơi xuất dữ liệu của riêng kỳ đó. Thiết lập hai link tại phần “Thay đổi thông tin” của kỳ tổ chức.</p></div>
@@ -547,7 +564,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
                   placeholder="https://docs.google.com/spreadsheets/d/..."
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
               </label>
-              <div className="grid gap-3 sm:grid-cols-2"><label><span className="mb-1 block text-sm font-bold text-slate-700">Kỳ tổ chức</span><select value={newSheetSessionId} onChange={event => setNewSheetSessionId(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"><option value="">Chưa gán kỳ</option>{sessions.map(item => <option key={item.id} value={item.id}>{sessionOptionLabel(item)}</option>)}</select></label><label><span className="mb-1 block text-sm font-bold text-slate-700">Phạm vi tab</span><select value={newSheetStage} onChange={event => setNewSheetStage(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"><option>Toàn bộ kỳ tổ chức</option><option>Bổ sung dữ liệu</option></select></label><label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold text-slate-700">Tên tab / sheet nhỏ</span><input value={newSheetTab} onChange={event => setNewSheetTab(event.target.value)} placeholder="Ví dụ: Dữ liệu thí sinh, Vòng quốc gia" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"/></label></div>
+              <div className="grid gap-3 sm:grid-cols-2"><label><span className="mb-1 block text-sm font-bold text-slate-700">Kỳ tổ chức</span><select value={newSheetSessionId} onChange={event => setNewSheetSessionId(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"><option value="">Chưa gán kỳ</option>{selectableSessions.map(item => <option key={item.id} value={item.id}>{sessionOptionLabel(item)}</option>)}</select></label><label><span className="mb-1 block text-sm font-bold text-slate-700">Phạm vi tab</span><select value={newSheetStage} onChange={event => setNewSheetStage(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"><option>Toàn bộ kỳ tổ chức</option><option>Bổ sung dữ liệu</option></select></label><label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold text-slate-700">Tên tab / sheet nhỏ</span><input value={newSheetTab} onChange={event => setNewSheetTab(event.target.value)} placeholder="Ví dụ: Dữ liệu thí sinh, Vòng quốc gia" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"/></label></div>
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setShowAddModal(false)}
                   className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 transition-colors">
