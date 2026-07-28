@@ -339,7 +339,9 @@ def media_summary_trend(request):
             'followers': followers_sum
         })
         
-    return Response({'groupBy': group_by, 'trend': trend})
+    response = Response({'groupBy': group_by, 'trend': trend})
+    response['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+    return response
 
 def _build_media_summary(query):
     period_start, period_end = resolve_reporting_period(query)
@@ -423,7 +425,9 @@ def _build_media_summary(query):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def media_summary(request):
-    return Response(_build_media_summary(request.query_params))
+    response = Response(_build_media_summary(request.query_params))
+    response['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+    return response
 
 
 def _safe_excel_value(value):

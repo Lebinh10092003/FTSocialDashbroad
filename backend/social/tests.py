@@ -455,6 +455,7 @@ class MediaSummaryTrendTests(TestCase):
         )
 
         response = self.client.get('/api/media-summary/trend', {'groupBy': 'month'})
+        self.assertEqual(response['Cache-Control'], 'no-store, no-cache, must-revalidate')
         trend = {point['period']: point for point in response.json()['trend']}
         period = published_day.strftime('%Y-%m')
         self.assertEqual(trend[period]['views'], 77)

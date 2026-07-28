@@ -44,7 +44,7 @@ export default function MediaSummary({ idToken, channels }: MediaSummaryProps) {
     try {
       const search = params();
       const headers = { Authorization: `Bearer ${idToken}` };
-      const [summaryResponse, trendResponse] = await Promise.all([fetch(`/api/media-summary?${search.toString()}`, { headers }), fetch(`/api/media-summary/trend?${search.toString()}`, { headers })]);
+      const [summaryResponse, trendResponse] = await Promise.all([fetch(`/api/media-summary?${search.toString()}`, { headers, cache: 'no-store' }), fetch(`/api/media-summary/trend?${search.toString()}`, { headers, cache: 'no-store' })]);
       const [summaryBody, trendBody] = await Promise.all([summaryResponse.json(), trendResponse.json()]);
       if (!summaryResponse.ok) throw new Error(summaryBody.error || 'Không thể tải báo cáo tổng hợp.');
       if (!trendResponse.ok) throw new Error(trendBody.error || 'Không thể tải xu hướng báo cáo.');
