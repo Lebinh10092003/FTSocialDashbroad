@@ -5,12 +5,11 @@ import {
   FileText,
   RefreshCw,
   Settings,
-  LogOut,
-  ArrowLeft,
-  LogIn
+  ArrowLeft
 } from 'lucide-react';
 import { UserRole } from '../../types';
 import TokenNotifications from './TokenNotifications';
+import AccountMenu from '../AccountMenu';
 
 interface SidebarProps {
   activeTab: string;
@@ -77,40 +76,16 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
         </button>
         <div className="mb-2 flex justify-end">
           <TokenNotifications idToken={idToken} userRole={userRole} />
-        </div>
-        <button onClick={onAccountClick} className="ft-sidebar-account mb-3 flex w-full items-center gap-3 rounded-xl border p-2.5 text-left shadow-sm">
-          {user?.photoURL ? (
-            <img src={user.photoURL} alt={user.displayName} className="w-8.5 h-8.5 rounded-xl border border-slate-100 object-cover" />
-          ) : (
-            <div className="w-8.5 h-8.5 rounded-xl bg-gradient-to-br from-blue-100 to-indigo-50 flex items-center justify-center text-xs font-bold text-blue-750 border border-blue-200/30">
-              {user?.email?.charAt(0).toUpperCase()}
-            </div>
-          )}
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-bold text-slate-800 truncate leading-tight">{user?.displayName || 'Người dùng'}</p>
-            <div className="flex items-center gap-1 mt-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-              <span className="text-[9px] font-bold text-slate-400 tracking-wider uppercase">{userRole}</span>
-            </div>
-          </div>
-        </button>
-        {user?.email === 'guest@ftsocial.com' ? (
-          <button
-            onClick={onLogin}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all cursor-pointer shadow-sm active:scale-[0.99]"
-          >
-            <LogIn className="w-3.5 h-3.5" />
-            Đăng nhập
-          </button>
-        ) : (
-          <button
-            onClick={onLogout}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-slate-500 hover:text-rose-600 bg-white hover:bg-rose-50 border border-slate-200/50 hover:border-rose-100 rounded-xl transition-all cursor-pointer"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            Đăng xuất
-          </button>
-        )}
+        </div>        <AccountMenu
+          userName={user?.displayName}
+          photoURL={user?.photoURL}
+          userRole={userRole}
+          isGuest={isGuest}
+          onAccountClick={onAccountClick}
+          onLogin={onLogin}
+          onLogout={onLogout}
+          variant="sidebar"
+        />
       </div>
     </div>
   );

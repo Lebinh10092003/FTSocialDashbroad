@@ -37,13 +37,17 @@ import EmailSettingsComponent from './EmailSettings';
 import EmailPreview from './EmailPreview';
 import VariablePicker from './VariablePicker';
 import EmailBuilderHeader from './EmailBuilderHeader';
+import AccountMenu from '../AccountMenu';
 import { EmailBuilderDialogProvider, useEmailBuilderDialog } from './EmailBuilderDialog';
 
 interface EmailTemplateBuilderProps {
   onBackToWorkspace: () => void;
   onAccountClick: () => void;
+  onLogout: () => void;
   isGuest: boolean;
   userName?: string | null;
+  userRole?: string | null;
+  photoURL?: string | null;
 }
 
 function sortEmailTemplates(templates: EmailTemplate[]): EmailTemplate[] {
@@ -59,7 +63,7 @@ export default function EmailTemplateBuilder(props: EmailTemplateBuilderProps) {
   return <EmailBuilderDialogProvider><EmailTemplateBuilderContent {...props} /></EmailBuilderDialogProvider>;
 }
 
-function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGuest, userName }: EmailTemplateBuilderProps) {
+function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogout, isGuest, userName, userRole, photoURL }: EmailTemplateBuilderProps) {
   const dialog = useEmailBuilderDialog();
   // 1. Storage & State Management
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
@@ -747,7 +751,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
             >
               Tạo mẫu mới
             </button>
-            <button onClick={onAccountClick} className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer transition-all">{isGuest ? 'Đăng nhập' : userName || 'Tài khoản'}</button>
+            <AccountMenu userName={userName} userRole={userRole} photoURL={photoURL} isGuest={isGuest} onAccountClick={onAccountClick} onLogout={onLogout} variant="header"/>
             <button
               onClick={onBackToWorkspace}
               className="px-4 py-2 text-xs font-bold text-slate-650 bg-slate-100 hover:bg-slate-200/80 rounded-xl cursor-pointer transition-all border border-slate-200"
@@ -913,8 +917,11 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, isGues
       {/* Main Top Header */}
       <EmailBuilderHeader
         onAccountClick={onAccountClick}
+        onLogout={onLogout}
         isGuest={isGuest}
         userName={userName}
+        userRole={userRole}
+        photoURL={photoURL}
         template={activeTemplate}
         templatesList={templates}
         onSelectTemplate={handleSelectTemplate}

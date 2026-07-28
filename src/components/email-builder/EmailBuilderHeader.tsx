@@ -10,10 +10,10 @@ import {
   Upload, 
   Trash2, 
   Eye, 
-  Check,  Edit2,
-  LogIn
+  Check,  Edit2
 } from 'lucide-react';
 import { EmailTemplate } from '../../types/emailBuilder';
+import AccountMenu from '../AccountMenu';
 import { exportTemplateToJson } from '../../lib/emailStorage';
 import { useEmailBuilderDialog } from './EmailBuilderDialog';
 
@@ -29,8 +29,11 @@ interface EmailBuilderHeaderProps {
   onPreviewClick: () => void;
   onBackToWorkspace: () => void;
   onAccountClick: () => void;
+  onLogout: () => void;
   isGuest: boolean;
   userName?: string | null;
+  userRole?: string | null;
+  photoURL?: string | null;
   onCopyEmail: () => void;
   onCopySubject: () => void;
   copySuccess: boolean;
@@ -53,8 +56,11 @@ export default function EmailBuilderHeader({
   onPreviewClick,
   onBackToWorkspace,
   onAccountClick,
+  onLogout,
   isGuest,
   userName,
+  userRole,
+  photoURL,
   onCopyEmail,
   onCopySubject,
   copySuccess,
@@ -180,7 +186,7 @@ export default function EmailBuilderHeader({
 
       {/* Right section: utility operations + COPY CTA */}
       <div className="flex items-center gap-2 flex-wrap sm:justify-end">
-        <button onClick={onAccountClick} className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-extrabold text-blue-700 hover:bg-blue-100">{isGuest && <LogIn className="h-3.5 w-3.5" />}{isGuest ? 'Đăng nhập' : userName || 'Tài khoản'}</button>
+        <AccountMenu userName={userName} userRole={userRole} photoURL={photoURL} isGuest={isGuest} onAccountClick={onAccountClick} onLogout={onLogout} variant="header"/>
         {/* Template admin controls */}
         <button
           onClick={onDuplicateTemplate}

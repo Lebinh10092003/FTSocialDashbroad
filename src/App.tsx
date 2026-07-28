@@ -1,10 +1,11 @@
 import React, { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { ChartColumnBig, ClipboardList, GraduationCap, LogIn, LogOut, Mail, ShieldUser } from 'lucide-react';
+import { ChartColumnBig, ClipboardList, GraduationCap, Mail, ShieldUser } from 'lucide-react';
 
 import { Channel, UserRole } from './types';
 import Sidebar from './components/social-dashboard/Sidebar';
 import LoginModal from './components/LoginModal';
 import AccountProfileModal from './components/AccountProfileModal';
+import AccountMenu from './components/AccountMenu';
 
 const lazyWithRecovery = <T extends React.ComponentType<any>>(loader: () => Promise<{ default: T }>) => lazy(async () => {
   const retryKey = `ft-workspace-lazy-reload:${window.location.pathname}`;
@@ -397,18 +398,16 @@ export default function App() {
                 <h1 className="font-extrabold text-slate-900 text-sm">Fermat Workspace</h1>
               </div>
             </div>
-            {isGuest ? (
-              <button onClick={() => { setAuthError(''); setShowLoginModal(true); }} className="ft-btn ft-btn-primary">
-                <LogIn className="w-4 h-4" /> Đăng nhập
-              </button>
-            ) : (
-              <div className="flex items-center gap-3">
-                <button onClick={openAccount} className="hidden rounded-lg px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-sky-50 sm:block">{user.displayName}</button>
-                <button onClick={handleLogout} className="ft-btn ft-btn-secondary text-rose-600">
-                  <LogOut className="w-4 h-4" /> Đăng xuất
-                </button>
-              </div>
-            )}
+            <AccountMenu
+              userName={user.displayName}
+              userRole={userRole}
+              photoURL={user.photoURL}
+              isGuest={isGuest}
+              onAccountClick={openAccount}
+              onLogin={() => { setAuthError(''); setShowLoginModal(true); }}
+              onLogout={handleLogout}
+              variant="header"
+            />
           </div>
         </header>
 
@@ -465,8 +464,11 @@ export default function App() {
           <EmailTemplateBuilder
             onBackToWorkspace={() => setViewMode('workspace')}
             onAccountClick={openAccount}
+            onLogout={handleLogout}
             isGuest={isGuest}
             userName={user.displayName}
+            userRole={userRole}
+            photoURL={user.photoURL}
           />
         </Suspense>
         {loginModal}{profileModal}
@@ -481,8 +483,11 @@ export default function App() {
           <DigitalTraining
             onBackToWorkspace={() => setViewMode('workspace')}
             onAccountClick={openAccount}
+            onLogout={handleLogout}
             isGuest={isGuest}
             userName={user.displayName}
+            userRole={userRole}
+            photoURL={user.photoURL}
             idToken={idToken || ''}
           />
         </Suspense>
@@ -500,11 +505,13 @@ export default function App() {
               onBackToWorkspace={() => setViewMode('workspace')}
               userName={user.displayName}
               userEmail={user.email}
+              photoURL={user.photoURL}
               idToken={idToken}
               googleAccessToken={googleAccessToken}
               userRole={userRole}
               isGuest={isGuest}
               onAccountClick={openAccount}
+              onLogout={handleLogout}
             />
           </Suspense>
         </ExaminationErrorBoundary>
