@@ -850,7 +850,7 @@ def _parse_round_date(value):
 
 
 def dated_session_rounds(session):
-    """Return configured rounds with a concrete date, sorted in examination order."""
+    """Return every concrete day of each configured round in examination order."""
     configured = session.rounds or []
     if not configured:
         configured = [
@@ -861,13 +861,15 @@ def dated_session_rounds(session):
     for position, round_config in enumerate(configured):
         if not isinstance(round_config, dict):
             continue
-        round_date = _parse_round_date(round_config.get('date'))
         name = str(round_config.get('name') or '').strip()
-        if name and round_date:
+        if not name:
+            continue
+        values = [round_config.get('date')]
+        values.extend(slot.get('date') for slot in (round_config.get('slots') or []) if isinstance(slot, dict))
+        dates = sorted({_parse_round_date(value) for value in values if _parse_round_date(value)})
+        for round_date in dates:
             rows.append((round_date, position, name))
     return sorted(rows, key=lambda item: (item[0], item[1]))
-
-
 def automatic_session_phase(session, current_date=None):
     """Derive the operational phase from dated rounds without changing the round plan."""
     today = current_date or timezone.localdate()
