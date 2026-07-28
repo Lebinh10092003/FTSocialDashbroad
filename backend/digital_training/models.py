@@ -7,12 +7,20 @@ class TrainingPartner(models.Model):
     contact_person = models.CharField(max_length=255, blank=True)
     phone = models.CharField(max_length=50, blank=True)
     email = models.EmailField(blank=True)
-    # Accept either DD/MM/YYYY or MM/YYYY to match the signed agreement.
     contract_start = models.CharField(max_length=20, blank=True)
     contract_end = models.CharField(max_length=20, blank=True)
     training_content = models.TextField(blank=True)
     planned_sessions = models.PositiveIntegerField(default=0)
     notes = models.TextField(blank=True)
+    partner_type = models.CharField(max_length=50, blank=True)
+    products = models.JSONField(default=list, blank=True)
+    contract_duration = models.PositiveIntegerField(null=True, blank=True)
+    contract_duration_unit = models.CharField(max_length=10, blank=True)
+    contract_signed_date = models.DateField(null=True, blank=True)
+    contract_status = models.CharField(max_length=30, blank=True)
+    ai_account_count = models.PositiveIntegerField(default=0)
+    training_contents = models.JSONField(default=list, blank=True)
+    training_schedule = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -33,13 +41,9 @@ class TrainingClass(models.Model):
         ordering = ["partner__name", "name"]
         constraints = [models.UniqueConstraint(fields=["partner", "name"], name="unique_training_class_per_partner")]
 
-class TrainingSession(models.Model):
-    STATUS_CHOICES = [
-        ("planned", "Đã lên lịch"),
-        ("completed", "Đã thực hiện"),
-        ("cancelled", "Đã hủy"),
-    ]
 
+class TrainingSession(models.Model):
+    STATUS_CHOICES = [("planned", "Scheduled"), ("completed", "Completed"), ("cancelled", "Cancelled")]
     title = models.CharField(max_length=255)
     session_number = models.PositiveIntegerField(null=True, blank=True)
     session_date = models.DateField()
@@ -49,7 +53,6 @@ class TrainingSession(models.Model):
     partner_ref = models.ForeignKey(TrainingPartner, null=True, blank=True, on_delete=models.SET_NULL, related_name="sessions")
     training_class = models.ForeignKey(TrainingClass, null=True, blank=True, on_delete=models.SET_NULL, related_name="sessions")
     category = models.CharField(max_length=255, blank=True)
-    # A session can cover multiple standard or ad-hoc training topics.
     contents = models.JSONField(default=list, blank=True)
     attendees = models.PositiveIntegerField(default=0)
     location = models.CharField(max_length=500, blank=True)
@@ -79,11 +82,7 @@ class TrainingMaterial(models.Model):
 
 
 class TrainingSurvey(models.Model):
-    FORM_TYPES = [
-        ("end_session", "Phiếu khảo sát cuối buổi"),
-        ("end_course", "Bài đánh giá cuối khóa tập huấn"),
-    ]
-
+    FORM_TYPES = [("end_session", "End session"), ("end_course", "End course")]
     title = models.CharField(max_length=255)
     form_type = models.CharField(max_length=20, choices=FORM_TYPES)
     session = models.ForeignKey(TrainingSession, null=True, blank=True, on_delete=models.SET_NULL, related_name="surveys")

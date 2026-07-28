@@ -12,12 +12,54 @@ class TrainingPartnerSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "address", "contact_person", "phone", "email",
             "contract_start", "contract_end", "training_content", "planned_sessions",
-            "completed_sessions", "notes", "created_at", "updated_at",
+            "partner_type", "products", "contract_duration", "contract_duration_unit",
+            "contract_signed_date", "contract_status", "ai_account_count", "training_contents",
+            "training_schedule", "completed_sessions", "notes", "created_at", "updated_at",
         ]
 
     def get_completed_sessions(self, obj):
         return obj.sessions.filter(status="completed").count()
 
+    def validate_products(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("San pham dang ky phai la danh sach.")
+        return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+    def validate_training_contents(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Noi dung tap huan phai la danh sach.")
+        return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+    def _sync_registered_sessions(self, partner):
+        prefix = "Tạo từ đăng ký tập huấn"
+        partner.sessions.filter(training_class__isnull=True, notes__startswith=prefix).delete()
+        if "Tập huấn" not in (partner.products or []):
+            return
+        contents = partner.training_contents or []
+        for number, item in enumerate(partner.training_schedule or [], start=1):
+            if not isinstance(item, dict) or item.get("unscheduled") or not item.get("date"):
+                continue
+            TrainingSession.objects.create(
+                title=f"Buổi {number} · {partner.name}",
+                session_number=number,
+                session_date=item["date"],
+                partner=partner.name,
+                partner_ref=partner,
+                category=" · ".join(contents),
+                contents=contents,
+                status="planned",
+                notes=f"{prefix}: buổi {number}.",
+            )
+
+    def create(self, validated_data):
+        partner = super().create(validated_data)
+        self._sync_registered_sessions(partner)
+        return partner
+
+    def update(self, instance, validated_data):
+        partner = super().update(instance, validated_data)
+        self._sync_registered_sessions(partner)
+        return partner
 
 class TrainingClassSerializer(serializers.ModelSerializer):
     partner_name = serializers.CharField(source="partner.name", read_only=True)
