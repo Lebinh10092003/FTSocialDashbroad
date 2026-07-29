@@ -158,7 +158,7 @@ class TrainingCustomerMeetingSerializer(serializers.ModelSerializer):
         model = TrainingCustomerMeeting
         fields = [
             "id", "title", "customer_type", "representative", "phone", "email", "date",
-            "start_time", "end_time", "location", "content", "notes", "created_at", "updated_at",
+            "start_time", "end_time", "location", "content", "status", "staff_name", "notes", "created_at", "updated_at",
         ]
 
 class TrainingMaterialSerializer(serializers.ModelSerializer):

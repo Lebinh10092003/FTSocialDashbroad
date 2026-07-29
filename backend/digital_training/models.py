@@ -83,6 +83,8 @@ class TrainingCustomerMeeting(models.Model):
     end_time = models.TimeField(null=True, blank=True)
     location = models.CharField(max_length=500, blank=True)
     content = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=TrainingSession.STATUS_CHOICES, default="planned")
+    staff_name = models.CharField(max_length=255, blank=True)
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
