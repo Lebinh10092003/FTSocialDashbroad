@@ -1031,6 +1031,18 @@ body {
 .dt-calendar-event {
   user-select: none;
 }
+.dt-calendar-event-main { display:block; }
+.dt-calendar-event-meta {
+  display:block;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:9px;
+  font-weight:700;
+  line-height:1.25;
+  opacity:.88;
+}
+.dt-month-event .dt-calendar-event-main { display:inline; }
 .dt-calendar-event.is-moving {
   opacity: 0.45;
   cursor: grabbing;
