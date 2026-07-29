@@ -1,7 +1,7 @@
 from django.test import TestCase
 
 from .models import TrainingClass, TrainingPartner, TrainingSession, TrainingSurvey
-from .serializers import TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingPartnerSerializer, TrainingSurveySerializer
+from .serializers import TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingPartnerSerializer, TrainingSessionSerializer, TrainingSurveySerializer
 
 
 class TrainingSurveySerializerTests(TestCase):
@@ -94,3 +94,47 @@ class TrainingPartnerLocationTests(TestCase):
         self.assertTrue(serializer.is_valid(), serializer.errors)
         training_class = serializer.save()
         self.assertEqual(training_class.training_contents, ["Dashboard", "AI"])
+
+class TrainingSessionLocationTests(TestCase):
+    def test_location_is_stored_on_the_calendar_session(self):
+        serializer = TrainingSessionSerializer(
+            data={
+                "title": "Buổi 1",
+                "date": "2026-08-05",
+                "start_time": "08:00",
+                "end_time": "11:00",
+                "location": "Hội trường A / https://meet.example.test",
+                "status": "planned",
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        session = serializer.save()
+        self.assertEqual(session.location, "Hội trường A / https://meet.example.test")
+        self.assertEqual(TrainingSessionSerializer(session).data["location"], session.location)
+
+    def test_shared_schedule_keeps_each_session_location(self):
+        serializer = TrainingPartnerSerializer(
+            data={
+                "name": "Khách hàng có lịch theo địa điểm",
+                "training_schedule": [
+                    {
+                        "date": "2026-08-05",
+                        "start_time": "08:00",
+                        "location": "Phòng 201",
+                        "unscheduled": False,
+                    },
+                    {
+                        "date": "2026-08-06",
+                        "start_time": "13:30",
+                        "location": "https://meet.example.test/buoi-2",
+                        "unscheduled": False,
+                    },
+                ],
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        partner = serializer.save()
+        self.assertEqual(partner.training_schedule[0]["location"], "Phòng 201")
+        self.assertEqual(partner.training_schedule[1]["location"], "https://meet.example.test/buoi-2")
