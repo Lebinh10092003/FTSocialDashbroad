@@ -728,14 +728,14 @@ a { color: inherit; text-decoration: none; }
 
 /* Bright calendar language inspired by Calendar's clarity, without copying its dark theme. */
 .dt-calendar { border: 1px solid #d7e7f5; border-radius: 18px; overflow: hidden; background: #fff; }
-.dt-calendar-toolbar { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:48px; padding:6px 12px; border-bottom:1px solid #d7e7f5; background:#fbfdff; }
-.dt-calendar-toolbar button { min-height:34px; border:1px solid #c7ddf0; background:#fff; color:#075da7; border-radius:8px; font-weight:700; padding:5px 10px; transition:.16s ease; }
+.dt-calendar-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:40px; padding:4px 8px; border-bottom:1px solid #d7e7f5; background:#fbfdff; }
+.dt-calendar-toolbar button { min-height:30px; border:1px solid #c7ddf0; background:#fff; color:#075da7; border-radius:7px; font-weight:700; padding:3px 8px; transition:.16s ease; }
 .dt-calendar-toolbar button:hover { background:#eaf6ff; border-color:#8fc6eb; }
-.dt-calendar-week { position:relative; display:grid; grid-template-columns:56px repeat(7,minmax(128px,1fr)); grid-template-rows:42px; grid-auto-rows:var(--dt-calendar-slot-height,37.3333px); min-width:960px; }
+.dt-calendar-week { position:relative; display:grid; grid-template-columns:56px repeat(7,minmax(128px,1fr)); grid-template-rows:32px; grid-auto-rows:var(--dt-calendar-slot-height,37.3333px); min-width:960px; }
 .dt-calendar-week.is-dynamic { grid-template-columns:56px repeat(var(--dt-calendar-days),minmax(0,1fr)); min-width:0; }
-.dt-calendar-head { position:sticky; top:0; z-index:2; border-bottom:1px solid #d7e7f5; background:#fff; padding:3px 6px; text-align:center; color:#54718c; font-size:10px; font-weight:800; }
-.dt-calendar-head strong { display:block; margin-top:1px; font-size:16px; color:#113c62; }
-.dt-calendar-head.is-today strong { display:inline-grid; height:26px; min-width:26px; place-items:center; border-radius:50%; background:#1681c5; color:#fff; }
+.dt-calendar-head { position:sticky; top:0; z-index:2; border-bottom:1px solid #d7e7f5; background:#fff; padding:2px 5px; text-align:center; color:#54718c; font-size:10px; font-weight:800; }
+.dt-calendar-head strong { display:block; margin-top:0; font-size:15px; color:#113c62; }
+.dt-calendar-head.is-today strong { display:inline-grid; height:24px; min-width:24px; place-items:center; border-radius:50%; background:#1681c5; color:#fff; }
 .dt-calendar-hour { border-right:1px solid #d7e7f5; border-bottom:1px solid #e9f2f9; padding:7px 8px; color:#7890a7; font-size:11px; text-align:right; }
 .dt-calendar-cell { position:relative; height:var(--dt-calendar-slot-height,37.3333px); min-height:0; border-right:1px solid #d7e7f5; border-bottom:1px solid #e9f2f9; background:#fff; transition:background .15s ease; }
 .dt-calendar-cell:hover { background:#f1f9ff; }
@@ -851,12 +851,12 @@ a { color: inherit; text-decoration: none; }
 .ft-nav-item:hover { background: rgba(255,255,255,.72) !important; }
 .ft-nav-item-active { background: linear-gradient(90deg, #fff 0%, #d8efff 100%) !important; }
 /* Digital Training calendar: stable weekday headers and a complete month grid. */
-.dt-calendar-head { position:static; min-height:42px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; }
+.dt-calendar-head { position:static; min-height:32px; display:flex; flex-direction:row; align-items:center; justify-content:center; gap:6px; }
 .dt-calendar-head strong { margin-top:0; line-height:1; }
 .dt-calendar-head.is-filtered, .dt-calendar-cell.is-filtered { opacity:.38; }
 .dt-calendar-range { display:flex; flex-wrap:wrap; align-items:center; gap:7px; }
 .dt-calendar-range label { display:flex; align-items:center; gap:5px; color:#54718c; font-size:10px; font-weight:800; }
-.dt-calendar-range input { width:142px; height:34px; border:1px solid #c7ddf0; border-radius:8px; background:#fff; color:#17324d; padding:3px 7px; font-size:12px; }
+.dt-calendar-range input { width:128px; height:30px; border:1px solid #c7ddf0; border-radius:7px; background:#fff; color:#17324d; padding:2px 6px; font-size:11px; }
 .dt-calendar-range-error { border-bottom:1px solid #fecdd3; background:#fff1f2; padding:9px 16px; color:#be123c; font-size:12px; font-weight:700; }
 .dt-calendar-month { display:grid; grid-template-columns:repeat(7,minmax(112px,1fr)); min-width:780px; }
 .dt-month-head { border-bottom:1px solid #d7e7f5; background:#f7fbff; padding:10px 6px; text-align:center; color:#54718c; font-size:11px; font-weight:800; text-transform:uppercase; }
@@ -1011,7 +1011,19 @@ body {
 .overflow-x-auto :is(button, input, select, textarea, a), [data-drag-scroll] :is(button, input, select, textarea, a) { cursor: auto; }
 
 /* Digital Training calendar keeps its controls visible while the time grid scrolls independently. */
-.dt-calendar-scroll { max-height: calc(100vh - 300px); overflow: auto; overscroll-behavior: contain; }
+.dt-calendar-page { padding:12px !important; }
+.dt-calendar-page-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+.dt-calendar-page-header > div:first-child { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 12px; }
+.dt-calendar-page-header > div:first-child > * { margin:0 !important; }
+.dt-calendar-page-header > div:first-child > p:first-child { font-size:10px; }
+.dt-calendar-page-header > div:first-child > h2 { font-size:18px; }
+.dt-calendar-page-header > div:first-child > p:last-child { font-size:11px; }
+.dt-calendar-scroll { height:clamp(704px,calc(100dvh - 180px),850px); max-height:none; overflow:auto; overscroll-behavior:contain; }
+.dt-calendar > p:last-child { padding:4px 12px !important; font-size:10px; line-height:1.2; }
+@media (max-width:767px) {
+  .dt-calendar-page-header { align-items:flex-start; flex-direction:column; }
+  .dt-calendar-scroll { height:70dvh; min-height:520px; }
+}
 .dt-calendar-scroll .dt-calendar-head { position: sticky; top: 0; z-index: 4; box-shadow: 0 1px 0 #d9e2f0; }
 .dt-calendar-scroll .dt-calendar-event { cursor:pointer; }
 .dt-calendar-scroll .dt-calendar-event[draggable="true"] { cursor:grab; }
