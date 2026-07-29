@@ -1,3 +1,5 @@
+from datetime import date
+
 from django.db.models import Max
 from rest_framework import serializers
 
@@ -102,6 +104,11 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Noi dung tap huan phai la danh sach.")
         return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
 
+    def _mark_past_session_completed(self, validated_data):
+        session_date = validated_data.get("session_date")
+        if session_date and session_date < date.today() and validated_data.get("status", "planned") == "planned":
+            validated_data["status"] = "completed"
+        return validated_data
     def _sync_primary_category(self, validated_data):
         contents = validated_data.get("contents")
         if contents:
@@ -120,7 +127,7 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
         return validated_data
 
     def create(self, validated_data):
-        validated_data = self._sync_partner_from_class(self._sync_primary_category(validated_data))
+        validated_data = self._sync_partner_from_class(self._sync_primary_category(self._mark_past_session_completed(validated_data)))
         training_class = validated_data.get("training_class")
         if training_class and not validated_data.get("session_number"):
             last_number = training_class.sessions.aggregate(Max("session_number"))["session_number__max"] or 0
@@ -128,7 +135,7 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        return super().update(instance, self._sync_partner_from_class(self._sync_primary_category(validated_data)))
+        return super().update(instance, self._sync_partner_from_class(self._sync_primary_category(self._mark_past_session_completed(validated_data))))
 
 
 class TrainingCustomerMeetingSerializer(serializers.ModelSerializer):
