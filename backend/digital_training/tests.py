@@ -1,7 +1,7 @@
 from django.test import TestCase
 
-from .models import TrainingPartner, TrainingSession, TrainingSurvey
-from .serializers import TrainingCustomerMeetingSerializer, TrainingSurveySerializer
+from .models import TrainingClass, TrainingPartner, TrainingSession, TrainingSurvey
+from .serializers import TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingPartnerSerializer, TrainingSurveySerializer
 
 
 class TrainingSurveySerializerTests(TestCase):
@@ -62,3 +62,35 @@ class OtherWorkScheduleSerializerTests(TestCase):
         item = serializer.save()
         self.assertEqual(item.schedule_type, "other")
         self.assertEqual(item.activity_type, "Họp nội bộ")
+class TrainingPartnerLocationTests(TestCase):
+    def test_partner_keeps_province_and_ward_as_filterable_fields(self):
+        serializer = TrainingPartnerSerializer(
+            data={
+                "name": "Trường thử nghiệm",
+                "partner_type": "Khối Giáo dục",
+                "partner_subtype": "THCS",
+                "province": "Hà Nội",
+                "ward": "Việt Hưng",
+                "products": ["Tập huấn"],
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        partner = serializer.save()
+        self.assertEqual(partner.province, "Hà Nội")
+        self.assertEqual(partner.ward, "Việt Hưng")
+
+    def test_training_contents_are_stored_on_each_class(self):
+        partner = TrainingPartner.objects.create(name="Khách hàng nhiều lớp")
+        serializer = TrainingClassSerializer(
+            data={
+                "partner": partner.pk,
+                "name": "Lớp 1",
+                "planned_sessions": 0,
+                "training_contents": ["Dashboard", "Dashboard", "AI"],
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        training_class = serializer.save()
+        self.assertEqual(training_class.training_contents, ["Dashboard", "AI"])

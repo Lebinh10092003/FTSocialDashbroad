@@ -14,7 +14,7 @@ class TrainingPartnerSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "address", "contact_person", "contact_position", "phone", "email", "additional_contacts",
             "contract_start", "contract_end", "training_content", "planned_sessions",
-            "partner_type", "partner_subtype", "products", "contract_duration", "contract_duration_unit",
+            "partner_type", "partner_subtype", "province", "ward", "products", "contract_duration", "contract_duration_unit",
             "contract_signed_date", "contract_status", "budget", "ai_account_count", "training_contents",
             "training_schedule", "training_location", "training_staff", "completed_sessions", "notes", "created_at", "updated_at",
         ]
@@ -69,12 +69,17 @@ class TrainingClassSerializer(serializers.ModelSerializer):
     class Meta:
         model = TrainingClass
         fields = [
-            "id", "partner", "partner_name", "name", "members", "planned_sessions",
+            "id", "partner", "partner_name", "name", "members", "planned_sessions", "training_contents",
             "completed_sessions", "notes", "created_at", "updated_at",
         ]
 
     def get_completed_sessions(self, obj):
         return obj.sessions.filter(status="completed").count()
+
+    def validate_training_contents(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Noi dung tap huan phai la danh sach.")
+        return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
 
 
 class TrainingSessionSerializer(serializers.ModelSerializer):
