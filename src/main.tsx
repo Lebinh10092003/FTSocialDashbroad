@@ -45,6 +45,31 @@ window.fetch = async (input, init) => {
   return originalFetch(new Request(targetUrl, requestInit));
 };
 
+const isInteractiveTarget = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest('button, input, select, textarea, a, [data-no-drag-scroll]'));
+let dragScroll: { element: HTMLElement; startX: number; startLeft: number; pointerId: number; moved: boolean } | null = null;
+
+document.addEventListener('pointerdown', event => {
+  if (event.button !== 0 || isInteractiveTarget(event.target)) return;
+  const element = event.target instanceof Element ? event.target.closest<HTMLElement>('.overflow-x-auto, [data-drag-scroll]') : null;
+  if (!element || element.scrollWidth <= element.clientWidth) return;
+  dragScroll = { element, startX: event.clientX, startLeft: element.scrollLeft, pointerId: event.pointerId, moved: false };
+  element.setPointerCapture?.(event.pointerId);
+  element.classList.add('is-drag-scrolling');
+});
+document.addEventListener('pointermove', event => {
+  if (!dragScroll || event.pointerId !== dragScroll.pointerId) return;
+  const distance = event.clientX - dragScroll.startX;
+  if (Math.abs(distance) > 3) dragScroll.moved = true;
+  dragScroll.element.scrollLeft = dragScroll.startLeft - distance;
+  if (dragScroll.moved) event.preventDefault();
+}, { passive: false });
+const endDragScroll = (event: PointerEvent) => {
+  if (!dragScroll || event.pointerId !== dragScroll.pointerId) return;
+  dragScroll.element.classList.remove('is-drag-scrolling');
+  dragScroll = null;
+};
+document.addEventListener('pointerup', endDragScroll);
+document.addEventListener('pointercancel', endDragScroll);
 createRoot(document.getElementById('root')!).render(
   <StrictMode><App /></StrictMode>,
 );

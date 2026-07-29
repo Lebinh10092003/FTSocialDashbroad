@@ -992,3 +992,7 @@ body {
 .dt-partner-management th:nth-child(7), .dt-partner-management td:nth-child(7) { width: 10rem; }
 .dt-partner-management th:nth-child(8), .dt-partner-management td:nth-child(8) { width: 13rem; }
 .dt-partner-management th:nth-child(9), .dt-partner-management td:nth-child(9), .dt-partner-management th:nth-child(10), .dt-partner-management td:nth-child(10) { width: 3.25rem; text-align: center; }
+/* Kéo chuột để cuộn ngang bảng khi bảng vượt chiều rộng khung. */
+.overflow-x-auto, [data-drag-scroll] { cursor: grab; touch-action: pan-y; }
+.overflow-x-auto.is-drag-scrolling, [data-drag-scroll].is-drag-scrolling { cursor: grabbing; user-select: none; }
+.overflow-x-auto :is(button, input, select, textarea, a), [data-drag-scroll] :is(button, input, select, textarea, a) { cursor: auto; }

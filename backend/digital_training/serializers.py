@@ -46,30 +46,9 @@ class TrainingPartnerSerializer(serializers.ModelSerializer):
         return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
 
     def _sync_registered_sessions(self, partner):
-        prefix = "Tạo từ đăng ký tập huấn"
-        partner.sessions.filter(training_class__isnull=True, notes__startswith=prefix).delete()
-        if "Tập huấn" not in (partner.products or []):
-            return
-        contents = partner.training_contents or []
-        for number, item in enumerate(partner.training_schedule or [], start=1):
-            if not isinstance(item, dict):
-                continue
-            unscheduled = bool(item.get("unscheduled")) or not item.get("date")
-            TrainingSession.objects.create(
-                title=f"Buổi chung {number} · {partner.name}",
-                session_number=number,
-                session_date=None if unscheduled else item.get("date"),
-                start_time=None if unscheduled else (item.get("start_time") or None),
-                partner=partner.name,
-                partner_ref=partner,
-                category=" · ".join(contents),
-                contents=contents,
-                location=partner.training_location,
-                staff_name=partner.training_staff,
-                status="unscheduled" if unscheduled else "planned",
-                notes=f"{prefix}: buổi chung {number}.",
-            )
-
+        # Shared sessions are materialised per class by the client workflow.
+        # Keeping this hook empty prevents a separate “Tập huấn chung” row.
+        return
     def create(self, validated_data):
         partner = super().create(validated_data)
         self._sync_registered_sessions(partner)
