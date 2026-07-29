@@ -44,7 +44,7 @@ jobs:
   deploy:
     name: Deploy Workspace VPS
     needs: [frontend, backend]
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency:
       group: workspace-production-deploy
@@ -53,29 +53,27 @@ jobs:
     steps:
       - name: Configure VPS SSH access
         env:
-          VPS_HOST: ${{ vars.VPS_HOST }}
-          VPS_PORT: ${{ vars.VPS_PORT }}
-          VPS_USERNAME: ${{ vars.VPS_USERNAME }}
-          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
-          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          VPS_HOST: ${{ secrets.DEPLOY_HOST }}
+          VPS_PORT: ${{ secrets.DEPLOY_PORT }}
+          VPS_USERNAME: ${{ secrets.DEPLOY_USER }}
         run: |
           set -Eeuo pipefail
-          : "${VPS_HOST:?Missing repository variable VPS_HOST}"
-          : "${VPS_PORT:?Missing repository variable VPS_PORT}"
-          : "${VPS_USERNAME:?Missing repository variable VPS_USERNAME}"
-          : "${VPS_SSH_PRIVATE_KEY:?Missing repository secret VPS_SSH_PRIVATE_KEY}"
-          : "${VPS_KNOWN_HOSTS:?Missing repository secret VPS_KNOWN_HOSTS}"
+          : "${VPS_HOST:?Missing repository secret DEPLOY_HOST}"
+          : "${VPS_PORT:?Missing repository secret DEPLOY_PORT}"
+          : "${VPS_USERNAME:?Missing repository secret DEPLOY_USER}"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh-keyscan -p "$VPS_PORT" -H "$VPS_HOST" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
       - name: Run isolated Workspace deployment
         env:
-          VPS_HOST: ${{ vars.VPS_HOST }}
-          VPS_PORT: ${{ vars.VPS_PORT }}
-          VPS_USERNAME: ${{ vars.VPS_USERNAME }}
+          VPS_HOST: ${{ secrets.DEPLOY_HOST }}
+          VPS_PORT: ${{ secrets.DEPLOY_PORT }}
+          VPS_USERNAME: ${{ secrets.DEPLOY_USER }}
+          SSHPASS: ${{ secrets.DEPLOY_PASSWORD }}
         run: |
           set -Eeuo pipefail
-          ssh -i ~/.ssh/id_ed25519 -p "$VPS_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USERNAME@$VPS_HOST" 'cd /var/www/ft-workspace && bash deploy.sh'
+          : "${SSHPASS:?Missing repository secret DEPLOY_PASSWORD}"
+          sshpass -e ssh -p "$VPS_PORT" -o BatchMode=no -o StrictHostKeyChecking=yes "$VPS_USERNAME@$VPS_HOST" 'if [ "$(id -u)" -eq 0 ]; then exec sudo -u workspace -H bash -lc "cd /var/www/ft-workspace && bash deploy.sh"; else cd /var/www/ft-workspace && exec bash deploy.sh; fi'
