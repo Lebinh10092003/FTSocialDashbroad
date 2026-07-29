@@ -13,7 +13,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 import datetime
 from .models import ApiLog, Channel, Post, DailySnapshot, FollowerSnapshot
-from authentication.permissions import IsAuthenticated, IsManagerOrAdmin
+from authentication.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, IsManagerOrAdmin
 from .sync import SyncEngine
 
 def get_today_date():
@@ -31,7 +31,7 @@ def resolve_reporting_period(query):
     return get_recent_start_date(6), get_today_date()
 
 @api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticatedOrReadOnly])
 def channels_list(request):
     if request.method == 'GET':
         channels = Channel.objects.exclude(external_id='current-facebook-token').order_by('name')
@@ -167,7 +167,7 @@ def channel_sync(request, channel_id):
         "message": "Đã xếp hàng đồng bộ nền cho kênh đã chọn.",
     }, status=status.HTTP_202_ACCEPTED)
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticatedOrReadOnly])
 def media_summary_trend(request):
     group_by = request.query_params.get('groupBy', 'month')
     platform_filter = request.query_params.get('platform')
@@ -423,7 +423,7 @@ def _build_media_summary(query):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticatedOrReadOnly])
 def media_summary(request):
     response = Response(_build_media_summary(request.query_params))
     response['Cache-Control'] = 'no-store, no-cache, must-revalidate'
@@ -437,7 +437,7 @@ def _safe_excel_value(value):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticatedOrReadOnly])
 def media_summary_xlsx(request):
     rows = _build_media_summary(request.query_params)
     period_start, period_end = resolve_reporting_period(request.query_params)
@@ -515,7 +515,7 @@ def media_summary_xlsx(request):
     return response
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticatedOrReadOnly])
 def followers_trend(request):
     try:
         if request.query_params.get('startDate') and request.query_params.get('endDate'):
@@ -604,7 +604,7 @@ def followers_trend(request):
     return Response(trend)
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticatedOrReadOnly])
 def dashboard_view(request):
     platform_filter = request.query_params.get('platform')
     channel_id_filter = request.query_params.get('channelId')
@@ -1094,7 +1094,7 @@ def sync_history(request):
     return Response(result)
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticatedOrReadOnly])
 def posts_list(request):
     """GET /api/posts - Danh sách bài viết có phân trang"""
     try:

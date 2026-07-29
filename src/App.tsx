@@ -156,7 +156,7 @@ export default function App() {
 
   const isGuest = !idToken || user.email === GUEST_USER.email;
   const moduleForView: Partial<Record<ViewMode, string>> = { 'social-dashboard': 'social-dashboard', 'email-builder': 'email-builder', examination: 'examination', 'digital-training': 'digital-training' };
-  const canAccessView = (mode: ViewMode) => userRole === 'ADMIN' || (mode === 'account-management' ? false : !!moduleForView[mode] && (user.accessModules || []).includes(moduleForView[mode]!));
+  const canAccessView = (mode: ViewMode) => { if (mode === 'account-management') return userRole === 'ADMIN'; if (isGuest) return !!moduleForView[mode]; return userRole === 'ADMIN' || (!!moduleForView[mode] && (user.accessModules || []).includes(moduleForView[mode]!)); };
   const googleAccessToken = null;
 
   const persistSession = (token: string, nextUser: AppUser, role: UserRole) => {
@@ -221,7 +221,8 @@ export default function App() {
   };
 
   const setSocialTab = (tab: string) => {
-    const nextTab = (SOCIAL_TABS as readonly string[]).includes(tab) ? tab as SocialTab : 'dashboard';
+    const requestedTab = (SOCIAL_TABS as readonly string[]).includes(tab) ? tab as SocialTab : 'dashboard';
+    const nextTab = isGuest && (requestedTab === 'sync' || requestedTab === 'config') ? 'dashboard' : requestedTab;
     setActiveTab(nextTab);
     setViewModeState('social-dashboard');
     const path = socialPathFor(nextTab);
@@ -539,6 +540,7 @@ export default function App() {
   }
 
   if (!canAccessView('social-dashboard')) { setViewMode('workspace'); return null; }
+  if (isGuest && (activeTab === 'sync' || activeTab === 'config')) { setSocialTab('dashboard'); return null; }
 
   return (
     <div className="ft-module-shell flex h-screen overflow-hidden font-sans">

@@ -3,10 +3,10 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
 from .models import EmailTemplate, EmailUserPref
-from authentication.permissions import IsAuthenticated
+from authentication.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 
 @api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticatedOrReadOnly])
 def email_templates_list(request):
     if request.method == 'GET':
         templates = EmailTemplate.objects.all().order_by('-last_updated')

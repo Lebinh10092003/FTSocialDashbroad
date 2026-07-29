@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from django.utils import timezone
 from .models import Competition, ExamSession, Candidate, CandidateParticipation, RoundResult, LogNote, ExaminationSheet, ExaminationSheetPublication
 from authentication.models import SystemConfig, UserProfile
-from authentication.permissions import IsAuthenticated, IsManagerOrAdmin, IsAdmin
+from authentication.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, IsManagerOrAdmin, IsAdmin
 from .sheet_publication import academic_year_for_date, publication_payload, session_academic_year, session_tab_name, sync_publication
 
 from .sync import (
@@ -526,7 +526,11 @@ def serialize_competition(comp):
         'updatedAt': comp.updated_at.isoformat()
     }
 
-def serialize_session(sess):
+def request_can_view_sensitive_data(request):
+    return bool(getattr(getattr(request, 'user', None), 'email', ''))
+
+
+def serialize_session(sess, include_private=True):
     competition = session_competition(sess)
     output_sheet = ExaminationSheet.objects.filter(session_id=sess.id, stage='session-output').first()
     return {
@@ -545,17 +549,17 @@ def serialize_session(sess):
         'internationalDate': sess.international_date,
         'phase': sess.phase,
         'note': sess.note,
-        'registrationSheetUrl': sess.registration_sheet_url,
-        'registrationSheetTab': sess.registration_sheet_tab,
-        'outputSheetUrl': output_sheet.url if output_sheet else '',
-        'outputSheetTab': output_sheet.sheet_tab if output_sheet else '',
+        'registrationSheetUrl': sess.registration_sheet_url if include_private else '',
+        'registrationSheetTab': sess.registration_sheet_tab if include_private else '',
+        'outputSheetUrl': (output_sheet.url if output_sheet else '') if include_private else '',
+        'outputSheetTab': (output_sheet.sheet_tab if output_sheet else '') if include_private else '',
         'rounds': sess.rounds or [],
         'sortKey': sess.sort_key,
         'createdBy': sess.created_by,
         'updatedAt': sess.updated_at.isoformat()
     }
 
-def serialize_candidate_participations(cand):
+def serialize_candidate_participations(cand, include_private=True):
     participations = CandidateParticipation.objects.filter(candidate=cand).select_related('session').prefetch_related('round_results')
     rows = []
     for participation in participations:
@@ -574,14 +578,14 @@ def serialize_candidate_participations(cand):
                 'id': str(result.id),
                 'round': result.round_name, 'eligibility': result.eligibility, 'sbd': result.sbd,
                 'date': result.exam_date, 'time': result.time_slot, 'mode': result.mode,
-                'location': result.location, 'link': result.link, 'account': result.account, 'password': result.password,
+                'location': result.location, 'link': result.link, 'account': result.account if include_private else '', 'password': result.password if include_private else '',
                 'attendance': result.attendance, 'score': result.score, 'scoreRate': result.score_rate,
                 'rank': result.rank, 'result': result.result, 'note': result.note,
             } for result in participation.round_results.all()],
         })
     return rows
 
-def serialize_candidate(cand):
+def serialize_candidate(cand, include_private=True):
     return {
         'id': cand.id,
         'code': cand.code,
@@ -602,7 +606,7 @@ def serialize_candidate(cand):
         'address': cand.address or '',
         'birthDate': cand.birth_date or '',
         'sessionIds': cand.session_ids or [],
-        'participations': serialize_candidate_participations(cand),
+        'participations': serialize_candidate_participations(cand, include_private=include_private),
         'examHistory': normalized_exam_history(cand) or cand.exam_history or [],
         'sortKey': cand.sort_key,
         'updated': cand.updated or ''
@@ -682,7 +686,7 @@ def persisted_partners():
 
 
 @api_view(['GET', 'PUT'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticatedOrReadOnly])
 def partners_detail(request):
     if request.method == 'GET':
         return Response({'partners': persisted_partners()})
@@ -713,7 +717,7 @@ def partners_detail(request):
                 append_audit(entity_key, 'Cập nhật đối tác: ' + changes, request)
     return Response({'partners': partners})
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticatedOrReadOnly])
 def examination_bootstrap(request):
     try:
         ensure_examination_seed()
@@ -721,9 +725,10 @@ def examination_bootstrap(request):
         for session in ExamSession.objects.all():
             refresh_automatic_session_phase(session)
         
+        include_private = request_can_view_sensitive_data(request)
         competitions = [serialize_competition(c) for c in Competition.objects.all().order_by('sort_key')[:1000]]
-        sessions = [serialize_session(s) for s in ExamSession.objects.all().order_by('sort_key')[:1000]]
-        candidates = [serialize_candidate(cand) for cand in Candidate.objects.all().order_by('sort_key')[:1000]]
+        sessions = [serialize_session(s, include_private=include_private) for s in ExamSession.objects.all().order_by('sort_key')[:1000]]
+        candidates = [serialize_candidate(cand, include_private=include_private) for cand in Candidate.objects.all().order_by('sort_key')[:1000]]
         
         return Response({
             'competitions': competitions,
@@ -735,13 +740,14 @@ def examination_bootstrap(request):
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticatedOrReadOnly])
 def get_resource_list(request, resource):
     try:
         ensure_examination_seed()
         limit = int(request.query_params.get('limit', 50))
         cursor = request.query_params.get('cursor')
         
+        include_private = request_can_view_sensitive_data(request)
         if resource == 'competitions':
             queryset = Competition.objects.all().order_by('sort_key')
             if cursor:
@@ -766,7 +772,7 @@ def get_resource_list(request, resource):
             items_to_return = items[:limit]
             
             return Response({
-                'items': [serialize_session(s) for s in items_to_return],
+                'items': [serialize_session(s, include_private=include_private) for s in items_to_return],
                 'nextCursor': items_to_return[-1].sort_key if has_next and items_to_return else None
             })
             
@@ -779,7 +785,7 @@ def get_resource_list(request, resource):
             items_to_return = items[:limit]
             
             return Response({
-                'items': [serialize_candidate(c) for c in items_to_return],
+                'items': [serialize_candidate(c, include_private=include_private) for c in items_to_return],
                 'nextCursor': items_to_return[-1].sort_key if has_next and items_to_return else None
             })
             

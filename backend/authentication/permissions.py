@@ -34,6 +34,11 @@ class IsAuthenticated(permissions.BasePermission):
         return has_module_access(request)
 
 
+class IsAuthenticatedOrReadOnly(permissions.BasePermission):
+    """Public read access for normal workspace data; all mutations require authentication."""
+    def has_permission(self, request, view):
+        return request.method in permissions.SAFE_METHODS or has_module_access(request)
+
 class IsAdmin(permissions.BasePermission):
     def has_permission(self, request, view):
         return request.user is not None and getattr(request, 'user_role', 'EMPLOYEE') == 'ADMIN'

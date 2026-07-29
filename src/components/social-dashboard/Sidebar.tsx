@@ -29,7 +29,7 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
     { id: 'dashboard', label: 'Biểu đồ tổng quan', icon: LayoutDashboard },
     { id: 'media', label: 'Báo cáo tổng hợp', icon: Radio },
     { id: 'posts', label: 'Bài đăng', icon: FileText },
-    { id: 'sync', label: 'Đồng bộ dữ liệu', icon: RefreshCw },
+    ...(isGuest ? [] : [{ id: 'sync', label: 'Đồng bộ dữ liệu', icon: RefreshCw }]),
     ...(isGuest ? [] : [{ id: 'config', label: 'Cấu hình hệ thống', icon: Settings }]),
   ];
 

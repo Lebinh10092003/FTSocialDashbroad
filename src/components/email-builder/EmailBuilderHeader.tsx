@@ -132,8 +132,8 @@ export default function EmailBuilderHeader({
           <ArrowLeft className="w-4 h-4 text-slate-550" />
         </button>
         <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
-          <button type="button" onClick={onUndo} disabled={!canUndo} title="Hoàn tác (Ctrl+Z)" className="rounded-lg p-1.5 text-slate-600 hover:bg-white hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-4 w-4" /></button>
-          <button type="button" onClick={onRedo} disabled={!canRedo} title="Làm lại (Ctrl+Y hoặc Ctrl+Shift+Z)" className="rounded-lg p-1.5 text-slate-600 hover:bg-white hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-30"><Redo2 className="h-4 w-4" /></button>
+          <button type="button" onClick={onUndo} disabled={isGuest || !canUndo} title="Hoàn tác (Ctrl+Z)" className="rounded-lg p-1.5 text-slate-600 hover:bg-white hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-4 w-4" /></button>
+          <button type="button" onClick={onRedo} disabled={isGuest || !canRedo} title="Làm lại (Ctrl+Y hoặc Ctrl+Shift+Z)" className="rounded-lg p-1.5 text-slate-600 hover:bg-white hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-30"><Redo2 className="h-4 w-4" /></button>
         </div>
 
         <div className="min-w-0">
@@ -158,6 +158,7 @@ export default function EmailBuilderHeader({
                     setNameVal(template.name);
                     setIsEditingName(true);
                   }}
+                  disabled={isGuest}
                   className="p-1 opacity-0 group-hover:opacity-100 hover:bg-slate-100 rounded text-slate-450 hover:text-slate-700 transition-all cursor-pointer"
                   title="Đổi tên mẫu"
                 >
@@ -192,7 +193,7 @@ export default function EmailBuilderHeader({
           onClick={onDuplicateTemplate}
           title="Nhân bản mẫu này"
           className="p-2 hover:bg-slate-50 border border-slate-200/50 hover:border-slate-350/50 rounded-xl text-slate-550 transition-all cursor-pointer flex items-center justify-center bg-white shadow-sm"
-        >
+         disabled={isGuest}>
           <Copy className="w-3.5 h-3.5" />
         </button>
 
@@ -208,7 +209,7 @@ export default function EmailBuilderHeader({
           onClick={handleImportClick}
           title="Nhập file JSON"
           className="p-2 hover:bg-slate-50 border border-slate-200/50 hover:border-slate-350/50 rounded-xl text-slate-550 transition-all cursor-pointer flex items-center justify-center bg-white shadow-sm"
-        >
+         disabled={isGuest}>
           <Upload className="w-3.5 h-3.5" />
         </button>
         <input
@@ -222,13 +223,14 @@ export default function EmailBuilderHeader({
         <button
           onClick={async () => { if (await dialog.confirm('Bạn muốn khôi phục tất cả các mẫu mặc định ban đầu của FermatTech? Các sửa đổi hiện tại sẽ bị xóa.', { title: 'Khôi phục mẫu mặc định', confirmText: 'Khôi phục', danger: true })) onRestoreDefaults(); }}
           title="Khôi phục mẫu mặc định"
+          disabled={isGuest}
           className="p-2 hover:bg-slate-50 border border-slate-200/50 hover:border-slate-350/50 rounded-xl text-slate-550 transition-all cursor-pointer flex items-center justify-center bg-white shadow-sm"
         >
           <RotateCcw className="w-3.5 h-3.5" />
         </button>
 
         <button
-          disabled={templatesList.length <= 1}
+          disabled={isGuest || templatesList.length <= 1}
           onClick={async () => { if (await dialog.confirm('Bạn chắc chắn muốn xóa mẫu này?', { title: 'Xóa mẫu email', confirmText: 'Xóa mẫu', danger: true })) onDeleteTemplate(); }}
           title="Xóa mẫu này"
           className="p-2 hover:bg-rose-50 border border-slate-200/50 hover:border-rose-100 rounded-xl text-slate-500 hover:text-rose-600 transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-500 flex items-center justify-center bg-white shadow-sm"

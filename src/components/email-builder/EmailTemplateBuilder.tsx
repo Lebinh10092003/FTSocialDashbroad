@@ -98,6 +98,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
 
   // Debounced panel width sync lên server (tránh quá nhiều request khi kéo)
   useEffect(() => {
+    if (isGuest) return;
     if (panelWidthSyncTimer.current) clearTimeout(panelWidthSyncTimer.current);
     panelWidthSyncTimer.current = setTimeout(() => {
       saveUserPrefsAsync({ leftPanelWidth, rightPanelWidth });
@@ -106,18 +107,18 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
       localStorage.setItem('ft_email_right_panel_width', String(rightPanelWidth));
     }, 1500);
     return () => { if (panelWidthSyncTimer.current) clearTimeout(panelWidthSyncTimer.current); };
-  }, [leftPanelWidth, rightPanelWidth]);
+  }, [leftPanelWidth, rightPanelWidth, isGuest]);
 
   // Initialize templates and variables (async - fetch từ server, fallback về localStorage)
   useEffect(() => {
-    let cancelled = false;
+        let cancelled = false;
 
     const initAsync = async () => {
       setIsLoading(true);
       try {
         // 1. Load user preferences (panel widths, active template)
-        const prefs = await loadUserPrefsAsync();
-        if (!cancelled) {
+        const prefs = isGuest ? null : await loadUserPrefsAsync();
+        if (!cancelled && prefs) {
           if (prefs.leftPanelWidth) {
             const max = Math.max(152, Math.floor(window.innerWidth * 0.25));
             setLeftPanelWidth(Math.max(96, Math.min(max, prefs.leftPanelWidth)));
@@ -341,13 +342,14 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   };
   useEffect(() => {
+    if (isGuest) return;
     if (panelWidthSyncTimer.current) clearTimeout(panelWidthSyncTimer.current);
     panelWidthSyncTimer.current = setTimeout(() => {
       saveUserPrefsAsync({ leftPanelWidth, rightPanelWidth });
       localStorage.setItem('ft_email_left_panel_width', String(leftPanelWidth));
       localStorage.setItem('ft_email_right_panel_width', String(rightPanelWidth));
     }, 1500);
-  }, [leftPanelWidth, rightPanelWidth]);
+  }, [leftPanelWidth, rightPanelWidth, isGuest]);
 
   const getBlockLabel = (type?: BlockType) => {
     switch (type) {
