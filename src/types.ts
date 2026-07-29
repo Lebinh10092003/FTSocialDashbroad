@@ -91,6 +91,7 @@ export interface UserProfile {
   employeeCode?: string;
   phone?: string;
   department?: { id: number; name: string } | null;
+  departments?: { id: number; name: string }[];
   jobTitle?: { id: number; name: string } | null;
   manager?: { email: string; name: string } | null;
   startDate?: string | null;

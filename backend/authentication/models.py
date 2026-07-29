@@ -36,6 +36,7 @@ class UserProfile(models.Model):
     employee_code = models.CharField(max_length=50, blank=True, null=True, unique=True)
     phone = models.CharField(max_length=30, blank=True, default='')
     department = models.ForeignKey(Department, blank=True, null=True, on_delete=models.SET_NULL, related_name='employees')
+    departments = models.ManyToManyField(Department, blank=True, related_name='member_employees')
     job_title = models.ForeignKey(JobTitle, blank=True, null=True, on_delete=models.SET_NULL, related_name='employees')
     manager = models.ForeignKey('self', blank=True, null=True, on_delete=models.SET_NULL, related_name='direct_reports')
     start_date = models.DateField(blank=True, null=True)

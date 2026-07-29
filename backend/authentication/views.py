@@ -59,6 +59,7 @@ def _client_ip(request) -> str:
 
 def _user_payload(profile: UserProfile) -> dict:
     department = profile.department
+    departments = list(profile.departments.all())
     job_title = profile.job_title
     manager = profile.manager
     return {
@@ -72,6 +73,7 @@ def _user_payload(profile: UserProfile) -> dict:
         "employeeCode": profile.employee_code or "",
         "phone": profile.phone or "",
         "department": {"id": department.id, "name": department.name} if department else None,
+        "departments": [{"id": item.id, "name": item.name} for item in departments],
         "jobTitle": {"id": job_title.id, "name": job_title.name} if job_title else None,
         "manager": {"email": manager.email, "name": manager.name or manager.email} if manager else None,
         "startDate": profile.start_date.isoformat() if profile.start_date else None,
@@ -538,6 +540,22 @@ def change_password(request):
 
 EMPLOYMENT_STATUSES = {"ACTIVE", "SUSPENDED", "TERMINATED", "PENDING"}
 WORKSPACE_MODULES = {"social-dashboard", "email-builder", "examination", "digital-training"}
+DEFAULT_DEPARTMENTS = (
+    ("Kế toán", "ACCOUNTING"),
+    ("Truyền thông", "MEDIA"),
+    ("Công nghệ", "TECH"),
+    ("Đào tạo số", "DIGITAL_TRAINING"),
+    ("Khảo thí", "EXAMINATION"),
+)
+
+
+def _ensure_default_departments():
+    """Keep the employee directory useful on a newly installed workspace."""
+    for name, code in DEFAULT_DEPARTMENTS:
+        Department.objects.get_or_create(
+            name=name,
+            defaults={"code": code, "is_active": True},
+        )
 
 
 def _category_payload(item):
@@ -545,7 +563,7 @@ def _category_payload(item):
 
 
 def _employee_filters(request):
-    rows = UserProfile.objects.select_related("department", "job_title", "manager").all().order_by("name", "email")
+    rows = UserProfile.objects.select_related("department", "job_title", "manager").prefetch_related("departments").all().order_by("name", "email")
     search = str(request.query_params.get("search") or "").strip()
     if search:
         from django.db.models import Q
@@ -555,7 +573,7 @@ def _employee_filters(request):
     role = str(request.query_params.get("role") or "").strip().upper()
     employment_status = str(request.query_params.get("status") or "").strip().upper()
     if department.isdigit():
-        rows = rows.filter(department_id=int(department))
+        rows = rows.filter(departments__id=int(department)).distinct()
     if job_title.isdigit():
         rows = rows.filter(job_title_id=int(job_title))
     if role in VALID_ROLES:
@@ -581,6 +599,9 @@ def _write_employee(request, profile=None):
     employment_status = str(data.get("employmentStatus") or data.get("employment_status") or (profile.employment_status if profile else "PENDING")).upper()
     employee_code = str(data.get("employeeCode") or data.get("employee_code") or "").strip() or None
     department_id = data.get("departmentId") if "departmentId" in data else data.get("department_id")
+    department_ids = data.get("departmentIds") if "departmentIds" in data else data.get("department_ids")
+    if not isinstance(department_ids, list):
+        department_ids = [department_id] if department_id not in (None, "") else []
     title_id = data.get("jobTitleId") if "jobTitleId" in data else data.get("job_title_id")
     manager_email = _normalise_email(data.get("managerEmail") if "managerEmail" in data else data.get("manager_email"))
     requested_modules = data.get("accessModules") if "accessModules" in data else data.get("access_modules", profile.access_modules if profile else [])
@@ -605,11 +626,11 @@ def _write_employee(request, profile=None):
     if employee_code and UserProfile.objects.exclude(email=email).filter(employee_code__iexact=employee_code).exists():
         return None, Response({"error": "Mã nhân viên đã được sử dụng."}, status=status.HTTP_400_BAD_REQUEST)
 
-    department = None
-    if department_id not in (None, ""):
-        department = Department.objects.filter(pk=department_id).first()
-        if not department:
-            return None, Response({"error": "Phòng ban không tồn tại."}, status=status.HTTP_400_BAD_REQUEST)
+    requested_department_ids = {str(item).strip() for item in department_ids if str(item).strip()}
+    departments = list(Department.objects.filter(pk__in=requested_department_ids))
+    if len(departments) != len(requested_department_ids):
+        return None, Response({"error": "Phòng ban không tồn tại."}, status=status.HTTP_400_BAD_REQUEST)
+    department = departments[0] if departments else None
     job_title = None
     if title_id not in (None, ""):
         job_title = JobTitle.objects.filter(pk=title_id).first()
@@ -624,6 +645,7 @@ def _write_employee(request, profile=None):
             return None, Response({"error": "Nhân viên không thể tự là người quản lý của mình."}, status=status.HTTP_400_BAD_REQUEST)
 
     if profile is None:
+        password = password or 'Fermat@123'
         if not password:
             return None, Response({"error": "Vui lòng đặt mật khẩu khởi tạo."}, status=status.HTTP_400_BAD_REQUEST)
         try:
@@ -661,6 +683,7 @@ def _write_employee(request, profile=None):
     django_user.is_active = employment_status == "ACTIVE"
     django_user.save()
     profile.save()
+    profile.departments.set(departments)
     if password:
         Token.objects.filter(user=django_user).delete()
     return profile, None
