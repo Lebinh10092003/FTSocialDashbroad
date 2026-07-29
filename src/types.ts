@@ -95,6 +95,7 @@ export interface UserProfile {
   manager?: { email: string; name: string } | null;
   startDate?: string | null;
   employmentStatus?: 'ACTIVE' | 'SUSPENDED' | 'TERMINATED' | 'PENDING';
+  accessModules?: string[];
   lastLogin?: string | null;
 }
 

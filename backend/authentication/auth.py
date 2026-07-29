@@ -81,6 +81,7 @@ class DjangoTokenAuthentication(authentication.TokenAuthentication):
 
         request.django_user = django_user
         request.user_role = role
+        request.access_modules = set(profile.access_modules or [])
         request.google_access_token = (
             request.META.get("HTTP_X_GOOGLE_OAUTH_TOKEN") or ""
         ).strip() or None

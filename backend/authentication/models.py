@@ -40,6 +40,7 @@ class UserProfile(models.Model):
     manager = models.ForeignKey('self', blank=True, null=True, on_delete=models.SET_NULL, related_name='direct_reports')
     start_date = models.DateField(blank=True, null=True)
     employment_status = models.CharField(max_length=30, default='ACTIVE')
+    access_modules = models.JSONField(default=list, blank=True)
     last_login = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 

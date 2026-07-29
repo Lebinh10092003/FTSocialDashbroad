@@ -15,7 +15,7 @@ export type AccountMenuProps = {
 function accountLabels(userName?: string | null, userRole?: string | null) {
   const normalizedName = String(userName || '').trim().toLocaleLowerCase('vi-VN');
   if (normalizedName === 'phong nt' || normalizedName === 'phongnt') return { role: 'ADMIN', job: 'Nhân viên kỹ thuật' };
-  const roleMap: Record<string, string> = { ADMIN: 'ADMIN', MANAGER: 'QUẢN LÝ', EMPLOYEE: 'NHÂN VIÊN' };
+  const roleMap: Record<string, string> = { ADMIN: 'ADMIN', MANAGER: 'QUẢN LÝ', EMPLOYEE: 'NHÂN VIÊN', VIEWER: 'CHỈ XEM' };
   return { role: roleMap[String(userRole || '').toUpperCase()] || 'TÀI KHOẢN WORKSPACE', job: 'Chưa phân công chức vụ' };
 }
 

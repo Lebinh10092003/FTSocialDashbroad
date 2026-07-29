@@ -18,9 +18,9 @@ from .paper_services import (
 
 
 class IsWorkspaceUser(permissions.BasePermission):
-    """Paper content is never public, unlike a few legacy read-only endpoints."""
+    """Paper content is private and must honor the Examination module scope."""
     def has_permission(self, request, view):
-        return bool(getattr(request, 'user', None) and getattr(request.user, 'email', ''))
+        return IsAuthenticated().has_permission(request, view)
 
 def actor(request):
     return str(getattr(request.user, 'email', '') or getattr(request.user, 'username', '') or 'FT Workspace').strip()

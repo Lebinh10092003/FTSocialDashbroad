@@ -76,6 +76,7 @@ def _user_payload(profile: UserProfile) -> dict:
         "manager": {"email": manager.email, "name": manager.name or manager.email} if manager else None,
         "startDate": profile.start_date.isoformat() if profile.start_date else None,
         "employmentStatus": profile.employment_status or "ACTIVE",
+        "accessModules": sorted(WORKSPACE_MODULES) if profile.role == "ADMIN" else [item for item in (profile.access_modules or []) if item in WORKSPACE_MODULES],
         "lastLogin": profile.last_login.isoformat() if profile.last_login else None,
         "updatedAt": profile.updated_at.isoformat(),
     }
@@ -536,6 +537,7 @@ def change_password(request):
     return Response({"success": True, "token": token.key, "user": _user_payload(_profile_for_user(django_user))})
 
 EMPLOYMENT_STATUSES = {"ACTIVE", "SUSPENDED", "TERMINATED", "PENDING"}
+WORKSPACE_MODULES = {"social-dashboard", "email-builder", "examination", "digital-training"}
 
 
 def _category_payload(item):
@@ -581,15 +583,25 @@ def _write_employee(request, profile=None):
     department_id = data.get("departmentId") if "departmentId" in data else data.get("department_id")
     title_id = data.get("jobTitleId") if "jobTitleId" in data else data.get("job_title_id")
     manager_email = _normalise_email(data.get("managerEmail") if "managerEmail" in data else data.get("manager_email"))
+    requested_modules = data.get("accessModules") if "accessModules" in data else data.get("access_modules", profile.access_modules if profile else [])
+    access_modules = {str(item) for item in requested_modules} if isinstance(requested_modules, list) else set()
 
     if not email:
         return None, Response({"error": "Vui lòng nhập email."}, status=status.HTTP_400_BAD_REQUEST)
+    if not access_modules.issubset(WORKSPACE_MODULES):
+        return None, Response({"error": "Phạm vi truy cập mô-đun không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
     if role not in VALID_ROLES:
         return None, Response({"error": "Quyền hệ thống không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
     if employment_status not in EMPLOYMENT_STATUSES:
         return None, Response({"error": "Trạng thái nhân sự không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+    if role == "ADMIN" and request.user_role != "ADMIN":
+        return None, Response({"error": "Chỉ quản trị viên được cấp quyền Quản trị viên."}, status=status.HTTP_403_FORBIDDEN)
     if request.user_role == "MANAGER" and role not in {"EMPLOYEE", "VIEWER"}:
         return None, Response({"error": "Quản lý chỉ được cấp quyền Nhân viên hoặc Chỉ xem."}, status=status.HTTP_403_FORBIDDEN)
+    if request.user_role == "MANAGER":
+        access_modules = access_modules.intersection(set(request.user.access_modules or []))
+    if role == "ADMIN":
+        access_modules = set(WORKSPACE_MODULES)
     if employee_code and UserProfile.objects.exclude(email=email).filter(employee_code__iexact=employee_code).exists():
         return None, Response({"error": "Mã nhân viên đã được sử dụng."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -643,6 +655,7 @@ def _write_employee(request, profile=None):
     profile.manager = manager
     profile.start_date = data.get("startDate") or data.get("start_date") or None
     profile.employment_status = employment_status
+    profile.access_modules = sorted(access_modules)
     django_user.first_name = name
     django_user.email = email
     django_user.is_active = employment_status == "ACTIVE"

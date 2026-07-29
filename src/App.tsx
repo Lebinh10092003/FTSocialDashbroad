@@ -49,6 +49,7 @@ type AppUser = {
   email: string;
   displayName: string;
   photoURL?: string | null;
+  accessModules?: string[];
 };
 
 type StoredSession = {
@@ -86,6 +87,7 @@ function userFromApi(value: any): AppUser {
     email: String(value?.email || ''),
     displayName: String(value?.displayName || value?.name || value?.email || 'Người dùng'),
     photoURL: value?.photoURL || value?.picture || '',
+    accessModules: Array.isArray(value?.accessModules) ? value.accessModules : [],
   };
 }
 
@@ -145,6 +147,7 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [accessNotice, setAccessNotice] = useState('');
 
   const [viewMode, setViewModeState] = useState<ViewMode>(getInitialViewMode());
   const [activeTab, setActiveTab] = useState<SocialTab>(() => socialTabFromPath(window.location.pathname));
@@ -152,6 +155,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
 
   const isGuest = !idToken || user.email === GUEST_USER.email;
+  const moduleForView: Partial<Record<ViewMode, string>> = { 'social-dashboard': 'social-dashboard', 'email-builder': 'email-builder', examination: 'examination', 'digital-training': 'digital-training' };
+  const canAccessView = (mode: ViewMode) => userRole === 'ADMIN' || (mode === 'account-management' ? false : !!moduleForView[mode] && (user.accessModules || []).includes(moduleForView[mode]!));
   const googleAccessToken = null;
 
   const persistSession = (token: string, nextUser: AppUser, role: UserRole) => {
@@ -224,10 +229,14 @@ export default function App() {
   };
 
   const openProtectedView = (mode: ViewMode, tab?: string) => {
+    if (!canAccessView(mode)) {
+      if (isGuest) { setAuthError('Vui lòng đăng nhập để truy cập mô-đun.'); setShowLoginModal(true); }
+      else setAccessNotice('Tài khoản của bạn chưa được cấp quyền truy cập mô-đun này.');
+      return;
+    }
     if (mode === 'social-dashboard' && tab) { setSocialTab(tab); return; }
     setViewMode(mode);
   };
-
   const handleCredentialsAuth = async (event: React.FormEvent) => {
     event.preventDefault();
     setAuthError('');
@@ -281,6 +290,7 @@ export default function App() {
   };
 
   const handleRefreshChannels = async () => {
+    if (!canAccessView('social-dashboard')) { setChannels([]); return; }
     const headers: HeadersInit = {};
     if (idToken) {
       headers['Authorization'] = `Bearer ${idToken}`;
@@ -381,13 +391,14 @@ export default function App() {
     if (userRole === 'ADMIN') {
       apps.push({
         mode: 'account-management',
-        title: 'Quản lý tài khoản',
+        title: 'Quản lý nhân viên',
         description: 'Tạo, phân quyền và quản lý thành viên Workspace.',
         gradient: 'from-[#101114] to-[#0055DA]',
         icon: ShieldUser,
       });
     }
 
+    const visibleApps = apps.filter(app => canAccessView(app.mode));
     return (
       <div className="min-h-dvh liquid-bg flex flex-col font-sans relative overflow-x-hidden">
         <header className="sticky top-0 z-30 w-full glass-panel border-b border-white/50">
@@ -419,7 +430,8 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 max-w-4xl mx-auto">
-            {apps.map(app => {
+            {accessNotice && <div className="sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{accessNotice}</div>}
+            {visibleApps.map(app => {
               const AppIcon = app.icon;
               return (
                 <button
@@ -457,6 +469,8 @@ export default function App() {
     );
   }
 
+  if (viewMode === 'email-builder' && !canAccessView('email-builder')) { setViewMode('workspace'); return null; }
+
   if (viewMode === 'email-builder') {
     return (
       <>
@@ -475,6 +489,8 @@ export default function App() {
       </>
     );
   }
+
+  if (viewMode === 'digital-training' && !canAccessView('digital-training')) { setViewMode('workspace'); return null; }
 
   if (viewMode === 'digital-training') {
     return (
@@ -495,6 +511,8 @@ export default function App() {
       </>
     );
   }
+
+  if (viewMode === 'examination' && !canAccessView('examination')) { setViewMode('workspace'); return null; }
 
   if (viewMode === 'examination') {
     return (
@@ -519,6 +537,8 @@ export default function App() {
       </>
     );
   }
+
+  if (!canAccessView('social-dashboard')) { setViewMode('workspace'); return null; }
 
   return (
     <div className="ft-module-shell flex h-screen overflow-hidden font-sans">

@@ -1,6 +1,6 @@
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from authentication.permissions import IsAuthenticated
 from rest_framework.response import Response
 import json
 import uuid
@@ -98,25 +98,25 @@ def _crud_detail(request, queryset, serializer_class, pk, kind):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def training_sessions(request):
     return _crud_collection(request, TrainingSession.objects.select_related("partner_ref", "training_class").all(), TrainingSessionSerializer, "buổi tập huấn")
 
 
 @api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def training_session_detail(request, pk):
     return _crud_detail(request, TrainingSession.objects.select_related("partner_ref", "training_class").all(), TrainingSessionSerializer, pk, "buổi tập huấn")
 
 
 @api_view(["GET", "POST"])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def training_partners(request):
     return _crud_collection(request, TrainingPartner.objects.all(), TrainingPartnerSerializer, "đối tác")
 
 
 @api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def training_partner_detail(request, pk):
     partner = TrainingPartner.objects.filter(pk=pk).first()
     if not partner:
@@ -132,34 +132,34 @@ def training_partner_detail(request, pk):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def training_classes(request):
     return _crud_collection(request, TrainingClass.objects.select_related("partner").all(), TrainingClassSerializer, "lớp/phân nhóm")
 
 
 @api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def training_class_detail(request, pk):
     return _crud_detail(request, TrainingClass.objects.select_related("partner").all(), TrainingClassSerializer, pk, "lớp/phân nhóm")
 @api_view(["GET", "POST"])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def training_materials(request):
     return _crud_collection(request, TrainingMaterial.objects.select_related("session", "partner").all(), TrainingMaterialSerializer, "tài liệu")
 
 
 @api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def training_material_detail(request, pk):
     return _crud_detail(request, TrainingMaterial.objects.select_related("session", "partner").all(), TrainingMaterialSerializer, pk, "tài liệu")
 
 
 @api_view(["GET", "POST"])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def training_surveys(request):
     return _crud_collection(request, TrainingSurvey.objects.select_related("session", "partner").all(), TrainingSurveySerializer, "phiếu khảo sát")
 
 
 @api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def training_survey_detail(request, pk):
     return _crud_detail(request, TrainingSurvey.objects.select_related("session", "partner").all(), TrainingSurveySerializer, pk, "phiếu khảo sát")

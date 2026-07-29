@@ -206,3 +206,25 @@ class EmployeeDirectoryTests(TestCase):
         delete_second = self.request("delete", "/api/auth/users/second-hr@example.com")
         self.assertEqual(delete_second.status_code, 200)
         self.assertTrue(UserProfile.objects.filter(email="hr-admin@example.com").exists())
+class ModuleAccessTests(TestCase):
+    def test_employee_is_limited_to_explicit_modules_while_admin_is_unrestricted(self):
+        user = get_user_model().objects.create_user(
+            username="module-user@example.com", email="module-user@example.com", password="StrongPassword9921"
+        )
+        UserProfile.objects.create(
+            email=user.email,
+            name="Module User",
+            role="EMPLOYEE",
+            access_modules=["social-dashboard", "examination"],
+        )
+        token = Token.objects.create(user=user).key
+        denied = self.client.get("/api/email-templates", HTTP_AUTHORIZATION=f"Bearer {token}")
+        self.assertEqual(denied.status_code, 403)
+
+        admin = get_user_model().objects.create_user(
+            username="module-admin@example.com", email="module-admin@example.com", password="StrongPassword9921"
+        )
+        UserProfile.objects.create(email=admin.email, name="Module Admin", role="ADMIN", access_modules=[])
+        admin_token = Token.objects.create(user=admin).key
+        allowed = self.client.get("/api/email-templates", HTTP_AUTHORIZATION=f"Bearer {admin_token}")
+        self.assertEqual(allowed.status_code, 200)
