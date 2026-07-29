@@ -6,7 +6,7 @@ from rest_framework import authentication, exceptions
 from .models import SystemConfig, UserProfile
 
 logger = logging.getLogger(__name__)
-VALID_ROLES = {"ADMIN", "MANAGER", "EMPLOYEE"}
+VALID_ROLES = {"ADMIN", "MANAGER", "EMPLOYEE", "VIEWER"}
 
 
 def get_admin_emails() -> set[str]:

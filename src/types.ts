@@ -1,5 +1,5 @@
 export type Platform = 'facebook' | 'zalo' | 'mock';
-export type UserRole = 'ADMIN' | 'MANAGER' | 'EMPLOYEE';
+export type UserRole = 'ADMIN' | 'MANAGER' | 'EMPLOYEE' | 'VIEWER';
 
 export interface Channel {
   id: string;
@@ -88,6 +88,14 @@ export interface UserProfile {
   name?: string;
   role: UserRole;
   updatedAt: string;
+  employeeCode?: string;
+  phone?: string;
+  department?: { id: number; name: string } | null;
+  jobTitle?: { id: number; name: string } | null;
+  manager?: { email: string; name: string } | null;
+  startDate?: string | null;
+  employmentStatus?: 'ACTIVE' | 'SUSPENDED' | 'TERMINATED' | 'PENDING';
+  lastLogin?: string | null;
 }
 
 export interface DashboardData {

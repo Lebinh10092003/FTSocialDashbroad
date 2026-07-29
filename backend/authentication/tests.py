@@ -7,7 +7,7 @@ from rest_framework.authtoken.models import Token
 from django.utils import timezone
 
 from social.models import Channel
-from .models import SystemConfig, UserProfile
+from .models import Department, SystemConfig, UserProfile
 from .views import SENSITIVE_CONFIG_KEYS, _bootstrap_admin, _get_config, _normalise_token_rows, _sync_channels
 
 
@@ -162,3 +162,47 @@ class PersistentLoginTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertTrue(self.user.check_password('StrongPassword9921'))
+class EmployeeDirectoryTests(TestCase):
+    def setUp(self):
+        self.admin_user = get_user_model().objects.create_user(
+            username="hr-admin@example.com", email="hr-admin@example.com", password="StrongPassword9921"
+        )
+        UserProfile.objects.create(email="hr-admin@example.com", name="HR Admin", role="ADMIN")
+        self.token = Token.objects.create(user=self.admin_user).key
+
+    def request(self, method, path, payload=None):
+        return getattr(self.client, method)(
+            path,
+            payload or {},
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.token}",
+        )
+
+    def test_employee_create_and_directory_filters_keep_employee_fields(self):
+        department = Department.objects.create(name="Công nghệ", code="TECH")
+        response = self.request("post", "/api/auth/users", {
+            "name": "Nhân viên mới",
+            "email": "employee.new@example.com",
+            "password": "AnotherStrong9921",
+            "employeeCode": "FT-001",
+            "departmentId": department.id,
+            "employmentStatus": "PENDING",
+            "role": "VIEWER",
+        })
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["user"]["employeeCode"], "FT-001")
+        listing = self.request("get", "/api/auth/users?department=%s" % department.id)
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(listing.json()["total"], 1)
+        self.assertEqual(listing.json()["results"][0]["employmentStatus"], "PENDING")
+
+    def test_cannot_delete_self_or_last_admin(self):
+        self_response = self.request("delete", "/api/auth/users/hr-admin@example.com")
+        self.assertEqual(self_response.status_code, 400)
+        other = get_user_model().objects.create_user(
+            username="second-hr@example.com", email="second-hr@example.com", password="StrongPassword9921"
+        )
+        UserProfile.objects.create(email=other.email, name="Second", role="ADMIN")
+        delete_second = self.request("delete", "/api/auth/users/second-hr@example.com")
+        self.assertEqual(delete_second.status_code, 200)
+        self.assertTrue(UserProfile.objects.filter(email="hr-admin@example.com").exists())

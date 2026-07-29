@@ -26,11 +26,11 @@ from integrations.google_sheets import (
     initialize_sheets_structure,
 )
 from .auth import get_admin_emails
-from .models import SystemConfig, UserLogin, UserProfile
+from .models import Department, JobTitle, SystemConfig, UserLogin, UserProfile
 from .permissions import IsAdmin, IsAuthenticated, IsManagerOrAdmin
 
 User = get_user_model()
-VALID_ROLES = {"ADMIN", "MANAGER", "EMPLOYEE"}
+VALID_ROLES = {"ADMIN", "MANAGER", "EMPLOYEE", "VIEWER"}
 SENSITIVE_CONFIG_KEYS = {
     "metaPageTokensJson",
     "zaloOaTokensJson",
@@ -58,6 +58,9 @@ def _client_ip(request) -> str:
 
 
 def _user_payload(profile: UserProfile) -> dict:
+    department = profile.department
+    job_title = profile.job_title
+    manager = profile.manager
     return {
         "uid": profile.email,
         "email": profile.email,
@@ -66,11 +69,16 @@ def _user_payload(profile: UserProfile) -> dict:
         "picture": profile.photo_url or "",
         "photoURL": profile.photo_url or "",
         "role": profile.role,
+        "employeeCode": profile.employee_code or "",
+        "phone": profile.phone or "",
+        "department": {"id": department.id, "name": department.name} if department else None,
+        "jobTitle": {"id": job_title.id, "name": job_title.name} if job_title else None,
+        "manager": {"email": manager.email, "name": manager.name or manager.email} if manager else None,
+        "startDate": profile.start_date.isoformat() if profile.start_date else None,
+        "employmentStatus": profile.employment_status or "ACTIVE",
         "lastLogin": profile.last_login.isoformat() if profile.last_login else None,
         "updatedAt": profile.updated_at.isoformat(),
     }
-
-
 def _record_login(request, profile: UserProfile) -> None:
     now = timezone.now()
     UserLogin.objects.create(
@@ -527,33 +535,260 @@ def change_password(request):
     token = Token.objects.create(user=django_user)
     return Response({"success": True, "token": token.key, "user": _user_payload(_profile_for_user(django_user))})
 
+EMPLOYMENT_STATUSES = {"ACTIVE", "SUSPENDED", "TERMINATED", "PENDING"}
+
+
+def _category_payload(item):
+    return {"id": item.id, "name": item.name, "code": getattr(item, "code", ""), "isActive": item.is_active}
+
+
+def _employee_filters(request):
+    rows = UserProfile.objects.select_related("department", "job_title", "manager").all().order_by("name", "email")
+    search = str(request.query_params.get("search") or "").strip()
+    if search:
+        from django.db.models import Q
+        rows = rows.filter(Q(name__icontains=search) | Q(email__icontains=search) | Q(employee_code__icontains=search) | Q(phone__icontains=search))
+    department = str(request.query_params.get("department") or "").strip()
+    job_title = str(request.query_params.get("job_title") or "").strip()
+    role = str(request.query_params.get("role") or "").strip().upper()
+    employment_status = str(request.query_params.get("status") or "").strip().upper()
+    if department.isdigit():
+        rows = rows.filter(department_id=int(department))
+    if job_title.isdigit():
+        rows = rows.filter(job_title_id=int(job_title))
+    if role in VALID_ROLES:
+        rows = rows.filter(role=role)
+    if employment_status in EMPLOYMENT_STATUSES:
+        rows = rows.filter(employment_status=employment_status)
+    return rows
+
+
+def _get_positive_int(value, default, maximum=100):
+    try:
+        return max(1, min(int(value), maximum))
+    except (TypeError, ValueError):
+        return default
+
+
+def _write_employee(request, profile=None):
+    data = request.data or {}
+    email = _normalise_email(data.get("email") if profile is None else profile.email)
+    name = str(data.get("name") or "").strip() or email.split("@", 1)[0]
+    password = str(data.get("password") or "")
+    role = str(data.get("role") or (profile.role if profile else "EMPLOYEE")).upper()
+    employment_status = str(data.get("employmentStatus") or data.get("employment_status") or (profile.employment_status if profile else "PENDING")).upper()
+    employee_code = str(data.get("employeeCode") or data.get("employee_code") or "").strip() or None
+    department_id = data.get("departmentId") if "departmentId" in data else data.get("department_id")
+    title_id = data.get("jobTitleId") if "jobTitleId" in data else data.get("job_title_id")
+    manager_email = _normalise_email(data.get("managerEmail") if "managerEmail" in data else data.get("manager_email"))
+
+    if not email:
+        return None, Response({"error": "Vui lòng nhập email."}, status=status.HTTP_400_BAD_REQUEST)
+    if role not in VALID_ROLES:
+        return None, Response({"error": "Quyền hệ thống không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+    if employment_status not in EMPLOYMENT_STATUSES:
+        return None, Response({"error": "Trạng thái nhân sự không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+    if request.user_role == "MANAGER" and role not in {"EMPLOYEE", "VIEWER"}:
+        return None, Response({"error": "Quản lý chỉ được cấp quyền Nhân viên hoặc Chỉ xem."}, status=status.HTTP_403_FORBIDDEN)
+    if employee_code and UserProfile.objects.exclude(email=email).filter(employee_code__iexact=employee_code).exists():
+        return None, Response({"error": "Mã nhân viên đã được sử dụng."}, status=status.HTTP_400_BAD_REQUEST)
+
+    department = None
+    if department_id not in (None, ""):
+        department = Department.objects.filter(pk=department_id).first()
+        if not department:
+            return None, Response({"error": "Phòng ban không tồn tại."}, status=status.HTTP_400_BAD_REQUEST)
+    job_title = None
+    if title_id not in (None, ""):
+        job_title = JobTitle.objects.filter(pk=title_id).first()
+        if not job_title:
+            return None, Response({"error": "Chức danh không tồn tại."}, status=status.HTTP_400_BAD_REQUEST)
+    manager = None
+    if manager_email:
+        manager = UserProfile.objects.filter(email=manager_email).first()
+        if not manager:
+            return None, Response({"error": "Người quản lý không tồn tại."}, status=status.HTTP_400_BAD_REQUEST)
+        if manager.email == email:
+            return None, Response({"error": "Nhân viên không thể tự là người quản lý của mình."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if profile is None:
+        if not password:
+            return None, Response({"error": "Vui lòng đặt mật khẩu khởi tạo."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            validate_password(password)
+        except ValidationError as exc:
+            return None, Response({"error": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        django_user = User.objects.filter(username__iexact=email).first()
+        if django_user:
+            return None, Response({"error": "Email này đã có tài khoản."}, status=status.HTTP_400_BAD_REQUEST)
+        django_user = User.objects.create_user(username=email, email=email, password=password)
+        profile = UserProfile(email=email)
+    else:
+        django_user = User.objects.filter(username__iexact=email).first()
+        if not django_user:
+            django_user = User.objects.create_user(username=email, email=email, password=password or None)
+        if password:
+            try:
+                validate_password(password, django_user)
+            except ValidationError as exc:
+                return None, Response({"error": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+            django_user.set_password(password)
+
+    profile.name = name
+    profile.role = role
+    profile.employee_code = employee_code
+    profile.phone = str(data.get("phone") or "").strip()
+    profile.department = department
+    profile.job_title = job_title
+    profile.manager = manager
+    profile.start_date = data.get("startDate") or data.get("start_date") or None
+    profile.employment_status = employment_status
+    django_user.first_name = name
+    django_user.email = email
+    django_user.is_active = employment_status == "ACTIVE"
+    django_user.save()
+    profile.save()
+    if password:
+        Token.objects.filter(user=django_user).delete()
+    return profile, None
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsManagerOrAdmin])
 def manage_users(request):
-    if request.method == "GET":
-        users = UserProfile.objects.all().order_by("-updated_at")
-        return Response([_user_payload(item) for item in users])
-    return admin_create_user(request)
+    if request.method == "POST":
+        profile, error_response = _write_employee(request)
+        if error_response:
+            return error_response
+        return Response({"success": True, "message": "Đã thêm nhân viên.", "user": _user_payload(profile)}, status=status.HTTP_201_CREATED)
+
+    page_size = _get_positive_int(request.query_params.get("page_size"), 20, 100)
+    page = _get_positive_int(request.query_params.get("page"), 1, 100000)
+    rows = _employee_filters(request)
+    total = rows.count()
+    start = (page - 1) * page_size
+    results = [_user_payload(item) for item in rows[start:start + page_size]]
+    return Response({
+        "results": results,
+        "total": total,
+        "page": page,
+        "pageSize": page_size,
+        "departments": [_category_payload(item) for item in Department.objects.all()],
+        "jobTitles": [_category_payload(item) for item in JobTitle.objects.all()],
+        "currentUserEmail": request.user.email,
+    })
 
 
-@api_view(["PUT", "DELETE"])
+@api_view(["PUT", "PATCH", "DELETE"])
 @permission_classes([IsManagerOrAdmin])
 def manage_single_user(request, email):
     clean_email = _normalise_email(email)
     profile = UserProfile.objects.filter(email=clean_email).first()
     if not profile:
-        return Response({"error": "Không tìm thấy người dùng."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"error": "Không tìm thấy nhân viên."}, status=status.HTTP_404_NOT_FOUND)
     if request.method == "DELETE":
-        return _delete_account(clean_email)
+        if clean_email == request.user.email:
+            return Response({"error": "Không thể tự xóa tài khoản đang đăng nhập."}, status=status.HTTP_400_BAD_REQUEST)
+        if request.user_role == "MANAGER" and profile.role not in {"EMPLOYEE", "VIEWER"}:
+            return Response({"error": "Quản lý không thể xóa tài khoản quản lý hoặc quản trị viên."}, status=status.HTTP_403_FORBIDDEN)
+        if profile.role == "ADMIN" and UserProfile.objects.filter(role="ADMIN").count() <= 1:
+            return Response({"error": "Không thể xóa quản trị viên cuối cùng."}, status=status.HTTP_400_BAD_REQUEST)
+        django_user = User.objects.filter(username__iexact=clean_email).first()
+        if django_user:
+            django_user.delete()
+        profile.delete()
+        return Response({"success": True, "message": "Đã xóa nhân viên."})
 
-    role = str(request.data.get("role") or "").upper()
-    if role not in {"ADMIN", "MANAGER", "EMPLOYEE"}:
-        return Response({"error": "Vai trò không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
-    if request.user_role == "MANAGER" and role != "EMPLOYEE":
-        return Response({"error": "Quản lý chỉ được cấp vai trò Nhân viên."}, status=status.HTTP_403_FORBIDDEN)
-    profile.role = role
-    profile.save(update_fields=["role", "updated_at"])
-    return Response(_user_payload(profile))
+    if clean_email == request.user.email and str(request.data.get("employmentStatus") or request.data.get("employment_status") or "").upper() in {"SUSPENDED", "TERMINATED"}:
+        return Response({"error": "Không thể tự khóa hoặc cho nghỉ tài khoản đang đăng nhập."}, status=status.HTTP_400_BAD_REQUEST)
+    if request.user_role == "MANAGER" and profile.role not in {"EMPLOYEE", "VIEWER"}:
+        return Response({"error": "Quản lý không thể chỉnh sửa quản lý hoặc quản trị viên."}, status=status.HTTP_403_FORBIDDEN)
+    updated, error_response = _write_employee(request, profile)
+    if error_response:
+        return error_response
+    return Response({"success": True, "message": "Đã cập nhật nhân viên.", "user": _user_payload(updated)})
+
+
+@api_view(["POST"])
+@permission_classes([IsManagerOrAdmin])
+def reset_employee_password(request, email):
+    clean_email = _normalise_email(email)
+    if clean_email == request.user.email:
+        return Response({"error": "Hãy dùng chức năng đổi mật khẩu trong hồ sơ để thay đổi mật khẩu của chính bạn."}, status=status.HTTP_400_BAD_REQUEST)
+    profile = UserProfile.objects.filter(email=clean_email).first()
+    django_user = User.objects.filter(username__iexact=clean_email).first()
+    if not profile or not django_user:
+        return Response({"error": "Không tìm thấy nhân viên."}, status=status.HTTP_404_NOT_FOUND)
+    if request.user_role == "MANAGER" and profile.role not in {"EMPLOYEE", "VIEWER"}:
+        return Response({"error": "Quản lý không thể đặt lại mật khẩu tài khoản này."}, status=status.HTTP_403_FORBIDDEN)
+    password = str(request.data.get("password") or "")
+    try:
+        validate_password(password, django_user)
+    except ValidationError as exc:
+        return Response({"error": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+    django_user.set_password(password)
+    django_user.save(update_fields=["password"])
+    Token.objects.filter(user=django_user).delete()
+    return Response({"success": True, "message": "Đã đặt lại mật khẩu. Nhân viên sẽ đăng nhập lại bằng mật khẩu mới."})
+
+
+def _category_view(request, model, label):
+    if request.method == "GET":
+        return Response([_category_payload(item) for item in model.objects.all()])
+    if request.user_role != "ADMIN":
+        return Response({"error": "Chỉ quản trị viên được quản lý danh mục này."}, status=status.HTTP_403_FORBIDDEN)
+    name = str(request.data.get("name") or "").strip()
+    if not name:
+        return Response({"error": f"Vui lòng nhập tên {label}."}, status=status.HTTP_400_BAD_REQUEST)
+    if model.objects.filter(name__iexact=name).exists():
+        return Response({"error": f"{label.capitalize()} đã tồn tại."}, status=status.HTTP_400_BAD_REQUEST)
+    item = model.objects.create(name=name, code=str(request.data.get("code") or "").strip()) if model is Department else model.objects.create(name=name)
+    return Response({"success": True, "item": _category_payload(item)}, status=status.HTTP_201_CREATED)
+
+
+def _category_detail(request, model, item_id, label):
+    item = model.objects.filter(pk=item_id).first()
+    if not item:
+        return Response({"error": f"Không tìm thấy {label}."}, status=status.HTTP_404_NOT_FOUND)
+    if request.user_role != "ADMIN":
+        return Response({"error": "Chỉ quản trị viên được quản lý danh mục này."}, status=status.HTTP_403_FORBIDDEN)
+    if request.method == "DELETE":
+        item.is_active = False
+        item.save(update_fields=["is_active", "updated_at"])
+        return Response({"success": True, "message": f"Đã ngừng sử dụng {label}.", "item": _category_payload(item)})
+    name = str(request.data.get("name") or item.name).strip()
+    if model.objects.exclude(pk=item.pk).filter(name__iexact=name).exists():
+        return Response({"error": f"{label.capitalize()} đã tồn tại."}, status=status.HTTP_400_BAD_REQUEST)
+    item.name = name
+    item.is_active = bool(request.data.get("isActive", request.data.get("is_active", item.is_active)))
+    if model is Department:
+        item.code = str(request.data.get("code", item.code) or "").strip()
+    item.save()
+    return Response({"success": True, "item": _category_payload(item)})
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsManagerOrAdmin])
+def departments_view(request):
+    return _category_view(request, Department, "phòng ban")
+
+
+@api_view(["PUT", "PATCH", "DELETE"])
+@permission_classes([IsManagerOrAdmin])
+def department_detail(request, department_id):
+    return _category_detail(request, Department, department_id, "phòng ban")
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsManagerOrAdmin])
+def job_titles_view(request):
+    return _category_view(request, JobTitle, "chức danh")
+
+
+@api_view(["PUT", "PATCH", "DELETE"])
+@permission_classes([IsManagerOrAdmin])
+def job_title_detail(request, title_id):
+    return _category_detail(request, JobTitle, title_id, "chức danh")
 
 
 @api_view(["GET"])
@@ -566,71 +801,30 @@ def admin_users(request):
 @api_view(["POST"])
 @permission_classes([IsManagerOrAdmin])
 def admin_create_user(request):
-    email = _normalise_email(request.data.get("email"))
-    password = str(request.data.get("password") or "")
-    name = str(request.data.get("name") or "").strip() or email.split("@", 1)[0]
-    role = str(request.data.get("role") or "EMPLOYEE").upper()
-
-    if not email or not password:
-        return Response({"error": "Vui lòng nhập email và mật khẩu."}, status=status.HTTP_400_BAD_REQUEST)
-    if role not in {"ADMIN", "MANAGER", "EMPLOYEE"}:
-        return Response({"error": "Vai trò không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
-    if request.user_role == "MANAGER" and role != "EMPLOYEE":
-        return Response({"error": "Quản lý chỉ được tạo tài khoản Nhân viên."}, status=status.HTTP_403_FORBIDDEN)
-    try:
-        validate_password(password)
-    except ValidationError as exc:
-        return Response({"error": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
-
-    with transaction.atomic():
-        django_user = User.objects.filter(username=email).first()
-        created = django_user is None
-        if created:
-            django_user = User.objects.create_user(username=email, email=email, password=password)
-        else:
-            if django_user.is_superuser:
-                return Response({"error": "Không thể thay đổi tài khoản quản trị hệ thống."}, status=status.HTTP_400_BAD_REQUEST)
-            django_user.email = email
-            django_user.set_password(password)
-        django_user.first_name = name
-        django_user.is_active = True
-        django_user.save()
-        Token.objects.filter(user=django_user).delete()
-        profile, _ = UserProfile.objects.update_or_create(
-            email=email,
-            defaults={"name": name, "role": role},
-        )
-
-    return Response({
-        "success": True,
-        "message": "Tạo tài khoản thành công." if created else "Cập nhật tài khoản thành công.",
-        "user": _user_payload(profile),
-    })
-
-
-def _delete_account(email: str) -> Response:
-    django_user = User.objects.filter(username=email).first()
-    profile = UserProfile.objects.filter(email=email).first()
-    if (django_user and django_user.is_superuser) or (profile and profile.role == "ADMIN") or email in get_admin_emails():
-        return Response({"error": "Không được phép xóa tài khoản Admin."}, status=status.HTTP_400_BAD_REQUEST)
-    if django_user:
-        django_user.delete()
-    if profile:
-        profile.delete()
-    return Response({"success": True, "message": f"Đã xóa tài khoản {email}."})
+    profile, error_response = _write_employee(request)
+    if error_response:
+        return error_response
+    return Response({"success": True, "message": "Tạo tài khoản thành công.", "user": _user_payload(profile)})
 
 
 @api_view(["POST"])
 @permission_classes([IsManagerOrAdmin])
 def admin_delete_user(request):
     email = _normalise_email(request.data.get("email"))
-    if not email:
-        return Response({"error": "Thiếu email cần xóa."}, status=status.HTTP_400_BAD_REQUEST)
-    target = UserProfile.objects.filter(email=email).first()
-    if request.user_role == "MANAGER" and (not target or target.role != "EMPLOYEE"):
-        return Response({"error": "Quản lý chỉ được xóa tài khoản Nhân viên."}, status=status.HTTP_403_FORBIDDEN)
-    return _delete_account(email)
-
+    profile = UserProfile.objects.filter(email=email).first()
+    if not profile:
+        return Response({"error": "Không tìm thấy nhân viên."}, status=status.HTTP_404_NOT_FOUND)
+    if email == request.user.email:
+        return Response({"error": "Không thể tự xóa tài khoản đang đăng nhập."}, status=status.HTTP_400_BAD_REQUEST)
+    if request.user_role == "MANAGER" and profile.role not in {"EMPLOYEE", "VIEWER"}:
+        return Response({"error": "Quản lý không thể xóa tài khoản này."}, status=status.HTTP_403_FORBIDDEN)
+    if profile.role == "ADMIN" and UserProfile.objects.filter(role="ADMIN").count() <= 1:
+        return Response({"error": "Không thể xóa quản trị viên cuối cùng."}, status=status.HTTP_400_BAD_REQUEST)
+    django_user = User.objects.filter(username__iexact=email).first()
+    if django_user:
+        django_user.delete()
+    profile.delete()
+    return Response({"success": True, "message": "Đã xóa nhân viên."})
 
 @api_view(["GET"])
 @permission_classes([IsAdmin])
