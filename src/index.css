@@ -728,9 +728,13 @@ a { color: inherit; text-decoration: none; }
 
 /* Bright calendar language inspired by Calendar's clarity, without copying its dark theme. */
 .dt-calendar { border: 1px solid #d7e7f5; border-radius: 18px; overflow: hidden; background: #fff; }
-.dt-calendar-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:40px; padding:4px 8px; border-bottom:1px solid #d7e7f5; background:#fbfdff; }
-.dt-calendar-toolbar button { min-height:30px; border:1px solid #c7ddf0; background:#fff; color:#075da7; border-radius:7px; font-weight:700; padding:3px 8px; transition:.16s ease; }
-.dt-calendar-toolbar button:hover { background:#eaf6ff; border-color:#8fc6eb; }
+.dt-calendar-toolbar { display:flex; flex-wrap:nowrap; align-items:center; justify-content:space-between; gap:8px; min-height:40px; padding:4px 8px; border-bottom:1px solid #d7e7f5; background:#fbfdff; }
+.dt-calendar-period, .dt-calendar-toolbar-right, .dt-calendar-actions { display:flex; align-items:center; gap:8px; }
+.dt-calendar-period { flex:0 1 auto; min-width:0; white-space:nowrap; }
+.dt-calendar-toolbar-right { flex:0 1 auto; justify-content:flex-end; min-width:0; margin-left:auto; }
+.dt-calendar-actions { flex:0 0 auto; }
+.dt-calendar-period > button, .dt-calendar-range > button { min-height:30px; border:1px solid #c7ddf0; background:#fff; color:#075da7; border-radius:7px; font-weight:700; padding:3px 8px; transition:.16s ease; }
+.dt-calendar-period > button:hover, .dt-calendar-range > button:hover { background:#eaf6ff; border-color:#8fc6eb; }
 .dt-calendar-week { position:relative; display:grid; grid-template-columns:56px repeat(7,minmax(128px,1fr)); grid-template-rows:32px; grid-auto-rows:var(--dt-calendar-slot-height,37.3333px); min-width:960px; }
 .dt-calendar-week.is-dynamic { grid-template-columns:56px repeat(var(--dt-calendar-days),minmax(0,1fr)); min-width:0; }
 .dt-calendar-head { position:sticky; top:0; z-index:2; border-bottom:1px solid #d7e7f5; background:#fff; padding:2px 5px; text-align:center; color:#54718c; font-size:10px; font-weight:800; }
@@ -854,7 +858,7 @@ a { color: inherit; text-decoration: none; }
 .dt-calendar-head { position:static; min-height:32px; display:flex; flex-direction:row; align-items:center; justify-content:center; gap:6px; }
 .dt-calendar-head strong { margin-top:0; line-height:1; }
 .dt-calendar-head.is-filtered, .dt-calendar-cell.is-filtered { opacity:.38; }
-.dt-calendar-range { display:flex; flex-wrap:wrap; align-items:center; gap:7px; }
+.dt-calendar-range { display:flex; flex-wrap:nowrap; align-items:center; gap:7px; }
 .dt-calendar-range label { display:flex; align-items:center; gap:5px; color:#54718c; font-size:10px; font-weight:800; }
 .dt-calendar-range input { width:128px; height:30px; border:1px solid #c7ddf0; border-radius:7px; background:#fff; color:#17324d; padding:2px 6px; font-size:11px; }
 .dt-calendar-range-error { border-bottom:1px solid #fecdd3; background:#fff1f2; padding:9px 16px; color:#be123c; font-size:12px; font-weight:700; }
@@ -955,8 +959,8 @@ body {
 
 /* Calendar uses the same palette: blue for navigation, green for complete, pink for cancelled, yellow for a small emphasis. */
 .dt-calendar, .dt-calendar-toolbar, .dt-calendar-head, .dt-month-head { border-color:#D9E2F0; }
-.dt-calendar-toolbar button { border-color:#B9C9E1; color:#0055DA; }
-.dt-calendar-toolbar button:hover { background:#EAF1FF; border-color:#7EA7F3; }
+.dt-calendar-period > button, .dt-calendar-range > button { border-color:#B9C9E1; color:#0055DA; }
+.dt-calendar-period > button:hover, .dt-calendar-range > button:hover { background:#EAF1FF; border-color:#7EA7F3; }
 .dt-calendar-head.is-today strong, .dt-month-day.is-today .dt-month-number { background:#0055DA; }
 .dt-calendar-event, .dt-month-event { border-left-color:#0055DA; background:#EAF1FF; color:#0042AD; }
 .dt-calendar-event.is-completed, .dt-month-event.is-completed { border-left-color:#00C68D; background:#E5FBF3; color:#007D5A; }
@@ -1011,17 +1015,14 @@ body {
 .overflow-x-auto :is(button, input, select, textarea, a), [data-drag-scroll] :is(button, input, select, textarea, a) { cursor: auto; }
 
 /* Digital Training calendar keeps its controls visible while the time grid scrolls independently. */
-.dt-calendar-page { padding:12px !important; }
-.dt-calendar-page-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
-.dt-calendar-page-header > div:first-child { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 12px; }
-.dt-calendar-page-header > div:first-child > * { margin:0 !important; }
-.dt-calendar-page-header > div:first-child > p:first-child { font-size:10px; }
-.dt-calendar-page-header > div:first-child > h2 { font-size:18px; }
-.dt-calendar-page-header > div:first-child > p:last-child { font-size:11px; }
-.dt-calendar-scroll { height:clamp(704px,calc(100dvh - 180px),850px); max-height:none; overflow:auto; overscroll-behavior:contain; }
+.dt-calendar-page { padding:0 !important; overflow:hidden; }
+.dt-calendar-page > .dt-calendar { border:0; border-radius:inherit; }
+.dt-calendar-scroll { height:clamp(704px,calc(100dvh - 112px),850px); max-height:none; overflow:auto; overscroll-behavior:contain; }
 .dt-calendar > p:last-child { padding:4px 12px !important; font-size:10px; line-height:1.2; }
 @media (max-width:767px) {
-  .dt-calendar-page-header { align-items:flex-start; flex-direction:column; }
+  .dt-calendar-toolbar { align-items:stretch; flex-direction:column; }
+  .dt-calendar-toolbar-right { width:100%; flex-wrap:wrap; justify-content:flex-start; margin-left:0; }
+  .dt-calendar-range { flex-wrap:wrap; }
   .dt-calendar-scroll { height:70dvh; min-height:520px; }
 }
 .dt-calendar-scroll .dt-calendar-head { position: sticky; top: 0; z-index: 4; box-shadow: 0 1px 0 #d9e2f0; }
