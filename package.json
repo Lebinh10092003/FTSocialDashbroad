@@ -6,6 +6,7 @@
     "scripts":  {
                     "dev":  "vite",
                     "build":  "vite build",
+                    "prune:frontend":  "node scripts/prune-vite-assets.mjs --keep 5",
                     "preview":  "vite preview",
                     "clean":  "node -e \"require(\u0027fs\u0027).rmSync(\u0027dist\u0027,{recursive:true,force:true})\"",
                     "lint":  "tsc --noEmit"

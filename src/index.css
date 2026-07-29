@@ -732,6 +732,7 @@ a { color: inherit; text-decoration: none; }
 .dt-calendar-toolbar button { border:1px solid #c7ddf0; background:#fff; color:#075da7; border-radius:8px; font-weight:700; padding:7px 11px; transition:.16s ease; }
 .dt-calendar-toolbar button:hover { background:#eaf6ff; border-color:#8fc6eb; }
 .dt-calendar-week { display:grid; grid-template-columns:56px repeat(7,minmax(128px,1fr)); min-width:960px; }
+.dt-calendar-week.is-dynamic { grid-template-columns:56px repeat(var(--dt-calendar-days),minmax(0,1fr)); min-width:0; }
 .dt-calendar-head { position:sticky; top:0; z-index:2; border-bottom:1px solid #d7e7f5; background:#fff; padding:10px 8px; text-align:center; color:#54718c; font-size:12px; font-weight:800; }
 .dt-calendar-head strong { display:block; margin-top:3px; font-size:18px; color:#113c62; }
 .dt-calendar-head.is-today strong { display:inline-grid; height:30px; min-width:30px; place-items:center; border-radius:50%; background:#1681c5; color:#fff; }
@@ -854,6 +855,7 @@ a { color: inherit; text-decoration: none; }
 .dt-calendar-range { display:flex; flex-wrap:wrap; align-items:end; gap:8px; }
 .dt-calendar-range label { display:grid; gap:3px; color:#54718c; font-size:11px; font-weight:800; }
 .dt-calendar-range input { height:34px; border:1px solid #c7ddf0; border-radius:8px; background:#fff; color:#17324d; padding:4px 7px; font-size:12px; }
+.dt-calendar-range-error { border-bottom:1px solid #fecdd3; background:#fff1f2; padding:9px 16px; color:#be123c; font-size:12px; font-weight:700; }
 .dt-calendar-month { display:grid; grid-template-columns:repeat(7,minmax(112px,1fr)); min-width:780px; }
 .dt-month-head { border-bottom:1px solid #d7e7f5; background:#f7fbff; padding:10px 6px; text-align:center; color:#54718c; font-size:11px; font-weight:800; text-transform:uppercase; }
 .dt-month-day { min-height:142px; border-right:1px solid #d7e7f5; border-bottom:1px solid #e1edf7; background:#fff; padding:8px; text-align:left; transition:background .15s ease; }
@@ -867,6 +869,14 @@ a { color: inherit; text-decoration: none; }
 .dt-month-event.is-completed { border-left-color:#22a06b; background:#e8f8ef; color:#147247; }
 .dt-month-event.is-cancelled { border-left-color:#e56b75; background:#fff0f1; color:#b34752; }
 .dt-month-more { color:#1681c5; font-size:10px; font-weight:800; }
+.dt-calendar-month-scroll { overflow-x:auto; }
+.dt-calendar-multi-month { background:#f4f8fc; }
+.dt-calendar-range-month { border-bottom:10px solid #d9e2f0; background:#fff; }
+.dt-calendar-range-month:last-child { border-bottom:0; }
+.dt-calendar-month-title { position:sticky; top:0; z-index:6; border-bottom:1px solid #b9c9e1; background:#eaf1ff; padding:12px 16px; color:#003b94; font-size:15px; font-weight:900; text-transform:capitalize; }
+.dt-calendar-month.is-range-month .dt-month-day { min-height:126px; }
+.dt-month-day.is-placeholder { cursor:default; background:#f6f8fb; }
+.dt-month-day.is-placeholder:hover { background:#f6f8fb; }
 @media (max-width: 1023px) { .dt-calendar-month { overflow-x:auto; } }
 /* FT core palette: #0055DA is the primary brand color; the remaining palette is reserved for meaning and emphasis. */
 :root {

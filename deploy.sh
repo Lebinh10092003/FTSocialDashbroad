@@ -66,6 +66,7 @@ for attempt in $(seq 1 "$HEALTH_RETRIES"); do
   if curl --fail --silent --header "Host: $HEALTH_HOST" "$HEALTH_URL" >/dev/null 2>&1; then
     curl --fail --silent --show-error --header "Host: $HEALTH_HOST" "$HEALTH_URL"
     echo
+    npm run prune:frontend
     echo "Deploy completed successfully."
     exit 0
   fi

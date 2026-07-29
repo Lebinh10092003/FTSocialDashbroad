@@ -8,8 +8,10 @@ export default defineConfig(() => {
     base: '/', // Hỗ trợ đường dẫn tương đối khi deploy lên GitHub Pages
     plugins: [react(), tailwindcss()],
     build: {
-      // Giữ bundle có hash cũ trong một chu kỳ deploy để các tab đang mở không trắng trang khi tải route động.
+      // Keep hashed assets until the post-health-check retention step has
+      // safely retained the latest frontend releases.
       emptyOutDir: false,
+      manifest: true,
     },
     resolve: {
       alias: {
