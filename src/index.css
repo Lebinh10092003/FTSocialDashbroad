@@ -1001,3 +1001,16 @@ body {
 .dt-calendar-scroll { max-height: calc(100vh - 300px); overflow: auto; overscroll-behavior: contain; }
 .dt-calendar-scroll .dt-calendar-head { position: sticky; top: 0; z-index: 4; box-shadow: 0 1px 0 #d9e2f0; }
 .dt-calendar-scroll .dt-calendar-event { cursor: pointer; }
+.dt-calendar-event {
+  user-select: none;
+}
+.dt-calendar-event.is-moving {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+.dt-calendar-cell.is-drop-target {
+  transition: background-color 120ms ease;
+}
+.dt-calendar-cell.is-drop-target:hover {
+  background: #dbeafe;
+}
