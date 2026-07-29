@@ -157,7 +157,7 @@ class TrainingCustomerMeetingSerializer(serializers.ModelSerializer):
     class Meta:
         model = TrainingCustomerMeeting
         fields = [
-            "id", "title", "customer_type", "representative", "phone", "email", "date",
+            "id", "title", "schedule_type", "activity_type", "customer_type", "representative", "phone", "email", "date",
             "start_time", "end_time", "location", "content", "status", "staff_name", "notes", "created_at", "updated_at",
         ]
 
@@ -196,3 +196,13 @@ class TrainingSurveySerializer(serializers.ModelSerializer):
     class Meta:
         model = TrainingSurvey
         fields = ["id", "title", "form_type", "session", "session_name", "partner", "partner_name", "notes", "created_at", "updated_at"]
+        read_only_fields = ["partner"]
+
+    def validate(self, attrs):
+        session = attrs.get("session") or getattr(self.instance, "session", None)
+        if session is None:
+            raise serializers.ValidationError({"session": "Vui lòng chọn lịch tập huấn."})
+        attrs["partner"] = session.partner_ref or (
+            session.training_class.partner if session.training_class else None
+        )
+        return attrs

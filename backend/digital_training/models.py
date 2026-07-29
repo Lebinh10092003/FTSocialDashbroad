@@ -71,9 +71,16 @@ class TrainingSession(models.Model):
 
 
 class TrainingCustomerMeeting(models.Model):
-    """A calendar entry for an initial meeting that does not require a saved customer."""
+    """A work-calendar entry for either a new-customer meeting or another activity."""
+
+    SCHEDULE_TYPES = [
+        ("meeting", "Customer meeting"),
+        ("other", "Other work activity"),
+    ]
 
     title = models.CharField(max_length=255)
+    schedule_type = models.CharField(max_length=20, choices=SCHEDULE_TYPES, default="meeting")
+    activity_type = models.CharField(max_length=100, blank=True)
     customer_type = models.CharField(max_length=100, blank=True)
     representative = models.CharField(max_length=255, blank=True)
     phone = models.CharField(max_length=50, blank=True)
