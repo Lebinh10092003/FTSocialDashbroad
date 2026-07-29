@@ -17,6 +17,46 @@ type Partner = {id:number;name:string;address:string;contact_person:string;phone
 type Session = {id:number;title:string;session_number?:number|null;date:string|null;start_time?:string|null;end_time?:string|null;partner:string;partner_id?:number|null;partner_name?:string;class_group_id?:number|null;class_group_name?:string;category:string;contents?:string[];attendees:number;location:string;staff_name?:string;status:'unscheduled'|'planned'|'completed'|'cancelled';notes:string;has_materials:boolean};
 type CustomerMeeting = {id:number;title:string;schedule_type?:'meeting'|'other';activity_type?:string;customer_type:string;representative:string;phone:string;email:string;date:string;start_time?:string|null;end_time?:string|null;location:string;content:string;status:'unscheduled'|'planned'|'completed'|'cancelled';staff_name?:string;notes:string};
 type CalendarItem = {id:string|number;title:string;date:string|null;start_time?:string|null;end_time?:string|null;status:'unscheduled'|'planned'|'completed'|'cancelled';kind?:'training'|'meeting'|'other'};
+type CalendarLayoutItem = {item:CalendarItem;start:number;end:number;column:number;columnCount:number};
+
+const calendarMinute=(value?:string|null)=>{
+  const match=(value||'').match(/^(\d{1,2}):(\d{2})/);
+  if(!match)return Number.NaN;
+  const hour=Number(match[1]),minute=Number(match[2]);
+  return hour>=0&&hour<24&&minute>=0&&minute<60?hour*60+minute:Number.NaN;
+};
+const calendarInterval=(item:CalendarItem)=>{
+  const start=calendarMinute(item.start_time);
+  if(!Number.isFinite(start))return null;
+  const parsedEnd=calendarMinute(item.end_time);
+  const fallback=item.kind==='meeting'||item.kind==='other'?60:180;
+  return {item,start,end:Number.isFinite(parsedEnd)&&parsedEnd>start?parsedEnd:start+fallback};
+};
+export const layoutCalendarEvents=(items:CalendarItem[]):CalendarLayoutItem[]=>{
+  const intervals=items.map(calendarInterval).filter((item):item is NonNullable<ReturnType<typeof calendarInterval>>=>!!item).sort((a,b)=>a.start-b.start||a.end-b.end);
+  const result:CalendarLayoutItem[]=[];
+  let cluster:typeof intervals=[],clusterEnd=-1;
+  const flush=()=>{
+    if(!cluster.length)return;
+    const columnEnds:number[]=[];
+    const placed=cluster.map(entry=>{
+      let column=columnEnds.findIndex(end=>end<=entry.start);
+      if(column<0)column=columnEnds.length;
+      columnEnds[column]=entry.end;
+      return {...entry,column};
+    });
+    result.push(...placed.map(entry=>({...entry,columnCount:columnEnds.length})));
+    cluster=[];
+    clusterEnd=-1;
+  };
+  intervals.forEach(entry=>{
+    if(cluster.length&&entry.start>=clusterEnd)flush();
+    cluster.push(entry);
+    clusterEnd=Math.max(clusterEnd,entry.end);
+  });
+  flush();
+  return result;
+};
 type CalendarDetail = {kind:'training'|'meeting'|'other';sourceId:number};
 type WorkActivity = {key:string;sourceId:number;kind:'training'|'meeting'|'other';title:string;date:string|null;start_time?:string|null;end_time?:string|null;customerId?:number|null;customerName:string;className:string;activityLabel:string;content:string;location:string;status:'unscheduled'|'planned'|'completed'|'cancelled';staffName:string};
 type TrainingClass = {id:number;partner:number;partner_name?:string;name:string;members:string;planned_sessions:number;training_contents?:string[];completed_sessions:number;notes:string};
@@ -65,7 +105,7 @@ function ProductSelect({label,value,onChange,options=productCatalog,allowCustom=
       <button type="button" onClick={()=>setOpen(false)} className="mt-2 w-full rounded-lg border px-3 py-1.5 text-xs font-bold">Xong</button>
     </div>}
   </label>
-}function Calendar({mode,onModeChange,sessions,onPick,onOpen,onMove}:{mode:Mode;onModeChange:(mode:Mode)=>void;sessions:CalendarItem[];onPick:(date:string,start?:string,end?:string)=>void;onOpen:(item:CalendarItem)=>void;onMove:(item:CalendarItem,date:string,start?:string)=>void}) {
+}export function Calendar({mode,onModeChange,sessions,onPick,onOpen,onMove}:{mode:Mode;onModeChange:(mode:Mode)=>void;sessions:CalendarItem[];onPick:(date:string,start?:string,end?:string)=>void;onOpen:(item:CalendarItem)=>void;onMove:(item:CalendarItem,date:string,start?:string)=>void}) {
   const [cursor,setCursor]=useState(()=>new Date());
   const [rangeStart,setRangeStart]=useState('');
   const [rangeEnd,setRangeEnd]=useState('');
@@ -89,7 +129,7 @@ function ProductSelect({label,value,onChange,options=productCatalog,allowCustom=
   const timelineDays=appliedRange&&appliedRange.days<=7?enumerateDays(appliedRange.start,appliedRange.end):weekDays;
   const inRange=(date:string)=>!appliedRange||(date>=appliedRange.start&&date<=appliedRange.end);
   const visibleSessions=sessions.filter(item=>inRange(item.date||''));
-  const events=(date:string,minute?:number)=>visibleSessions.filter(item=>{if(item.date!==date)return false;if(minute===undefined)return true;if(!item.start_time)return false;const at=Number(item.start_time.slice(0,2))*60+Number(item.start_time.slice(3,5));return at>=minute&&at<minute+30});
+  const events=(date:string)=>visibleSessions.filter(item=>item.date===date);
   const clearRange=()=>{setRangeStart('');setRangeEnd('');setAppliedRange(null);setRangeError('')};
   const shift=(step:number)=>{clearRange();setCursor(value=>mode==='week'?addDays(value,step*7):new Date(value.getFullYear(),value.getMonth()+step,1))};
   const selectToday=()=>{const value=today();setCursor(fromIso(value));setRangeStart(value);setRangeEnd(value);setAppliedRange({start:value,end:value,days:1});setRangeError('');onModeChange('week')};
@@ -97,9 +137,9 @@ function ProductSelect({label,value,onChange,options=productCatalog,allowCustom=
   useEffect(()=>{if(!appliedRange)return;const expected=appliedRange.days<=7?'week':'month';if(mode!==expected)clearRange()},[mode]);
   const beginMove=(event:React.DragEvent,item:CalendarItem)=>{if(item.status==='cancelled'){event.preventDefault();return}event.stopPropagation();draggedRef.current=true;movingRef.current=item;setMoving(item);event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',String(item.id))};
   const cancelMove=()=>{movingRef.current=null;setMoving(null);window.setTimeout(()=>{draggedRef.current=false},0)};
-  const dropMove=(event:React.DragEvent,date:string,minute?:number)=>{const item=movingRef.current;if(!item)return false;event.preventDefault();event.stopPropagation();movingRef.current=null;setMoving(null);const targetStart=minute===undefined?(item.start_time||'').slice(0,5):toTime(minute);if(item.date===date&&(!targetStart||targetStart===(item.start_time||'').slice(0,5))){onOpen(item);return true}onMove(item,date,targetStart);return true};
+  const dropMove=(event:React.DragEvent,date:string,minute?:number)=>{const item=movingRef.current;if(!item)return false;event.preventDefault();event.stopPropagation();movingRef.current=null;setMoving(null);const targetStart=minute===undefined?(item.start_time||'').slice(0,5):toTime(minute);if(item.date===date&&(!targetStart||targetStart===(item.start_time||'').slice(0,5)))return true;onMove(item,date,targetStart);return true};
   const openItem=(event:React.MouseEvent,item:CalendarItem)=>{event.stopPropagation();if(draggedRef.current){draggedRef.current=false;return}onOpen(item)};
-  const renderEvent=(item:CalendarItem,variant:'week'|'month')=><span key={item.id} role="button" tabIndex={0} draggable={item.status!=='cancelled'} onMouseDown={event=>event.stopPropagation()} onMouseUp={event=>event.stopPropagation()} onDragStart={event=>beginMove(event,item)} onDragEnd={cancelMove} onClick={event=>openItem(event,item)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();onOpen(item)}}} className={`${variant==='week'?'dt-calendar-event':'dt-month-event'} cursor-grab ${moving?.id===item.id?'is-moving':''} ${item.status==='completed'?'is-completed':item.status==='cancelled'?'is-cancelled':''}`}>{showTime(item)} · {item.title}</span>;
+  const renderEvent=(item:CalendarItem,variant:'week'|'month',style?:React.CSSProperties,layout?:CalendarLayoutItem)=><span key={item.id} role="button" tabIndex={0} title={`${showTime(item)} · ${item.title}`} data-calendar-event={variant} data-start={(item.start_time||'').slice(0,5)} data-end={(item.end_time||'').slice(0,5)} data-overlap-column={layout?.column} data-overlap-columns={layout?.columnCount} draggable={item.status!=='cancelled'} onMouseDown={event=>event.stopPropagation()} onMouseUp={event=>event.stopPropagation()} onDragStart={event=>beginMove(event,item)} onDragEnd={cancelMove} onClick={event=>openItem(event,item)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();onOpen(item)}}} style={style} className={`${variant==='week'?'dt-calendar-event':'dt-month-event'} cursor-grab ${moving?.id===item.id?'is-moving':''} ${item.status==='completed'?'is-completed':item.status==='cancelled'?'is-cancelled':''}`}>{showTime(item)} · {item.title}</span>;
   const rangeLabel=appliedRange?`${fromIso(appliedRange.start).toLocaleDateString('vi-VN')} – ${fromIso(appliedRange.end).toLocaleDateString('vi-VN')}`:mode==='week'?`${first.toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit'})} – ${weekDays[6].toLocaleDateString('vi-VN',{day:'2-digit',month:'2-digit',year:'numeric'})}`:cursor.toLocaleDateString('vi-VN',{month:'long',year:'numeric'});
   const toolbar=<><div className="dt-calendar-toolbar"><div className="flex flex-wrap items-center gap-2"><button type="button" onClick={selectToday}>Hôm nay</button><button type="button" onClick={()=>shift(-1)} aria-label="Kỳ trước"><ChevronLeft className="h-4 w-4"/></button><button type="button" onClick={()=>shift(1)} aria-label="Kỳ sau"><ChevronRight className="h-4 w-4"/></button><b className="ml-2 text-sm text-slate-800">{rangeLabel}</b></div><div className="dt-calendar-range"><label>Từ<input type="date" value={rangeStart} onChange={event=>{setRangeStart(event.target.value);setRangeError('')}}/></label><label>Đến<input type="date" min={rangeStart||undefined} max={rangeStart?iso(addMonths(fromIso(rangeStart),3)):undefined} value={rangeEnd} onChange={event=>{setRangeEnd(event.target.value);setRangeError('')}}/></label><button type="button" onClick={applyRange}>Xem khoảng</button>{(rangeStart||rangeEnd||appliedRange)&&<button type="button" onClick={clearRange}>Bỏ lọc</button>}</div></div>{rangeError&&<p className="dt-calendar-range-error" role="alert">{rangeError}</p>}</>;
   const renderMonthDay=(day:Date,key:string,active:boolean,outside:boolean=false)=>{const date=iso(day),rows=active?events(date):[],todayDate=date===today();return <div key={key} role={active?'button':undefined} tabIndex={active?0:-1} onDragOver={event=>{if(active&&movingRef.current)event.preventDefault()}} onDrop={event=>{if(active)dropMove(event,date)}} onClick={()=>{if(active&&!draggedRef.current)onPick(date);draggedRef.current=false}} className={`dt-month-day ${outside?'is-outside':''} ${todayDate?'is-today':''} ${active?'':'is-filtered'}`}><span className="dt-month-number">{day.getDate()}</span><span className="dt-month-events">{rows.slice(0,3).map(item=>renderEvent(item,'month'))}{rows.length>3&&<span className="dt-month-more">+{rows.length-3} buổi khác</span>}</span></div>};
@@ -112,9 +152,16 @@ function ProductSelect({label,value,onChange,options=productCatalog,allowCustom=
     const monthStart=new Date(cursor.getFullYear(),cursor.getMonth(),1),gridStart=weekStart(monthStart),days=Array.from({length:42},(_,index)=>addDays(gridStart,index));
     return <div className="dt-calendar">{toolbar}<div className="dt-calendar-month-scroll"><div className="dt-calendar-month">{weekdayHeads}{days.map(day=>renderMonthDay(day,iso(day),true,day.getMonth()!==cursor.getMonth()))}</div></div><p className="border-t border-sky-100 px-4 py-2 text-xs text-slate-500">Kéo một lịch sang ngày khác để chuyển lịch; bấm vào ngày trống để tạo lịch mới.</p></div>
   }
-  const slots=Array.from({length:26},(_,index)=>480+index*30);
+  const timelineStart=480,timelineEnd=1260,slotMinutes=30;
+  const slots=Array.from({length:(timelineEnd-timelineStart)/slotMinutes},(_,index)=>timelineStart+index*slotMinutes);
+  const timelineEvents=timelineDays.flatMap((day,dayIndex)=>layoutCalendarEvents(events(iso(day))).map(entry=>({...entry,dayIndex}))).filter(entry=>entry.end>timelineStart&&entry.start<timelineEnd);
+  const renderTimelineEvent=(entry:CalendarLayoutItem&{dayIndex:number})=>{
+    const start=Math.max(timelineStart,entry.start),end=Math.min(timelineEnd,entry.end),row=Math.floor((start-timelineStart)/slotMinutes)+2,offset=start-(timelineStart+(row-2)*slotMinutes);
+    const style={gridColumnStart:entry.dayIndex+2,gridRowStart:row,transform:`translateY(${offset*56/slotMinutes+2}px)`,height:`${Math.max(24,(end-start)*56/slotMinutes-4)}px`,width:`calc(${100/entry.columnCount}% - 4px)`,marginLeft:`calc(${entry.column*100/entry.columnCount}% + 2px)`} as React.CSSProperties;
+    return renderEvent(entry.item,'week',style,entry);
+  };
   const finish=(date:string,minute:number)=>{if(!drag){onPick(date,toTime(minute),toTime(minute+30));return}const start=Math.min(drag.minute,minute),end=Math.max(drag.minute,minute)+30;onPick(drag.date,toTime(start),toTime(end));setDrag(null);setHover(null)};
-  return <div className="dt-calendar">{toolbar}<div className="dt-calendar-scroll"><div className="dt-calendar-week is-dynamic" style={{'--dt-calendar-days':timelineDays.length} as React.CSSProperties}><div className="dt-calendar-head"/>{timelineDays.map(day=>{const date=iso(day);return <div key={date} className={`dt-calendar-head ${date===today()?'is-today':''}`}><span>{day.toLocaleDateString('vi-VN',{weekday:'long'})}</span><strong>{day.getDate()}</strong></div>})}{slots.flatMap(minute=>[<div key={`hour-${minute}`} className="dt-calendar-hour">{minute%60===0?toTime(minute):''}</div>,...timelineDays.map(day=>{const date=iso(day),selected=!!drag&&!!hover&&drag.date===date&&hover.date===date&&minute>=Math.min(drag.minute,hover.minute)&&minute<=Math.max(drag.minute,hover.minute);return <div key={`${date}-${minute}`} role="button" tabIndex={0} onMouseDown={event=>{event.preventDefault();draggedRef.current=false;setDrag({date,minute});setHover({date,minute})}} onMouseEnter={()=>{if(drag)setHover({date,minute})}} onMouseUp={()=>{draggedRef.current=true;finish(date,minute)}} onDragOver={event=>{if(movingRef.current)event.preventDefault()}} onDrop={event=>dropMove(event,date,minute)} onClick={()=>{if(!draggedRef.current)onPick(date,toTime(minute),toTime(minute+30));draggedRef.current=false}} className={`dt-calendar-cell ${selected?'is-selecting':''} ${moving?'is-drop-target':''}`}>{events(date,minute).map(item=>renderEvent(item,'week'))}</div>})])}</div></div><p className="border-t border-sky-100 px-4 py-2 text-xs text-slate-500">Kéo một lịch sang ô ngày/giờ khác để chuyển lịch. Kéo chuột qua ô trống để tạo lịch mới theo đúng khoảng đã chọn.</p></div>
+  return <div className="dt-calendar">{toolbar}<div className="dt-calendar-scroll"><div className={`dt-calendar-week is-dynamic ${moving?'is-moving-calendar':''}`} style={{'--dt-calendar-days':timelineDays.length} as React.CSSProperties}><div className="dt-calendar-head"/>{timelineDays.map(day=>{const date=iso(day);return <div key={date} className={`dt-calendar-head ${date===today()?'is-today':''}`}><span>{day.toLocaleDateString('vi-VN',{weekday:'long'})}</span><strong>{day.getDate()}</strong></div>})}{slots.flatMap(minute=>[<div key={`hour-${minute}`} className="dt-calendar-hour">{minute%60===0?toTime(minute):''}</div>,...timelineDays.map(day=>{const date=iso(day),selected=!!drag&&!!hover&&drag.date===date&&hover.date===date&&minute>=Math.min(drag.minute,hover.minute)&&minute<=Math.max(drag.minute,hover.minute);return <div key={`${date}-${minute}`} role="button" tabIndex={0} data-calendar-slot={`${date}T${toTime(minute)}`} onMouseDown={event=>{event.preventDefault();draggedRef.current=false;setDrag({date,minute});setHover({date,minute})}} onMouseEnter={()=>{if(drag)setHover({date,minute})}} onMouseUp={()=>{draggedRef.current=true;finish(date,minute)}} onDragOver={event=>{if(movingRef.current)event.preventDefault()}} onDrop={event=>dropMove(event,date,minute)} onClick={()=>{if(!draggedRef.current)onPick(date,toTime(minute),toTime(minute+30));draggedRef.current=false}} className={`dt-calendar-cell ${selected?'is-selecting':''} ${moving?'is-drop-target':''}`}/>})])}{timelineEvents.map(renderTimelineEvent)}</div></div><p className="border-t border-sky-100 px-4 py-2 text-xs text-slate-500">Kéo một lịch sang ô ngày/giờ khác để chuyển lịch. Kéo chuột qua ô trống để tạo lịch mới theo đúng khoảng đã chọn.</p></div>
 }function WorkScheduleDetail({activity,canWrite,actor,idToken,onBack,onEdit,onCancel,onDelete}:{activity:WorkActivity;canWrite:boolean;actor?:string|null;idToken?:string;onBack:()=>void;onEdit:()=>void;onCancel:()=>void;onDelete:()=>void}){
   const title=activity.kind==='training'?'Lịch tập huấn':activity.kind==='meeting'?'Lịch gặp Khách hàng':'Lịch công tác khác';
   const logKey=activity.kind==='training'?`digital-training-session-${activity.sourceId}`:`digital-training-activity-${activity.kind}-${activity.sourceId}`;
