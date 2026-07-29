@@ -1,7 +1,7 @@
 from django.db.models import Max
 from rest_framework import serializers
 
-from .models import TrainingClass, TrainingMaterial, TrainingPartner, TrainingSession, TrainingSurvey
+from .models import TrainingClass, TrainingCustomerMeeting, TrainingMaterial, TrainingPartner, TrainingSession, TrainingSurvey
 
 
 class TrainingPartnerSerializer(serializers.ModelSerializer):
@@ -150,6 +150,16 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         return super().update(instance, self._sync_partner_from_class(self._sync_primary_category(validated_data)))
 
+
+class TrainingCustomerMeetingSerializer(serializers.ModelSerializer):
+    date = serializers.DateField(source="meeting_date")
+
+    class Meta:
+        model = TrainingCustomerMeeting
+        fields = [
+            "id", "title", "customer_type", "representative", "phone", "email", "date",
+            "start_time", "end_time", "location", "content", "notes", "created_at", "updated_at",
+        ]
 
 class TrainingMaterialSerializer(serializers.ModelSerializer):
     file_url = serializers.SerializerMethodField()

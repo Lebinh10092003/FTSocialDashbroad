@@ -8,8 +8,8 @@ import uuid
 from authentication.permissions import IsManagerOrAdmin
 from authentication.models import UserProfile
 from examination.models import LogNote
-from .models import TrainingClass, TrainingMaterial, TrainingPartner, TrainingSession, TrainingSurvey
-from .serializers import TrainingClassSerializer, TrainingMaterialSerializer, TrainingPartnerSerializer, TrainingSessionSerializer, TrainingSurveySerializer
+from .models import TrainingClass, TrainingCustomerMeeting, TrainingMaterial, TrainingPartner, TrainingSession, TrainingSurvey
+from .serializers import TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingMaterialSerializer, TrainingPartnerSerializer, TrainingSessionSerializer, TrainingSurveySerializer
 
 
 def _can_manage(request):
@@ -111,8 +111,19 @@ def training_session_detail(request, pk):
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
+def training_customer_meetings(request):
+    return _crud_collection(request, TrainingCustomerMeeting.objects.all(), TrainingCustomerMeetingSerializer, "cuộc gặp khách hàng")
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def training_customer_meeting_detail(request, pk):
+    return _crud_detail(request, TrainingCustomerMeeting.objects.all(), TrainingCustomerMeetingSerializer, pk, "cuộc gặp khách hàng")
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
 def training_partners(request):
-    return _crud_collection(request, TrainingPartner.objects.all(), TrainingPartnerSerializer, "đối tác")
+    return _crud_collection(request, TrainingPartner.objects.all(), TrainingPartnerSerializer, "khách hàng")
 
 
 @api_view(["GET", "PATCH", "DELETE"])
@@ -120,7 +131,7 @@ def training_partners(request):
 def training_partner_detail(request, pk):
     partner = TrainingPartner.objects.filter(pk=pk).first()
     if not partner:
-        return Response({"error": "Không tìm thấy đối tác."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"error": "Không tìm thấy khách hàng."}, status=status.HTTP_404_NOT_FOUND)
     if request.method == "GET":
         data = TrainingPartnerSerializer(partner, context={"request": request}).data
         data["classes"] = TrainingClassSerializer(partner.classes.all(), many=True, context={"request": request}).data
@@ -128,7 +139,7 @@ def training_partner_detail(request, pk):
         data["materials"] = TrainingMaterialSerializer(partner.materials.all(), many=True, context={"request": request}).data
         data["surveys"] = TrainingSurveySerializer(partner.surveys.all(), many=True, context={"request": request}).data
         return Response(data)
-    return _crud_detail(request, TrainingPartner.objects.all(), TrainingPartnerSerializer, pk, "đối tác")
+    return _crud_detail(request, TrainingPartner.objects.all(), TrainingPartnerSerializer, pk, "khách hàng")
 
 
 @api_view(["GET", "POST"])

@@ -70,6 +70,26 @@ class TrainingSession(models.Model):
         ordering = ["session_date", "start_time", "title"]
 
 
+class TrainingCustomerMeeting(models.Model):
+    """A calendar entry for an initial meeting that does not require a saved customer."""
+
+    title = models.CharField(max_length=255)
+    customer_type = models.CharField(max_length=100, blank=True)
+    representative = models.CharField(max_length=255, blank=True)
+    phone = models.CharField(max_length=50, blank=True)
+    email = models.EmailField(blank=True)
+    meeting_date = models.DateField()
+    start_time = models.TimeField(null=True, blank=True)
+    end_time = models.TimeField(null=True, blank=True)
+    location = models.CharField(max_length=500, blank=True)
+    content = models.TextField(blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["meeting_date", "start_time", "title"]
+
 class TrainingMaterial(models.Model):
     title = models.CharField(max_length=255)
     file = models.FileField(upload_to="digital-training/materials/%Y/%m/", blank=True)
