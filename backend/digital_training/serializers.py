@@ -10,9 +10,9 @@ class TrainingPartnerSerializer(serializers.ModelSerializer):
     class Meta:
         model = TrainingPartner
         fields = [
-            "id", "name", "address", "contact_person", "phone", "email", "additional_contacts",
+            "id", "name", "address", "contact_person", "contact_position", "phone", "email", "additional_contacts",
             "contract_start", "contract_end", "training_content", "planned_sessions",
-            "partner_type", "products", "contract_duration", "contract_duration_unit",
+            "partner_type", "partner_subtype", "products", "contract_duration", "contract_duration_unit",
             "contract_signed_date", "contract_status", "budget", "ai_account_count", "training_contents",
             "training_schedule", "training_location", "training_staff", "completed_sessions", "notes", "created_at", "updated_at",
         ]
@@ -29,6 +29,7 @@ class TrainingPartnerSerializer(serializers.ModelSerializer):
                 continue
             contact = {
                 "contact_person": str(item.get("contact_person", "")).strip(),
+                "position": str(item.get("position", "")).strip(),
                 "phone": str(item.get("phone", "")).strip(),
                 "email": str(item.get("email", "")).strip(),
             }
