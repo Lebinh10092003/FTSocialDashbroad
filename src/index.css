@@ -996,3 +996,8 @@ body {
 .overflow-x-auto, [data-drag-scroll] { cursor: grab; touch-action: pan-y; }
 .overflow-x-auto.is-drag-scrolling, [data-drag-scroll].is-drag-scrolling { cursor: grabbing; user-select: none; }
 .overflow-x-auto :is(button, input, select, textarea, a), [data-drag-scroll] :is(button, input, select, textarea, a) { cursor: auto; }
+
+/* Digital Training calendar keeps its controls visible while the time grid scrolls independently. */
+.dt-calendar-scroll { max-height: calc(100vh - 300px); overflow: auto; overscroll-behavior: contain; }
+.dt-calendar-scroll .dt-calendar-head { position: sticky; top: 0; z-index: 4; box-shadow: 0 1px 0 #d9e2f0; }
+.dt-calendar-scroll .dt-calendar-event { cursor: pointer; }
