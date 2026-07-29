@@ -157,7 +157,7 @@ function ProductSelect({label,value,onChange,options=productCatalog,allowCustom=
   const timelineEvents=timelineDays.flatMap((day,dayIndex)=>layoutCalendarEvents(events(iso(day))).map(entry=>({...entry,dayIndex}))).filter(entry=>entry.end>timelineStart&&entry.start<timelineEnd);
   const renderTimelineEvent=(entry:CalendarLayoutItem&{dayIndex:number})=>{
     const start=Math.max(timelineStart,entry.start),end=Math.min(timelineEnd,entry.end),row=Math.floor((start-timelineStart)/slotMinutes)+2,offset=start-(timelineStart+(row-2)*slotMinutes);
-    const style={gridColumnStart:entry.dayIndex+2,gridRowStart:row,transform:`translateY(${offset*56/slotMinutes+2}px)`,height:`${Math.max(24,(end-start)*56/slotMinutes-4)}px`,width:`calc(${100/entry.columnCount}% - 4px)`,marginLeft:`calc(${entry.column*100/entry.columnCount}% + 2px)`} as React.CSSProperties;
+    const style={gridColumnStart:entry.dayIndex+2,gridRowStart:row,transform:`translateY(${offset*56/slotMinutes}px)`,height:`${Math.max(24,(end-start)*56/slotMinutes)}px`,width:`calc(${100/entry.columnCount}% - 4px)`,marginLeft:`calc(${entry.column*100/entry.columnCount}% + 2px)`} as React.CSSProperties;
     return renderEvent(entry.item,'week',style,entry);
   };
   const finish=(date:string,minute:number)=>{if(!drag){onPick(date,toTime(minute),toTime(minute+30));return}const start=Math.min(drag.minute,minute),end=Math.max(drag.minute,minute)+30;onPick(drag.date,toTime(start),toTime(end));setDrag(null);setHover(null)};
