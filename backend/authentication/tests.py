@@ -218,7 +218,12 @@ class ModuleAccessTests(TestCase):
             access_modules=["social-dashboard", "examination"],
         )
         token = Token.objects.create(user=user).key
-        denied = self.client.get("/api/email-templates", HTTP_AUTHORIZATION=f"Bearer {token}")
+        denied = self.client.post(
+            "/api/email-templates",
+            {"id": "denied-template", "name": "Denied"},
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
         self.assertEqual(denied.status_code, 403)
 
         admin = get_user_model().objects.create_user(

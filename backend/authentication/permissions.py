@@ -5,6 +5,7 @@ MODULE_PATHS = {
     "examination": "/api/examination",
     "digital-training": "/api/digital-training",
     "email-builder": "/api/email-",
+    "attendance": "/api/attendance",
 }
 
 
@@ -18,14 +19,27 @@ def requested_module(request):
     return None
 
 
+def request_role(request) -> str:
+    user = getattr(request, "user", None)
+    return str(getattr(request, "user_role", "") or getattr(user, "role", "EMPLOYEE") or "EMPLOYEE")
+
+
+def request_modules(request) -> set[str]:
+    user = getattr(request, "user", None)
+    modules = getattr(request, "access_modules", None)
+    if modules is None:
+        modules = getattr(user, "access_modules", None)
+    return set(modules or [])
+
+
 def has_module_access(request) -> bool:
     user = getattr(request, "user", None)
     if user is None or not getattr(user, "email", ""):
         return False
-    if getattr(request, "user_role", "EMPLOYEE") == "ADMIN":
+    if request_role(request) == "ADMIN":
         return True
     module = requested_module(request)
-    return module is None or module in set(getattr(user, "access_modules", None) or [])
+    return module is None or module == "attendance" or module in request_modules(request)
 
 
 class IsAuthenticated(permissions.BasePermission):
@@ -41,13 +55,13 @@ class IsAuthenticatedOrReadOnly(permissions.BasePermission):
 
 class IsAdmin(permissions.BasePermission):
     def has_permission(self, request, view):
-        return request.user is not None and getattr(request, 'user_role', 'EMPLOYEE') == 'ADMIN'
+        return request.user is not None and request_role(request) == 'ADMIN'
 
 
 class IsManagerOrAdmin(permissions.BasePermission):
     def has_permission(self, request, view):
         return (
             request.user is not None
-            and getattr(request, 'user_role', 'EMPLOYEE') in ['ADMIN', 'MANAGER']
+            and request_role(request) in ['ADMIN', 'MANAGER']
             and has_module_access(request)
         )

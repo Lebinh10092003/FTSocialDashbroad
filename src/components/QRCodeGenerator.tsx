@@ -1,0 +1,253 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, ArrowLeft, Check, Clipboard, Download, ExternalLink, FileImage, Link2, LockKeyhole, QrCode, ShieldCheck } from 'lucide-react';
+import QRCode from 'qrcode';
+
+type QRCodeGeneratorProps = { onBackToWorkspace: () => void };
+type UrlAssessment = { normalizedUrl: string; hostname: string; error: string; warnings: string[]; checks: Array<{ label: string; passed: boolean }> };
+
+const SHORT_LINK_HOSTS = new Set(['bit.ly', 'tinyurl.com', 't.co', 'goo.gl', 'forms.gle', 'shorturl.at', 'rebrand.ly', 'ow.ly', 'buff.ly', 'cutt.ly', 'vnlink.top']);
+const REDIRECT_PARAM_NAMES = new Set(['redirect', 'redirect_url', 'redirect_uri', 'return', 'return_url', 'target', 'url', 'destination', 'dest']);
+
+function assessUrl(rawValue: string): UrlAssessment {
+  const value = rawValue.trim();
+  if (!value) return { normalizedUrl: '', hostname: '', error: '', warnings: [], checks: [] };
+  const withProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
+  let parsed: URL;
+  try { parsed = new URL(withProtocol); }
+  catch { return { normalizedUrl: '', hostname: '', error: 'Đường dẫn chưa đúng định dạng. Ví dụ: https://forms.google.com/...', warnings: [], checks: [] }; }
+  if (!['http:', 'https:'].includes(parsed.protocol)) return { normalizedUrl: '', hostname: parsed.hostname, error: 'Chỉ hỗ trợ đường dẫn web bắt đầu bằng https:// hoặc http://.', warnings: [], checks: [] };
+  if (!parsed.hostname || !parsed.hostname.includes('.')) return { normalizedUrl: '', hostname: parsed.hostname, error: 'Tên miền chưa hợp lệ. Hãy kiểm tra lại đường dẫn.', warnings: [], checks: [] };
+
+  const hostname = parsed.hostname.toLowerCase().replace(/^www\./, '');
+  const warnings: string[] = [];
+  const isShortLink = SHORT_LINK_HOSTS.has(hostname);
+  const hasRedirectParam = [...parsed.searchParams.keys()].some(key => REDIRECT_PARAM_NAMES.has(key.toLowerCase()));
+  if (parsed.protocol !== 'https:') warnings.push('Link dùng HTTP nên một số điện thoại có thể hiện cảnh báo không an toàn.');
+  if (isShortLink) warnings.push(hostname === 'forms.gle' ? 'forms.gle là link rút gọn. Nên mở form rồi sao chép URL đầy đủ dạng docs.google.com/forms/...' : 'Đây là tên miền rút gọn; máy quét có thể cảnh báo vì chưa thấy tên miền đích thật.');
+  if (hasRedirectParam) warnings.push('Link có tham số chuyển hướng. Nếu có thể, hãy dùng trực tiếp URL cuối cùng.');
+  return { normalizedUrl: parsed.toString(), hostname, error: '', warnings, checks: [
+    { label: 'Kết nối HTTPS', passed: parsed.protocol === 'https:' },
+    { label: 'Không dùng link rút gọn', passed: !isShortLink },
+    { label: 'Không có tham số chuyển hướng', passed: !hasRedirectParam },
+  ] };
+}
+
+function safeFilename(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase().slice(0, 70) || 'ma-qr';
+}
+
+function roundedRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+  const r = Math.min(radius, width / 2, height / 2);
+  context.beginPath(); context.moveTo(x + r, y); context.arcTo(x + width, y, x + width, y + height, r); context.arcTo(x + width, y + height, x, y + height, r); context.arcTo(x, y + height, x, y, r); context.arcTo(x, y, x + width, y, r); context.closePath();
+}
+
+function triggerDownload(dataUrl: string, filename: string) {
+  const anchor = document.createElement('a'); anchor.href = dataUrl; anchor.download = filename; anchor.click();
+}
+
+export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [rawUrl, setRawUrl] = useState('');
+  const [title, setTitle] = useState('');
+  const [purpose, setPurpose] = useState('Khảo sát tập huấn');
+  const [foreground, setForeground] = useState('#102A43');
+  const [renderError, setRenderError] = useState('');
+  const [notice, setNotice] = useState('');
+  const assessment = useMemo(() => assessUrl(rawUrl), [rawUrl]);
+  const canGenerate = Boolean(assessment.normalizedUrl && !assessment.error);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (!canGenerate) { const context = canvas.getContext('2d'); if (context) context.clearRect(0, 0, canvas.width, canvas.height); setRenderError(''); return; }
+    QRCode.toCanvas(canvas, assessment.normalizedUrl, { width: 960, margin: 4, errorCorrectionLevel: 'H', color: { dark: foreground, light: '#FFFFFF' } })
+      .then(() => setRenderError('')).catch(() => setRenderError('Không thể tạo mã QR từ đường dẫn này.'));
+  }, [assessment.normalizedUrl, canGenerate, foreground]);
+
+  useEffect(() => { if (!notice) return; const timeout = window.setTimeout(() => setNotice(''), 2600); return () => window.clearTimeout(timeout); }, [notice]);
+
+  const downloadQR = () => {
+    const canvas = canvasRef.current; if (!canvas || !canGenerate) return;
+    triggerDownload(canvas.toDataURL('image/png'), `${safeFilename(title || assessment.hostname)}-qr.png`); setNotice('Đã tải mã QR PNG chất lượng cao.');
+  };
+
+  const copyQR = async () => {
+    const canvas = canvasRef.current; if (!canvas || !canGenerate) return;
+    if (!navigator.clipboard || typeof ClipboardItem === 'undefined') { downloadQR(); setNotice('Thiết bị không hỗ trợ sao chép ảnh; mã QR đã được tải xuống.'); return; }
+    try {
+      const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('Canvas export failed')), 'image/png'));
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); setNotice('Đã sao chép ảnh QR.');
+    } catch { setNotice('Trình duyệt chưa cho phép sao chép ảnh. Bạn có thể tải PNG.'); }
+  };
+
+  const downloadPoster = () => {
+    const source = canvasRef.current;
+    if (!source || !canGenerate) return;
+    const poster = document.createElement('canvas');
+    poster.width = 1600;
+    poster.height = 2000;
+    const context = poster.getContext('2d');
+    if (!context) return;
+    context.fillStyle = '#F7F4EE';
+    context.fillRect(0, 0, poster.width, poster.height);
+    context.fillStyle = '#F4A261';
+    context.fillRect(0, 0, poster.width, 22);
+    context.fillStyle = '#102A43';
+    context.font = '700 36px "Be Vietnam Pro", Arial, sans-serif';
+    context.fillText('FERMAT WORKSPACE', 120, 132);
+    context.fillStyle = '#64748B';
+    context.font = '600 28px "Be Vietnam Pro", Arial, sans-serif';
+    context.fillText(purpose.toUpperCase(), 120, 224);
+    context.fillStyle = '#102A43';
+    context.font = '800 72px "Be Vietnam Pro", Arial, sans-serif';
+    const words = (title.trim() || 'Quét mã để truy cập').split(/\s+/);
+    let line = '';
+    let y = 330;
+    for (const word of words) {
+      const testLine = `${line}${word} `;
+      if (context.measureText(testLine).width > 1360 && line) {
+        context.fillText(line.trim(), 120, y);
+        line = `${word} `;
+        y += 92;
+      } else line = testLine;
+    }
+    context.fillText(line.trim(), 120, y);
+    const qrSize = 1100;
+    const qrX = (poster.width - qrSize) / 2;
+    const qrY = Math.max(540, y + 100);
+    context.fillStyle = '#FFFFFF';
+    roundedRect(context, qrX - 45, qrY - 45, qrSize + 90, qrSize + 90, 42);
+    context.fill();
+    context.drawImage(source, qrX, qrY, qrSize, qrSize);
+    context.textAlign = 'center';
+    context.fillStyle = '#102A43';
+    context.font = '700 34px "Be Vietnam Pro", Arial, sans-serif';
+    context.fillText('Mở camera điện thoại và hướng vào mã QR', poster.width / 2, qrY + qrSize + 120);
+    context.fillStyle = '#64748B';
+    context.font = '500 28px "Be Vietnam Pro", Arial, sans-serif';
+    context.fillText(assessment.hostname, poster.width / 2, qrY + qrSize + 180);
+    triggerDownload(poster.toDataURL('image/png'), `${safeFilename(title || purpose)}-poster.png`);
+    setNotice('Đã tải poster QR sẵn sàng để trình chiếu hoặc in.');
+  };
+
+  const colors = [
+    { value: '#102A43', label: 'Xanh đậm' },
+    { value: '#0F5132', label: 'Xanh lá' },
+    { value: '#111827', label: 'Đen' },
+  ];
+
+  return (
+    <div className="min-h-dvh bg-[#f7f4ee] font-sans text-[#102A43]">
+      <header className="border-b border-[#102A43]/10 bg-[#f7f4ee]/90 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
+          <button type="button" onClick={onBackToWorkspace} className="inline-flex items-center gap-2 text-sm font-bold transition hover:text-[#de6b35]">
+            <ArrowLeft className="h-4 w-4" />Workspace
+          </button>
+          <div className="flex items-center gap-2.5">
+            <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#102A43] text-white"><QrCode className="h-5 w-5" /></div>
+            <span className="text-sm font-extrabold tracking-tight">QR Studio</span>
+          </div>
+          <div className="hidden items-center gap-2 text-xs font-semibold text-[#52677a] sm:flex"><LockKeyhole className="h-4 w-4 text-emerald-700" />Xử lý ngay trên thiết bị</div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-12">
+        <section className="mb-9 max-w-3xl">
+          <div className="mb-3 flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.18em] text-[#de6b35]"><span className="h-px w-8 bg-[#de6b35]" />Trình tạo mã QR trực tiếp</div>
+          <h1 className="max-w-2xl text-3xl font-extrabold leading-tight tracking-[-0.035em] sm:text-5xl">Một lần quét.<br />Đến đúng nơi cần đến.</h1>
+          <p className="mt-4 max-w-2xl text-sm leading-7 text-[#52677a] sm:text-base">Tạo mã QR dẫn thẳng tới form khảo sát, tài liệu hoặc bất kỳ trang web nào — không chèn link trung gian và không thu thập dữ liệu người quét.</p>
+        </section>
+
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.12fr)_minmax(360px,.88fr)]">
+          <section className="border border-[#102A43]/10 bg-white p-5 shadow-[0_18px_60px_rgba(16,42,67,.08)] sm:p-7">
+            <div className="flex items-start justify-between gap-5 border-b border-[#102A43]/10 pb-5">
+              <div><p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[#de6b35]">Nội dung</p><h2 className="mt-1 text-xl font-extrabold tracking-tight">Đường dẫn cần chia sẻ</h2></div>
+              <span className="text-sm font-bold text-[#9a6a50]">01</span>
+            </div>
+            <div className="mt-6 space-y-5">
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold">URL đích</span>
+                <div className={`flex items-center border bg-[#fbfaf7] transition focus-within:ring-4 ${assessment.error ? 'border-rose-400 focus-within:ring-rose-100' : 'border-[#102A43]/20 focus-within:border-[#de6b35] focus-within:ring-[#de6b35]/10'}`}>
+                  <Link2 className="ml-4 h-5 w-5 shrink-0 text-[#718294]" />
+                  <input type="url" inputMode="url" autoComplete="url" value={rawUrl} onChange={event => setRawUrl(event.target.value)} placeholder="https://docs.google.com/forms/..." className="min-w-0 flex-1 bg-transparent px-3 py-4 text-sm font-medium outline-none placeholder:text-[#93a1ad]" aria-describedby="url-help" />
+                  {canGenerate && <Check className="mr-4 h-5 w-5 text-emerald-700" />}
+                </div>
+                <span id="url-help" className={`mt-2 block text-xs leading-5 ${assessment.error ? 'font-semibold text-rose-600' : 'text-[#718294]'}`}>{assessment.error || 'Có thể dán link không có https:// — hệ thống sẽ tự bổ sung.'}</span>
+              </label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold">Mục đích sử dụng</span>
+                  <select value={purpose} onChange={event => setPurpose(event.target.value)} className="w-full border border-[#102A43]/20 bg-[#fbfaf7] px-4 py-3.5 text-sm font-semibold outline-none focus:border-[#de6b35] focus:ring-4 focus:ring-[#de6b35]/10">
+                    <option>Khảo sát tập huấn</option><option>Điểm danh / check-in</option><option>Tài liệu chia sẻ</option><option>Đăng ký sự kiện</option><option>Thanh toán</option><option>Khác</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-sm font-bold">Tiêu đề poster <span className="font-normal text-[#718294]">(tùy chọn)</span></span>
+                  <input value={title} onChange={event => setTitle(event.target.value)} maxLength={90} placeholder="Khảo sát cuối buổi tập huấn" className="w-full border border-[#102A43]/20 bg-[#fbfaf7] px-4 py-3.5 text-sm font-medium outline-none focus:border-[#de6b35] focus:ring-4 focus:ring-[#de6b35]/10" />
+                </label>
+              </div>
+              <fieldset>
+                <legend className="mb-2 text-sm font-bold">Màu mã QR</legend>
+                <div className="flex flex-wrap gap-2.5">{colors.map(color => <button key={color.value} type="button" onClick={() => setForeground(color.value)} className={`inline-flex items-center gap-2 border px-3 py-2 text-xs font-bold transition ${foreground === color.value ? 'border-[#de6b35] bg-[#fff5ed] text-[#a94720]' : 'border-[#102A43]/15 bg-white text-[#52677a]'}`} aria-pressed={foreground === color.value}><span className="h-3.5 w-3.5 rounded-full" style={{ backgroundColor: color.value }} />{color.label}</button>)}</div>
+              </fieldset>
+            </div>
+            <div className="mt-7 border-t border-[#102A43]/10 pt-6">
+              <div className="flex items-center justify-between gap-5">
+                <div><p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[#de6b35]">Kiểm tra link</p><h2 className="mt-1 text-lg font-extrabold tracking-tight">Giảm cảnh báo khi quét</h2></div>
+                <ShieldCheck className="h-7 w-7 text-emerald-700" />
+              </div>
+              {!rawUrl.trim() ? (
+                <p className="mt-4 border-l-2 border-[#de6b35] pl-4 text-sm leading-6 text-[#52677a]">Nhập URL để kiểm tra HTTPS, link rút gọn và dấu hiệu chuyển hướng.</p>
+              ) : assessment.error ? (
+                <div className="mt-4 flex items-start gap-3 bg-rose-50 p-4 text-sm text-rose-800"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" /><p>{assessment.error}</p></div>
+              ) : (
+                <div className="mt-4 space-y-4">
+                  <div className="flex items-center gap-3 bg-emerald-50 p-4">
+                    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-emerald-700 text-white"><ExternalLink className="h-4 w-4" /></div>
+                    <div className="min-w-0"><p className="text-xs font-semibold text-emerald-800">Người dùng sẽ được đưa trực tiếp tới</p><p className="truncate text-sm font-extrabold text-emerald-950">{assessment.hostname}</p></div>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {assessment.checks.map(check => <div key={check.label} className={`flex items-center gap-2 border px-3 py-2.5 text-xs font-bold ${check.passed ? 'border-emerald-200 bg-emerald-50/60 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>{check.passed ? <Check className="h-4 w-4 shrink-0" /> : <AlertTriangle className="h-4 w-4 shrink-0" />}{check.label}</div>)}
+                  </div>
+                  {assessment.warnings.map(warning => <div key={warning} className="flex items-start gap-3 border-l-2 border-amber-500 bg-amber-50/70 px-4 py-3 text-xs font-medium leading-5 text-amber-900"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{warning}</div>)}
+                </div>
+              )}
+            </div>
+          </section>
+
+          <aside className="lg:sticky lg:top-6">
+            <div className="bg-[#102A43] p-5 text-white shadow-[0_22px_70px_rgba(16,42,67,.24)] sm:p-7">
+              <div className="flex items-start justify-between gap-5">
+                <div><p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[#f4a261]">Xem trước</p><h2 className="mt-1 text-xl font-extrabold tracking-tight">Mã QR của bạn</h2></div>
+                <span className="text-sm font-bold text-white/45">02</span>
+              </div>
+              <div className="mx-auto mt-6 grid aspect-square w-full max-w-[420px] place-items-center bg-white p-4 sm:p-6">
+                {!canGenerate ? (
+                  <div className="flex max-w-[250px] flex-col items-center text-center text-[#718294]">
+                    <div className="mb-4 grid h-20 w-20 place-items-center rounded-full bg-[#f7f4ee]"><QrCode className="h-10 w-10 text-[#9a6a50]" /></div>
+                    <p className="text-sm font-extrabold text-[#102A43]">Mã QR sẽ xuất hiện tại đây</p>
+                    <p className="mt-2 text-xs leading-5">Dán một đường dẫn hợp lệ để bắt đầu.</p>
+                  </div>
+                ) : <canvas ref={canvasRef} className="h-full w-full" aria-label={`Mã QR dẫn tới ${assessment.hostname}`} />}
+                {!canGenerate && <canvas ref={canvasRef} className="hidden" />}
+              </div>
+              {renderError && <p className="mt-3 text-center text-xs font-semibold text-rose-300">{renderError}</p>}
+              <div className="mt-5 min-h-12 border border-white/10 bg-white/[0.06] px-4 py-3">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45">Đích đến hiển thị</p>
+                <p className="mt-1 truncate text-sm font-bold">{assessment.hostname || 'Chưa có đường dẫn'}</p>
+              </div>
+              <button type="button" onClick={downloadQR} disabled={!canGenerate} className="mt-4 inline-flex w-full items-center justify-center gap-2 bg-[#f4a261] px-4 py-3.5 text-sm font-extrabold text-[#102A43] transition hover:bg-[#ffb37a] disabled:cursor-not-allowed disabled:opacity-40"><Download className="h-4 w-4" />Tải mã QR (PNG)</button>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button type="button" onClick={copyQR} disabled={!canGenerate} className="inline-flex items-center justify-center gap-2 border border-white/15 px-3 py-3 text-xs font-bold transition hover:bg-white/10 disabled:opacity-35"><Clipboard className="h-4 w-4" />Sao chép ảnh</button>
+                <button type="button" onClick={downloadPoster} disabled={!canGenerate} className="inline-flex items-center justify-center gap-2 border border-white/15 px-3 py-3 text-xs font-bold transition hover:bg-white/10 disabled:opacity-35"><FileImage className="h-4 w-4" />Tải poster</button>
+              </div>
+              <div className="mt-5 flex items-start gap-3 text-xs leading-5 text-white/58"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" /><p>Mã hóa trực tiếp URL bạn nhập. Link không đi qua máy chủ Fermat Workspace.</p></div>
+            </div>
+            <p className="mt-4 px-1 text-xs leading-5 text-[#718294]">Mẹo: thử quét bằng ít nhất một iPhone và một máy Android trước khi trình chiếu hoặc in số lượng lớn.</p>
+          </aside>
+        </div>
+      </main>
+      {notice && <div className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 bg-[#102A43] px-4 py-3 text-sm font-bold text-white shadow-2xl" role="status"><Check className="h-4 w-4 text-emerald-400" />{notice}</div>}
+    </div>
+  );
+}

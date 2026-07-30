@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import base64
+import difflib
 import hashlib
 import json
 import os
+import re
 import time
+import unicodedata
+from collections import Counter
 from io import BytesIO
 from pathlib import Path
 
@@ -14,11 +18,18 @@ from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
 from django.utils import timezone
 from docx import Document
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Mm, Pt, RGBColor
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 from jsonschema import Draft202012Validator
 from openpyxl import Workbook, load_workbook
 from pypdf import PdfReader
 
-from .models import AiProviderConfig, AiUsageLog, BlueprintSlot, ExamPaper, ExamQuestion, ExamSourceDocument
+from .models import AiProviderConfig, AiUsageLog, BlueprintSlot, ExamPaper, ExamQuestion, ExamReview, ExamSourceDocument
 
 DIFFICULTIES = ('EASY', 'MEDIUM', 'HARD', 'VERY_HARD')
 DIFFICULTY_LABELS = {'EASY': 'Dễ', 'MEDIUM': 'Trung bình', 'HARD': 'Khó', 'VERY_HARD': 'Rất khó'}
@@ -131,13 +142,70 @@ def serialize_paper(paper: ExamPaper, include_questions: bool = False) -> dict:
         'difficultyDistribution': paper.difficulty_distribution or default_distribution(paper.total_questions),
         'status': paper.status, 'description': paper.description, 'aiGenerationStatus': paper.ai_generation_status,
         'aiGenerationMessage': paper.ai_generation_message, 'createdBy': paper.created_by, 'updatedBy': paper.updated_by,
+        'qualityReport': paper.quality_report or {}, 'workflowLog': paper.workflow_log or [],
+        'draftExportedAt': paper.draft_exported_at.isoformat() if paper.draft_exported_at else None,
+        'approvedAt': paper.approved_at.isoformat() if paper.approved_at else None, 'approvedBy': paper.approved_by,
+        'officialExportedAt': paper.official_exported_at.isoformat() if paper.official_exported_at else None,
+        'bankedAt': paper.banked_at.isoformat() if paper.banked_at else None,
         'createdAt': paper.created_at.isoformat(), 'updatedAt': paper.updated_at.isoformat(),
         'questionCount': paper.questions.count(),
     }
     if include_questions:
         data['questions'] = [serialize_question(item) for item in paper.questions.all()]
         data['sources'] = [serialize_source(item) for item in paper.sources.select_related('referenced_paper').all()]
+        data['reviews'] = [{
+            'id': str(item.id), 'scope': item.scope, 'questionId': str(item.question_id or ''),
+            'verdict': item.verdict, 'notes': item.notes, 'checks': item.checks or {},
+            'reviewer': item.reviewer, 'updatedAt': item.updated_at.isoformat(),
+        } for item in paper.human_reviews.select_related('question').all()]
     return data
+
+
+def _word_math_text(element) -> str:
+    """Convert common Office Math nodes to compact, prompt-friendly plain text."""
+    tag = element.tag.rsplit('}', 1)[-1]
+    children = list(element)
+    if tag in {'t', 'instrText'}:
+        return element.text or ''
+    if tag == 'tab':
+        return '\t'
+    if tag in {'br', 'cr'}:
+        return '\n'
+    by_tag = {child.tag.rsplit('}', 1)[-1]: child for child in children}
+    if tag == 'f' and 'num' in by_tag and 'den' in by_tag:
+        return f"({_word_math_text(by_tag['num'])})/({_word_math_text(by_tag['den'])})"
+    if tag == 'sSup' and 'e' in by_tag and 'sup' in by_tag:
+        return f"{_word_math_text(by_tag['e'])}^({_word_math_text(by_tag['sup'])})"
+    if tag == 'sSub' and 'e' in by_tag and 'sub' in by_tag:
+        return f"{_word_math_text(by_tag['e'])}_({_word_math_text(by_tag['sub'])})"
+    if tag == 'rad' and 'e' in by_tag:
+        return f"√({_word_math_text(by_tag['e'])})"
+    return ''.join(_word_math_text(child) for child in children)
+
+
+def _paragraph_source_text(paragraph: Paragraph) -> str:
+    return _word_math_text(paragraph._p).strip()
+
+
+def _docx_source_lines(document: Document) -> list[str]:
+    """Read paragraphs and tables in document order instead of dropping tables."""
+    lines = []
+    for child in document.element.body.iterchildren():
+        if child.tag == qn('w:p'):
+            text = _paragraph_source_text(Paragraph(child, document))
+            if text:
+                lines.append(text)
+        elif child.tag == qn('w:tbl'):
+            table = Table(child, document)
+            for row in table.rows:
+                values = []
+                for cell in row.cells:
+                    value = ' '.join(filter(None, (_paragraph_source_text(item) for item in cell.paragraphs))).strip()
+                    if not values or value != values[-1]:
+                        values.append(value)
+                if any(values):
+                    lines.append(' | '.join(values))
+    return lines
 
 
 def read_uploaded_source(uploaded) -> str:
@@ -151,7 +219,7 @@ def read_uploaded_source(uploaded) -> str:
     if extension == '.pdf':
         return '\n'.join((page.extract_text() or '') for page in PdfReader(BytesIO(content)).pages)[:120000]
     if extension == '.docx':
-        return '\n'.join(paragraph.text for paragraph in Document(BytesIO(content)).paragraphs)[:120000]
+        return '\n'.join(_docx_source_lines(Document(BytesIO(content))))[:120000]
     workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
     rows = []
     for sheet in workbook.worksheets:
@@ -189,7 +257,7 @@ def serialize_ai_config(config: AiProviderConfig) -> dict:
     }
 
 
-def call_ai_json(*, paper: ExamPaper, task_type: str, model: str, system: str, prompt: str, user_email: str) -> dict:
+def call_ai_json(*, paper: ExamPaper, task_type: str, model: str, system: str, prompt: str, user_email: str, max_tokens: int | None = None) -> dict:
     config = _config()
     api_key = decrypt_secret(config.api_key_encrypted)
     if not api_key:
@@ -197,7 +265,7 @@ def call_ai_json(*, paper: ExamPaper, task_type: str, model: str, system: str, p
     endpoint = config.base_url.rstrip('/') + '/chat/completions'
     started = time.monotonic()
     payload = {
-        'model': model, 'temperature': config.temperature, 'max_tokens': config.max_tokens,
+        'model': model, 'temperature': config.temperature, 'max_tokens': min(config.max_tokens, max_tokens) if max_tokens else config.max_tokens,
         'response_format': {'type': 'json_object'},
         'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': prompt}],
     }
@@ -237,35 +305,168 @@ def generate_questions_with_ai(paper: ExamPaper, user_email: str) -> list[dict]:
 
 def review_questions_with_ai(paper: ExamPaper, auto_fix: bool, user_email: str) -> list[dict]:
     current = [serialize_question(item) for item in paper.questions.all()]
-    prompt = f'''Kiểm tra đề trắc nghiệm dưới đây: đủ 4 phương án, một đáp án đúng, số lượng, độ khó, câu trùng, mơ hồ, vượt phạm vi, lỗi ngôn ngữ và phương án nhiễu. Nếu autoFix=true, chỉ viết lại các câu lỗi.\nTrả JSON {{"questions":[{{"id":"","status":"PASSED|AI_FIXED|NEEDS_REVIEW|WARNING","warnings":[""],"replacement":null hoặc question schema}}]}}.\nautoFix={str(auto_fix).lower()}\nĐề: {json.dumps(current, ensure_ascii=False)}\nNguồn: {source_context(paper)}'''
+    prompt = f'''Kiểm tra đề dưới đây: đúng loại câu và đúng số phương án theo từng slot, một đáp án đúng, số lượng, độ khó, câu trùng, mơ hồ, vượt phạm vi, lỗi ngôn ngữ và phương án nhiễu. Nếu autoFix=true, chỉ viết lại các câu lỗi và giữ nguyên mọi ràng buộc slot.\nTrả JSON {{"questions":[{{"id":"","status":"PASSED|AI_FIXED|NEEDS_REVIEW|WARNING","warnings":[""],"replacement":null hoặc question schema}}]}}.\nautoFix={str(auto_fix).lower()}\nĐề: {json.dumps(current, ensure_ascii=False)}\nNguồn: {source_context(paper)}'''
     result = call_ai_json(paper=paper, task_type='review_auto_fix' if auto_fix else 'review', model=_config().review_model, user_email=user_email, system='Bạn là kiểm định viên đề thi. Chỉ trả JSON hợp lệ.', prompt=prompt)
     return result.get('questions') if isinstance(result, dict) and isinstance(result.get('questions'), list) else []
 
 
-def document_export(paper: ExamPaper, mode: str) -> bytes:
-    document = Document()
-    document.add_heading(paper.title, 0)
-    document.add_paragraph(f'Môn: {paper.subject or "—"} | Khối/Bảng: {paper.grade_or_category or "—"} | Thời gian: {paper.duration_minutes} phút')
-    include_answers = mode in {'answers', 'combined'}
-    answers_only = mode == 'answers'
-    if answers_only:
-        document.add_heading('Đáp án', level=1)
+def _set_cell_shading(cell, fill: str) -> None:
+    properties = cell._tc.get_or_add_tcPr()
+    shading = properties.find(qn('w:shd')) or OxmlElement('w:shd')
+    shading.set(qn('w:fill'), fill)
+    if shading.getparent() is None:
+        properties.append(shading)
+
+
+def _set_page_number(paragraph) -> None:
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = paragraph.add_run('Trang ')
+    begin = OxmlElement('w:fldChar'); begin.set(qn('w:fldCharType'), 'begin')
+    instruction = OxmlElement('w:instrText'); instruction.set(qn('xml:space'), 'preserve'); instruction.text = ' PAGE '
+    separate = OxmlElement('w:fldChar'); separate.set(qn('w:fldCharType'), 'separate')
+    value = OxmlElement('w:t'); value.text = '1'
+    end = OxmlElement('w:fldChar'); end.set(qn('w:fldCharType'), 'end')
+    for item in (begin, instruction, separate, value, end):
+        run._r.append(item)
+
+
+def _configure_exam_document(document, paper: ExamPaper) -> None:
+    section = document.sections[0]
+    section.page_width, section.page_height = Mm(210), Mm(297)
+    section.top_margin = section.bottom_margin = Mm(20)
+    section.left_margin, section.right_margin = Mm(25), Mm(20)
+    section.header_distance = section.footer_distance = Mm(12.7)
+    normal = document.styles['Normal']
+    normal.font.name, normal.font.size = 'Times New Roman', Pt(14)
+    normal.element.rPr.rFonts.set(qn('w:eastAsia'), 'Times New Roman')
+    normal.paragraph_format.space_after = Pt(2)
+    normal.paragraph_format.line_spacing = 1.05
+    document.core_properties.title = paper.title
+    document.core_properties.subject = f'{paper.subject} - {paper.grade_or_category}'.strip(' -')
+    document.core_properties.author = paper.created_by or 'FermatTech'
+    _set_page_number(section.footer.paragraphs[0])
+
+
+def _add_exam_heading(document, paper: ExamPaper, *, answer_key: bool = False) -> None:
+    blueprint = paper.blueprint_version.blueprint if paper.blueprint_version_id else None
+    round_name = blueprint.round_name if blueprint else ''
+    competition = paper.competition.name if paper.competition else 'CUỘC THI'
+    title = 'ĐÁP ÁN' if answer_key else 'ĐỀ THI'
+    for text, size in ((competition.upper(), 13), (f'{title} {round_name}'.strip().upper(), 16), (f'{paper.subject} · {paper.grade_or_category}'.strip(' ·'), 14)):
+        paragraph = document.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        paragraph.paragraph_format.space_after = Pt(2)
+        run = paragraph.add_run(text)
+        run.bold, run.font.name, run.font.size = True, 'Times New Roman', Pt(size)
+    meta = document.add_paragraph()
+    meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    meta.paragraph_format.space_after = Pt(8)
+    meta.add_run(f'Thời gian làm bài: {paper.duration_minutes} phút').italic = True
+    if not answer_key:
+        info = document.add_table(rows=2, cols=2)
+        info.alignment = WD_TABLE_ALIGNMENT.CENTER
+        info.autofit = True
+        values = ('Họ và tên: ........................................................', 'Số báo danh: ........................', 'Trường: ..............................................................', 'Lớp: ........................')
+        for cell, value in zip((cell for row in info.rows for cell in row.cells), values):
+            cell.text = value
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            for paragraph in cell.paragraphs:
+                paragraph.paragraph_format.space_after = Pt(0)
+        instruction = document.add_paragraph()
+        instruction.paragraph_format.space_before, instruction.paragraph_format.space_after = Pt(6), Pt(6)
+        instruction.add_run('Hướng dẫn: ').bold = True
+        instruction.add_run('Chọn một đáp án đúng cho mỗi câu trắc nghiệm; ghi đáp số vào ô trống đối với câu điền đáp số.')
+
+
+def _add_exam_questions(document, paper: ExamPaper) -> None:
     for question in paper.questions.all():
-        if not answers_only:
-            document.add_paragraph(f'Câu {question.order}. {question.content}')
-            for index, choice in enumerate(question.choices or []):
-                document.add_paragraph(f'{chr(65 + index)}. {choice}', style='List Bullet')
-        if include_answers:
-            document.add_paragraph(f'Đáp án câu {question.order}: {question.correct_answer}. {question.explanation}'.strip())
-    output = BytesIO(); document.save(output); return output.getvalue()
+        paragraph = document.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        paragraph.paragraph_format.keep_with_next = bool(question.choices)
+        paragraph.paragraph_format.space_before = Pt(5)
+        paragraph.add_run(f'Câu {question.order}. ').bold = True
+        paragraph.add_run(question.content)
+        if question.question_type == 'numeric_input':
+            answer = document.add_paragraph('Đáp số:  ........................................................')
+            answer.paragraph_format.left_indent = Mm(8)
+            answer.paragraph_format.space_after = Pt(5)
+            continue
+        for index, choice in enumerate(question.choices or []):
+            option = document.add_paragraph()
+            option.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            option.paragraph_format.left_indent = Mm(8)
+            option.paragraph_format.first_line_indent = Mm(-6)
+            option.paragraph_format.space_after = Pt(1)
+            option.add_run(f'{chr(65 + index)}. ').bold = True
+            option.add_run(str(choice))
+
+
+def _add_answer_key(document, paper: ExamPaper) -> None:
+    _add_exam_heading(document, paper, answer_key=True)
+    questions = list(paper.questions.all())
+    columns = min(8, max(1, len(questions)))
+    table = document.add_table(rows=0, cols=columns)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.style = 'Table Grid'
+    for start in range(0, len(questions), columns):
+        group = questions[start:start + columns]
+        number_row, answer_row = table.add_row(), table.add_row()
+        for index in range(columns):
+            number_cell, answer_cell = number_row.cells[index], answer_row.cells[index]
+            if index < len(group):
+                question = group[index]
+                number_cell.text, answer_cell.text = f'Câu {question.order}', question.correct_answer
+            else:
+                number_cell.text = answer_cell.text = ''
+            number_cell.vertical_alignment = answer_cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            _set_cell_shading(number_cell, 'DCE6F1')
+            for cell in (number_cell, answer_cell):
+                for paragraph in cell.paragraphs:
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    paragraph.paragraph_format.space_after = Pt(0)
+            for run in number_cell.paragraphs[0].runs + answer_cell.paragraphs[0].runs:
+                run.bold = True
+    explanations = [question for question in questions if question.explanation.strip()]
+    if explanations:
+        heading = document.add_paragraph()
+        heading.paragraph_format.space_before = Pt(10)
+        heading.add_run('HƯỚNG DẪN GIẢI').bold = True
+        for question in explanations:
+            paragraph = document.add_paragraph()
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            paragraph.add_run(f'Câu {question.order}. ').bold = True
+            paragraph.add_run(question.explanation)
+
+
+def document_export(paper: ExamPaper, mode: str, publication: str = 'draft') -> bytes:
+    """Build the previewed paper deterministically; this path never calls AI."""
+    document = Document()
+    _configure_exam_document(document, paper)
+    if publication == 'draft':
+        banner = document.add_paragraph()
+        banner.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        banner.paragraph_format.space_after = Pt(8)
+        run = banner.add_run('BẢN NHÁP — KHÔNG PHÁT HÀNH')
+        run.bold, run.font.name, run.font.size = True, 'Times New Roman', Pt(14)
+        run.font.color.rgb = RGBColor(192, 0, 0)
+    if mode != 'answers':
+        _add_exam_heading(document, paper)
+        _add_exam_questions(document, paper)
+    if mode in {'answers', 'combined'}:
+        if mode == 'combined':
+            document.add_page_break()
+        _add_answer_key(document, paper)
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
 
 
 def xlsx_export(paper: ExamPaper) -> bytes:
     workbook = Workbook(); sheet = workbook.active; sheet.title = 'Đề thi'
-    sheet.append(['STT', 'Nội dung câu hỏi', 'Phương án A', 'Phương án B', 'Phương án C', 'Phương án D', 'Đáp án', 'Lời giải', 'Mức độ khó', 'Chủ đề', 'Cuộc thi', 'Trạng thái', 'Cảnh báo'])
+    sheet.append(['STT', 'Nội dung câu hỏi', 'Phương án A', 'Phương án B', 'Phương án C', 'Phương án D', 'Phương án E', 'Đáp án', 'Lời giải', 'Mức độ khó', 'Chủ đề', 'Cuộc thi', 'Trạng thái', 'Cảnh báo'])
     for question in paper.questions.all():
-        choices = list(question.choices or []) + ['', '', '', '']
-        sheet.append([question.order, question.content, choices[0], choices[1], choices[2], choices[3], question.correct_answer, question.explanation, DIFFICULTY_LABELS.get(question.difficulty, question.difficulty), question.topic, paper.competition.name if paper.competition else '', question.check_status, '; '.join(question.warnings or [])])
+        choices = list(question.choices or []) + ['', '', '', '', '']
+        sheet.append([question.order, question.content, choices[0], choices[1], choices[2], choices[3], choices[4], question.correct_answer, question.explanation, DIFFICULTY_LABELS.get(question.difficulty, question.difficulty), question.topic, paper.competition.name if paper.competition else '', question.check_status, '; '.join(question.warnings or [])])
     output = BytesIO(); workbook.save(output); return output.getvalue()
 
 def revise_question_with_ai(paper: ExamPaper, question: ExamQuestion, action: str, user_email: str) -> dict:
@@ -286,6 +487,101 @@ def revise_question_with_ai(paper: ExamPaper, question: ExamQuestion, action: st
     return normalize_question({**row, 'order': question.order}, question.order)
 # Blueprint-aware generation overrides. Every AI call receives one immutable slot;
 # the returned question is normalised back against that slot rather than AI choices.
+def _text_fingerprint(value: str, *, remove_numbers: bool = False) -> str:
+    text = unicodedata.normalize('NFKC', str(value or '')).lower()
+    if remove_numbers:
+        text = re.sub(r'\d+(?:[.,]\d+)?', '#', text)
+    text = re.sub(r'[^\w#]+', ' ', text, flags=re.UNICODE)
+    return ' '.join(text.split())
+
+
+def _duplicate_pair(left: dict, right: dict) -> tuple[bool, str]:
+    exact_left = _text_fingerprint(left.get('content', ''))
+    exact_right = _text_fingerprint(right.get('content', ''))
+    if exact_left and exact_left == exact_right:
+        return True, 'trùng nội dung'
+    skeleton_left = _text_fingerprint(left.get('content', ''), remove_numbers=True)
+    skeleton_right = _text_fingerprint(right.get('content', ''), remove_numbers=True)
+    if skeleton_left and skeleton_left == skeleton_right:
+        return True, 'chỉ thay số'
+    similarity = difflib.SequenceMatcher(None, skeleton_left, skeleton_right).ratio()
+    if min(len(skeleton_left), len(skeleton_right)) >= 45 and similarity >= 0.9:
+        return True, f'quá giống nhau ({similarity:.0%})'
+    return False, ''
+
+
+def _balanced_answer_targets(slots: list[BlueprintSlot]) -> dict[int, str]:
+    counts: dict[int, Counter] = {}
+    targets: dict[int, str] = {}
+    previous = ''
+    for sequence, slot in enumerate(slots):
+        if slot.question_type != 'single_choice':
+            continue
+        size = max(2, int(slot.option_count or 4))
+        labels = [chr(65 + index) for index in range(size)]
+        counter = counts.setdefault(size, Counter())
+        offset = (sequence * 2) % size
+        preference = labels[offset:] + labels[:offset]
+        target = min(preference, key=lambda label: (counter[label], label == previous, preference.index(label)))
+        targets[slot.position] = target
+        counter[target] += 1
+        previous = target
+    return targets
+
+
+def _place_correct_answer(row: dict, target: str) -> dict:
+    choices = list(row.get('choices') or [])
+    current = str(row.get('correctAnswer') or '').upper()
+    valid = [chr(65 + index) for index in range(len(choices))]
+    if current not in valid or target not in valid:
+        raise ValueError('AI chưa xác định đáp án đúng hợp lệ.')
+    old_index, new_index = ord(current) - 65, ord(target) - 65
+    choices[old_index], choices[new_index] = choices[new_index], choices[old_index]
+    return {**row, 'choices': choices, 'correctAnswer': target}
+
+
+def paper_quality_report(paper: ExamPaper, rows: list[dict] | None = None) -> dict:
+    values = rows if rows is not None else [serialize_question(item) for item in paper.questions.all()]
+    issues, duplicates = [], []
+    for index, row in enumerate(values):
+        choices = [str(item).strip() for item in (row.get('choices') or [])]
+        if row.get('questionType', 'single_choice') == 'single_choice':
+            if len(set(_text_fingerprint(item) for item in choices)) != len(choices):
+                issues.append(f'Câu {index + 1} có phương án trùng nhau.')
+            valid = [chr(65 + item) for item in range(len(choices))]
+            if str(row.get('correctAnswer') or '') not in valid:
+                issues.append(f'Câu {index + 1} có đáp án không hợp lệ.')
+        for previous in range(index):
+            duplicate, reason = _duplicate_pair(values[previous], row)
+            if duplicate:
+                duplicates.append({'questions': [previous + 1, index + 1], 'reason': reason})
+    answers = [str(row.get('correctAnswer') or '') for row in values if row.get('questionType', 'single_choice') == 'single_choice']
+    distribution = dict(sorted(Counter(answers).items()))
+    max_run, run, previous_answer = 0, 0, None
+    for answer in answers:
+        run = run + 1 if answer == previous_answer else 1
+        max_run, previous_answer = max(max_run, run), answer
+    matrix_issues = []
+    slots = list(paper.blueprint_version.slots.all().order_by('position')) if paper.blueprint_version_id else []
+    if slots and len(values) != len(slots):
+        matrix_issues.append(f'Số câu {len(values)} không khớp {len(slots)} slot ma trận.')
+    for index, (row, slot) in enumerate(zip(values, slots)):
+        if row.get('difficulty') != slot.difficulty or row.get('questionType', 'single_choice') != slot.question_type:
+            matrix_issues.append(f'Câu {index + 1} không khớp loại câu/độ khó của slot.')
+    if duplicates:
+        issues.append(f'Có {len(duplicates)} cặp câu trùng hoặc chỉ thay số.')
+    if max_run > 3:
+        issues.append(f'Có chuỗi {max_run} đáp án liên tiếp giống nhau.')
+    if distribution and max(distribution.values()) - min(distribution.values()) > 1:
+        issues.append('Đáp án trắc nghiệm chưa được phân bố đều.')
+    issues.extend(matrix_issues)
+    return {
+        'passed': not issues, 'issues': issues, 'duplicatePairs': duplicates,
+        'answerDistribution': distribution, 'maxAnswerRun': max_run,
+        'questionCount': len(values), 'matrixIssues': matrix_issues,
+    }
+
+
 def normalize_question_for_slot(value: dict, order: int, slot: BlueprintSlot) -> dict:
     raw = dict(value or {})
     question_type = slot.question_type
@@ -324,18 +620,35 @@ def generate_questions_with_ai(paper: ExamPaper, user_email: str) -> list[dict]:
     if paper.total_questions != len(slots):
         raise ValueError('Số câu của đề không khớp số slot trong phiên bản ma trận.')
     rows = []
+    answer_targets = _balanced_answer_targets(slots)
     for slot in slots:
-        prompt = f'''Sinh DUY NHẤT câu hỏi cho slot cố định sau, không đổi loại câu, số phương án, điểm, độ khó, chủ đề hay metadata bắt buộc.
+        previous_questions = [{'order': item['order'], 'content': item['content']} for item in rows[-12:]]
+        prompt = f'''Đóng vai giáo viên Toán nhiều năm kinh nghiệm ra đề Olympic. Sinh DUY NHẤT một câu cho slot cố định sau; không đổi loại câu, số phương án, điểm, độ khó, chủ đề hay metadata bắt buộc.
+Không sao chép và không tạo biến thể chỉ thay số. Thay đổi bối cảnh, dữ liệu biểu diễn và đường suy luận khi phù hợp CTX/Assessment Intent. Các câu đã sinh để tránh trùng: {json.dumps(previous_questions, ensure_ascii=False)}
 Đề: {paper.title}; Cuộc thi: {paper.competition.name if paper.competition else ''}; Môn: {paper.subject}; Khối/Bảng: {paper.grade_or_category}; Ngôn ngữ: {paper.language}.
-Slot: {json.dumps({'position': slot.position, 'questionType': slot.question_type, 'optionCount': slot.option_count, 'score': float(slot.score), 'difficulty': slot.difficulty, 'topic': slot.topic, 'knowledgeSource': slot.knowledge_source, 'knowledgeRequirements': slot.knowledge_requirements, 'prohibitedKnowledge': slot.prohibited_knowledge, 'assessmentIntent': slot.assessment_intent, 'estimatedSeconds': slot.estimated_seconds, 'metadata': slot.metadata}, ensure_ascii=False)}
+Slot: {json.dumps({'position': slot.position, 'questionType': slot.question_type, 'optionCount': slot.option_count, 'score': float(slot.score), 'difficulty': slot.difficulty, 'difficultyLabel': (slot.metadata or {}).get('difficultyLabel') or slot.difficulty, 'topic': slot.topic, 'knowledgeSource': slot.knowledge_source, 'knowledgeRequirements': slot.knowledge_requirements, 'prohibitedKnowledge': slot.prohibited_knowledge, 'assessmentIntent': slot.assessment_intent, 'estimatedSeconds': slot.estimated_seconds, 'metadata': slot.metadata}, ensure_ascii=False)}
+Trong đó difficultyLabel là nhãn độ khó nguyên bản của file ma trận và là yêu cầu ưu tiên khi thiết kế độ phức tạp của câu; difficulty chỉ là mã nội bộ để kiểm tra hệ thống.
 Trả JSON đúng dạng {{"question":{{"content":"","choices":[],"correctAnswer":"","explanation":""}}}}. Với numeric_input: choices phải là mảng rỗng và correctAnswer là đáp số. Không sao chép nguyên văn nguồn.
 Nguồn tham chiếu:
 {source_context(paper)}'''
-        result = call_ai_json(paper=paper, task_type='generate_slot', model=_config().generation_model, user_email=user_email, system='Bạn là chuyên gia ra đề. Chỉ trả JSON hợp lệ; tuân thủ tuyệt đối slot ma trận.', prompt=prompt)
+        result = call_ai_json(paper=paper, task_type='generate_slot', model=_config().generation_model, user_email=user_email, system='Bạn là giáo viên ra đề kỳ cựu và biên tập viên khảo thí. Chỉ trả JSON hợp lệ; tuân thủ tuyệt đối slot ma trận.', prompt=prompt)
         row = result.get('question') if isinstance(result, dict) else None
         if not isinstance(row, dict):
             raise ValueError(f'AI không trả về câu hợp lệ cho slot {slot.position}.')
-        rows.append(normalize_question_for_slot(row, slot.position, slot))
+        candidate = normalize_question_for_slot(row, slot.position, slot)
+        target = answer_targets.get(slot.position)
+        if target:
+            candidate = _place_correct_answer(candidate, target)
+        duplicate_reasons = []
+        for prior_position, prior in enumerate(rows, 1):
+            duplicate, reason = _duplicate_pair(prior, candidate)
+            if duplicate:
+                duplicate_reasons.append(f'câu {prior_position}: {reason}')
+        if duplicate_reasons:
+            raise ValueError(f'Câu {slot.position} bị trùng hoặc chỉ thay số so với ' + '; '.join(duplicate_reasons[:3]) + '. Hãy sinh lại đề.')
+        if len(set(_text_fingerprint(item) for item in candidate.get('choices', []))) != len(candidate.get('choices', [])):
+            raise ValueError(f'Câu {slot.position} có phương án trùng nhau. Hãy sinh lại đề.')
+        rows.append(candidate)
     return rows
 
 
@@ -362,3 +675,48 @@ Nguồn: {source_context(paper)}'''
     if not isinstance(row, dict):
         raise ValueError('AI không trả về câu hỏi hợp lệ.')
     return normalize_question_for_slot(row, question.order, slot)
+
+
+def revise_paper_from_chat(paper: ExamPaper, instruction: str, question_id: str, user_email: str) -> dict:
+    """Turn a natural-language edit request into validated question changes."""
+    message = str(instruction or '').strip()
+    if not message:
+        raise ValueError('Nhập yêu cầu cần chỉnh sửa.')
+    if len(message) > 4000:
+        raise ValueError('Yêu cầu chỉnh sửa tối đa 4.000 ký tự.')
+    queryset = paper.questions.select_related('blueprint_slot').all()
+    if question_id:
+        queryset = queryset.filter(pk=question_id)
+    questions = list(queryset)
+    if not questions:
+        raise ValueError('Không tìm thấy câu hỏi trong phạm vi chỉnh sửa.')
+    current = [serialize_question(question) for question in questions]
+    scope = f'Câu {questions[0].order}' if question_id else f'toàn bộ {len(questions)} câu của đề'
+    prompt = f'''Người biên tập yêu cầu chỉnh sửa {scope}: {message}
+Chỉ thay đổi những gì yêu cầu; giữ nguyên các phần không liên quan. Mọi câu phải tiếp tục tuân thủ slot ma trận, loại câu, số phương án, độ khó và điểm.
+Trả JSON dạng {{"reply":"Mô tả ngắn thay đổi đã thực hiện","changes":[{{"id":"UUID hiện có","question":{{"content":"","choices":[],"correctAnswer":"","explanation":""}}}}]}}.
+Nếu yêu cầu chỉ hỏi hoặc không cần sửa, trả changes là mảng rỗng và giải thích trong reply.
+Câu hiện tại: {json.dumps(current, ensure_ascii=False)}
+Nguồn tham chiếu rút gọn: {source_context(paper)[:30000]}'''
+    result = call_ai_json(
+        paper=paper, task_type='paper_chat', model=_config().generation_model, user_email=user_email,
+        system='Bạn là đồng biên tập đề thi. Chỉ trả JSON hợp lệ và không được phá vỡ ràng buộc ma trận.',
+        prompt=prompt, max_tokens=3000 if question_id else 8000,
+    )
+    raw_changes = result.get('changes') if isinstance(result, dict) else []
+    if not isinstance(raw_changes, list):
+        raise ValueError('AI trả về danh sách chỉnh sửa không hợp lệ.')
+    by_id = {str(question.id): question for question in questions}
+    changes = []
+    for raw_change in raw_changes:
+        if not isinstance(raw_change, dict):
+            continue
+        target = by_id.get(str(raw_change.get('id') or ''))
+        row = raw_change.get('question')
+        if not target or not isinstance(row, dict):
+            continue
+        merged = {**serialize_question(target), **row, 'order': target.order}
+        normalized = normalize_question_for_slot(merged, target.order, target.blueprint_slot) if target.blueprint_slot else normalize_question(merged, target.order)
+        changes.append({'id': str(target.id), 'question': normalized})
+    reply = str(result.get('reply') or '').strip() if isinstance(result, dict) else ''
+    return {'reply': reply or ('Đã chuẩn bị các thay đổi.' if changes else 'Không có nội dung nào cần thay đổi.'), 'changes': changes}

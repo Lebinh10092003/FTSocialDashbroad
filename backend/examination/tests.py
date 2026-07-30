@@ -606,7 +606,9 @@ class SessionOutputSheetTests(TestCase):
         user = get_user_model().objects.create_user(
             username='manager@example.com', email='manager@example.com', password='StrongPassword9921'
         )
-        UserProfile.objects.create(email='manager@example.com', name='Manager', role='MANAGER')
+        UserProfile.objects.create(
+            email='manager@example.com', name='Manager', role='MANAGER', access_modules=['examination']
+        )
         token = Token.objects.create(user=user).key
         self.client = APIClient()
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')

@@ -1,5 +1,5 @@
 import React, { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { ChartColumnBig, ClipboardList, GraduationCap, Mail, ShieldUser } from 'lucide-react';
+import { CalendarCheck, ChartColumnBig, ClipboardList, GraduationCap, Mail, QrCode, ShieldUser } from 'lucide-react';
 
 import { Channel, UserRole } from './types';
 import Sidebar from './components/social-dashboard/Sidebar';
@@ -33,8 +33,10 @@ const AccountManagement = lazyWithRecovery(() => import('./components/social-das
 const EmailTemplateBuilder = lazyWithRecovery(() => import('./components/email-builder/EmailTemplateBuilder'));
 const ExaminationModule = lazyWithRecovery(() => import('./components/ExaminationModule'));
 const DigitalTraining = lazyWithRecovery(() => import('./components/digital-training/DigitalTraining'));
+const QRCodeGenerator = lazyWithRecovery(() => import('./components/QRCodeGenerator'));
+const Attendance = lazyWithRecovery(() => import('./components/Attendance'));
 
-type ViewMode = 'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training' | 'account-management';
+type ViewMode = 'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training' | 'qr-generator' | 'attendance' | 'account-management';
 
 const SOCIAL_TABS = ['dashboard', 'media', 'posts', 'sync', 'config'] as const;
 type SocialTab = typeof SOCIAL_TABS[number];
@@ -97,6 +99,8 @@ function getInitialViewMode(): ViewMode {
   if (path.startsWith('/social-dashboard')) return 'social-dashboard';
   if (path.startsWith('/email-builder')) return 'email-builder';
   if (path.startsWith('/examination')) return 'examination';
+  if (path.startsWith('/qr-generator')) return 'qr-generator';
+  if (path.startsWith('/attendance')) return 'attendance';
   if (path.startsWith('/account-management')) return 'account-management';
   return 'workspace';
 }
@@ -156,7 +160,7 @@ export default function App() {
 
   const isGuest = !idToken || user.email === GUEST_USER.email;
   const moduleForView: Partial<Record<ViewMode, string>> = { 'social-dashboard': 'social-dashboard', 'email-builder': 'email-builder', examination: 'examination', 'digital-training': 'digital-training' };
-  const canAccessView = (mode: ViewMode) => { if (mode === 'account-management') return userRole === 'ADMIN'; if (isGuest) return !!moduleForView[mode]; return userRole === 'ADMIN' || (!!moduleForView[mode] && (user.accessModules || []).includes(moduleForView[mode]!)); };
+  const canAccessView = (mode: ViewMode) => { if (mode === 'qr-generator') return true; if (mode === 'attendance') return !isGuest; if (mode === 'account-management') return userRole === 'ADMIN'; if (isGuest) return !!moduleForView[mode]; return userRole === 'ADMIN' || (!!moduleForView[mode] && (user.accessModules || []).includes(moduleForView[mode]!)); };
   const googleAccessToken = null;
 
   const persistSession = (token: string, nextUser: AppUser, role: UserRole) => {
@@ -388,6 +392,20 @@ export default function App() {
         gradient: 'from-[#0055DA] to-[#00C68D]',
         icon: GraduationCap,
       },
+      {
+        mode: 'qr-generator',
+        title: 'Trình tạo mã QR',
+        description: 'Tạo QR đi thẳng tới form khảo sát, tài liệu hoặc bất kỳ đường dẫn nào.',
+        gradient: 'from-[#102A43] to-[#DE6B35]',
+        icon: QrCode,
+      },
+      {
+        mode: 'attendance',
+        title: 'Chấm công',
+        description: 'Ghi nhận giờ vào, giờ ra và theo dõi dữ liệu công ca theo tháng.',
+        gradient: 'from-[#173F30] to-[#4E9B73]',
+        icon: CalendarCheck,
+      },
     ];
     if (userRole === 'ADMIN') {
       apps.push({
@@ -399,7 +417,7 @@ export default function App() {
       });
     }
 
-    const visibleApps = apps.filter(app => canAccessView(app.mode));
+    const visibleApps = apps.filter(app => app.mode === 'attendance' || canAccessView(app.mode));
     return (
       <div className="min-h-dvh liquid-bg flex flex-col font-sans relative overflow-x-hidden">
         <header className="sticky top-0 z-30 w-full glass-panel border-b border-white/50">
@@ -467,6 +485,24 @@ export default function App() {
         </div>
         {loginModal}{profileModal}
       </>
+    );
+  }
+
+  if (viewMode === 'qr-generator') {
+    return (
+      <Suspense fallback={<div className="grid h-screen place-items-center bg-[#f7f4ee]">Đang nạp Trình tạo mã QR...</div>}>
+        <QRCodeGenerator onBackToWorkspace={() => setViewMode('workspace')} />
+      </Suspense>
+    );
+  }
+
+  if (viewMode === 'attendance' && isGuest) { setViewMode('workspace'); return null; }
+
+  if (viewMode === 'attendance') {
+    return (
+      <Suspense fallback={<div className="grid h-screen place-items-center bg-[#f3f5f1]">Đang nạp mô-đun Chấm công...</div>}>
+        <Attendance onBackToWorkspace={() => setViewMode('workspace')} idToken={idToken || ''} userName={user.displayName} />
+      </Suspense>
     );
   }
 

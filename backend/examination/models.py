@@ -189,6 +189,7 @@ class Blueprint(models.Model):
     subject = models.CharField(max_length=255, blank=True, default='')
     grade_or_category = models.CharField(max_length=255, blank=True, default='')
     language = models.CharField(max_length=50, default='Tiếng Việt')
+    duration_minutes = models.PositiveIntegerField(default=60)
     metadata_schema = models.JSONField(default=dict, blank=True)
     description = models.TextField(blank=True, default='')
     created_by = models.CharField(max_length=255, blank=True, default='')
@@ -214,6 +215,7 @@ class BlueprintVersion(models.Model):
     version_number = models.PositiveIntegerField(default=1)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT)
     note = models.TextField(blank=True, default='')
+    analysis = models.JSONField(default=dict, blank=True)
     created_by = models.CharField(max_length=255, blank=True, default='')
     locked_by = models.CharField(max_length=255, blank=True, default='')
     locked_at = models.DateTimeField(null=True, blank=True)
@@ -266,10 +268,24 @@ class ExamGenerationJob(models.Model):
 
 class ExamPaper(models.Model):
     STATUS_DRAFT = 'DRAFT'
-    STATUS_READY = 'READY'
-    STATUS_REVIEW = 'REVIEW'
+    STATUS_AI_REVIEW = 'AI_REVIEW'
+    STATUS_STAFF_PRECHECK = 'STAFF_PRECHECK'
+    STATUS_DRAFT_EXPORTED = 'DRAFT_EXPORTED'
+    STATUS_PEER_REVIEW = 'PEER_REVIEW'
+    STATUS_AWAITING_APPROVAL = 'AWAITING_APPROVAL'
+    STATUS_APPROVED = 'APPROVED'
+    STATUS_OFFICIAL = 'OFFICIAL'
+    STATUS_BANKED = 'BANKED'
+    STATUS_NEEDS_REVISION = 'NEEDS_REVISION'
     STATUS_ARCHIVED = 'ARCHIVED'
-    STATUS_CHOICES = [(STATUS_DRAFT, 'Bản nháp'), (STATUS_READY, 'Sẵn sàng'), (STATUS_REVIEW, 'Cần kiểm tra'), (STATUS_ARCHIVED, 'Lưu trữ')]
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, 'Đề nháp'), (STATUS_AI_REVIEW, 'AI kiểm tra sơ bộ'),
+        (STATUS_STAFF_PRECHECK, 'Nhân viên kiểm tra sơ bộ'), (STATUS_DRAFT_EXPORTED, 'Đã xuất và lưu đề nháp'),
+        (STATUS_PEER_REVIEW, 'Đang phản biện'), (STATUS_AWAITING_APPROVAL, 'Chờ phê duyệt'),
+        (STATUS_APPROVED, 'Đã phê duyệt'), (STATUS_OFFICIAL, 'Đề chính thức'),
+        (STATUS_BANKED, 'Đã lưu ngân hàng'), (STATUS_NEEDS_REVISION, 'Cần chỉnh sửa'),
+        (STATUS_ARCHIVED, 'Lưu trữ'),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=500)
@@ -286,6 +302,13 @@ class ExamPaper(models.Model):
     description = models.TextField(blank=True, default='')
     ai_generation_status = models.CharField(max_length=30, blank=True, default='idle')
     ai_generation_message = models.CharField(max_length=500, blank=True, default='')
+    quality_report = models.JSONField(default=dict, blank=True)
+    workflow_log = models.JSONField(default=list, blank=True)
+    draft_exported_at = models.DateTimeField(null=True, blank=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
+    approved_by = models.CharField(max_length=255, blank=True, default='')
+    official_exported_at = models.DateTimeField(null=True, blank=True)
+    banked_at = models.DateTimeField(null=True, blank=True)
     created_by = models.CharField(max_length=255, blank=True, default='')
     updated_by = models.CharField(max_length=255, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -324,6 +347,33 @@ class ExamQuestion(models.Model):
     class Meta:
         ordering = ['order', 'created_at']
         constraints = [models.UniqueConstraint(fields=['paper', 'order'], name='unique_question_order_per_paper')]
+
+
+class ExamReview(models.Model):
+    SCOPE_QUESTION = 'QUESTION'
+    SCOPE_PAPER = 'PAPER'
+    SCOPE_CHOICES = [(SCOPE_QUESTION, 'Phản biện câu'), (SCOPE_PAPER, 'Phản biện đề')]
+    VERDICT_PENDING = 'PENDING'
+    VERDICT_PASSED = 'PASSED'
+    VERDICT_REVISION_REQUIRED = 'REVISION_REQUIRED'
+    VERDICT_CHOICES = [
+        (VERDICT_PENDING, 'Chưa kết luận'), (VERDICT_PASSED, 'Đạt'),
+        (VERDICT_REVISION_REQUIRED, 'Yêu cầu chỉnh sửa'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    paper = models.ForeignKey(ExamPaper, on_delete=models.CASCADE, related_name='human_reviews')
+    question = models.ForeignKey(ExamQuestion, on_delete=models.CASCADE, null=True, blank=True, related_name='human_reviews')
+    scope = models.CharField(max_length=20, choices=SCOPE_CHOICES)
+    verdict = models.CharField(max_length=30, choices=VERDICT_CHOICES, default=VERDICT_PENDING)
+    notes = models.TextField(blank=True, default='')
+    checks = models.JSONField(default=dict, blank=True)
+    reviewer = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
 
 
 class ExamSourceDocument(models.Model):

@@ -96,6 +96,35 @@ class TrainingPartnerLocationTests(TestCase):
         self.assertEqual(training_class.training_contents, ["Dashboard", "AI"])
 
 class TrainingSessionLocationTests(TestCase):
+    def test_new_session_has_no_automatic_responsible_staff(self):
+        serializer = TrainingSessionSerializer(
+            data={
+                "title": "Buổi chưa phân công",
+                "date": "2026-08-05",
+                "status": "planned",
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        session = serializer.save()
+        self.assertEqual(session.staff_name, "")
+
+    def test_partial_schedule_sync_does_not_overwrite_responsible_staff(self):
+        session = TrainingSession.objects.create(
+            title="Buổi 4 · UBP Giảng Võ · Lớp 2",
+            staff_name="Ms Liên, Ms Phương",
+            status="planned",
+        )
+        serializer = TrainingSessionSerializer(
+            session,
+            data={"location": "525 Kim Mã", "notes": "Đồng bộ lịch lớp."},
+            partial=True,
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        updated = serializer.save()
+        self.assertEqual(updated.staff_name, "Ms Liên, Ms Phương")
+
     def test_location_is_stored_on_the_calendar_session(self):
         serializer = TrainingSessionSerializer(
             data={
