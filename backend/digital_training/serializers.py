@@ -3,7 +3,17 @@ from datetime import date
 from django.db.models import Max
 from rest_framework import serializers
 
-from .models import TrainingClass, TrainingCustomerMeeting, TrainingMaterial, TrainingPartner, TrainingSession, TrainingSurvey
+from .assessment_service import variants_for
+from .models import (
+    TrainingAssessment,
+    TrainingAssessmentAttempt,
+    TrainingClass,
+    TrainingCustomerMeeting,
+    TrainingMaterial,
+    TrainingPartner,
+    TrainingSession,
+    TrainingSurvey,
+)
 
 
 class TrainingPartnerSerializer(serializers.ModelSerializer):
@@ -198,3 +208,137 @@ class TrainingSurveySerializer(serializers.ModelSerializer):
             session.training_class.partner if session.training_class else None
         )
         return attrs
+
+
+class TrainingAssessmentSerializer(serializers.ModelSerializer):
+    session_name = serializers.CharField(source="session.title", read_only=True)
+    partner_name = serializers.CharField(source="partner.name", read_only=True)
+    class_name = serializers.CharField(source="training_class.name", read_only=True)
+    variants = serializers.SerializerMethodField()
+    attempts_count = serializers.SerializerMethodField()
+    submitted_count = serializers.SerializerMethodField()
+    average_score = serializers.SerializerMethodField()
+    variant_distribution = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TrainingAssessment
+        fields = [
+            "id", "title", "session", "session_name", "partner", "partner_name",
+            "training_class", "class_name",
+            "description", "instructions", "duration_minutes", "opens_at", "closes_at",
+            "attempt_limit", "status", "public_slug", "questions", "variants",
+            "source_type", "source_name", "created_by", "attempts_count",
+            "submitted_count", "average_score", "variant_distribution", "created_at", "updated_at",
+        ]
+        read_only_fields = ["partner", "public_slug", "created_by"]
+
+    def get_variants(self, obj):
+        return [
+            {
+                "name": variant,
+                "question_count": sum(
+                    1 for item in obj.questions
+                    if str(item.get("variant") or "Đề 1") == variant
+                ),
+            }
+            for variant in variants_for(obj)
+        ]
+
+    def get_attempts_count(self, obj):
+        return obj.attempts.count()
+
+    def get_submitted_count(self, obj):
+        return obj.attempts.filter(status__in=["submitted", "timed_out"]).count()
+
+    def get_average_score(self, obj):
+        attempts = obj.attempts.filter(status__in=["submitted", "timed_out"], max_score__gt=0)
+        percentages = [float(item.score or 0) * 100 / float(item.max_score) for item in attempts]
+        return round(sum(percentages) / len(percentages), 1) if percentages else None
+
+    def get_variant_distribution(self, obj):
+        return {
+            variant: obj.attempts.filter(variant=variant).count()
+            for variant in variants_for(obj)
+        }
+
+    def validate_duration_minutes(self, value):
+        if value < 1 or value > 480:
+            raise serializers.ValidationError("Thời gian làm bài phải từ 1 đến 480 phút.")
+        return value
+
+    def validate_attempt_limit(self, value):
+        if value < 1 or value > 20:
+            raise serializers.ValidationError("Số lượt làm phải từ 1 đến 20.")
+        return value
+
+    def validate_questions(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Danh sách câu hỏi không hợp lệ.")
+        for index, question in enumerate(value, start=1):
+            if not isinstance(question, dict) or not str(question.get("text") or "").strip():
+                raise serializers.ValidationError(f"Câu {index} chưa có nội dung.")
+            if question.get("type") not in {"single_choice", "short_answer", "file_upload"}:
+                raise serializers.ValidationError(f"Câu {index} có loại câu chưa được hỗ trợ.")
+        return value
+
+    def validate(self, attrs):
+        session = attrs.get("session") or getattr(self.instance, "session", None)
+        training_class = attrs.get("training_class") or getattr(self.instance, "training_class", None)
+        partner = (
+            training_class.partner if training_class else
+            session.partner_ref if session and session.partner_ref else
+            session.training_class.partner if session and session.training_class else
+            getattr(self.instance, "partner", None)
+        )
+        if not partner:
+            raise serializers.ValidationError({"training_class": "Vui lòng chọn đơn vị hoặc phân lớp tập huấn."})
+        if session and training_class and session.training_class_id and session.training_class_id != training_class.id:
+            raise serializers.ValidationError({"session": "Buổi tập huấn không thuộc phân lớp đã chọn."})
+        duplicate = TrainingAssessment.objects.filter(partner=partner, training_class=training_class)
+        if self.instance:
+            duplicate = duplicate.exclude(pk=self.instance.pk)
+        if duplicate.exists():
+            raise serializers.ValidationError({"training_class": "Đơn vị/phân lớp này đã có một bài cuối học phần."})
+        attrs["partner"] = partner
+        status_value = attrs.get("status", getattr(self.instance, "status", "draft"))
+        questions = attrs.get("questions", getattr(self.instance, "questions", []))
+        if status_value == "published" and not questions:
+            raise serializers.ValidationError({"questions": "Cần nhập câu hỏi trước khi phát hành."})
+        opens_at = attrs.get("opens_at", getattr(self.instance, "opens_at", None))
+        closes_at = attrs.get("closes_at", getattr(self.instance, "closes_at", None))
+        if opens_at and closes_at and closes_at <= opens_at:
+            raise serializers.ValidationError({"closes_at": "Thời gian đóng phải sau thời gian mở."})
+        return attrs
+
+    def update(self, instance, validated_data):
+        next_class = validated_data.get("training_class", instance.training_class)
+        next_partner = validated_data.get("partner", instance.partner)
+        if instance.training_class_id != getattr(next_class, "id", None) or instance.partner_id != getattr(next_partner, "id", None):
+            instance.public_slug = ""
+        return super().update(instance, validated_data)
+
+
+class TrainingAssessmentAttemptSerializer(serializers.ModelSerializer):
+    uploads = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TrainingAssessmentAttempt
+        fields = [
+            "id", "respondent_name", "email", "phone", "organization", "variant",
+            "answers", "score", "max_score", "auto_graded_points",
+            "manual_grading_required", "status", "started_at", "expires_at",
+            "submitted_at", "updated_at", "uploads",
+        ]
+
+    def get_uploads(self, obj):
+        request = self.context.get("request")
+        result = []
+        for upload in obj.uploads.all():
+            url = upload.file.url
+            result.append({
+                "id": upload.id,
+                "question_id": upload.question_id,
+                "name": upload.original_name,
+                "url": request.build_absolute_uri(url) if request else url,
+            })
+        return result

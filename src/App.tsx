@@ -33,10 +33,11 @@ const AccountManagement = lazyWithRecovery(() => import('./components/social-das
 const EmailTemplateBuilder = lazyWithRecovery(() => import('./components/email-builder/EmailTemplateBuilder'));
 const ExaminationModule = lazyWithRecovery(() => import('./components/ExaminationModule'));
 const DigitalTraining = lazyWithRecovery(() => import('./components/digital-training/DigitalTraining'));
+const TrainingAssessmentPublic = lazyWithRecovery(() => import('./components/digital-training/TrainingAssessmentPublic'));
 const QRCodeGenerator = lazyWithRecovery(() => import('./components/QRCodeGenerator'));
 const Attendance = lazyWithRecovery(() => import('./components/Attendance'));
 
-type ViewMode = 'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training' | 'qr-generator' | 'attendance' | 'account-management';
+type ViewMode = 'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training' | 'training-assessment-public' | 'qr-generator' | 'attendance' | 'account-management';
 
 const SOCIAL_TABS = ['dashboard', 'media', 'posts', 'sync', 'config'] as const;
 type SocialTab = typeof SOCIAL_TABS[number];
@@ -95,6 +96,7 @@ function userFromApi(value: any): AppUser {
 
 function getInitialViewMode(): ViewMode {
   const path = window.location.pathname;
+  if (path.startsWith('/training-assessment/')) return 'training-assessment-public';
   if (path.startsWith('/digital-training')) return 'digital-training';
   if (path.startsWith('/social-dashboard')) return 'social-dashboard';
   if (path.startsWith('/email-builder')) return 'email-builder';
@@ -485,6 +487,15 @@ export default function App() {
         </div>
         {loginModal}{profileModal}
       </>
+    );
+  }
+
+  if (viewMode === 'training-assessment-public') {
+    const slug = window.location.pathname.replace(/^\/training-assessment\//, '').split('/')[0];
+    return (
+      <Suspense fallback={<div className="grid min-h-screen place-items-center bg-slate-50">Đang mở bài đánh giá...</div>}>
+        <TrainingAssessmentPublic slug={slug} />
+      </Suspense>
     );
   }
 

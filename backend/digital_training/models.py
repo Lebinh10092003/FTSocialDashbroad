@@ -1,4 +1,7 @@
+import uuid
+
 from django.db import models
+from django.utils.text import slugify
 
 
 class TrainingPartner(models.Model):
@@ -132,3 +135,76 @@ class TrainingSurvey(models.Model):
 
     class Meta:
         ordering = ["-updated_at", "title"]
+
+
+class TrainingAssessment(models.Model):
+    STATUS_CHOICES = [("draft", "Draft"), ("published", "Published"), ("closed", "Closed")]
+    title = models.CharField(max_length=255)
+    session = models.ForeignKey(TrainingSession, null=True, blank=True, on_delete=models.SET_NULL, related_name="assessments")
+    partner = models.ForeignKey(TrainingPartner, null=True, blank=True, on_delete=models.SET_NULL, related_name="assessments")
+    training_class = models.ForeignKey(TrainingClass, null=True, blank=True, on_delete=models.SET_NULL, related_name="assessments")
+    description = models.TextField(blank=True)
+    instructions = models.TextField(blank=True)
+    duration_minutes = models.PositiveIntegerField(default=30)
+    opens_at = models.DateTimeField(null=True, blank=True)
+    closes_at = models.DateTimeField(null=True, blank=True)
+    attempt_limit = models.PositiveIntegerField(default=1)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
+    public_slug = models.SlugField(max_length=255, unique=True, editable=False)
+    questions = models.JSONField(default=list, blank=True)
+    source_type = models.CharField(max_length=20, blank=True)
+    source_name = models.CharField(max_length=500, blank=True)
+    created_by = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at", "title"]
+
+    def save(self, *args, **kwargs):
+        if not self.public_slug:
+            label = " ".join(
+                value for value in [
+                    self.partner.name if self.partner else "",
+                    self.training_class.name if self.training_class else "",
+                ] if value
+            )
+            label = label.replace("Đ", "D").replace("đ", "d")
+            self.public_slug = slugify(label) or f"training-assessment-{uuid.uuid4().hex[:8]}"
+        super().save(*args, **kwargs)
+
+
+class TrainingAssessmentAttempt(models.Model):
+    STATUS_CHOICES = [("in_progress", "In progress"), ("submitted", "Submitted"), ("timed_out", "Timed out")]
+    assessment = models.ForeignKey(TrainingAssessment, on_delete=models.CASCADE, related_name="attempts")
+    access_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    respondent_name = models.CharField(max_length=255)
+    email = models.EmailField(blank=True)
+    phone = models.CharField(max_length=50, blank=True)
+    organization = models.CharField(max_length=255, blank=True)
+    variant = models.CharField(max_length=100)
+    answers = models.JSONField(default=dict, blank=True)
+    score = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    max_score = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    auto_graded_points = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    manual_grading_required = models.BooleanField(default=False)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="in_progress")
+    started_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+
+
+class TrainingAssessmentUpload(models.Model):
+    attempt = models.ForeignKey(TrainingAssessmentAttempt, on_delete=models.CASCADE, related_name="uploads")
+    question_id = models.CharField(max_length=100)
+    file = models.FileField(upload_to="digital-training/assessment-answers/%Y/%m/")
+    original_name = models.CharField(max_length=500)
+    content_type = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]

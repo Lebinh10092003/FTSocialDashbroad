@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   ClipboardList,
   ExternalLink,
+  FileCheck2,
   GraduationCap,
   Handshake,
   Pencil,
@@ -19,6 +20,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import TrainingAssessmentsAdmin from "./TrainingAssessmentsAdmin";
 import LogNotes, {
   appendLogNote,
   formatChangeLog,
@@ -34,6 +36,7 @@ type Tab =
   | "partner-sessions"
   | "partners"
   | "survey"
+  | "assessment"
   | "materials";
 type Mode = "week" | "month";
 type Modal =
@@ -356,6 +359,7 @@ const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
   },
   { id: "partners", label: "Khách hàng", icon: Handshake },
   { id: "survey", label: "Khảo sát", icon: Users },
+  { id: "assessment", label: "Bài cuối học phần", icon: FileCheck2 },
   { id: "materials", label: "Tài liệu", icon: BookOpen },
 ];
 const localDateKey = (value: Date) =>
@@ -3667,6 +3671,13 @@ export default function DigitalTraining({
             Khảo sát
           </button>
           <button
+            onClick={() => go("assessment")}
+            className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "assessment" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
+          >
+            <FileCheck2 className="h-4 w-4" />
+            Bài cuối học phần
+          </button>
+          <button
             onClick={() => go("materials")}
             className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "materials" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
           >
@@ -5267,6 +5278,14 @@ export default function DigitalTraining({
                     idToken={idToken}
                   />
                 </section>
+              )}
+              {tab === "assessment" && (
+                <TrainingAssessmentsAdmin
+                  idToken={idToken}
+                  sessions={sessions}
+                  classes={classes}
+                  isGuest={isGuest}
+                />
               )}
               {tab === "materials" && (
                 <section className="mt-6 overflow-hidden rounded-2xl border bg-white shadow-sm">
