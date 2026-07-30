@@ -51,6 +51,7 @@ export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorPr
   const [title, setTitle] = useState('');
   const [purpose, setPurpose] = useState('Khảo sát tập huấn');
   const [foreground, setForeground] = useState('#102A43');
+  const [previewUrl, setPreviewUrl] = useState('');
   const [renderError, setRenderError] = useState('');
   const [notice, setNotice] = useState('');
   const assessment = useMemo(() => assessUrl(rawUrl), [rawUrl]);
@@ -59,9 +60,13 @@ export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorPr
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    if (!canGenerate) { const context = canvas.getContext('2d'); if (context) context.clearRect(0, 0, canvas.width, canvas.height); setRenderError(''); return; }
+    let cancelled = false;
+    if (!canGenerate) { const context = canvas.getContext('2d'); if (context) context.clearRect(0, 0, canvas.width, canvas.height); setPreviewUrl(''); setRenderError(''); return; }
+    setPreviewUrl('');
     QRCode.toCanvas(canvas, assessment.normalizedUrl, { width: 960, margin: 4, errorCorrectionLevel: 'H', color: { dark: foreground, light: '#FFFFFF' } })
-      .then(() => setRenderError('')).catch(() => setRenderError('Không thể tạo mã QR từ đường dẫn này.'));
+      .then(() => { if (!cancelled) { setPreviewUrl(canvas.toDataURL('image/png')); setRenderError(''); } })
+      .catch(() => { if (!cancelled) { setPreviewUrl(''); setRenderError('Không thể tạo mã QR từ đường dẫn này.'); } });
+    return () => { cancelled = true; };
   }, [assessment.normalizedUrl, canGenerate, foreground]);
 
   useEffect(() => { if (!notice) return; const timeout = window.setTimeout(() => setNotice(''), 2600); return () => window.clearTimeout(timeout); }, [notice]);
@@ -221,16 +226,16 @@ export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorPr
                 <div><p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[#f4a261]">Xem trước</p><h2 className="mt-1 text-xl font-extrabold tracking-tight">Mã QR của bạn</h2></div>
                 <span className="text-sm font-bold text-white/45">02</span>
               </div>
-              <div className="mx-auto mt-6 grid aspect-square w-full max-w-[420px] place-items-center overflow-hidden bg-white p-4 sm:p-6">
+              <div className="mx-auto mt-6 flex aspect-square w-full max-w-[420px] items-center justify-center overflow-hidden bg-white p-4 sm:p-6">
                 {!canGenerate ? (
                   <div className="flex max-w-[250px] flex-col items-center text-center text-[#718294]">
                     <div className="mb-4 grid h-20 w-20 place-items-center rounded-full bg-[#f7f4ee]"><QrCode className="h-10 w-10 text-[#9a6a50]" /></div>
                     <p className="text-sm font-extrabold text-[#102A43]">Mã QR sẽ xuất hiện tại đây</p>
                     <p className="mt-2 text-xs leading-5">Dán một đường dẫn hợp lệ để bắt đầu.</p>
                   </div>
-                ) : <canvas ref={canvasRef} className="block h-auto max-h-full w-full min-w-0 max-w-full object-contain" aria-label={`Mã QR dẫn tới ${assessment.hostname}`} />}
-                {!canGenerate && <canvas ref={canvasRef} className="hidden" />}
+                ) : previewUrl ? <img src={previewUrl} className="block h-full w-full object-contain" alt={`Mã QR dẫn tới ${assessment.hostname}`} /> : <p className="text-sm font-bold text-[#718294]">Đang tạo mã QR...</p>}
               </div>
+              <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
               {renderError && <p className="mt-3 text-center text-xs font-semibold text-rose-300">{renderError}</p>}
               <div className="mt-5 min-h-12 border border-white/10 bg-white/[0.06] px-4 py-3">
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45">Đích đến hiển thị</p>
