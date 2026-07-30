@@ -336,6 +336,10 @@ const newPartnerDraft = (): PartnerDraft => ({
   class_plans: [newClassDraft(1)],
   notes: "",
 });
+const partnerSubtypeCatalog: Record<string, string[]> = {
+  "Khối Giáo dục": ["Mầm non", "Tiểu học", "THCS", "THPT"],
+  "Khối Hành chính công": ["Khối Xã/Phường", "Cơ quan nhà nước khác"],
+};
 const categories = [
   "Triển khai BNDC",
   "Ứng dụng AI trong quản lý hành chính",
@@ -1632,6 +1636,8 @@ export default function DigitalTraining({
     [partnerProgress, setPartnerProgress] = useState(""),
     [partnerStatusFilter, setPartnerStatusFilter] = useState(""),
     [partnerManagementTypeFilter, setPartnerManagementTypeFilter] =
+      useState(""),
+    [partnerManagementSubtypeFilter, setPartnerManagementSubtypeFilter] =
       useState(""),
     [partnerManagementFilter, setPartnerManagementFilter] = useState(""),
     [partnerProvinceFilter, setPartnerProvinceFilter] = useState(""),
@@ -3046,6 +3052,8 @@ export default function DigitalTraining({
           (item) =>
             (!partnerManagementTypeFilter ||
               item.partner_type === partnerManagementTypeFilter) &&
+            (!partnerManagementSubtypeFilter ||
+              item.partner_subtype === partnerManagementSubtypeFilter) &&
             (!partnerProvinceFilter || item.province === partnerProvinceFilter),
         )
         .map((item) => item.ward || "")
@@ -3054,6 +3062,15 @@ export default function DigitalTraining({
   ).sort((a, b) => a.localeCompare(b, "vi"));
   const partnerTypeOptions = Array.from(
     new Set(partners.map((item) => item.partner_type || "").filter(Boolean)),
+  ).sort((a, b) => a.localeCompare(b, "vi"));
+  const partnerManagementSubtypeOptions = Array.from(
+    new Set([
+      ...(partnerSubtypeCatalog[partnerManagementTypeFilter] || []),
+      ...partners
+        .filter((item) => item.partner_type === partnerManagementTypeFilter)
+        .map((item) => item.partner_subtype || "")
+        .filter(Boolean),
+    ]),
   ).sort((a, b) => a.localeCompare(b, "vi"));
   const matchesPartnerType = (
     partnerId: number | string | null | undefined,
@@ -3237,6 +3254,8 @@ export default function DigitalTraining({
               .includes(query.toLocaleLowerCase("vi-VN"))) &&
           (!partnerManagementTypeFilter ||
             item.partner_type === partnerManagementTypeFilter) &&
+          (!partnerManagementSubtypeFilter ||
+            item.partner_subtype === partnerManagementSubtypeFilter) &&
           (!partnerManagementFilter ||
             item.id === Number(partnerManagementFilter)) &&
           (!partnerProvinceFilter || item.province === partnerProvinceFilter) &&
@@ -3248,6 +3267,7 @@ export default function DigitalTraining({
       partners,
       query,
       partnerManagementTypeFilter,
+      partnerManagementSubtypeFilter,
       partnerManagementFilter,
       partnerProvinceFilter,
       partnerWardFilter,
@@ -4187,7 +4207,7 @@ export default function DigitalTraining({
                       </button>
                     )}
                   </div>
-                  <div className="grid gap-3 border-y p-4 md:grid-cols-2 xl:grid-cols-7">
+                  <div className="grid gap-3 border-y p-4 md:grid-cols-2 xl:grid-cols-8">
                     <label className="relative w-full xl:col-span-2">
                       <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
                       <input
@@ -4201,6 +4221,7 @@ export default function DigitalTraining({
                       value={partnerManagementTypeFilter}
                       onChange={(e) => {
                         setPartnerManagementTypeFilter(e.target.value);
+                        setPartnerManagementSubtypeFilter("");
                         setPartnerManagementFilter("");
                       }}
                       className="rounded-lg border px-3 py-2 text-sm"
@@ -4212,6 +4233,23 @@ export default function DigitalTraining({
                         </option>
                       ))}
                     </select>
+                    {partnerManagementSubtypeOptions.length > 0 && (
+                      <select
+                        value={partnerManagementSubtypeFilter}
+                        onChange={(e) => {
+                          setPartnerManagementSubtypeFilter(e.target.value);
+                          setPartnerManagementFilter("");
+                        }}
+                        className="rounded-lg border px-3 py-2 text-sm"
+                      >
+                        <option value="">Tất cả phân loại</option>
+                        {partnerManagementSubtypeOptions.map((subtype) => (
+                          <option key={subtype} value={subtype}>
+                            {subtype}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     <select
                       value={partnerProvinceFilter}
                       onChange={(e) => {
@@ -4257,6 +4295,9 @@ export default function DigitalTraining({
                             (!partnerManagementTypeFilter ||
                               item.partner_type ===
                                 partnerManagementTypeFilter) &&
+                            (!partnerManagementSubtypeFilter ||
+                              item.partner_subtype ===
+                                partnerManagementSubtypeFilter) &&
                             (!partnerProvinceFilter ||
                               item.province === partnerProvinceFilter) &&
                             (!partnerWardFilter ||
