@@ -365,20 +365,6 @@ export default function App() {
   if (viewMode === 'workspace') {
     const apps: Array<{ mode: ViewMode; title: string; description: string; gradient: string; icon: React.ElementType }> = [
       {
-        mode: 'social-dashboard',
-        title: 'Phân tích Mạng xã hội',
-        description: 'Theo dõi Facebook, Zalo OA, báo cáo tương tác và đồng bộ dữ liệu.',
-        gradient: 'from-[#0055DA] to-[#0042AD]',
-        icon: ChartColumnBig,
-      },
-      {
-        mode: 'email-builder',
-        title: 'Trình tạo Email',
-        description: 'Thiết kế email trực quan và lưu mẫu dùng chung.',
-        gradient: 'from-[#FF0052] to-[#d90045]',
-        icon: Mail,
-      },
-      {
         mode: 'examination',
         title: 'Khảo thí',
         description: 'Quản lý cuộc thi, kỳ tổ chức, thí sinh và nguồn dữ liệu Google Sheets.',
@@ -393,18 +379,32 @@ export default function App() {
         icon: GraduationCap,
       },
       {
+        mode: 'social-dashboard',
+        title: 'Truyền thông',
+        description: 'Theo dõi Facebook, Zalo OA, báo cáo tương tác và đồng bộ dữ liệu.',
+        gradient: 'from-[#0055DA] to-[#0042AD]',
+        icon: ChartColumnBig,
+      },
+      {
+        mode: 'attendance',
+        title: 'Công ca',
+        description: 'Ghi nhận giờ vào, giờ ra và theo dõi dữ liệu công ca theo tháng.',
+        gradient: 'from-[#173F30] to-[#4E9B73]',
+        icon: CalendarCheck,
+      },
+      {
+        mode: 'email-builder',
+        title: 'Trình tạo Email',
+        description: 'Thiết kế email trực quan và lưu mẫu dùng chung.',
+        gradient: 'from-[#FF0052] to-[#d90045]',
+        icon: Mail,
+      },
+      {
         mode: 'qr-generator',
         title: 'Trình tạo mã QR',
         description: 'Tạo QR đi thẳng tới form khảo sát, tài liệu hoặc bất kỳ đường dẫn nào.',
         gradient: 'from-[#102A43] to-[#DE6B35]',
         icon: QrCode,
-      },
-      {
-        mode: 'attendance',
-        title: 'Chấm công',
-        description: 'Ghi nhận giờ vào, giờ ra và theo dõi dữ liệu công ca theo tháng.',
-        gradient: 'from-[#173F30] to-[#4E9B73]',
-        icon: CalendarCheck,
       },
     ];
     if (userRole === 'ADMIN') {
@@ -421,7 +421,7 @@ export default function App() {
     return (
       <div className="min-h-dvh liquid-bg flex flex-col font-sans relative overflow-x-hidden">
         <header className="sticky top-0 z-30 w-full glass-panel border-b border-white/50">
-          <div className="max-w-6xl mx-auto px-5 sm:px-8 py-4 flex justify-between items-center">
+          <div className="mx-auto flex max-w-[1600px] items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
             <div className="flex items-center gap-3.5">
               <img src="/logo.png" alt="FermatTech Logo" className="h-8 object-contain" />
               <div className="hidden sm:block border-l border-slate-200 pl-3.5">
@@ -441,15 +441,15 @@ export default function App() {
           </div>
         </header>
 
-        <main className="flex-1 w-full max-w-6xl mx-auto px-5 sm:px-8 py-12 sm:py-16 z-10">
-          <div className="text-center max-w-2xl mx-auto mb-12 space-y-4">
-            <h2 className="text-3xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">
+        <main className="z-10 mx-auto w-full max-w-[1600px] flex-1 px-4 py-10 sm:px-6 sm:py-12 lg:px-8">
+          <div className="mx-auto mb-12 space-y-4 text-center">
+            <h2 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:whitespace-nowrap sm:text-5xl">
               Không gian làm việc <span className="ft-gradient-text">FT Workspace</span>
             </h2>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 max-w-4xl mx-auto">
-            {accessNotice && <div className="sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{accessNotice}</div>}
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {accessNotice && <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:col-span-2 lg:col-span-3">{accessNotice}</div>}
             {visibleApps.map(app => {
               const AppIcon = app.icon;
               return (
@@ -500,7 +500,7 @@ export default function App() {
 
   if (viewMode === 'attendance') {
     return (
-      <Suspense fallback={<div className="grid h-screen place-items-center bg-[#f3f5f1]">Đang nạp mô-đun Chấm công...</div>}>
+      <Suspense fallback={<div className="grid h-screen place-items-center bg-[#f3f5f1]">Đang nạp mô-đun Công ca...</div>}>
         <Attendance onBackToWorkspace={() => setViewMode('workspace')} idToken={idToken || ''} userName={user.displayName} />
       </Suspense>
     );

@@ -40,7 +40,7 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
         <img src="/logo.png" alt="FermatTech Logo" className="h-8 object-contain" />
         <div className="border-l border-slate-200 pl-3">
           <h1 className="font-extrabold text-slate-900 text-sm leading-none tracking-tight" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>Fermat</h1>
-          <p className="text-[9px] uppercase font-bold text-indigo-650 tracking-wider mt-1">Phân tích MXH</p>
+          <p className="text-[9px] uppercase font-bold text-indigo-650 tracking-wider mt-1">Truyền thông</p>
         </div>
       </div>
       {/* Navigation menu items */}
@@ -90,4 +90,3 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
     </div>
   );
 }
-
