@@ -14,6 +14,7 @@ from authentication.permissions import IsAuthenticated
 
 from .assessment_service import (
     fetch_google_sheet,
+    generate_variants_from_import,
     grade_attempt,
     parse_assessment_workbook,
     public_questions,
@@ -133,6 +134,7 @@ def assessment_import_preview(request):
         return _forbidden()
     uploaded = request.FILES.get("file")
     google_url = str(request.data.get("google_sheet_url") or "").strip()
+    import_mode = str(request.data.get("import_mode") or "prepared").strip()
     try:
         if uploaded:
             if not uploaded.name.lower().endswith(".xlsx"):
@@ -149,6 +151,17 @@ def assessment_import_preview(request):
         else:
             return _assessment_error("Vui lòng chọn file XLSX hoặc nhập đường dẫn Google Sheet.")
         result = parse_assessment_workbook(content, source_name)
+        if import_mode == "auto_generate" and not result["errors"]:
+            generated = generate_variants_from_import(
+                result["questions"],
+                request.data.get("variant_count", 5),
+                request.data.get("questions_per_variant", 20),
+                request.data.get("seed"),
+            )
+            result.update(generated)
+        elif import_mode != "prepared":
+            return _assessment_error("Chế độ nhập câu hỏi không hợp lệ.")
+        result["import_mode"] = import_mode
         result["source_type"] = source_type
         return Response(result)
     except ValueError as error:

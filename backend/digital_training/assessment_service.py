@@ -1,5 +1,8 @@
+import copy
 import io
+import random
 import re
+import secrets
 import unicodedata
 from collections import Counter
 from decimal import Decimal
@@ -25,6 +28,8 @@ COLUMN_ALIASES = {
     "required": {"batbuoc", "required"},
     "explanation": {"giaithich", "huongdan", "explanation"},
     "image_url": {"hinhanh", "anh", "image", "imageurl"},
+    "category": {"chude", "nhomcau", "nhom", "category", "topic"},
+    "difficulty": {"dokho", "mucdo", "difficulty", "level"},
 }
 for letter in "ABCDE":
     COLUMN_ALIASES[f"option_{letter}"] = {
@@ -139,6 +144,8 @@ def parse_assessment_workbook(content, source_name=""):
                 "required": _bool(value("required"), True),
                 "explanation": str(value("explanation") or "").strip(),
                 "image_url": str(value("image_url") or "").strip(),
+                "category": str(value("category") or "").strip(),
+                "difficulty": str(value("difficulty") or "").strip(),
                 "source": f"{sheet.title}!{row_number}",
             }
             questions.append(question)
@@ -146,10 +153,22 @@ def parse_assessment_workbook(content, source_name=""):
         errors.append("Không tìm thấy cột “Câu hỏi” trong workbook.")
     variants = sorted({question["variant"] for question in questions}, key=str.casefold)
     counts = Counter(question["variant"] for question in questions)
+    point_totals = {}
+    for variant in variants:
+        variant_questions = [question for question in questions if question["variant"] == variant]
+        fingerprints = [_question_fingerprint(question) for question in variant_questions]
+        if len(fingerprints) != len(set(fingerprints)):
+            errors.append(f"{variant}: có câu hỏi bị trùng trong cùng một mã đề.")
+        point_totals[variant] = sum(
+            Decimal(str(question.get("points") or 0))
+            for question in variant_questions
+        )
     if len(variants) == 1:
         warnings.append("Workbook hiện có 1 mã đề. Có thể thêm cột “Mã đề” hoặc dùng mỗi sheet làm một đề.")
     if variants and len(set(counts.values())) > 1:
         warnings.append("Số câu giữa các mã đề chưa bằng nhau; hệ thống vẫn chia đề nhưng nên kiểm tra lại.")
+    if variants and len(set(point_totals.values())) > 1:
+        warnings.append("Tổng điểm giữa các mã đề chưa bằng nhau; nên điều chỉnh trước khi phát hành.")
     return {
         "source_name": source_name,
         "questions": questions,
@@ -160,13 +179,152 @@ def parse_assessment_workbook(content, source_name=""):
     }
 
 
+def _question_fingerprint(question):
+    option_text = "|".join(_key(item.get("text")) for item in question.get("options") or [])
+    return f"{_key(question.get('text'))}|{option_text}"
+
+
+def _shuffle_options(question, rng, target_index):
+    item = copy.deepcopy(question)
+    if item.get("type") != "single_choice" or len(item.get("correct_answers") or []) != 1:
+        return item
+    options = item.get("options") or []
+    correct_key = item["correct_answers"][0]
+    correct_option = next((option for option in options if option.get("key") == correct_key), None)
+    if not correct_option:
+        return item
+    distractors = [option for option in options if option is not correct_option]
+    rng.shuffle(distractors)
+    target_index = target_index % len(options)
+    arranged = distractors[:]
+    arranged.insert(target_index, correct_option)
+    item["options"] = [
+        {"key": chr(65 + index), "text": option.get("text", "")}
+        for index, option in enumerate(arranged)
+    ]
+    item["correct_answers"] = [chr(65 + target_index)]
+    return item
+
+
+def generate_variants_from_import(questions, variant_count=5, questions_per_variant=20, seed=None):
+    try:
+        variant_count = int(variant_count)
+        questions_per_variant = int(questions_per_variant)
+    except (TypeError, ValueError):
+        raise ValueError("Số mã đề và số câu mỗi đề phải là số nguyên.")
+    if variant_count < 2 or variant_count > 10:
+        raise ValueError("Số mã đề phải từ 2 đến 10.")
+    if questions_per_variant < 1 or questions_per_variant > 200:
+        raise ValueError("Số câu mỗi đề phải từ 1 đến 200.")
+
+    unique_questions = []
+    seen = set()
+    duplicate_count = 0
+    for question in questions:
+        fingerprint = _question_fingerprint(question)
+        if fingerprint in seen:
+            duplicate_count += 1
+            continue
+        seen.add(fingerprint)
+        unique_questions.append(question)
+    if len(unique_questions) < questions_per_variant:
+        raise ValueError(
+            f"File nguồn chỉ có {len(unique_questions)} câu không trùng; "
+            f"không đủ để tạo đề {questions_per_variant} câu."
+        )
+
+    seed = int(seed) if seed not in (None, "") else secrets.randbits(63)
+    rng = random.Random(seed)
+    strata = {}
+    for question in unique_questions:
+        key = (
+            str(question.get("category") or "").strip().casefold(),
+            str(question.get("difficulty") or "").strip().casefold(),
+            str(question.get("type") or "").strip().casefold(),
+            str(question.get("points") or 0),
+        )
+        strata.setdefault(key, []).append(question)
+
+    total = len(unique_questions)
+    raw_targets = {
+        key: len(group) * questions_per_variant / total
+        for key, group in strata.items()
+    }
+    quotas = {
+        key: min(len(strata[key]), int(raw_targets[key]))
+        for key in strata
+    }
+    while sum(quotas.values()) < questions_per_variant:
+        candidates = [key for key in strata if quotas[key] < len(strata[key])]
+        if not candidates:
+            break
+        rng.shuffle(candidates)
+        selected_key = max(candidates, key=lambda key: raw_targets[key] - quotas[key])
+        quotas[selected_key] += 1
+
+    usage = {str(question["id"]): 0 for question in unique_questions}
+    generated = []
+    for variant_index in range(1, variant_count + 1):
+        selected = []
+        selected_ids = set()
+        for key, group in strata.items():
+            ranked = group[:]
+            rng.shuffle(ranked)
+            ranked.sort(key=lambda question: usage[str(question["id"])])
+            for question in ranked[:quotas[key]]:
+                selected.append(question)
+                selected_ids.add(str(question["id"]))
+        if len(selected) < questions_per_variant:
+            remaining = [
+                question for question in unique_questions
+                if str(question["id"]) not in selected_ids
+            ]
+            rng.shuffle(remaining)
+            remaining.sort(key=lambda question: usage[str(question["id"])])
+            selected.extend(remaining[:questions_per_variant - len(selected)])
+        rng.shuffle(selected)
+
+        for order, source in enumerate(selected, start=1):
+            source_id = str(source["id"])
+            usage[source_id] += 1
+            item = _shuffle_options(source, rng, order + variant_index - 2)
+            item["source_question_id"] = source_id
+            item["variant"] = f"Đề {variant_index}"
+            item["order"] = order
+            item["id"] = f"de{variant_index}-{order}-{_key(source_id)[:24]}"
+            generated.append(item)
+
+    warnings = []
+    if duplicate_count:
+        warnings.append(f"Đã bỏ {duplicate_count} câu trùng nội dung trong file nguồn.")
+    if len(unique_questions) < variant_count * questions_per_variant:
+        warnings.append(
+            "File nguồn chưa đủ để các mã đề hoàn toàn khác nhau; "
+            "hệ thống đã giảm trùng lặp giữa các mã ở mức thấp nhất."
+        )
+    return {
+        "questions": generated,
+        "variants": [
+            {"name": f"Đề {index}", "question_count": questions_per_variant}
+            for index in range(1, variant_count + 1)
+        ],
+        "question_count": len(generated),
+        "source_question_count": len(unique_questions),
+        "warnings": warnings,
+        "generation_config": {
+            "variant_count": variant_count,
+            "questions_per_variant": questions_per_variant,
+            "source_question_count": len(unique_questions),
+            "seed": seed,
+        },
+    }
+
+
 def google_sheet_export_url(url):
     match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", str(url or ""))
     if not match:
         raise ValueError("Đường dẫn Google Sheet không hợp lệ.")
-    gid_match = re.search(r"(?:[?#&]gid=)(\d+)", str(url))
-    suffix = f"&gid={gid_match.group(1)}" if gid_match else ""
-    return f"https://docs.google.com/spreadsheets/d/{match.group(1)}/export?format=xlsx{suffix}"
+    return f"https://docs.google.com/spreadsheets/d/{match.group(1)}/export?format=xlsx"
 
 
 def fetch_google_sheet(url):

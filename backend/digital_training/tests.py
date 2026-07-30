@@ -5,7 +5,7 @@ from django.test import TestCase
 from openpyxl import Workbook
 from rest_framework.test import APIClient
 
-from .assessment_service import parse_assessment_workbook
+from .assessment_service import generate_variants_from_import, parse_assessment_workbook
 from .models import TrainingAssessment, TrainingClass, TrainingPartner, TrainingSession, TrainingSurvey
 from .serializers import TrainingAssessmentSerializer, TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingPartnerSerializer, TrainingSessionSerializer, TrainingSurveySerializer
 
@@ -253,7 +253,7 @@ class TrainingAssessmentTests(TestCase):
     def test_xlsx_parser_supports_variant_column(self):
         workbook = Workbook()
         sheet = workbook.active
-        sheet.title = "Ngân hàng"
+        sheet.title = "Nguồn câu hỏi"
         sheet.append(["Mã đề", "STT", "Loại câu", "Câu hỏi", "A", "B", "Đáp án", "Điểm"])
         sheet.append(["Đề 1", 1, "Trắc nghiệm", "Câu một", "Sai", "Đúng", "B", 1])
         sheet.append(["Đề 2", 1, "Trả lời ngắn", "Câu hai", "", "", "Hà Nội", 2])
@@ -262,4 +262,72 @@ class TrainingAssessmentTests(TestCase):
         result = parse_assessment_workbook(buffer.getvalue(), "questions.xlsx")
         self.assertEqual(result["question_count"], 2)
         self.assertEqual([item["name"] for item in result["variants"]], ["Đề 1", "Đề 2"])
+        self.assertEqual(result["errors"], [])
+
+    def test_import_generation_balances_usage_and_answer_keys(self):
+        source_questions = [
+            {
+                "id": f"bank-{index}",
+                "variant": "Đề 1",
+                "order": index,
+                "type": "single_choice",
+                "text": f"Câu hỏi nguồn {index}",
+                "options": [
+                    {"key": "A", "text": "Đúng"},
+                    {"key": "B", "text": "Sai 1"},
+                    {"key": "C", "text": "Sai 2"},
+                    {"key": "D", "text": "Sai 3"},
+                ],
+                "correct_answers": ["A"],
+                "points": 1,
+                "required": True,
+                "category": "Kiến thức",
+                "difficulty": "Trung bình",
+            }
+            for index in range(1, 13)
+        ]
+        result = generate_variants_from_import(source_questions, 4, 5, seed=20260730)
+        self.assertEqual(len(result["variants"]), 4)
+        self.assertEqual(result["question_count"], 20)
+        source_usage = Counter(item["source_question_id"] for item in result["questions"])
+        self.assertLessEqual(max(source_usage.values()) - min(source_usage.values()), 1)
+        for variant in result["variants"]:
+            questions = [
+                item for item in result["questions"]
+                if item["variant"] == variant["name"]
+            ]
+            self.assertEqual(len({item["source_question_id"] for item in questions}), 5)
+            answer_counts = Counter(item["correct_answers"][0] for item in questions)
+            self.assertLessEqual(max(answer_counts.values()) - min(answer_counts.values()), 1)
+
+    def test_import_generation_removes_duplicate_questions(self):
+        source_questions = [
+            {
+                "id": f"bank-{index}",
+                "type": "short_answer",
+                "text": "Câu bị trùng" if index < 3 else f"Câu {index}",
+                "options": [],
+                "correct_answers": ["Đúng"],
+                "points": 1,
+                "required": True,
+            }
+            for index in range(1, 6)
+        ]
+        result = generate_variants_from_import(source_questions, 2, 3, seed=1)
+        self.assertEqual(result["source_question_count"], 4)
+        self.assertTrue(any("Đã bỏ 1 câu trùng" in warning for warning in result["warnings"]))
+
+    def test_xlsx_parser_uses_sheet_names_for_prepared_variants(self):
+        workbook = Workbook()
+        first = workbook.active
+        first.title = "Đề 1"
+        second = workbook.create_sheet("Đề 2")
+        for sheet, question in [(first, "Câu của đề một"), (second, "Câu của đề hai")]:
+            sheet.append(["STT", "Loại câu", "Câu hỏi", "A", "B", "Đáp án", "Điểm"])
+            sheet.append([1, "Trắc nghiệm", question, "Sai", "Đúng", "B", 1])
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        result = parse_assessment_workbook(buffer.getvalue(), "prepared.xlsx")
+        self.assertEqual([item["name"] for item in result["variants"]], ["Đề 1", "Đề 2"])
+        self.assertEqual(result["question_count"], 2)
         self.assertEqual(result["errors"], [])

@@ -227,6 +227,7 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
             "training_class", "class_name",
             "description", "instructions", "duration_minutes", "opens_at", "closes_at",
             "attempt_limit", "status", "public_slug", "questions", "variants",
+            "generation_mode", "generation_config",
             "source_type", "source_name", "created_by", "attempts_count",
             "submitted_count", "average_score", "variant_distribution", "created_at", "updated_at",
         ]

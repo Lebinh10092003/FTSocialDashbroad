@@ -139,6 +139,7 @@ class TrainingSurvey(models.Model):
 
 class TrainingAssessment(models.Model):
     STATUS_CHOICES = [("draft", "Draft"), ("published", "Published"), ("closed", "Closed")]
+    GENERATION_MODE_CHOICES = [("prepared", "Prepared variants"), ("auto_generate", "Auto-generate from import")]
     title = models.CharField(max_length=255)
     session = models.ForeignKey(TrainingSession, null=True, blank=True, on_delete=models.SET_NULL, related_name="assessments")
     partner = models.ForeignKey(TrainingPartner, null=True, blank=True, on_delete=models.SET_NULL, related_name="assessments")
@@ -152,6 +153,12 @@ class TrainingAssessment(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
     public_slug = models.SlugField(max_length=255, unique=True, editable=False)
     questions = models.JSONField(default=list, blank=True)
+    generation_mode = models.CharField(
+        max_length=30,
+        choices=GENERATION_MODE_CHOICES,
+        default="prepared",
+    )
+    generation_config = models.JSONField(default=dict, blank=True)
     source_type = models.CharField(max_length=20, blank=True)
     source_name = models.CharField(max_length=500, blank=True)
     created_by = models.CharField(max_length=255, blank=True)
