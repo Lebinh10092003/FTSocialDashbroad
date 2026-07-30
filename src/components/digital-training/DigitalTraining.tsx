@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   ClipboardList,
   ExternalLink,
-  FileCheck2,
   GraduationCap,
   Handshake,
   Pencil,
@@ -20,7 +19,6 @@ import {
   Users,
   X,
 } from "lucide-react";
-import TrainingAssessmentsAdmin from "./TrainingAssessmentsAdmin";
 import LogNotes, {
   appendLogNote,
   formatChangeLog,
@@ -36,7 +34,6 @@ type Tab =
   | "partner-sessions"
   | "partners"
   | "survey"
-  | "assessment"
   | "materials";
 type Mode = "week" | "month";
 type Modal =
@@ -359,7 +356,6 @@ const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
   },
   { id: "partners", label: "Khách hàng", icon: Handshake },
   { id: "survey", label: "Khảo sát", icon: Users },
-  { id: "assessment", label: "Bài cuối học phần", icon: FileCheck2 },
   { id: "materials", label: "Tài liệu", icon: BookOpen },
 ];
 const localDateKey = (value: Date) =>
@@ -1591,6 +1587,7 @@ function WorkScheduleDetail({
 }
 export default function DigitalTraining({
   onBackToWorkspace,
+  onOpenTrainingAssessment,
   onAccountClick,
   onLogout,
   isGuest,
@@ -1600,6 +1597,7 @@ export default function DigitalTraining({
   idToken = "",
 }: {
   onBackToWorkspace: () => void;
+  onOpenTrainingAssessment: () => void;
   onAccountClick: () => void;
   onLogout: () => void;
   isGuest: boolean;
@@ -1613,6 +1611,7 @@ export default function DigitalTraining({
     [scheduleOpen, setScheduleOpen] = useState(
       route.tab === "sessions" || route.tab === "partner-sessions",
     ),
+    [surveyOpen, setSurveyOpen] = useState(route.tab === "survey"),
     [selected, setSelected] = useState<number | null>(route.partnerId),
     [selectedSurvey, setSelectedSurvey] = useState<number | null>(
       route.surveyId,
@@ -3664,19 +3663,33 @@ export default function DigitalTraining({
             Khách hàng
           </button>
           <button
-            onClick={() => go("survey")}
+            onClick={() => setSurveyOpen(!surveyOpen)}
             className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "survey" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
           >
             <Users className="h-4 w-4" />
             Khảo sát
+            <ChevronDown
+              className={`ml-auto h-4 w-4 transition-transform ${surveyOpen ? "rotate-180" : ""}`}
+            />
           </button>
-          <button
-            onClick={() => go("assessment")}
-            className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "assessment" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
-          >
-            <FileCheck2 className="h-4 w-4" />
-            Bài cuối học phần
-          </button>
+          {surveyOpen && (
+            <div className="space-y-1">
+              <button
+                onClick={() => go("survey")}
+                className={`ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold ${tab === "survey" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
+              >
+                <ClipboardList className="h-3.5 w-3.5" />
+                Khảo sát cuối buổi
+              </button>
+              <button
+                onClick={onOpenTrainingAssessment}
+                className="ft-nav-item ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Khảo sát kết thúc tập huấn
+              </button>
+            </div>
+          )}
           <button
             onClick={() => go("materials")}
             className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "materials" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
@@ -4980,9 +4993,9 @@ export default function DigitalTraining({
                 <section className="mt-6 overflow-hidden rounded-2xl border bg-white shadow-sm">
                   <div className="flex flex-wrap justify-between gap-3 p-5">
                     <div>
-                      <h2 className="text-xl font-extrabold">Khảo sát</h2>
+                      <h2 className="text-xl font-extrabold">Khảo sát cuối buổi</h2>
                       <p className="mt-1 text-sm text-slate-500">
-                        Tạo và theo dõi phiếu khảo sát theo từng lịch tập huấn.
+                        Tạo và theo dõi phiếu khảo sát sau từng buổi tập huấn.
                       </p>
                     </div>
                     {!isGuest && (
@@ -5078,6 +5091,7 @@ export default function DigitalTraining({
                             .join(" ")
                             .toLocaleLowerCase("vi-VN");
                           return (
+                            item.form_type === "end_session" &&
                             (!query ||
                               searchable.includes(
                                 query.toLocaleLowerCase("vi-VN"),
@@ -5109,6 +5123,7 @@ export default function DigitalTraining({
                                 .join(" ")
                                 .toLocaleLowerCase("vi-VN");
                               return (
+                                item.form_type === "end_session" &&
                                 (!query ||
                                   searchable.includes(
                                     query.toLocaleLowerCase("vi-VN"),
@@ -5139,9 +5154,7 @@ export default function DigitalTraining({
                                     <b>{item.title}</b>
                                   </td>
                                   <td>
-                                    {item.form_type === "end_course"
-                                      ? "Cuối khóa"
-                                      : "Cuối buổi"}
+                                    Cuối buổi
                                   </td>
                                   <td>
                                     {linked?.title || item.session_name || "—"}
@@ -5278,14 +5291,6 @@ export default function DigitalTraining({
                     idToken={idToken}
                   />
                 </section>
-              )}
-              {tab === "assessment" && (
-                <TrainingAssessmentsAdmin
-                  idToken={idToken}
-                  sessions={sessions}
-                  classes={classes}
-                  isGuest={isGuest}
-                />
               )}
               {tab === "materials" && (
                 <section className="mt-6 overflow-hidden rounded-2xl border bg-white shadow-sm">
@@ -6764,24 +6769,14 @@ export default function DigitalTraining({
               onClose={() => setModal(null)}
             >
               <form onSubmit={saveSurvey} className="grid gap-4">
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div>
                   <button
                     type="button"
                     onClick={() => setSv({ ...sv, form_type: "end_session" })}
-                    className={`rounded-xl border p-4 text-left ${sv.form_type === "end_session" ? "border-cyan-600 bg-cyan-50" : "border-slate-200"}`}
+                    className="w-full rounded-xl border border-cyan-600 bg-cyan-50 p-4 text-left"
                   >
                     <ClipboardList className="h-6 w-6 text-cyan-700" />
                     <b className="mt-3 block">Tạo phiếu khảo sát cuối buổi</b>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSv({ ...sv, form_type: "end_course" })}
-                    className={`rounded-xl border p-4 text-left ${sv.form_type === "end_course" ? "border-cyan-600 bg-cyan-50" : "border-slate-200"}`}
-                  >
-                    <CheckCircle2 className="h-6 w-6 text-cyan-700" />
-                    <b className="mt-3 block">
-                      Tạo bài đánh giá cuối khóa tập huấn
-                    </b>
                   </button>
                 </div>
                 <Input

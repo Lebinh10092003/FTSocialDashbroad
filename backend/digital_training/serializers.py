@@ -298,7 +298,7 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
         if self.instance:
             duplicate = duplicate.exclude(pk=self.instance.pk)
         if duplicate.exists():
-            raise serializers.ValidationError({"training_class": "Đơn vị/phân lớp này đã có một bài cuối học phần."})
+            raise serializers.ValidationError({"training_class": "Đơn vị/phân lớp này đã có một khảo sát kết thúc tập huấn."})
         attrs["partner"] = partner
         status_value = attrs.get("status", getattr(self.instance, "status", "draft"))
         questions = attrs.get("questions", getattr(self.instance, "questions", []))

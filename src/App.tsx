@@ -34,10 +34,11 @@ const EmailTemplateBuilder = lazyWithRecovery(() => import('./components/email-b
 const ExaminationModule = lazyWithRecovery(() => import('./components/ExaminationModule'));
 const DigitalTraining = lazyWithRecovery(() => import('./components/digital-training/DigitalTraining'));
 const TrainingAssessmentPublic = lazyWithRecovery(() => import('./components/digital-training/TrainingAssessmentPublic'));
+const TrainingAssessmentWorkspace = lazyWithRecovery(() => import('./components/digital-training/TrainingAssessmentWorkspace'));
 const QRCodeGenerator = lazyWithRecovery(() => import('./components/QRCodeGenerator'));
 const Attendance = lazyWithRecovery(() => import('./components/Attendance'));
 
-type ViewMode = 'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training' | 'training-assessment-public' | 'qr-generator' | 'attendance' | 'account-management';
+type ViewMode = 'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training' | 'training-assessments' | 'training-assessment-public' | 'qr-generator' | 'attendance' | 'account-management';
 
 const SOCIAL_TABS = ['dashboard', 'media', 'posts', 'sync', 'config'] as const;
 type SocialTab = typeof SOCIAL_TABS[number];
@@ -97,6 +98,7 @@ function userFromApi(value: any): AppUser {
 function getInitialViewMode(): ViewMode {
   const path = window.location.pathname;
   if (path.startsWith('/training-assessment/')) return 'training-assessment-public';
+  if (path.startsWith('/training-assessments')) return 'training-assessments';
   if (path.startsWith('/digital-training')) return 'digital-training';
   if (path.startsWith('/social-dashboard')) return 'social-dashboard';
   if (path.startsWith('/email-builder')) return 'email-builder';
@@ -161,7 +163,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
 
   const isGuest = !idToken || user.email === GUEST_USER.email;
-  const moduleForView: Partial<Record<ViewMode, string>> = { 'social-dashboard': 'social-dashboard', 'email-builder': 'email-builder', examination: 'examination', 'digital-training': 'digital-training' };
+  const moduleForView: Partial<Record<ViewMode, string>> = { 'social-dashboard': 'social-dashboard', 'email-builder': 'email-builder', examination: 'examination', 'digital-training': 'digital-training', 'training-assessments': 'digital-training' };
   const canAccessView = (mode: ViewMode) => { if (mode === 'qr-generator') return true; if (mode === 'attendance') return !isGuest; if (mode === 'account-management') return userRole === 'ADMIN'; if (isGuest) return !!moduleForView[mode]; return userRole === 'ADMIN' || (!!moduleForView[mode] && (user.accessModules || []).includes(moduleForView[mode]!)); };
   const googleAccessToken = null;
 
@@ -499,6 +501,28 @@ export default function App() {
     );
   }
 
+  if (viewMode === 'training-assessments' && !canAccessView('training-assessments')) { setViewMode('workspace'); return null; }
+
+  if (viewMode === 'training-assessments') {
+    return (
+      <>
+        <Suspense fallback={<div className="grid min-h-screen place-items-center bg-slate-50">Đang mở Khảo sát kết thúc tập huấn...</div>}>
+          <TrainingAssessmentWorkspace
+            onBackToWorkspace={() => setViewMode('workspace')}
+            onOpenDigitalTraining={() => setViewMode('digital-training')}
+            onAccountClick={openAccount}
+            onLogout={handleLogout}
+            userName={user.displayName}
+            userRole={userRole}
+            photoURL={user.photoURL}
+            idToken={idToken || ''}
+          />
+        </Suspense>
+        {loginModal}{profileModal}
+      </>
+    );
+  }
+
   if (viewMode === 'qr-generator') {
     return (
       <Suspense fallback={<div className="grid h-screen place-items-center bg-[#f7f4ee]">Đang nạp Trình tạo mã QR...</div>}>
@@ -546,6 +570,7 @@ export default function App() {
         <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp mô-đun Đào tạo số...</div>}>
           <DigitalTraining
             onBackToWorkspace={() => setViewMode('workspace')}
+            onOpenTrainingAssessment={() => setViewMode('training-assessments')}
             onAccountClick={openAccount}
             onLogout={handleLogout}
             isGuest={isGuest}
