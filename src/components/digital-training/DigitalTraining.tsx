@@ -37,6 +37,7 @@ type Tab =
   | "materials";
 type Mode = "week" | "month";
 type Modal =
+  | "schedule-kind"
   | "session"
   | "meeting"
   | "other"
@@ -1314,8 +1315,8 @@ export function Calendar({
           </div>
         </div>
         <p className="border-t border-sky-100 px-4 py-2 text-xs text-slate-500">
-          Kéo một lịch sang ngày khác để chuyển lịch; bấm vào ngày trống để tạo
-          lịch mới.
+          Kéo một lịch sang ngày khác để chuyển lịch; bấm vào ngày trống để chọn
+          loại lịch cần tạo.
         </p>
       </div>
     );
@@ -1455,7 +1456,7 @@ export function Calendar({
       </div>
       <p className="border-t border-sky-100 px-4 py-2 text-xs text-slate-500">
         Kéo một lịch sang ô ngày/giờ khác để chuyển lịch. Kéo chuột qua ô trống
-        để tạo lịch mới theo đúng khoảng đã chọn.
+        để chọn loại lịch cần tạo theo đúng khoảng đã chọn.
       </p>
     </div>
   );
@@ -1643,6 +1644,11 @@ export default function DigitalTraining({
     [editingMeeting, setEditingMeeting] = useState<CustomerMeeting | null>(
       null,
     ),
+    [pendingCalendarPick, setPendingCalendarPick] = useState<{
+      date: string;
+      start_time: string;
+      end_time: string;
+    } | null>(null),
     [calendarDetail, setCalendarDetail] = useState<CalendarDetail | null>(
       route.calendarDetail,
     ),
@@ -1836,6 +1842,10 @@ export default function DigitalTraining({
       return b;
     },
     pick = (date: string, start_time = "", end_time = "") => {
+      setPendingCalendarPick({ date, start_time, end_time });
+      setModal("schedule-kind");
+    },
+    openTraining = (date: string = today(), start_time = "", end_time = "") => {
       setEditingSession(null);
       setSd({
         title: "",
@@ -3701,7 +3711,7 @@ export default function DigitalTraining({
                         </div>
                         {!isGuest && (
                           <CreateScheduleMenu
-                            onTraining={() => pick(today())}
+                            onTraining={() => openTraining(today())}
                             onMeeting={() => openMeeting(today())}
                             onOther={() => openOther(today())}
                           />
@@ -3782,7 +3792,7 @@ export default function DigitalTraining({
                       </div>
                       {!isGuest && (
                         <CreateScheduleMenu
-                          onTraining={() => pick(today())}
+                          onTraining={() => openTraining(today())}
                           onMeeting={() => openMeeting(today())}
                           onOther={() => openOther(today())}
                         />
@@ -5363,6 +5373,62 @@ export default function DigitalTraining({
                 </section>
               )}
             </>
+          )}
+          {modal === "schedule-kind" && (
+            <Dialog
+              title="Tạo lịch mới"
+              onClose={() => {
+                setModal(null);
+                setPendingCalendarPick(null);
+              }}
+            >
+              <p className="text-sm text-slate-600">
+                {pendingCalendarPick
+                  ? `Chọn loại lịch cho ${showDate(pendingCalendarPick.date)}${pendingCalendarPick.start_time ? `, ${pendingCalendarPick.start_time}–${pendingCalendarPick.end_time || ""}` : ""}.`
+                  : "Chọn loại lịch cần tạo."}
+              </p>
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const slot = pendingCalendarPick;
+                    setPendingCalendarPick(null);
+                    openTraining(slot?.date, slot?.start_time, slot?.end_time);
+                  }}
+                  className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-left transition hover:border-sky-400 hover:bg-sky-100"
+                >
+                  <GraduationCap className="h-6 w-6 text-sky-700" />
+                  <b className="mt-3 block text-sm text-slate-900">Lịch tập huấn</b>
+                  <span className="mt-1 block text-xs leading-5 text-slate-600">Buổi học, lớp hoặc chương trình tập huấn.</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const slot = pendingCalendarPick;
+                    setPendingCalendarPick(null);
+                    openMeeting(slot?.date, slot?.start_time, slot?.end_time);
+                  }}
+                  className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-left transition hover:border-emerald-400 hover:bg-emerald-100"
+                >
+                  <Handshake className="h-6 w-6 text-emerald-700" />
+                  <b className="mt-3 block text-sm text-slate-900">Gặp Khách hàng</b>
+                  <span className="mt-1 block text-xs leading-5 text-slate-600">Gặp gỡ, tư vấn hoặc làm việc với Khách hàng.</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const slot = pendingCalendarPick;
+                    setPendingCalendarPick(null);
+                    openOther(slot?.date, slot?.start_time, slot?.end_time);
+                  }}
+                  className="rounded-xl border border-violet-200 bg-violet-50 p-4 text-left transition hover:border-violet-400 hover:bg-violet-100"
+                >
+                  <ClipboardList className="h-6 w-6 text-violet-700" />
+                  <b className="mt-3 block text-sm text-slate-900">Lịch khác</b>
+                  <span className="mt-1 block text-xs leading-5 text-slate-600">Công việc nội bộ hoặc hoạt động khác.</span>
+                </button>
+              </div>
+            </Dialog>
           )}
           {modal === "session" && (
             <Dialog
