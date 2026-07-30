@@ -19,6 +19,7 @@ urlpatterns = [
     path('examination/papers/<uuid:pk>/chat', paper_views.paper_chat, name='paper_chat'),
     path('examination/papers/<uuid:pk>/export/<str:export_type>', paper_views.paper_export, name='paper_export'),
     path('examination/ai-config', paper_views.ai_config, name='ai_config'),
+    path('examination/ai-config/<int:pk>', paper_views.ai_config_detail, name='ai_config_detail'),
     path('examination/ai-config/test', paper_views.ai_config_test, name='ai_config_test'),
     path('examination/blueprints', blueprint_views.blueprints_list, name='blueprints_list'),
     path('examination/blueprints/import', blueprint_views.blueprint_import, name='blueprint_import'),

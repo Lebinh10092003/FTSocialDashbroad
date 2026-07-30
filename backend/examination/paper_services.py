@@ -6,6 +6,7 @@ import difflib
 import hashlib
 import json
 import os
+import random
 import re
 import time
 import unicodedata
@@ -133,6 +134,7 @@ def serialize_source(source: ExamSourceDocument) -> dict:
 
 
 def serialize_paper(paper: ExamPaper, include_questions: bool = False) -> dict:
+    latest_job = paper.generation_jobs.order_by('-created_at').first()
     data = {
         'id': str(paper.id), 'title': paper.title, 'blueprintVersionId': str(paper.blueprint_version_id or ''), 'blueprintName': paper.blueprint_version.blueprint.name if paper.blueprint_version_id else 'Đề cũ chưa có ma trận', 'blueprintVersion': paper.blueprint_version.version_number if paper.blueprint_version_id else None,
         'competitionId': paper.competition_id or '', 'competitionName': paper.competition.name if paper.competition else '',
@@ -143,6 +145,12 @@ def serialize_paper(paper: ExamPaper, include_questions: bool = False) -> dict:
         'status': paper.status, 'description': paper.description, 'aiGenerationStatus': paper.ai_generation_status,
         'aiGenerationMessage': paper.ai_generation_message, 'createdBy': paper.created_by, 'updatedBy': paper.updated_by,
         'qualityReport': paper.quality_report or {}, 'workflowLog': paper.workflow_log or [],
+        'aiChatHistory': paper.ai_chat_history or [],
+        'generationProgress': {
+            'generated': latest_job.generated_count if latest_job else 0,
+            'total': paper.total_questions,
+            'resumable': bool(latest_job and latest_job.status == 'FAILED' and latest_job.partial_questions),
+        },
         'draftExportedAt': paper.draft_exported_at.isoformat() if paper.draft_exported_at else None,
         'approvedAt': paper.approved_at.isoformat() if paper.approved_at else None, 'approvedBy': paper.approved_by,
         'officialExportedAt': paper.official_exported_at.isoformat() if paper.official_exported_at else None,
@@ -231,61 +239,138 @@ def read_uploaded_source(uploaded) -> str:
     return '\n'.join(rows)[:120000]
 
 
-def source_context(paper: ExamPaper) -> str:
-    chunks = []
-    for source in paper.sources.select_related('referenced_paper').all():
+def source_context(paper: ExamPaper, max_chars: int = 30000) -> str:
+    """Build a bounded, balanced context so one long source cannot consume every AI request."""
+    max_chars = max(1000, min(int(max_chars), 60000))
+    chunks = [f'Yêu cầu bổ sung: {paper.description}'] if paper.description else []
+    sources = list(paper.sources.select_related('referenced_paper').all())
+    reserved = sum(len(chunk) + 2 for chunk in chunks)
+    per_source = max(1000, (max_chars - reserved) // max(1, len(sources)))
+    for source in sources:
         if source.source_type == 'PAPER' and source.referenced_paper:
             questions = '\n'.join(f'- {question.content}' for question in source.referenced_paper.questions.all()[:100])
-            chunks.append(f'Đề tham chiếu: {source.referenced_paper.title}\n{questions}')
+            chunk = f'Đề tham chiếu: {source.referenced_paper.title}\n{questions}'
         elif source.extracted_text:
-            chunks.append(f'Nguồn {source.name}:\n{source.extracted_text}')
-    if paper.description:
-        chunks.append(f'Yêu cầu bổ sung: {paper.description}')
-    return '\n\n'.join(chunks)[:160000]
+            chunk = f'Nguồn {source.name}:\n{source.extracted_text}'
+        else:
+            continue
+        chunks.append(chunk[:per_source])
+    return '\n\n'.join(chunks)[:max_chars]
 
 
 def _config() -> AiProviderConfig:
-    return AiProviderConfig.objects.filter(provider='openai').first() or AiProviderConfig(provider='openai')
+    return AiProviderConfig.objects.filter(provider='openai', is_enabled=True).order_by('priority', 'id').first() or AiProviderConfig(provider='openai')
+
+
+def _active_configs() -> list[AiProviderConfig]:
+    return list(AiProviderConfig.objects.filter(provider='openai', is_enabled=True).exclude(health_status=AiProviderConfig.STATUS_EXHAUSTED).order_by('priority', 'id'))
 
 
 def serialize_ai_config(config: AiProviderConfig) -> dict:
     return {
-        'provider': config.provider, 'baseUrl': config.base_url, 'apiKeyMasked': masked_secret(config.api_key_encrypted),
+        'id': config.pk, 'name': config.name, 'provider': config.provider, 'baseUrl': config.base_url, 'apiKeyMasked': masked_secret(config.api_key_encrypted),
         'hasApiKey': bool(config.api_key_encrypted), 'generationModel': config.generation_model,
         'reviewModel': config.review_model, 'temperature': config.temperature, 'maxTokens': config.max_tokens,
-        'timeoutSeconds': config.timeout_seconds, 'maxRetries': config.max_retries, 'updatedAt': config.updated_at.isoformat() if config.pk else '',
+        'timeoutSeconds': config.timeout_seconds, 'maxRetries': config.max_retries,
+        'priority': config.priority, 'isEnabled': config.is_enabled, 'healthStatus': config.health_status,
+        'lastError': config.last_error, 'lastFailedAt': config.last_failed_at.isoformat() if config.last_failed_at else None,
+        'lastUsedAt': config.last_used_at.isoformat() if config.last_used_at else None,
+        'updatedAt': config.updated_at.isoformat() if config.pk else '',
     }
 
 
 def call_ai_json(*, paper: ExamPaper, task_type: str, model: str, system: str, prompt: str, user_email: str, max_tokens: int | None = None) -> dict:
-    config = _config()
-    api_key = decrypt_secret(config.api_key_encrypted)
-    if not api_key:
-        raise ValueError('Chưa cấu hình API key OpenAI. Vui lòng vào Cấu hình AI.')
-    endpoint = config.base_url.rstrip('/') + '/chat/completions'
-    started = time.monotonic()
-    payload = {
-        'model': model, 'temperature': config.temperature, 'max_tokens': min(config.max_tokens, max_tokens) if max_tokens else config.max_tokens,
-        'response_format': {'type': 'json_object'},
-        'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': prompt}],
-    }
-    last_error = ''
-    for attempt in range(config.max_retries + 1):
+    configs = _active_configs()
+    if not configs:
+        if AiProviderConfig.objects.filter(provider='openai', is_enabled=True, health_status=AiProviderConfig.STATUS_EXHAUSTED).exists():
+            raise ValueError('Tất cả cấu hình AI đang bật đều đã hết hạn mức. Tiến trình đã được lưu nháp; hãy bổ sung hạn mức hoặc cập nhật API key rồi tiếp tục.')
+        raise ValueError('Chưa có cấu hình AI đang hoạt động. Vui lòng vào Cấu hình AI để thêm API key.')
+    failures: list[str] = []
+    review_task = task_type in {'review', 'review_auto_fix'}
+    quota_codes = {'credit_balance_exhausted', 'organization_spend_limit_exceeded', 'project_spend_limit_exceeded', 'organization_usage_limit_exceeded'}
+    for config in configs:
+        started = time.monotonic()
+        selected_model = (config.review_model if review_task else config.generation_model) or model
         try:
-            response = requests.post(endpoint, headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}, json=payload, timeout=config.timeout_seconds)
-            response.raise_for_status()
-            body = response.json()
-            content = body['choices'][0]['message']['content']
-            parsed = json.loads(content)
-            usage = body.get('usage') or {}
-            AiUsageLog.objects.create(paper=paper, user_email=user_email, task_type=task_type, provider=config.provider, model=model, input_tokens=int(usage.get('prompt_tokens') or 0), output_tokens=int(usage.get('completion_tokens') or 0), duration_ms=int((time.monotonic() - started) * 1000), success=True)
-            return parsed
-        except Exception as exc:
-            last_error = str(exc)
-            if attempt >= config.max_retries:
-                AiUsageLog.objects.create(paper=paper, user_email=user_email, task_type=task_type, provider=config.provider, model=model, duration_ms=int((time.monotonic() - started) * 1000), success=False, error_message=last_error[:4000])
-                raise ValueError(f'AI không thể hoàn tất yêu cầu: {last_error}') from exc
-    raise ValueError(last_error)
+            api_key = decrypt_secret(config.api_key_encrypted)
+        except ValueError as exc:
+            api_key = ''
+            failures.append(f'{config.name}: {exc}')
+        if not api_key:
+            config.health_status = AiProviderConfig.STATUS_ERROR
+            config.last_error = 'Chưa có API key hợp lệ.'
+            config.last_failed_at = timezone.now()
+            config.save(update_fields=['health_status', 'last_error', 'last_failed_at', 'updated_at'])
+            failures.append(f'{config.name}: chưa có API key hợp lệ')
+            continue
+        endpoint = config.base_url.rstrip('/') + '/chat/completions'
+        payload = {
+            'model': selected_model, 'temperature': config.temperature,
+            'max_tokens': min(config.max_tokens, max_tokens) if max_tokens else config.max_tokens,
+            'response_format': {'type': 'json_object'},
+            'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': prompt}],
+        }
+        last_error = ''
+        should_failover = False
+        for attempt in range(config.max_retries + 1):
+            try:
+                response = requests.post(endpoint, headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}, json=payload, timeout=config.timeout_seconds)
+                if response.ok:
+                    body = response.json()
+                    content = body['choices'][0]['message']['content']
+                    parsed = json.loads(content)
+                    usage = body.get('usage') or {}
+                    config.health_status = AiProviderConfig.STATUS_READY
+                    config.last_error = ''
+                    config.last_used_at = timezone.now()
+                    config.save(update_fields=['health_status', 'last_error', 'last_used_at', 'updated_at'])
+                    AiUsageLog.objects.create(config=config, paper=paper, user_email=user_email, task_type=task_type, provider=config.provider, model=selected_model, input_tokens=int(usage.get('prompt_tokens') or 0), output_tokens=int(usage.get('completion_tokens') or 0), duration_ms=int((time.monotonic() - started) * 1000), success=True)
+                    if failures:
+                        paper._ai_route_notice = f'Đã tự động chuyển sang {config.name}. ' + ' · '.join(failures)
+                    return parsed
+                try:
+                    error_body = response.json().get('error') or {}
+                except Exception:
+                    error_body = {}
+                error_code = str(error_body.get('code') or '')
+                error_type = str(error_body.get('type') or '')
+                error_message = str(error_body.get('message') or response.text or f'HTTP {response.status_code}')[:1000]
+                last_error = f'{response.status_code} {error_code or error_type}: {error_message}'.strip()
+                exhausted = response.status_code == 429 and (error_code in quota_codes or error_type == 'insufficient_quota')
+                retryable = response.status_code == 429 and not exhausted or response.status_code >= 500
+                should_failover = exhausted or retryable or response.status_code in {401, 403}
+                if exhausted:
+                    config.health_status = AiProviderConfig.STATUS_EXHAUSTED
+                    break
+                if retryable and attempt < config.max_retries:
+                    time.sleep(min(8, 2 ** attempt) + random.random())
+                    continue
+                if should_failover:
+                    config.health_status = AiProviderConfig.STATUS_ERROR
+                    break
+                response.raise_for_status()
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                last_error = str(exc)
+                should_failover = True
+                if attempt < config.max_retries:
+                    time.sleep(min(8, 2 ** attempt) + random.random())
+                    continue
+                config.health_status = AiProviderConfig.STATUS_ERROR
+                break
+            except Exception as exc:
+                last_error = str(exc)
+                should_failover = False
+                config.health_status = AiProviderConfig.STATUS_ERROR
+                break
+        config.last_error = last_error[:4000]
+        config.last_failed_at = timezone.now()
+        config.save(update_fields=['health_status', 'last_error', 'last_failed_at', 'updated_at'])
+        AiUsageLog.objects.create(config=config, paper=paper, user_email=user_email, task_type=task_type, provider=config.provider, model=selected_model, duration_ms=int((time.monotonic() - started) * 1000), success=False, error_message=last_error[:4000])
+        failures.append(f'{config.name}: {"hết hạn mức" if config.health_status == AiProviderConfig.STATUS_EXHAUSTED else last_error}')
+        if not should_failover:
+            break
+    paper._ai_route_notice = ' · '.join(failures)
+    raise ValueError('AI chưa thể hoàn tất yêu cầu. Tiến trình đã được lưu nháp. ' + ' · '.join(failures))
 
 
 def generate_questions_with_ai(paper: ExamPaper, user_email: str) -> list[dict]:
@@ -610,7 +695,7 @@ def normalize_question_for_slot(value: dict, order: int, slot: BlueprintSlot) ->
             'questionType': question_type, 'score': float(slot.score), 'slotMetadata': slot.metadata or {}}
 
 
-def generate_questions_with_ai(paper: ExamPaper, user_email: str) -> list[dict]:
+def generate_questions_with_ai(paper: ExamPaper, user_email: str, initial_rows: list[dict] | None = None, on_progress=None) -> list[dict]:
     version = paper.blueprint_version
     if not version or version.status != 'LOCKED':
         raise ValueError('Mỗi đề phải dùng một phiên bản ma trận đã khóa trước khi sinh AI.')
@@ -619,9 +704,11 @@ def generate_questions_with_ai(paper: ExamPaper, user_email: str) -> list[dict]:
         raise ValueError('Phiên bản ma trận chưa có slot.')
     if paper.total_questions != len(slots):
         raise ValueError('Số câu của đề không khớp số slot trong phiên bản ma trận.')
-    rows = []
+    rows = list(initial_rows or [])
+    if len(rows) > len(slots):
+        rows = []
     answer_targets = _balanced_answer_targets(slots)
-    for slot in slots:
+    for slot in slots[len(rows):]:
         previous_questions = [{'order': item['order'], 'content': item['content']} for item in rows[-12:]]
         prompt = f'''Đóng vai giáo viên Toán nhiều năm kinh nghiệm ra đề Olympic. Sinh DUY NHẤT một câu cho slot cố định sau; không đổi loại câu, số phương án, điểm, độ khó, chủ đề hay metadata bắt buộc.
 Không sao chép và không tạo biến thể chỉ thay số. Thay đổi bối cảnh, dữ liệu biểu diễn và đường suy luận khi phù hợp CTX/Assessment Intent. Các câu đã sinh để tránh trùng: {json.dumps(previous_questions, ensure_ascii=False)}
@@ -630,7 +717,7 @@ Slot: {json.dumps({'position': slot.position, 'questionType': slot.question_type
 Trong đó difficultyLabel là nhãn độ khó nguyên bản của file ma trận và là yêu cầu ưu tiên khi thiết kế độ phức tạp của câu; difficulty chỉ là mã nội bộ để kiểm tra hệ thống.
 Trả JSON đúng dạng {{"question":{{"content":"","choices":[],"correctAnswer":"","explanation":""}}}}. Với numeric_input: choices phải là mảng rỗng và correctAnswer là đáp số. Không sao chép nguyên văn nguồn.
 Nguồn tham chiếu:
-{source_context(paper)}'''
+{source_context(paper, 12000)}'''
         result = call_ai_json(paper=paper, task_type='generate_slot', model=_config().generation_model, user_email=user_email, system='Bạn là giáo viên ra đề kỳ cựu và biên tập viên khảo thí. Chỉ trả JSON hợp lệ; tuân thủ tuyệt đối slot ma trận.', prompt=prompt)
         row = result.get('question') if isinstance(result, dict) else None
         if not isinstance(row, dict):
@@ -649,6 +736,8 @@ Nguồn tham chiếu:
         if len(set(_text_fingerprint(item) for item in candidate.get('choices', []))) != len(candidate.get('choices', [])):
             raise ValueError(f'Câu {slot.position} có phương án trùng nhau. Hãy sinh lại đề.')
         rows.append(candidate)
+        if on_progress:
+            on_progress(rows)
     return rows
 
 
@@ -669,7 +758,7 @@ def revise_question_with_ai(paper: ExamPaper, question: ExamQuestion, action: st
 Slot bắt buộc: {json.dumps({'questionType': slot.question_type, 'optionCount': slot.option_count, 'score': float(slot.score), 'difficulty': slot.difficulty, 'topic': slot.topic, 'metadata': slot.metadata}, ensure_ascii=False)}
 Trả JSON {{"question":{{"content":"","choices":[],"correctAnswer":"","explanation":""}}}}.
 Câu hiện tại: {json.dumps(serialize_question(question), ensure_ascii=False)}
-Nguồn: {source_context(paper)}'''
+    Nguồn: {source_context(paper, 12000)}'''
     result = call_ai_json(paper=paper, task_type=f'question_{action}', model=_config().generation_model, user_email=user_email, system='Chỉ trả JSON hợp lệ và tuyệt đối không đổi ràng buộc của slot.', prompt=prompt)
     row = result.get('question') if isinstance(result, dict) else None
     if not isinstance(row, dict):
@@ -692,12 +781,18 @@ def revise_paper_from_chat(paper: ExamPaper, instruction: str, question_id: str,
         raise ValueError('Không tìm thấy câu hỏi trong phạm vi chỉnh sửa.')
     current = [serialize_question(question) for question in questions]
     scope = f'Câu {questions[0].order}' if question_id else f'toàn bộ {len(questions)} câu của đề'
+    prior_chat = [
+        {'role': item.get('role'), 'text': str(item.get('text') or '')[:1000]}
+        for item in (paper.ai_chat_history or [])[:-1][-10:]
+        if isinstance(item, dict) and item.get('role') in {'user', 'assistant'} and item.get('text')
+    ]
     prompt = f'''Người biên tập yêu cầu chỉnh sửa {scope}: {message}
 Chỉ thay đổi những gì yêu cầu; giữ nguyên các phần không liên quan. Mọi câu phải tiếp tục tuân thủ slot ma trận, loại câu, số phương án, độ khó và điểm.
 Trả JSON dạng {{"reply":"Mô tả ngắn thay đổi đã thực hiện","changes":[{{"id":"UUID hiện có","question":{{"content":"","choices":[],"correctAnswer":"","explanation":""}}}}]}}.
 Nếu yêu cầu chỉ hỏi hoặc không cần sửa, trả changes là mảng rỗng và giải thích trong reply.
+Trao đổi trước trong phiên chat của đề: {json.dumps(prior_chat, ensure_ascii=False)}
 Câu hiện tại: {json.dumps(current, ensure_ascii=False)}
-Nguồn tham chiếu rút gọn: {source_context(paper)[:30000]}'''
+Nguồn tham chiếu rút gọn: {source_context(paper, 20000)}'''
     result = call_ai_json(
         paper=paper, task_type='paper_chat', model=_config().generation_model, user_email=user_email,
         system='Bạn là đồng biên tập đề thi. Chỉ trả JSON hợp lệ và không được phá vỡ ràng buộc ma trận.',

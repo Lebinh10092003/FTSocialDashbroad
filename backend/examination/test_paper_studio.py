@@ -9,8 +9,8 @@ from openpyxl import load_workbook
 
 from .blueprint_services import replace_slots
 from .blueprint_views import _blueprint_docx, _blueprint_xlsx, _docx_blueprint_rows, _header_map
-from .models import Blueprint, BlueprintSlot, BlueprintVersion, Competition, ExamPaper, ExamQuestion
-from .paper_services import _balanced_answer_targets, document_export, generate_questions_with_ai, paper_quality_report, read_uploaded_source, revise_paper_from_chat
+from .models import AiProviderConfig, Blueprint, BlueprintSlot, BlueprintVersion, Competition, ExamPaper, ExamQuestion
+from .paper_services import _balanced_answer_targets, call_ai_json, document_export, generate_questions_with_ai, paper_quality_report, read_uploaded_source, revise_paper_from_chat
 
 
 def docx_upload(document: Document, name: str = 'source.docx') -> SimpleUploadedFile:
@@ -183,6 +183,24 @@ class PaperPreviewExportTests(TestCase):
         self.assertEqual(rows[1]['correctAnswer'], '42')
 
     @patch('examination.paper_services.call_ai_json')
+    def test_blueprint_generation_resumes_after_saved_question(self, mock_ai):
+        mock_ai.return_value = {'question': {'content':'Tìm số tự nhiên thỏa mãn điều kiện đã cho.', 'choices':[], 'correctAnswer':'42', 'explanation':'Suy luận được 42.'}}
+        saved = [{
+            'order': 1, 'blueprintSlotId': str(self.choice_slot.id), 'content': 'Tính tổng của 12 và 8.',
+            'choices': ['20', '18', '19', '21', '22'], 'correctAnswer': 'A', 'explanation': 'Kết quả bằng 20.',
+            'difficulty': 'EASY', 'topic': 'Số học', 'questionType': 'single_choice', 'score': 3,
+            'slotMetadata': {},
+        }]
+        progress = []
+
+        rows = generate_questions_with_ai(self.paper, 'editor@example.com', initial_rows=saved, on_progress=lambda value: progress.append(len(value)))
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]['content'], saved[0]['content'])
+        self.assertEqual(progress, [2])
+        mock_ai.assert_called_once()
+
+    @patch('examination.paper_services.call_ai_json')
     def test_chat_revision_is_normalized_against_the_locked_slot(self, mock_ai):
         mock_ai.return_value = {'reply': 'Đã làm rõ câu dẫn.', 'changes': [{'id': str(self.choice.id), 'question': {'content': 'Tính tổng 12 và 8.', 'choices': ['18', '19', '20', '21', '22'], 'correctAnswer': 'C', 'explanation': '12 + 8 = 20.'}}]}
 
@@ -192,3 +210,35 @@ class PaperPreviewExportTests(TestCase):
         self.assertEqual(result['changes'][0]['question']['content'], 'Tính tổng 12 và 8.')
         self.assertEqual(len(result['changes'][0]['question']['choices']), 5)
         self.assertEqual(result['changes'][0]['question']['difficulty'], 'EASY')
+
+
+class AiConfigFailoverTests(TestCase):
+    def setUp(self):
+        competition = Competition.objects.create(id='ai-failover', code='AI', name='AI', parent='FT', organizer='FT', sort_key='ai-failover')
+        self.paper = ExamPaper.objects.create(title='Đề thử AI', competition=competition, subject='Toán', grade_or_category='Khối 7', total_questions=1)
+        self.primary = AiProviderConfig.objects.create(name='Key chính', priority=1, api_key_encrypted='primary-key')
+        self.backup = AiProviderConfig.objects.create(name='Key dự phòng', priority=2, api_key_encrypted='backup-key')
+
+    @patch('examination.paper_services.requests.post')
+    @patch('examination.paper_services.decrypt_secret')
+    def test_quota_exhaustion_marks_primary_and_uses_backup(self, mock_decrypt, mock_post):
+        mock_decrypt.side_effect = ['primary-key', 'backup-key']
+        exhausted = SimpleNamespace(
+            ok=False, status_code=429, text='quota exhausted',
+            json=lambda: {'error': {'code': 'credit_balance_exhausted', 'type': 'insufficient_quota', 'message': 'No credits'}},
+        )
+        success = SimpleNamespace(
+            ok=True, status_code=200,
+            json=lambda: {'choices': [{'message': {'content': '{"ok": true}'}}], 'usage': {'prompt_tokens': 10, 'completion_tokens': 2}},
+        )
+        mock_post.side_effect = [exhausted, success]
+
+        result = call_ai_json(paper=self.paper, task_type='generate', model='fallback-model', system='system', prompt='prompt', user_email='editor@example.com')
+
+        self.primary.refresh_from_db()
+        self.backup.refresh_from_db()
+        self.assertEqual(result, {'ok': True})
+        self.assertEqual(self.primary.health_status, AiProviderConfig.STATUS_EXHAUSTED)
+        self.assertEqual(self.backup.health_status, AiProviderConfig.STATUS_READY)
+        self.assertIn('Key dự phòng', self.paper._ai_route_notice)
+        self.assertEqual(mock_post.call_count, 2)

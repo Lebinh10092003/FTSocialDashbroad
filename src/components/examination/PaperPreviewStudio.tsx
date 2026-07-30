@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Bot, Eye, LoaderCircle, MessageSquareText, Send } from 'lucide-react';
-import type { ExamPaper, PaperQuestion } from './ExamPapers';
+import type { ExamPaper, PaperChatMessage, PaperQuestion } from './ExamPapers';
 import PaperWorkflowPanel from './PaperWorkflowPanel';
 
 type Props = {
@@ -10,23 +10,27 @@ type Props = {
   onPaperChange: (paper: ExamPaper) => void;
 };
 
-type ChatMessage = { role: 'user' | 'assistant'; text: string };
-
 const optionLabel = (index: number) => String.fromCharCode(65 + index);
+
+const initialChat = (paper: ExamPaper): PaperChatMessage[] => paper.aiChatHistory?.length ? paper.aiChatHistory : [
+  { role: 'assistant', text: 'Chọn một câu rồi mô tả nội dung cần sửa. Tôi sẽ giữ nguyên các ràng buộc của ma trận.' },
+];
 
 export default function PaperPreviewStudio({ paper, idToken, canManage, onPaperChange }: Props) {
   const questions = paper.questions || [];
   const [previewMode, setPreviewMode] = useState<'paper' | 'answers'>('paper');
-  const [scope, setScope] = useState('');
+  const [scope, setScope] = useState('all');
   const [message, setMessage] = useState('');
-  const [history, setHistory] = useState<ChatMessage[]>([
-    { role: 'assistant', text: 'Chọn một câu rồi mô tả nội dung cần sửa. Tôi sẽ giữ nguyên các ràng buộc của ma trận.' },
-  ]);
+  const [history, setHistory] = useState<PaperChatMessage[]>(() => initialChat(paper));
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!scope && questions[0]?.id) setScope(questions[0].id);
+    if (scope !== 'all' && !questions.some((question) => question.id === scope)) setScope('all');
   }, [questions, scope]);
+
+  useEffect(() => {
+    setHistory(initialChat(paper));
+  }, [paper.id, paper.aiChatHistory]);
 
   const selected = useMemo(() => questions.find((question) => question.id === scope), [questions, scope]);
 
@@ -45,8 +49,6 @@ export default function PaperPreviewStudio({ paper, idToken, canManage, onPaperC
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || `Không thể chỉnh sửa (mã ${response.status}).`);
       onPaperChange(body.paper);
-      const changed = body.changedQuestionIds?.length ? ` Đã cập nhật ${body.changedQuestionIds.length} câu.` : '';
-      setHistory((items) => [...items, { role: 'assistant', text: `${body.reply || 'Đã xử lý yêu cầu.'}${changed}` }]);
     } catch (error: any) {
       setHistory((items) => [...items, { role: 'assistant', text: error.message || 'Không thể xử lý yêu cầu.' }]);
     } finally {
@@ -54,7 +56,7 @@ export default function PaperPreviewStudio({ paper, idToken, canManage, onPaperC
     }
   };
 
-  return React.createElement(React.Fragment, null, React.createElement(PaperWorkflowPanel, { idToken, paper, onChange:onPaperChange, onNotice:(text:string)=>window.alert(text) }), (
+  return React.createElement(React.Fragment, null, React.createElement(PaperWorkflowPanel, { idToken, paper, onChange:onPaperChange, onNotice:(text:string)=>window.alert(text) }), paper.aiGenerationMessage ? React.createElement('div', { className:`rounded-xl border px-4 py-3 text-sm font-semibold ${paper.aiGenerationStatus==='paused'||paper.aiGenerationStatus==='error'?'border-amber-200 bg-amber-50 text-amber-900':'border-blue-200 bg-blue-50 text-blue-900'}` }, `${paper.aiGenerationMessage}${paper.generationProgress?.resumable?` Có thể tiếp tục từ ${paper.generationProgress.generated}/${paper.generationProgress.total} câu đã lưu.`:''}`) : null, (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-5 py-4">
         <div>
@@ -101,11 +103,12 @@ export default function PaperPreviewStudio({ paper, idToken, canManage, onPaperC
         </div>
         <aside className="flex min-h-[640px] flex-col border-t border-slate-200 bg-white xl:border-l xl:border-t-0">
           <div className="border-b p-4">
-            <h3 className="flex items-center gap-2 font-extrabold text-[#001e40]"><MessageSquareText className="h-5 w-5 text-[#1f4fc9]" />Chat chỉnh sửa đề</h3>
+            <h3 className="flex items-center gap-2 font-extrabold text-[#001e40]"><MessageSquareText className="h-5 w-5 text-[#1f4fc9]" />Chat AI riêng cho đề này</h3>
+            <p className="mt-1 text-xs leading-5 text-slate-500">Dùng trong lúc kiểm thử, phản biện hoặc chỉnh bản nháp. Lịch sử được lưu cùng đề và mọi thay đổi vẫn phải khớp ma trận.</p>
             <label className="mt-3 block text-xs font-bold text-slate-600">Phạm vi chỉnh sửa
               <select value={scope} onChange={(event) => setScope(event.target.value)} className="ft-input mt-1">
-                {questions.map((question) => <option key={question.id || question.order} value={question.id || ''}>Câu {question.order} · {question.topic || 'Chưa có chủ đề'}</option>)}
                 <option value="all">Toàn bộ đề (dùng nhiều token hơn)</option>
+                {questions.map((question) => <option key={question.id || question.order} value={question.id || ''}>Câu {question.order} · {question.topic || 'Chưa có chủ đề'}</option>)}
               </select>
             </label>
             {selected && <p className="mt-2 line-clamp-2 text-xs text-slate-500">Đang chọn: {selected.content}</p>}

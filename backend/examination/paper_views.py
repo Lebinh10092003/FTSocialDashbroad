@@ -250,26 +250,41 @@ def paper_generate(request, pk):
         return Response({'error': 'Không tìm thấy đề thi.'}, status=status.HTTP_404_NOT_FOUND)
     if paper.ai_generation_status in {'reading', 'generating', 'reviewing', 'saving'}:
         return Response({'error': 'Đề đang được AI xử lý.'}, status=status.HTTP_409_CONFLICT)
+    job = None
     try:
         if not paper.blueprint_version_id or paper.blueprint_version.status != 'LOCKED':
             raise ValueError('Đề phải gắn với phiên bản ma trận đã khóa.')
-        job = ExamGenerationJob.objects.create(paper=paper, blueprint_version=paper.blueprint_version, status='GENERATING', message='Đang sinh câu hỏi theo từng slot...', requested_by=actor(request), started_at=timezone.now())
-        paper.ai_generation_status = 'generating'; paper.ai_generation_message = 'Đang tạo câu hỏi theo ma trận...'; paper.save(update_fields=['ai_generation_status', 'ai_generation_message', 'updated_at'])
-        rows = generate_questions_with_ai(paper, actor(request))
+        job = paper.generation_jobs.filter(status='FAILED', blueprint_version=paper.blueprint_version).order_by('-created_at').first()
+        partial_rows = list(job.partial_questions or []) if job else []
+        if job:
+            job.status = 'GENERATING'; job.message = f'Tiếp tục từ câu {len(partial_rows) + 1}...'; job.requested_by = actor(request); job.started_at = timezone.now(); job.completed_at = None; job.save()
+        else:
+            job = ExamGenerationJob.objects.create(paper=paper, blueprint_version=paper.blueprint_version, status='GENERATING', message='Đang sinh câu hỏi theo từng slot...', requested_by=actor(request), started_at=timezone.now())
+        paper.ai_generation_status = 'generating'; paper.ai_generation_message = f'Đang tạo câu hỏi theo ma trận ({len(partial_rows)}/{paper.total_questions})...'; paper.save(update_fields=['ai_generation_status', 'ai_generation_message', 'updated_at'])
+        def save_progress(rows):
+            job.partial_questions = rows
+            job.generated_count = len(rows)
+            job.message = f'Đã lưu nháp {len(rows)}/{paper.total_questions} câu.'
+            job.save(update_fields=['partial_questions', 'generated_count', 'message'])
+        rows = generate_questions_with_ai(paper, actor(request), initial_rows=partial_rows, on_progress=save_progress)
         with transaction.atomic():
             paper.questions.all().delete()
             for row in rows:
                 ExamQuestion.objects.create(paper=paper, blueprint_slot_id=row.get('blueprintSlotId'), question_type=row.get('questionType', 'single_choice'), score=row.get('score', 1), slot_metadata=row.get('slotMetadata', {}), order=row['order'], content=row['content'], choices=row['choices'], correct_answer=row['correctAnswer'], explanation=row['explanation'], difficulty=row['difficulty'], topic=row['topic'])
             paper._prefetched_objects_cache.pop('questions', None)
-            job.status = 'COMPLETED'; job.message = 'Đã sinh đủ câu theo slot.'; job.completed_at = timezone.now(); job.save(update_fields=['status', 'message', 'completed_at'])
-            paper.status = ExamPaper.STATUS_AI_REVIEW; paper.ai_generation_status = 'done'; paper.ai_generation_message = 'Đã tạo đề theo ma trận. Bắt buộc chạy kiểm tra AI trước khi nhân viên kiểm tra.'; paper.updated_by = actor(request)
+            job.status = 'COMPLETED'; job.message = 'Đã sinh đủ câu theo slot.'; job.generated_count = len(rows); job.partial_questions = []; job.completed_at = timezone.now(); job.save(update_fields=['status', 'message', 'generated_count', 'partial_questions', 'completed_at'])
+            route_notice = getattr(paper, '_ai_route_notice', '')
+            paper.status = ExamPaper.STATUS_AI_REVIEW; paper.ai_generation_status = 'done'; paper.ai_generation_message = 'Đã tạo đề theo ma trận. Bắt buộc chạy kiểm tra AI trước khi nhân viên kiểm tra.' + (f' {route_notice}' if route_notice else ''); paper.updated_by = actor(request)
             paper.quality_report = paper_quality_report(paper)
             paper.workflow_log = [*(paper.workflow_log or []), {'action': 'generated', 'actor': actor(request), 'at': timezone.now().isoformat()}]
             paper.save()
         return Response(serialize_paper(get_paper(pk), include_questions=True))
     except ValueError as exc:
-        paper.ai_generation_status = 'error'; paper.ai_generation_message = str(exc)[:500]; paper.save(update_fields=['ai_generation_status', 'ai_generation_message', 'updated_at'])
-        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if job:
+            job.status = 'FAILED'; job.message = str(exc)[:500]; job.completed_at = timezone.now(); job.save(update_fields=['status', 'message', 'completed_at'])
+        generated = job.generated_count if job else 0
+        paper.ai_generation_status = 'paused' if generated else 'error'; paper.ai_generation_message = f'{str(exc)[:400]} Đã lưu nháp {generated}/{paper.total_questions} câu.'; paper.save(update_fields=['ai_generation_status', 'ai_generation_message', 'updated_at'])
+        return Response({'error': paper.ai_generation_message, 'resumable': bool(generated), 'generated': generated, 'total': paper.total_questions}, status=status.HTTP_429_TOO_MANY_REQUESTS if 'hạn mức' in str(exc).lower() else status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['POST'])
@@ -297,7 +312,8 @@ def paper_review(request, pk):
         paper.quality_report = paper_quality_report(paper)
         ai_passed = not paper.questions.exclude(check_status__in=['PASSED', 'AI_FIXED']).exists()
         paper.status = ExamPaper.STATUS_STAFF_PRECHECK if ai_passed and paper.quality_report.get('passed') else ExamPaper.STATUS_AI_REVIEW
-        paper.ai_generation_status = 'done'; paper.ai_generation_message = 'Đã kiểm tra đề.'; paper.updated_by = actor(request); paper.save()
+        route_notice = getattr(paper, '_ai_route_notice', '')
+        paper.ai_generation_status = 'done'; paper.ai_generation_message = 'Đã kiểm tra đề.' + (f' {route_notice}' if route_notice else ''); paper.updated_by = actor(request); paper.save()
         return Response(serialize_paper(get_paper(pk), include_questions=True))
     except ValueError as exc:
         paper.ai_generation_status = 'error'; paper.ai_generation_message = str(exc)[:500]; paper.save(update_fields=['ai_generation_status', 'ai_generation_message', 'updated_at'])
@@ -350,6 +366,7 @@ def paper_transition(request, pk):
         'approve': (ExamPaper.STATUS_AWAITING_APPROVAL, ExamPaper.STATUS_APPROVED),
         'mark_official_export': (ExamPaper.STATUS_APPROVED, ExamPaper.STATUS_OFFICIAL),
         'bank': (ExamPaper.STATUS_OFFICIAL, ExamPaper.STATUS_BANKED),
+        'archive': (ExamPaper.STATUS_BANKED, ExamPaper.STATUS_ARCHIVED),
     }
     if action == 'submit_approval':
         if paper.status != ExamPaper.STATUS_PEER_REVIEW:
@@ -392,11 +409,21 @@ def paper_chat(request, pk):
     paper = get_paper(pk)
     if not paper:
         return Response({'error': 'Không tìm thấy đề thi.'}, status=status.HTTP_404_NOT_FOUND)
+    message = str(request.data.get('message') or '').strip()
+    question_id = str(request.data.get('questionId') or '').strip()
+    if not message:
+        return Response({'error': 'Nhập yêu cầu cần chỉnh sửa.'}, status=status.HTTP_400_BAD_REQUEST)
+    if len(message) > 4000:
+        return Response({'error': 'Yêu cầu chỉnh sửa tối đa 4.000 ký tự.'}, status=status.HTTP_400_BAD_REQUEST)
+    history = list(paper.ai_chat_history or [])
+    history.append({'role': 'user', 'text': message, 'questionId': question_id, 'actor': actor(request), 'at': timezone.now().isoformat()})
+    paper.ai_chat_history = history[-200:]
+    paper.save(update_fields=['ai_chat_history', 'updated_at'])
     try:
         result = revise_paper_from_chat(
             paper,
-            str(request.data.get('message') or ''),
-            str(request.data.get('questionId') or '').strip(),
+            message,
+            question_id,
             actor(request),
         )
         changed_ids = []
@@ -419,9 +446,14 @@ def paper_chat(request, pk):
                 changed_ids.append(str(question.id))
             if changed_ids:
                 reset_paper_workflow(paper, actor(request))
-                paper.save()
-        return Response({'reply': result['reply'], 'changedQuestionIds': changed_ids, 'paper': serialize_paper(get_paper(pk), include_questions=True)})
+            route_notice = getattr(paper, '_ai_route_notice', '')
+            reply = result['reply'] + (f' {route_notice}' if route_notice else '')
+            paper.ai_chat_history = [*(paper.ai_chat_history or []), {'role': 'assistant', 'text': reply, 'questionId': question_id, 'changedQuestionIds': changed_ids, 'at': timezone.now().isoformat()}][-200:]
+            paper.save()
+        return Response({'reply': reply, 'changedQuestionIds': changed_ids, 'paper': serialize_paper(get_paper(pk), include_questions=True)})
     except ValueError as exc:
+        paper.ai_chat_history = [*(paper.ai_chat_history or []), {'role': 'assistant', 'text': str(exc), 'questionId': question_id, 'error': True, 'at': timezone.now().isoformat()}][-200:]
+        paper.save(update_fields=['ai_chat_history', 'updated_at'])
         return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -435,7 +467,7 @@ def paper_export(request, pk, export_type):
     if publication not in {'draft', 'official'}:
         return Response({'error': 'Loại bản xuất không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
     draft_states = {ExamPaper.STATUS_DRAFT_EXPORTED, ExamPaper.STATUS_PEER_REVIEW, ExamPaper.STATUS_AWAITING_APPROVAL, ExamPaper.STATUS_APPROVED, ExamPaper.STATUS_OFFICIAL, ExamPaper.STATUS_BANKED}
-    official_states = {ExamPaper.STATUS_APPROVED, ExamPaper.STATUS_OFFICIAL, ExamPaper.STATUS_BANKED}
+    official_states = {ExamPaper.STATUS_APPROVED, ExamPaper.STATUS_OFFICIAL, ExamPaper.STATUS_BANKED, ExamPaper.STATUS_ARCHIVED}
     if publication == 'draft' and paper.status not in draft_states:
         return Response({'error': 'Nhân viên phải xác nhận kiểm tra sơ bộ trước khi xuất đề nháp.'}, status=status.HTTP_409_CONFLICT)
     if publication == 'official' and paper.status not in official_states:
@@ -450,15 +482,11 @@ def paper_export(request, pk, export_type):
     response['Content-Disposition'] = f'attachment; filename="{name}-{mode}.docx"'; return response
 
 
-@api_view(['GET', 'PUT'])
-@permission_classes([IsAdmin])
-def ai_config(request):
-    config, _ = AiProviderConfig.objects.get_or_create(provider='openai')
-    if request.method == 'GET':
-        return Response(serialize_ai_config(config))
-    data = request.data or {}
-    if str(data.get('provider') or 'openai').lower() != 'openai':
-        return Response({'error': 'MVP hiện chỉ hỗ trợ OpenAI-compatible API.'}, status=status.HTTP_400_BAD_REQUEST)
+def _update_ai_config(config, data, user_email):
+    if str(data.get('provider') or config.provider or 'openai').lower() != 'openai':
+        raise ValueError('Hiện chỉ hỗ trợ OpenAI-compatible API.')
+    config.name = str(data.get('name') or config.name or 'Cấu hình AI').strip()[:255]
+    config.provider = 'openai'
     config.base_url = str(data.get('baseUrl') or config.base_url).strip().rstrip('/')
     config.generation_model = str(data.get('generationModel') or config.generation_model).strip()
     config.review_model = str(data.get('reviewModel') or config.review_model).strip()
@@ -466,22 +494,64 @@ def ai_config(request):
     config.max_tokens = max(256, min(64000, int(data.get('maxTokens', config.max_tokens))))
     config.timeout_seconds = max(10, min(600, int(data.get('timeoutSeconds', config.timeout_seconds))))
     config.max_retries = max(0, min(5, int(data.get('maxRetries', config.max_retries))))
+    config.priority = max(1, int(data.get('priority', config.priority)))
+    config.is_enabled = bool(data.get('isEnabled', config.is_enabled))
     api_key = str(data.get('apiKey') or '').strip()
-    if api_key: config.api_key_encrypted = encrypt_secret(api_key)
-    config.updated_by = actor(request); config.save()
-    return Response(serialize_ai_config(config))
+    if api_key:
+        config.api_key_encrypted = encrypt_secret(api_key)
+        config.health_status = AiProviderConfig.STATUS_UNKNOWN
+        config.last_error = ''
+        config.last_failed_at = None
+    config.updated_by = user_email
+    config.save()
+    return config
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAdmin])
+def ai_config(request):
+    if request.method == 'GET':
+        if not AiProviderConfig.objects.exists():
+            AiProviderConfig.objects.create(name='Cấu hình AI 1', provider='openai', priority=1)
+        return Response({'items': [serialize_ai_config(item) for item in AiProviderConfig.objects.all()]})
+    try:
+        config = AiProviderConfig(name=f'Cấu hình AI {AiProviderConfig.objects.count() + 1}', provider='openai', priority=AiProviderConfig.objects.count() + 1)
+        _update_ai_config(config, request.data or {}, actor(request))
+        return Response(serialize_ai_config(config), status=status.HTTP_201_CREATED)
+    except (TypeError, ValueError) as exc:
+        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['PUT', 'PATCH', 'DELETE'])
+@permission_classes([IsAdmin])
+def ai_config_detail(request, pk):
+    config = AiProviderConfig.objects.filter(pk=pk).first()
+    if not config:
+        return Response({'error': 'Không tìm thấy cấu hình AI.'}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == 'DELETE':
+        config.delete()
+        return Response({'success': True})
+    try:
+        _update_ai_config(config, request.data or {}, actor(request))
+        return Response(serialize_ai_config(config))
+    except (TypeError, ValueError) as exc:
+        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['POST'])
 @permission_classes([IsAdmin])
 def ai_config_test(request):
     from .paper_services import decrypt_secret
-    config, _ = AiProviderConfig.objects.get_or_create(provider='openai')
+    config = AiProviderConfig.objects.filter(pk=request.data.get('id')).first()
+    if not config:
+        return Response({'success': False, 'error': 'Không tìm thấy cấu hình AI.'}, status=status.HTTP_404_NOT_FOUND)
     try:
         api_key = decrypt_secret(config.api_key_encrypted)
         if not api_key: raise ValueError('Chưa có API key.')
         response = __import__('requests').get(config.base_url.rstrip('/') + '/models', headers={'Authorization': f'Bearer {api_key}'}, timeout=min(config.timeout_seconds, 30))
         response.raise_for_status()
-        return Response({'success': True, 'message': 'Kết nối AI thành công.'})
+        config.health_status = AiProviderConfig.STATUS_READY; config.last_error = ''; config.last_used_at = timezone.now(); config.save(update_fields=['health_status', 'last_error', 'last_used_at', 'updated_at'])
+        return Response({'success': True, 'message': f'{config.name}: kết nối AI thành công.', 'config': serialize_ai_config(config)})
     except Exception as exc:
+        config.health_status = AiProviderConfig.STATUS_ERROR; config.last_error = str(exc)[:4000]; config.last_failed_at = timezone.now(); config.save(update_fields=['health_status', 'last_error', 'last_failed_at', 'updated_at'])
         return Response({'success': False, 'error': f'Không thể kết nối AI: {exc}'}, status=status.HTTP_400_BAD_REQUEST)

@@ -261,6 +261,8 @@ class ExamGenerationJob(models.Model):
     blueprint_version = models.ForeignKey(BlueprintVersion, on_delete=models.PROTECT, related_name='generation_jobs')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='QUEUED')
     message = models.CharField(max_length=500, blank=True, default='')
+    partial_questions = models.JSONField(default=list, blank=True)
+    generated_count = models.PositiveIntegerField(default=0)
     requested_by = models.CharField(max_length=255, blank=True, default='')
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -279,10 +281,10 @@ class ExamPaper(models.Model):
     STATUS_NEEDS_REVISION = 'NEEDS_REVISION'
     STATUS_ARCHIVED = 'ARCHIVED'
     STATUS_CHOICES = [
-        (STATUS_DRAFT, 'Đề nháp'), (STATUS_AI_REVIEW, 'AI kiểm tra sơ bộ'),
-        (STATUS_STAFF_PRECHECK, 'Nhân viên kiểm tra sơ bộ'), (STATUS_DRAFT_EXPORTED, 'Đã xuất và lưu đề nháp'),
+        (STATUS_DRAFT, 'Nháp'), (STATUS_AI_REVIEW, 'AI kiểm tra sơ bộ'),
+        (STATUS_STAFF_PRECHECK, 'Chờ nhân viên kiểm tra'), (STATUS_DRAFT_EXPORTED, 'Chờ phản biện'),
         (STATUS_PEER_REVIEW, 'Đang phản biện'), (STATUS_AWAITING_APPROVAL, 'Chờ phê duyệt'),
-        (STATUS_APPROVED, 'Đã phê duyệt'), (STATUS_OFFICIAL, 'Đề chính thức'),
+        (STATUS_APPROVED, 'Đã phê duyệt'), (STATUS_OFFICIAL, 'Hoàn thành'),
         (STATUS_BANKED, 'Đã lưu ngân hàng'), (STATUS_NEEDS_REVISION, 'Cần chỉnh sửa'),
         (STATUS_ARCHIVED, 'Lưu trữ'),
     ]
@@ -304,6 +306,7 @@ class ExamPaper(models.Model):
     ai_generation_message = models.CharField(max_length=500, blank=True, default='')
     quality_report = models.JSONField(default=dict, blank=True)
     workflow_log = models.JSONField(default=list, blank=True)
+    ai_chat_history = models.JSONField(default=list, blank=True)
     draft_exported_at = models.DateTimeField(null=True, blank=True)
     approved_at = models.DateTimeField(null=True, blank=True)
     approved_by = models.CharField(max_length=255, blank=True, default='')
@@ -392,7 +395,17 @@ class ExamSourceDocument(models.Model):
 
 
 class AiProviderConfig(models.Model):
-    provider = models.CharField(max_length=100, unique=True, default='openai')
+    STATUS_UNKNOWN = 'UNKNOWN'
+    STATUS_READY = 'READY'
+    STATUS_EXHAUSTED = 'EXHAUSTED'
+    STATUS_ERROR = 'ERROR'
+    STATUS_CHOICES = [
+        (STATUS_UNKNOWN, 'Chưa kiểm tra'), (STATUS_READY, 'Sẵn sàng'),
+        (STATUS_EXHAUSTED, 'Đã hết hạn mức'), (STATUS_ERROR, 'Có lỗi'),
+    ]
+
+    name = models.CharField(max_length=255, default='Cấu hình AI 1')
+    provider = models.CharField(max_length=100, default='openai', db_index=True)
     base_url = models.URLField(blank=True, default='https://api.openai.com/v1')
     api_key_encrypted = models.TextField(blank=True, default='')
     generation_model = models.CharField(max_length=255, blank=True, default='gpt-4.1-mini')
@@ -401,13 +414,23 @@ class AiProviderConfig(models.Model):
     max_tokens = models.PositiveIntegerField(default=12000)
     timeout_seconds = models.PositiveIntegerField(default=120)
     max_retries = models.PositiveIntegerField(default=2)
+    priority = models.PositiveIntegerField(default=1)
+    is_enabled = models.BooleanField(default=True)
+    health_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_UNKNOWN)
+    last_error = models.TextField(blank=True, default='')
+    last_failed_at = models.DateTimeField(null=True, blank=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
     updated_by = models.CharField(max_length=255, blank=True, default='')
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['priority', 'id']
 
 
 class AiUsageLog(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     paper = models.ForeignKey(ExamPaper, on_delete=models.SET_NULL, null=True, blank=True, related_name='ai_usage_logs')
+    config = models.ForeignKey(AiProviderConfig, on_delete=models.SET_NULL, null=True, blank=True, related_name='usage_logs')
     user_email = models.CharField(max_length=255, blank=True, default='')
     task_type = models.CharField(max_length=100)
     provider = models.CharField(max_length=100, default='openai')

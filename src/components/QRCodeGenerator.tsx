@@ -215,20 +215,20 @@ export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorPr
             </div>
           </section>
 
-          <aside className="lg:sticky lg:top-6">
+          <aside className="min-w-0 lg:sticky lg:top-6">
             <div className="bg-[#102A43] p-5 text-white shadow-[0_22px_70px_rgba(16,42,67,.24)] sm:p-7">
               <div className="flex items-start justify-between gap-5">
                 <div><p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[#f4a261]">Xem trước</p><h2 className="mt-1 text-xl font-extrabold tracking-tight">Mã QR của bạn</h2></div>
                 <span className="text-sm font-bold text-white/45">02</span>
               </div>
-              <div className="mx-auto mt-6 grid aspect-square w-full max-w-[420px] place-items-center bg-white p-4 sm:p-6">
+              <div className="mx-auto mt-6 grid aspect-square w-full max-w-[420px] place-items-center overflow-hidden bg-white p-4 sm:p-6">
                 {!canGenerate ? (
                   <div className="flex max-w-[250px] flex-col items-center text-center text-[#718294]">
                     <div className="mb-4 grid h-20 w-20 place-items-center rounded-full bg-[#f7f4ee]"><QrCode className="h-10 w-10 text-[#9a6a50]" /></div>
                     <p className="text-sm font-extrabold text-[#102A43]">Mã QR sẽ xuất hiện tại đây</p>
                     <p className="mt-2 text-xs leading-5">Dán một đường dẫn hợp lệ để bắt đầu.</p>
                   </div>
-                ) : <canvas ref={canvasRef} className="h-full w-full" aria-label={`Mã QR dẫn tới ${assessment.hostname}`} />}
+                ) : <canvas ref={canvasRef} className="block h-auto max-h-full w-full min-w-0 max-w-full object-contain" aria-label={`Mã QR dẫn tới ${assessment.hostname}`} />}
                 {!canGenerate && <canvas ref={canvasRef} className="hidden" />}
               </div>
               {renderError && <p className="mt-3 text-center text-xs font-semibold text-rose-300">{renderError}</p>}
