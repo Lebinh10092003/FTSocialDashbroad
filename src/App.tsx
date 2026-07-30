@@ -1,5 +1,5 @@
 import React, { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { CalendarCheck, ChartColumnBig, ClipboardList, GraduationCap, Mail, QrCode, ShieldUser } from 'lucide-react';
+import { CalendarCheck, ChartColumnBig, ClipboardList, FileCheck2, GraduationCap, Mail, QrCode, ShieldUser } from 'lucide-react';
 
 import { Channel, UserRole } from './types';
 import Sidebar from './components/social-dashboard/Sidebar';
@@ -409,6 +409,13 @@ export default function App() {
         description: 'Tạo QR đi thẳng tới form khảo sát, tài liệu hoặc bất kỳ đường dẫn nào.',
         gradient: 'from-[#102A43] to-[#DE6B35]',
         icon: QrCode,
+      },
+      {
+        mode: 'training-assessments',
+        title: 'Khảo sát kết thúc tập huấn',
+        description: 'Chia mã đề cân bằng, đặt thời gian, chấm điểm và theo dõi kết quả tập huấn.',
+        gradient: 'from-[#001E40] to-[#0055DA]',
+        icon: FileCheck2,
       },
     ];
     if (userRole === 'ADMIN') {
