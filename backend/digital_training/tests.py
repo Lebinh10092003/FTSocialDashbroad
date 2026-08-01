@@ -165,10 +165,11 @@ class TrainingProductManagementTests(TestCase):
         )
 
     def test_product_and_subscription_expose_quantity_and_remaining_status(self):
-        product_serializer = TrainingProductSerializer(data={"name": "San pham moi", "description": "Mo ta"})
+        product_serializer = TrainingProductSerializer(data={"name": "San pham moi", "product_type": "service", "description": "Mo ta"})
         self.assertTrue(product_serializer.is_valid(), product_serializer.errors)
         product = product_serializer.save()
         self.assertEqual(product.code, "san-pham-moi")
+        self.assertEqual(product.product_type, "service")
         subscription_serializer = TrainingProductSubscriptionSerializer(data={
             "partner": self.partner.pk,
             "product": product.pk,

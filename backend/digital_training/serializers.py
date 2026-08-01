@@ -99,7 +99,7 @@ class TrainingProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = TrainingProduct
         fields = [
-            "id", "name", "code", "description", "active", "display_order",
+            "id", "name", "code", "product_type", "description", "active", "display_order",
             "customer_count", "active_customer_count", "expired_customer_count",
             "total_quantity", "created_at", "updated_at",
         ]

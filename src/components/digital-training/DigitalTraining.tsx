@@ -12,6 +12,7 @@ import {
   ExternalLink,
   GraduationCap,
   Handshake,
+  LayoutDashboard,
   PackageSearch,
   Pencil,
   Plus,
@@ -29,8 +30,10 @@ import ConfirmModal from "../ConfirmModal";
 import SearchableSelect from "../SearchableSelect";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import ProductManagement from "./ProductManagement";
+import TrainingOverview from "./TrainingOverview";
 
 type Tab =
+  | "overview"
   | "calendar"
   | "sessions"
   | "partner-sessions"
@@ -350,15 +353,12 @@ const categories = [
   "Đào tạo lớp học số",
 ];
 const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
+  { id: "overview", label: "Tổng quan", icon: LayoutDashboard },
   { id: "calendar", label: "Lịch", icon: CalendarDays },
   { id: "sessions", label: "Báo cáo lịch công tác", icon: ClipboardList },
-  {
-    id: "partner-sessions",
-    label: "Lịch tập huấn theo khách hàng",
-    icon: ClipboardList,
-  },
-  { id: "partners", label: "Khách hàng", icon: Handshake },
-  { id: "products", label: "Quản lý sản phẩm", icon: PackageSearch },
+  { id: "partners", label: "Danh sách khách hàng", icon: Handshake },
+  { id: "partner-sessions", label: "Theo dõi tập huấn", icon: ClipboardList },
+  { id: "products", label: "Sản phẩm & dịch vụ", icon: PackageSearch },
   { id: "survey", label: "Khảo sát", icon: Users },
   { id: "materials", label: "Tài liệu", icon: BookOpen },
 ];
@@ -371,6 +371,12 @@ const localDateKey = (value: Date) =>
 const today = () => localDateKey(new Date());
 const showDate = (v?: string | null) =>
   v ? new Date(`${v}T00:00:00`).toLocaleDateString("vi-VN") : "—";
+const relativeMonthLabel = (offset = 0) => {
+  const value = new Date();
+  value.setDate(1);
+  value.setMonth(value.getMonth() + offset);
+  return `Tháng ${value.getMonth() + 1} - ${value.getFullYear()}`;
+};
 const showTime = (s: {
   start_time?: string | null;
   end_time?: string | null;
@@ -392,7 +398,7 @@ const status: { [key: string]: string } = {
 };
 function currentRoute() {
   const p = location.pathname.replace(/^\/+|\/+$/g, "").split("/");
-  const tab = (tabs.some((x) => x.id === p[1]) ? p[1] : "calendar") as Tab;
+  const tab = (tabs.some((x) => x.id === p[1]) ? p[1] : "overview") as Tab;
   const kind = p[2] as CalendarDetail["kind"];
   const sourceId = Number(p[3]);
   const calendarDetail =
@@ -412,7 +418,7 @@ function currentRoute() {
   };
 }
 const pathFor = (tab: Tab, id?: number | null) =>
-  tab === "calendar"
+  tab === "overview"
     ? "/digital-training"
     : (tab === "partners" || tab === "partner-sessions" || tab === "survey") &&
         id
@@ -1613,7 +1619,10 @@ export default function DigitalTraining({
   const route = currentRoute(),
     [tab, setTab] = useState<Tab>(route.tab),
     [scheduleOpen, setScheduleOpen] = useState(
-      route.tab === "sessions" || route.tab === "partner-sessions",
+      route.tab === "calendar" || route.tab === "sessions",
+    ),
+    [customerOpen, setCustomerOpen] = useState(
+      route.tab === "partners" || route.tab === "partner-sessions",
     ),
     [surveyOpen, setSurveyOpen] = useState(route.tab === "survey"),
     [selected, setSelected] = useState<number | null>(route.partnerId),
@@ -1777,6 +1786,8 @@ export default function DigitalTraining({
     const h = () => {
       const r = currentRoute();
       setTab(r.tab);
+      setScheduleOpen(r.tab === "calendar" || r.tab === "sessions");
+      setCustomerOpen(r.tab === "partners" || r.tab === "partner-sessions");
       setSelected(r.partnerId);
       setSelectedSurvey(r.surveyId);
       setCalendarDetail(r.calendarDetail);
@@ -1786,6 +1797,8 @@ export default function DigitalTraining({
   }, []);
   const go = (t: Tab, id?: number | null) => {
       setCalendarDetail(null);
+      setScheduleOpen(t === "calendar" || t === "sessions");
+      setCustomerOpen(t === "partners" || t === "partner-sessions");
       setTab(t);
       if (t === "survey") {
         setSelected(null);
@@ -2848,8 +2861,8 @@ export default function DigitalTraining({
           yesterday: "Hôm qua",
           "this-week": "Tuần này",
           "last-week": "Tuần trước",
-          "this-month": "Tháng này",
-          "last-month": "Tháng trước",
+          "this-month": relativeMonthLabel(),
+          "last-month": relativeMonthLabel(-1),
         } as Record<string, string>
       )[sessionTimeFilter] || "Tất cả thời gian"
     );
@@ -3201,6 +3214,14 @@ export default function DigitalTraining({
   const displayedPartners = useMemo(
     () =>
       partners.filter((item) => {
+        const hasTrainingRegistration =
+          item.planned_sessions > 0 ||
+          (item.training_schedule || []).length > 0 ||
+          classes.some(
+            (group) => group.partner === item.id && group.planned_sessions > 0,
+          ) ||
+          sessions.some((session) => session.partner_id === item.id);
+        if (!hasTrainingRegistration) return false;
         const partnerContents = trainingContentsForPartner(item.id);
         const searchable = [
           item.name,
@@ -3630,24 +3651,29 @@ export default function DigitalTraining({
         </div>
         <nav className="flex-1 space-y-1 px-4 pt-5">
           <button
-            onClick={() => go("calendar")}
-            className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "calendar" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
+            onClick={() => go("overview")}
+            className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "overview" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
           >
-            <CalendarDays className="h-4 w-4" />
-            Lịch
+            <LayoutDashboard className="h-4 w-4" />
+            Tổng quan
           </button>
           <button
             onClick={() => setScheduleOpen(!scheduleOpen)}
-            className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "sessions" || tab === "partner-sessions" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
+            className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "calendar" || tab === "sessions" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
           >
             <ClipboardList className="h-4 w-4" />
-            Theo dõi lịch công tác
-            <ChevronDown
-              className={`ml-auto h-4 w-4 transition-transform ${scheduleOpen ? "rotate-180" : ""}`}
-            />
+            Lịch công tác
+            <ChevronDown className={`ml-auto h-4 w-4 transition-transform ${scheduleOpen ? "rotate-180" : ""}`} />
           </button>
           {scheduleOpen && (
             <div className="space-y-1">
+              <button
+                onClick={() => go("calendar")}
+                className={`ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold ${tab === "calendar" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
+              >
+                <CalendarDays className="h-3.5 w-3.5" />
+                Lịch
+              </button>
               <button
                 onClick={() => go("sessions")}
                 className={`ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold ${tab === "sessions" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
@@ -3655,28 +3681,40 @@ export default function DigitalTraining({
                 <ClipboardList className="h-3.5 w-3.5" />
                 Báo cáo lịch công tác
               </button>
+            </div>
+          )}
+          <button
+            onClick={() => setCustomerOpen(!customerOpen)}
+            className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "partners" || tab === "partner-sessions" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
+          >
+            <Handshake className="h-4 w-4" />
+            Khách hàng
+            <ChevronDown className={`ml-auto h-4 w-4 transition-transform ${customerOpen ? "rotate-180" : ""}`} />
+          </button>
+          {customerOpen && (
+            <div className="space-y-1">
+              <button
+                onClick={() => go("partners")}
+                className={`ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold ${tab === "partners" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
+              >
+                <Handshake className="h-3.5 w-3.5" />
+                Danh sách khách hàng
+              </button>
               <button
                 onClick={() => go("partner-sessions")}
                 className={`ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold ${tab === "partner-sessions" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
               >
-                <Handshake className="h-3.5 w-3.5" />
-                Lịch tập huấn theo khách hàng
+                <ClipboardList className="h-3.5 w-3.5" />
+                Theo dõi tập huấn
               </button>
             </div>
           )}
-          <button
-            onClick={() => go("partners")}
-            className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "partners" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
-          >
-            <Handshake className="h-4 w-4" />
-            Khách hàng
-          </button>
           <button
             onClick={() => go("products")}
             className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "products" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
           >
             <PackageSearch className="h-4 w-4" />
-            Quản lý sản phẩm
+            Sản phẩm & dịch vụ
           </button>
           <button
             onClick={() => setSurveyOpen(!surveyOpen)}
@@ -3741,6 +3779,17 @@ export default function DigitalTraining({
             </div>
           ) : (
             <>
+              {tab === "overview" && (
+                <TrainingOverview
+                  sessions={sessions}
+                  meetings={meetings}
+                  partners={partners}
+                  idToken={idToken}
+                  onOpenCalendar={() => go("calendar")}
+                  onOpenPartners={() => go("partners")}
+                  onOpenProducts={() => go("products")}
+                />
+              )}
               {tab === "calendar" && !calendarDetail && (
                 <section className="dt-calendar-page mt-1 rounded-2xl border border-sky-100 bg-white p-5 shadow-sm">
                   <Calendar
@@ -3885,8 +3934,8 @@ export default function DigitalTraining({
                         <option value="yesterday">Hôm qua</option>
                         <option value="this-week">Tuần này</option>
                         <option value="last-week">Tuần trước</option>
-                        <option value="this-month">Tháng này</option>
-                        <option value="last-month">Tháng trước</option>
+                        <option value="this-month">{relativeMonthLabel()}</option>
+                        <option value="last-month">{relativeMonthLabel(-1)}</option>
                         <option value="custom">Ngày tùy chỉnh</option>
                         <option value="">Tất cả thời gian</option>
                       </select>
@@ -4503,7 +4552,7 @@ export default function DigitalTraining({
                   <div className="flex flex-wrap justify-between gap-3 p-5">
                     <div>
                       <h2 className="text-xl font-extrabold">
-                        Lịch tập huấn theo khách hàng
+                        Theo dõi tập huấn
                       </h2>
                       <p className="mt-1 text-sm text-slate-500">
                         Theo dõi từng lớp/phân nhóm, số buổi và tiến độ thực

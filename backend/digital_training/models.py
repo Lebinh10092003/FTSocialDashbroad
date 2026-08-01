@@ -40,8 +40,13 @@ class TrainingPartner(models.Model):
 
 
 class TrainingProduct(models.Model):
+    TYPE_CHOICES = [
+        ("product", "Product"),
+        ("service", "Service"),
+    ]
     name = models.CharField(max_length=255, unique=True)
     code = models.SlugField(max_length=255, unique=True)
+    product_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default="product")
     description = models.TextField(blank=True)
     active = models.BooleanField(default=True)
     display_order = models.PositiveIntegerField(default=0)
