@@ -1,5 +1,5 @@
 import React, { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { CalendarCheck, ChartColumnBig, ClipboardList, FileCheck2, GraduationCap, Mail, QrCode, ShieldUser } from 'lucide-react';
+import { BadgeDollarSign, CalendarCheck, ChartColumnBig, ClipboardList, FileCheck2, GraduationCap, Mail, QrCode, ShieldUser } from 'lucide-react';
 
 import { Channel, UserRole } from './types';
 import Sidebar from './components/social-dashboard/Sidebar';
@@ -31,6 +31,7 @@ const Sync = lazyWithRecovery(() => import('./components/social-dashboard/Sync')
 const Config = lazyWithRecovery(() => import('./components/social-dashboard/Config'));
 const AccountManagement = lazyWithRecovery(() => import('./components/social-dashboard/AccountManagement'));
 const EmailTemplateBuilder = lazyWithRecovery(() => import('./components/email-builder/EmailTemplateBuilder'));
+const FinanceWorkspace = lazyWithRecovery(() => import('./components/digital-training/FinanceWorkspace'));
 const ExaminationModule = lazyWithRecovery(() => import('./components/ExaminationModule'));
 const DigitalTraining = lazyWithRecovery(() => import('./components/digital-training/DigitalTraining'));
 const TrainingAssessmentPublic = lazyWithRecovery(() => import('./components/digital-training/TrainingAssessmentPublic'));
@@ -38,7 +39,7 @@ const TrainingAssessmentWorkspace = lazyWithRecovery(() => import('./components/
 const QRCodeGenerator = lazyWithRecovery(() => import('./components/QRCodeGenerator'));
 const Attendance = lazyWithRecovery(() => import('./components/Attendance'));
 
-type ViewMode = 'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training' | 'training-assessments' | 'training-assessment-public' | 'qr-generator' | 'attendance' | 'account-management';
+type ViewMode = 'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training' | 'finance-report' | 'training-assessments' | 'training-assessment-public' | 'qr-generator' | 'attendance' | 'account-management';
 
 const SOCIAL_TABS = ['dashboard', 'media', 'posts', 'sync', 'config'] as const;
 type SocialTab = typeof SOCIAL_TABS[number];
@@ -105,6 +106,7 @@ function getInitialViewMode(): ViewMode {
   if (path.startsWith('/training-assessments')) return 'training-assessments';
   if (path.startsWith('/digital-training')) return 'digital-training';
   if (path.startsWith('/social-dashboard')) return 'social-dashboard';
+  if (path.startsWith('/finance-report')) return 'finance-report';
   if (path.startsWith('/email-builder')) return 'email-builder';
   if (path.startsWith('/examination')) return 'examination';
   if (path.startsWith('/qr-generator')) return 'qr-generator';
@@ -167,8 +169,13 @@ export default function App() {
   const [loading, setLoading] = useState(false);
 
   const isGuest = !idToken || user.email === GUEST_USER.email;
+  const normalisedEmployeeIdentity = [user.jobTitle?.name || '', ...(user.departments || []).map(item => item.name)]
+    .join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(new RegExp(String.fromCharCode(273), 'g'), 'd').toLocaleLowerCase('vi-VN');
+  const isAccountant = normalisedEmployeeIdentity.includes('ke toan');
+  const canViewFinance = !isGuest && (userRole === 'ADMIN' || userRole === 'MANAGER' || isAccountant || normalisedEmployeeIdentity.includes('giam doc') || normalisedEmployeeIdentity.includes('quan ly'));
+  const canEditFinance = !isGuest && (userRole === 'ADMIN' || isAccountant);
   const moduleForView: Partial<Record<ViewMode, string>> = { 'social-dashboard': 'social-dashboard', 'email-builder': 'email-builder', examination: 'examination', 'digital-training': 'digital-training', 'training-assessments': 'digital-training' };
-  const canAccessView = (mode: ViewMode) => { if (mode === 'qr-generator') return true; if (mode === 'attendance') return !isGuest; if (mode === 'account-management') return userRole === 'ADMIN'; if (isGuest) return !!moduleForView[mode]; return userRole === 'ADMIN' || (!!moduleForView[mode] && (user.accessModules || []).includes(moduleForView[mode]!)); };
+  const canAccessView = (mode: ViewMode) => { if (mode === 'qr-generator') return true; if (mode === 'attendance') return !isGuest; if (mode === 'account-management') return userRole === 'ADMIN'; if (mode === 'finance-report') return canViewFinance; if (isGuest) return !!moduleForView[mode]; return userRole === 'ADMIN' || (!!moduleForView[mode] && (user.accessModules || []).includes(moduleForView[mode]!)); };
   const googleAccessToken = null;
 
   const persistSession = (token: string, nextUser: AppUser, role: UserRole) => {
@@ -432,16 +439,28 @@ export default function App() {
       });
     }
 
+    if (canViewFinance) {
+      apps.push({
+        mode: 'finance-report',
+        title: 'Báo cáo thu chi',
+        description: 'Theo dõi tổng thu, tổng chi, công nợ, chứng từ và tình trạng xử lý tài chính.',
+        gradient: 'from-[#0F766E] to-[#0055DA]',
+        icon: BadgeDollarSign,
+      });
+    }
+
     const visibleApps = apps.filter(app => app.mode === 'attendance' || canAccessView(app.mode));
     return (
       <div className="min-h-dvh liquid-bg flex flex-col font-sans relative overflow-x-hidden">
         <header className="sticky top-0 z-30 w-full glass-panel border-b border-white/50">
-          <div className="mx-auto flex max-w-[1600px] items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-            <div className="flex min-w-0 items-center gap-3.5">
+          <div className="relative mx-auto flex max-w-[1600px] items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+            <div className="flex shrink-0 items-center">
               <img src="/logo.png" alt="FermatTech Logo" className="h-8 object-contain" />
-              <div className="min-w-0 border-l border-slate-200 pl-3.5">
-                <h1 className="truncate whitespace-nowrap text-xs font-extrabold text-slate-900 sm:text-sm">Không gian làm việc FT Workspace</h1>
-              </div>
+            </div>
+            <div className="pointer-events-none absolute left-1/2 max-w-[48vw] -translate-x-1/2 truncate whitespace-nowrap text-center">
+              <h1 className="text-sm font-extrabold tracking-tight text-slate-900 sm:text-lg lg:text-2xl">
+                Không gian làm việc <span className="ft-gradient-text">FermatTech Workspace</span>
+              </h1>
             </div>
             <AccountMenu
               userName={user.displayName}
@@ -481,6 +500,28 @@ export default function App() {
         </main>
         {loginModal}{profileModal}
       </div>
+    );
+  }
+
+  if (viewMode === 'finance-report' && !canAccessView('finance-report')) { setViewMode('workspace'); return null; }
+
+  if (viewMode === 'finance-report') {
+    return (
+      <>
+        <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp Báo cáo thu chi...</div>}>
+          <FinanceWorkspace
+            onBackToWorkspace={() => setViewMode('workspace')}
+            onAccountClick={openAccount}
+            onLogout={handleLogout}
+            userName={user.displayName}
+            userRole={userRole}
+            photoURL={user.photoURL}
+            idToken={idToken || ''}
+            canEdit={canEditFinance}
+          />
+        </Suspense>
+        {loginModal}{profileModal}
+      </>
     );
   }
 
