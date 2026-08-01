@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  BadgeDollarSign,
   BookOpen,
   CalendarDays,
   Check,
@@ -29,7 +30,8 @@ import AccountMenu from "../AccountMenu";
 import ConfirmModal from "../ConfirmModal";
 import SearchableSelect from "../SearchableSelect";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
-import ProductManagement from "./ProductManagement";
+import FinanceReport from "./FinanceReport";
+import ProductManagement, { type ProductView } from "./ProductManagement";
 import TrainingOverview from "./TrainingOverview";
 
 type Tab =
@@ -39,6 +41,7 @@ type Tab =
   | "partner-sessions"
   | "partners"
   | "products"
+  | "finance"
   | "survey"
   | "materials";
 type Mode = "week" | "month";
@@ -359,6 +362,7 @@ const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "partners", label: "Danh sách khách hàng", icon: Handshake },
   { id: "partner-sessions", label: "Theo dõi tập huấn", icon: ClipboardList },
   { id: "products", label: "Sản phẩm & dịch vụ", icon: PackageSearch },
+  { id: "finance", label: "Báo cáo thu chi", icon: BadgeDollarSign },
   { id: "survey", label: "Khảo sát", icon: Users },
   { id: "materials", label: "Tài liệu", icon: BookOpen },
 ];
@@ -396,11 +400,28 @@ const status: { [key: string]: string } = {
   completed: "Hoàn thành",
   cancelled: "Đã hủy",
 };
+const scheduleStatusClass: Record<string, string> = {
+  unscheduled: "border-amber-200 bg-amber-50 text-amber-700",
+  planned: "border-blue-200 bg-blue-50 text-blue-700",
+  completed: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  cancelled: "border-slate-200 bg-slate-100 text-slate-600",
+};
+const contractStatusClass: Record<string, string> = {
+  not_signed: "border-amber-200 bg-amber-50 text-amber-700",
+  negotiating: "border-blue-200 bg-blue-50 text-blue-700",
+  signed: "border-cyan-200 bg-cyan-50 text-cyan-700",
+  paid: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  expiring: "border-orange-200 bg-orange-50 text-orange-700",
+  expired: "border-rose-200 bg-rose-50 text-rose-700",
+};
 function currentRoute() {
   const p = location.pathname.replace(/^\/+|\/+$/g, "").split("/");
   const tab = (tabs.some((x) => x.id === p[1]) ? p[1] : "overview") as Tab;
   const kind = p[2] as CalendarDetail["kind"];
   const sourceId = Number(p[3]);
+  const productView = (["catalog", "allocation", "statistics"].includes(p[2])
+    ? p[2]
+    : "catalog") as ProductView;
   const calendarDetail =
     tab === "calendar" &&
     ["training", "meeting", "other"].includes(kind) &&
@@ -414,16 +435,20 @@ function currentRoute() {
         ? Number(p[2])
         : null,
     surveyId: tab === "survey" && p[2] ? Number(p[2]) : null,
+    productView,
     calendarDetail,
   };
 }
 const pathFor = (tab: Tab, id?: number | null) =>
   tab === "overview"
     ? "/digital-training"
-    : (tab === "partners" || tab === "partner-sessions" || tab === "survey") &&
-        id
-      ? `/digital-training/${tab}/${id}`
-      : `/digital-training/${tab}`;
+    : tab === "products"
+      ? "/digital-training/products/catalog"
+      : (tab === "partners" || tab === "partner-sessions" || tab === "survey") &&
+          id
+        ? `/digital-training/${tab}/${id}`
+        : `/digital-training/${tab}`;
+const productPath = (view: ProductView) => `/digital-training/products/${view}`;
 const calendarDetailPath = (detail: CalendarDetail) =>
   `/digital-training/calendar/${detail.kind}/${detail.sourceId}`;
 function Dialog({
@@ -1556,7 +1581,7 @@ function WorkScheduleDetail({
         <div className="mt-6 grid gap-5 border-t pt-5 sm:grid-cols-2 xl:grid-cols-3">
           <p>
             <b className="block text-xs uppercase text-slate-500">Trạng thái</b>
-            <span className="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
+            <span className={`mt-1 inline-flex rounded-full border px-2 py-1 text-xs font-bold ${scheduleStatusClass[activity.status] || "border-slate-200 bg-slate-100 text-slate-600"}`}>
               {status[activity.status]}
             </span>
           </p>
@@ -1603,7 +1628,9 @@ export default function DigitalTraining({
   isGuest,
   userName,
   userRole,
+  jobTitle,
   photoURL,
+  departmentNames = [],
   idToken = "",
 }: {
   onBackToWorkspace: () => void;
@@ -1613,9 +1640,25 @@ export default function DigitalTraining({
   isGuest: boolean;
   userName?: string | null;
   userRole?: string | null;
+  jobTitle?: string | null;
+  departmentNames?: string[];
   photoURL?: string | null;
   idToken?: string;
 }) {
+  const normalisedJobTitle = [jobTitle || "", ...departmentNames].join(" ")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(new RegExp(String.fromCharCode(273), "g"), "d")
+    .toLocaleLowerCase("vi-VN");
+  const isAccountant = normalisedJobTitle.includes("ke toan");
+  const canViewFinance = !isGuest && (
+    userRole === "ADMIN"
+    || userRole === "MANAGER"
+    || isAccountant
+    || normalisedJobTitle.includes("giam doc")
+    || normalisedJobTitle.includes("quan ly")
+  );
+  const canEditFinance = !isGuest && (userRole === "ADMIN" || isAccountant);
   const route = currentRoute(),
     [tab, setTab] = useState<Tab>(route.tab),
     [scheduleOpen, setScheduleOpen] = useState(
@@ -1624,6 +1667,8 @@ export default function DigitalTraining({
     [customerOpen, setCustomerOpen] = useState(
       route.tab === "partners" || route.tab === "partner-sessions",
     ),
+    [productsOpen, setProductsOpen] = useState(route.tab === "products"),
+    [productView, setProductView] = useState<ProductView>(route.productView),
     [surveyOpen, setSurveyOpen] = useState(route.tab === "survey"),
     [selected, setSelected] = useState<number | null>(route.partnerId),
     [selectedSurvey, setSelectedSurvey] = useState<number | null>(
@@ -1788,6 +1833,8 @@ export default function DigitalTraining({
       setTab(r.tab);
       setScheduleOpen(r.tab === "calendar" || r.tab === "sessions");
       setCustomerOpen(r.tab === "partners" || r.tab === "partner-sessions");
+      setProductsOpen(r.tab === "products");
+      setProductView(r.productView);
       setSelected(r.partnerId);
       setSelectedSurvey(r.surveyId);
       setCalendarDetail(r.calendarDetail);
@@ -1799,6 +1846,8 @@ export default function DigitalTraining({
       setCalendarDetail(null);
       setScheduleOpen(t === "calendar" || t === "sessions");
       setCustomerOpen(t === "partners" || t === "partner-sessions");
+      setProductsOpen(t === "products");
+      if (t === "products") setProductView("catalog");
       setTab(t);
       if (t === "survey") {
         setSelected(null);
@@ -1808,6 +1857,17 @@ export default function DigitalTraining({
         setSelectedSurvey(null);
       }
       history.pushState(null, "", pathFor(t, id));
+    },
+    goProduct = (view: ProductView) => {
+      setCalendarDetail(null);
+      setScheduleOpen(false);
+      setCustomerOpen(false);
+      setProductsOpen(true);
+      setProductView(view);
+      setTab("products");
+      setSelected(null);
+      setSelectedSurvey(null);
+      history.pushState(null, "", productPath(view));
     },
     openCalendarDetail = (detail: CalendarDetail) => {
       setCalendarDetail(detail);
@@ -3710,12 +3770,35 @@ export default function DigitalTraining({
             </div>
           )}
           <button
-            onClick={() => go("products")}
+            onClick={() => setProductsOpen(!productsOpen)}
             className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "products" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
           >
             <PackageSearch className="h-4 w-4" />
             Sản phẩm & dịch vụ
+            <ChevronDown className={`ml-auto h-4 w-4 transition-transform ${productsOpen ? "rotate-180" : ""}`} />
           </button>
+          {productsOpen && (
+            <div className="space-y-1">
+              <button onClick={() => goProduct("catalog")} className={`ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold ${tab === "products" && productView === "catalog" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}>
+                <PackageSearch className="h-3.5 w-3.5" />Danh mục
+              </button>
+              <button onClick={() => goProduct("allocation")} className={`ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold ${tab === "products" && productView === "allocation" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}>
+                <Handshake className="h-3.5 w-3.5" />Phân bổ sản phẩm
+              </button>
+              <button onClick={() => goProduct("statistics")} className={`ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold ${tab === "products" && productView === "statistics" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}>
+                <ClipboardList className="h-3.5 w-3.5" />Thống kê sử dụng
+              </button>
+            </div>
+          )}
+          {canViewFinance && (
+            <button
+              onClick={() => go("finance")}
+              className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "finance" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
+            >
+              <BadgeDollarSign className="h-4 w-4" />
+              Báo cáo thu chi
+            </button>
+          )}
           <button
             onClick={() => setSurveyOpen(!surveyOpen)}
             className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "survey" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
@@ -4277,7 +4360,21 @@ export default function DigitalTraining({
                   partners={partners}
                   idToken={idToken}
                   isGuest={isGuest}
+                  view={productView}
                 />
+              )}
+              {tab === "finance" && canViewFinance && (
+                <FinanceReport
+                  partners={partners}
+                  idToken={idToken}
+                  canEdit={canEditFinance}
+                />
+              )}
+              {tab === "finance" && !canViewFinance && (
+                <section className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 p-6 text-rose-700">
+                  <h1 className="text-xl font-extrabold">Không có quyền truy cập</h1>
+                  <p className="mt-2 text-sm">Báo cáo thu chi chỉ dành cho Kế toán, Admin, Quản lý và Giám đốc.</p>
+                </section>
               )}
               {tab === "partners" && !partner && (
                 <section className="mt-6 overflow-hidden rounded-2xl border bg-white shadow-sm">
@@ -4506,7 +4603,7 @@ export default function DigitalTraining({
                                 )}
                               </td>
                               <td>
-                                <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
+                                <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-bold ${contractStatusClass[effectiveContractStatus(item)] || "border-slate-200 bg-slate-100 text-slate-600"}`}>
                                   {contractStatusLabel(
                                     effectiveContractStatus(item),
                                   )}
@@ -4735,9 +4832,11 @@ export default function DigitalTraining({
                                     )}
                                   </td>
                                   <td>
-                                    {contractStatusLabel(
-                                      effectiveContractStatus(item),
-                                    )}
+                                    <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-bold ${contractStatusClass[effectiveContractStatus(item)] || "border-slate-200 bg-slate-100 text-slate-600"}`}>
+                                      {contractStatusLabel(
+                                        effectiveContractStatus(item),
+                                      )}
+                                    </span>
                                   </td>
                                   <td className="whitespace-normal">
                                     {trainingContents.length ? (
@@ -4866,9 +4965,11 @@ export default function DigitalTraining({
                           <b className="block text-xs uppercase text-slate-500">
                             Hợp đồng
                           </b>
-                          {contractStatusLabel(
-                            effectiveContractStatus(partner),
-                          )}
+                          <span className={`mt-1 inline-flex rounded-full border px-2 py-1 text-xs font-bold ${contractStatusClass[effectiveContractStatus(partner)] || "border-slate-200 bg-slate-100 text-slate-600"}`}>
+                            {contractStatusLabel(
+                              effectiveContractStatus(partner),
+                            )}
+                          </span>
                         </p>
                         <p>
                           <b className="block text-xs uppercase text-slate-500">

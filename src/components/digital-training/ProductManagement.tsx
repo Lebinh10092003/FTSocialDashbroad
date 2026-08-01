@@ -13,6 +13,8 @@ import {
   X,
 } from "lucide-react";
 
+export type ProductView = "catalog" | "allocation" | "statistics";
+
 export type ProductPartner = {
   id: number;
   name: string;
@@ -68,7 +70,7 @@ const statusNames: Record<string, string> = {
 };
 
 const statusClass: Record<string, string> = {
-  active: "bg-emerald-50 text-emerald-700",
+  active: "bg-blue-50 text-blue-700",
   expiring: "bg-amber-50 text-amber-700",
   expired: "bg-rose-50 text-rose-700",
   paused: "bg-slate-100 text-slate-700",
@@ -101,14 +103,15 @@ export default function ProductManagement({
   partners,
   idToken,
   isGuest,
+  view,
 }: {
   partners: ProductPartner[];
   idToken: string;
   isGuest: boolean;
+  view: ProductView;
 }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
-  const [view, setView] = useState<"catalog" | "allocation" | "statistics">("catalog");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [filters, setFilters] = useState({
@@ -311,11 +314,7 @@ export default function ProductManagement({
           <div><p className="text-xs font-bold uppercase tracking-wide text-blue-600">Danh mục, phân bổ và mức sử dụng</p><h1 className="mt-1 text-2xl font-extrabold">Sản phẩm & dịch vụ</h1><p className="mt-2 text-sm text-slate-500">Quản lý danh mục và theo dõi sản phẩm, dịch vụ được phân bổ cho từng khách hàng.</p></div>
           <div className="flex flex-wrap gap-2"><button onClick={() => void load()} className="ft-btn ft-btn-secondary"><RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />Làm mới</button>{!isGuest && <button onClick={() => openProduct()} className="ft-primary"><PackagePlus className="h-4 w-4" />Thêm mới</button>}</div>
         </div>
-        <div className="mt-5 flex flex-wrap gap-2 border-t pt-4">
-          <button onClick={() => setView("catalog")} className={`rounded-lg px-4 py-2 text-sm font-bold ${view === "catalog" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>Danh mục</button>
-          <button onClick={() => setView("allocation")} className={`rounded-lg px-4 py-2 text-sm font-bold ${view === "allocation" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>Phân bổ sản phẩm</button>
-          <button onClick={() => setView("statistics")} className={`rounded-lg px-4 py-2 text-sm font-bold ${view === "statistics" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>Thống kê sử dụng</button>
-        </div>
+
       </header>
 
       {view !== "catalog" && <div className="grid gap-3 rounded-2xl border bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-7">

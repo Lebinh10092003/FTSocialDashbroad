@@ -993,9 +993,11 @@ body {
 .dt-partner-table th:last-child, .dt-partner-table td:last-child { width: 12rem; }
 .dt-progress-table { min-width: 1060px; border: 1px solid #94a3b8; }
 .dt-progress-table th, .dt-progress-table td { border-right: 1px solid #cbd5e1 !important; border-bottom: 1px solid #cbd5e1 !important; }
-.dt-session-completed { color: #15803d; font-weight: 700; }
-.dt-session-planned { color: #1d4ed8; font-weight: 700; }
-.dt-session-missing, .dt-session-cancelled { color: #dc2626; font-weight: 700; }
+.dt-session-completed, .dt-session-planned, .dt-session-unscheduled, .dt-session-missing, .dt-session-cancelled { display: inline-flex; border: 1px solid; border-radius: 9999px; padding: .25rem .5rem; font-weight: 700; line-height: 1.25; white-space: normal; word-break: normal; overflow-wrap: break-word; }
+.dt-session-completed { border-color: #a7f3d0; background: #ecfdf5; color: #15803d; }
+.dt-session-planned { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
+.dt-session-unscheduled, .dt-session-missing { border-color: #fde68a; background: #fffbeb; color: #b45309; }
+.dt-session-cancelled { border-color: #e2e8f0; background: #f1f5f9; color: #64748b; }
 /* Digital Training: partner management table */
 .dt-partner-management { min-width: 1340px; table-layout: fixed; border: 1px solid #94a3b8; }
 .dt-partner-management th, .dt-partner-management td { border-right: 1px solid #cbd5e1 !important; border-bottom: 1px solid #cbd5e1 !important; vertical-align: middle; overflow-wrap: anywhere; white-space: normal; }

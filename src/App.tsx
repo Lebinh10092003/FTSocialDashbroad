@@ -54,6 +54,8 @@ type AppUser = {
   displayName: string;
   photoURL?: string | null;
   accessModules?: string[];
+  jobTitle?: { id: number; name: string } | null;
+  departments?: { id: number; name: string }[];
 };
 
 type StoredSession = {
@@ -92,6 +94,8 @@ function userFromApi(value: any): AppUser {
     displayName: String(value?.displayName || value?.name || value?.email || 'Người dùng'),
     photoURL: value?.photoURL || value?.picture || '',
     accessModules: Array.isArray(value?.accessModules) ? value.accessModules : [],
+    jobTitle: value?.jobTitle || null,
+    departments: Array.isArray(value?.departments) ? value.departments : value?.department ? [value.department] : [],
   };
 }
 
@@ -433,10 +437,10 @@ export default function App() {
       <div className="min-h-dvh liquid-bg flex flex-col font-sans relative overflow-x-hidden">
         <header className="sticky top-0 z-30 w-full glass-panel border-b border-white/50">
           <div className="mx-auto flex max-w-[1600px] items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-            <div className="flex items-center gap-3.5">
+            <div className="flex min-w-0 items-center gap-3.5">
               <img src="/logo.png" alt="FermatTech Logo" className="h-8 object-contain" />
-              <div className="hidden sm:block border-l border-slate-200 pl-3.5">
-                <h1 className="font-extrabold text-slate-900 text-sm">Fermat Workspace</h1>
+              <div className="min-w-0 border-l border-slate-200 pl-3.5">
+                <h1 className="truncate whitespace-nowrap text-xs font-extrabold text-slate-900 sm:text-sm">Không gian làm việc FT Workspace</h1>
               </div>
             </div>
             <AccountMenu
@@ -452,13 +456,7 @@ export default function App() {
           </div>
         </header>
 
-        <main className="z-10 mx-auto w-full max-w-[1600px] flex-1 px-4 py-10 sm:px-6 sm:py-12 lg:px-8">
-          <div className="mx-auto mb-12 space-y-4 text-center">
-            <h2 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:whitespace-nowrap sm:text-5xl">
-              Không gian làm việc <span className="ft-gradient-text">FT Workspace</span>
-            </h2>
-          </div>
-
+        <main className="z-10 mx-auto w-full max-w-[1600px] flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {accessNotice && <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:col-span-2 lg:col-span-3">{accessNotice}</div>}
             {visibleApps.map(app => {
@@ -584,6 +582,8 @@ export default function App() {
             userName={user.displayName}
             userRole={userRole}
             photoURL={user.photoURL}
+            jobTitle={user.jobTitle?.name}
+            departmentNames={(user.departments || []).map((item) => item.name)}
             idToken={idToken || ''}
           />
         </Suspense>

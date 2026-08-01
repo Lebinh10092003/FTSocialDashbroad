@@ -91,6 +91,40 @@ class TrainingProductSubscription(models.Model):
         ]
 
 
+class TrainingFinanceEntry(models.Model):
+    ENTRY_TYPE_CHOICES = [("income", "Income"), ("expense", "Expense")]
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("completed", "Completed"),
+        ("overdue", "Overdue"),
+        ("cancelled", "Cancelled"),
+    ]
+
+    transaction_date = models.DateField()
+    entry_type = models.CharField(max_length=20, choices=ENTRY_TYPE_CHOICES)
+    category = models.CharField(max_length=150)
+    description = models.CharField(max_length=500)
+    amount = models.DecimalField(max_digits=16, decimal_places=0)
+    partner = models.ForeignKey(
+        TrainingPartner,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="finance_entries",
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    payment_method = models.CharField(max_length=100, blank=True)
+    reference_code = models.CharField(max_length=100, blank=True)
+    notes = models.TextField(blank=True)
+    created_by = models.EmailField(blank=True)
+    updated_by = models.EmailField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-transaction_date", "-id"]
+
+
 class TrainingClass(models.Model):
     partner = models.ForeignKey(TrainingPartner, on_delete=models.CASCADE, related_name="classes")
     name = models.CharField(max_length=255)

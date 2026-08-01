@@ -7,6 +7,7 @@ from .completion_service import schedule_has_ended
 from .product_service import sync_partner_product_subscriptions
 from .models import (
     TrainingAssessment,
+    TrainingFinanceEntry,
     TrainingAssessmentAttempt,
     TrainingClass,
     TrainingCustomerMeeting,
@@ -174,6 +175,24 @@ class TrainingProductSubscriptionSerializer(serializers.ModelSerializer):
         subscription = super().update(instance, validated_data)
         self._sync_partner_product_name(subscription)
         return subscription
+
+class TrainingFinanceEntrySerializer(serializers.ModelSerializer):
+    partner_name = serializers.CharField(source="partner.name", read_only=True)
+
+    class Meta:
+        model = TrainingFinanceEntry
+        fields = [
+            "id", "transaction_date", "entry_type", "category", "description",
+            "amount", "partner", "partner_name", "status", "payment_method",
+            "reference_code", "notes", "created_by", "updated_by", "created_at", "updated_at",
+        ]
+        read_only_fields = ["created_by", "updated_by", "created_at", "updated_at"]
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("S\u1ed1 ti\u1ec1n ph\u1ea3i l\u1edbn h\u01a1n 0.")
+        return value
+
 
 class TrainingClassSerializer(serializers.ModelSerializer):
     partner_name = serializers.CharField(source="partner.name", read_only=True)

@@ -1,16 +1,18 @@
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from authentication.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
+from authentication.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
+from rest_framework.permissions import BasePermission
 import json
 import uuid
+import unicodedata
 
 from authentication.permissions import IsManagerOrAdmin
 from authentication.models import UserProfile
 from examination.models import LogNote
 from .completion_service import complete_past_training_schedules
-from .models import TrainingClass, TrainingCustomerMeeting, TrainingMaterial, TrainingPartner, TrainingProduct, TrainingProductSubscription, TrainingSession, TrainingSurvey
-from .serializers import TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingMaterialSerializer, TrainingPartnerSerializer, TrainingProductSerializer, TrainingProductSubscriptionSerializer, TrainingSessionSerializer, TrainingSurveySerializer
+from .models import TrainingClass, TrainingCustomerMeeting, TrainingFinanceEntry, TrainingMaterial, TrainingPartner, TrainingProduct, TrainingProductSubscription, TrainingSession, TrainingSurvey
+from .serializers import TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingFinanceEntrySerializer, TrainingMaterialSerializer, TrainingPartnerSerializer, TrainingProductSerializer, TrainingProductSubscriptionSerializer, TrainingSessionSerializer, TrainingSurveySerializer
 
 
 def _can_manage(request):
@@ -23,6 +25,41 @@ def _forbidden():
 
 def _actor(request):
     return getattr(request.user, "email", "") or getattr(request, "user_email", "") or "Nhân viên FT Workspace"
+
+
+def _normalise_title(value):
+    return "".join(
+        char for char in unicodedata.normalize("NFD", str(value or "").lower())
+        if unicodedata.category(char) != "Mn"
+    ).replace("\u0111", "d")
+
+
+def _finance_permissions(request):
+    role = getattr(request, "user_role", "")
+    title = _normalise_title(getattr(getattr(request.user, "job_title", None), "name", ""))
+    department_names = [getattr(getattr(request.user, "department", None), "name", "")]
+    departments = getattr(request.user, "departments", None)
+    if departments is not None:
+        department_names.extend(departments.values_list("name", flat=True))
+    identity = _normalise_title(" ".join([title, *department_names]))
+    is_accountant = "ke toan" in identity
+    can_view = role in {"ADMIN", "MANAGER"} or is_accountant or "giam doc" in identity or "quan ly" in identity
+    can_edit = role == "ADMIN" or is_accountant
+    return can_view, can_edit
+
+
+def _finance_forbidden(edit=False):
+    message = (
+        "Ch\u1ec9 K\u1ebf to\u00e1n v\u00e0 Admin \u0111\u01b0\u1ee3c ch\u1ec9nh s\u1eeda b\u00e1o c\u00e1o thu chi."
+        if edit else "B\u1ea1n kh\u00f4ng c\u00f3 quy\u1ec1n xem b\u00e1o c\u00e1o thu chi."
+    )
+    return Response({"error": message}, status=status.HTTP_403_FORBIDDEN)
+
+
+
+class CanViewTrainingFinance(BasePermission):
+    def has_permission(self, request, view):
+        return _finance_permissions(request)[0]
 
 
 def _snapshot(serializer_class, item, request):
@@ -190,6 +227,69 @@ def training_product_subscriptions(request):
 def training_product_subscription_detail(request, pk):
     queryset = TrainingProductSubscription.objects.select_related("partner", "product").all()
     return _crud_detail(request, queryset, TrainingProductSubscriptionSerializer, pk, "đăng ký sản phẩm")
+
+
+@api_view(["GET", "POST"])
+@permission_classes([CanViewTrainingFinance])
+def training_finance_entries(request):
+    can_view, can_edit = _finance_permissions(request)
+    if not can_view:
+        return _finance_forbidden()
+    if request.method == "POST" and not can_edit:
+        return _finance_forbidden(edit=True)
+    queryset = TrainingFinanceEntry.objects.select_related("partner").all()
+    date_from = str(request.query_params.get("date_from") or "").strip()
+    date_to = str(request.query_params.get("date_to") or "").strip()
+    entry_type = str(request.query_params.get("entry_type") or "").strip()
+    entry_status = str(request.query_params.get("status") or "").strip()
+    partner = str(request.query_params.get("partner") or "").strip()
+    search = str(request.query_params.get("search") or "").strip()
+    if date_from:
+        queryset = queryset.filter(transaction_date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(transaction_date__lte=date_to)
+    if entry_type in {"income", "expense"}:
+        queryset = queryset.filter(entry_type=entry_type)
+    if entry_status in {"pending", "completed", "overdue", "cancelled"}:
+        queryset = queryset.filter(status=entry_status)
+    if partner.isdigit():
+        queryset = queryset.filter(partner_id=int(partner))
+    if search:
+        from django.db.models import Q
+        queryset = queryset.filter(
+            Q(category__icontains=search) | Q(description__icontains=search)
+            | Q(reference_code__icontains=search) | Q(partner__name__icontains=search)
+        )
+    if request.method == "GET":
+        return Response(TrainingFinanceEntrySerializer(queryset, many=True).data)
+    serializer = TrainingFinanceEntrySerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    email = getattr(request.user, "email", "")
+    item = serializer.save(created_by=email, updated_by=email)
+    return Response(TrainingFinanceEntrySerializer(item).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([CanViewTrainingFinance])
+def training_finance_entry_detail(request, pk):
+    can_view, can_edit = _finance_permissions(request)
+    if not can_view:
+        return _finance_forbidden()
+    if request.method != "GET" and not can_edit:
+        return _finance_forbidden(edit=True)
+    item = TrainingFinanceEntry.objects.select_related("partner").filter(pk=pk).first()
+    if not item:
+        return Response({"error": "Kh\u00f4ng t\u00ecm th\u1ea5y kho\u1ea3n thu chi."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "GET":
+        return Response(TrainingFinanceEntrySerializer(item).data)
+    if request.method == "DELETE":
+        item.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    serializer = TrainingFinanceEntrySerializer(item, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    updated = serializer.save(updated_by=getattr(request.user, "email", ""))
+    return Response(TrainingFinanceEntrySerializer(updated).data)
+
 
 
 @api_view(["GET", "POST"])

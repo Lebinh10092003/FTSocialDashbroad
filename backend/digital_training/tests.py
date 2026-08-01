@@ -6,13 +6,16 @@ from zoneinfo import ZoneInfo
 from zipfile import ZipFile
 
 from django.test import TestCase
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 from openpyxl import Workbook
 from rest_framework.test import APIClient
+from rest_framework.authtoken.models import Token
 
+from authentication.models import Department, JobTitle, UserProfile
 from .assessment_service import generate_variants_from_import, parse_assessment_workbook
 from .completion_service import complete_past_training_schedules
-from .models import TrainingAssessment, TrainingClass, TrainingCustomerMeeting, TrainingPartner, TrainingProduct, TrainingProductSubscription, TrainingSession, TrainingSurvey
+from .models import TrainingAssessment, TrainingClass, TrainingCustomerMeeting, TrainingFinanceEntry, TrainingPartner, TrainingProduct, TrainingProductSubscription, TrainingSession, TrainingSurvey
 from .serializers import TrainingAssessmentSerializer, TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingPartnerSerializer, TrainingProductSerializer, TrainingProductSubscriptionSerializer, TrainingSessionSerializer, TrainingSurveySerializer
 
 
@@ -572,3 +575,59 @@ class TrainingAssessmentTests(TestCase):
         self.assertEqual([item["name"] for item in result["variants"]], ["Đề 1", "Đề 2"])
         self.assertEqual(result["question_count"], 2)
         self.assertEqual(result["errors"], [])
+
+
+class TrainingFinancePermissionTests(TestCase):
+    def client_for(self, email, role="EMPLOYEE", title_name="", department_name=""):
+        title = JobTitle.objects.create(name=title_name) if title_name else None
+        department = Department.objects.create(name=department_name) if department_name else None
+        profile = UserProfile.objects.create(email=email, name=email, role=role, job_title=title, department=department)
+        if department:
+            profile.departments.add(department)
+        django_user = get_user_model().objects.create_user(
+            username=email,
+            email=email,
+            password="StrongPassword9921",
+        )
+        token = Token.objects.create(user=django_user).key
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        return client
+
+    def payload(self):
+        return {
+            "transaction_date": "2026-08-01",
+            "entry_type": "income",
+            "category": "Hop dong",
+            "description": "Thu dot 1",
+            "amount": 15000000,
+            "status": "completed",
+        }
+
+    def test_accountant_and_admin_can_create_finance_entries(self):
+        accountant = self.client_for("accountant@example.com", department_name="Phong Ke toan")
+        response = accountant.post("/api/digital-training/finance-entries", self.payload(), format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+
+        admin = self.client_for("finance-admin@example.com", role="ADMIN")
+        response = admin.post("/api/digital-training/finance-entries", {
+            **self.payload(),
+            "entry_type": "expense",
+            "description": "Chi van hanh",
+        }, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(TrainingFinanceEntry.objects.count(), 2)
+
+    def test_manager_and_director_can_view_but_cannot_edit(self):
+        TrainingFinanceEntry.objects.create(**self.payload())
+        manager = self.client_for("manager-finance@example.com", role="MANAGER")
+        self.assertEqual(manager.get("/api/digital-training/finance-entries").status_code, 200)
+        self.assertEqual(manager.post("/api/digital-training/finance-entries", self.payload(), format="json").status_code, 403)
+
+        director = self.client_for("director@example.com", title_name="Giam doc")
+        self.assertEqual(director.get("/api/digital-training/finance-entries").status_code, 200)
+        self.assertEqual(director.patch("/api/digital-training/finance-entries/1", {"notes": "No edit"}, format="json").status_code, 403)
+
+    def test_ordinary_employee_cannot_view_finance_entries(self):
+        employee = self.client_for("employee-finance@example.com", title_name="Nhan vien ky thuat")
+        self.assertEqual(employee.get("/api/digital-training/finance-entries").status_code, 403)
