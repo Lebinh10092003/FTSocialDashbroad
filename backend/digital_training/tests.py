@@ -1,12 +1,18 @@
 import io
+import re
 from collections import Counter
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
+from zipfile import ZipFile
 
 from django.test import TestCase
+from django.utils import timezone
 from openpyxl import Workbook
 from rest_framework.test import APIClient
 
 from .assessment_service import generate_variants_from_import, parse_assessment_workbook
-from .models import TrainingAssessment, TrainingClass, TrainingPartner, TrainingSession, TrainingSurvey
+from .completion_service import complete_past_training_schedules
+from .models import TrainingAssessment, TrainingClass, TrainingCustomerMeeting, TrainingPartner, TrainingSession, TrainingSurvey
 from .serializers import TrainingAssessmentSerializer, TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingPartnerSerializer, TrainingSessionSerializer, TrainingSurveySerializer
 
 
@@ -68,6 +74,54 @@ class OtherWorkScheduleSerializerTests(TestCase):
         item = serializer.save()
         self.assertEqual(item.schedule_type, "other")
         self.assertEqual(item.activity_type, "Họp nội bộ")
+
+
+class ScheduleCompletionTests(TestCase):
+    def test_daily_completion_updates_only_schedules_that_have_ended(self):
+        now = datetime(2026, 8, 1, 6, 0, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+        old_session = TrainingSession.objects.create(
+            title="Buoi cu", session_date=date(2026, 7, 31), status="planned"
+        )
+        ended_today = TrainingSession.objects.create(
+            title="Buoi som", session_date=date(2026, 8, 1), end_time=time(5, 30), status="planned"
+        )
+        future_today = TrainingSession.objects.create(
+            title="Buoi chua ket thuc", session_date=date(2026, 8, 1), end_time=time(9, 0), status="planned"
+        )
+        cancelled = TrainingSession.objects.create(
+            title="Buoi da huy", session_date=date(2026, 7, 31), status="cancelled"
+        )
+        old_meeting = TrainingCustomerMeeting.objects.create(
+            title="Lich cong tac cu", meeting_date=date(2026, 7, 31), status="planned"
+        )
+
+        result = complete_past_training_schedules(now)
+
+        self.assertEqual(result, {"sessions": 2, "customer_meetings": 1, "total": 3})
+        old_session.refresh_from_db()
+        ended_today.refresh_from_db()
+        future_today.refresh_from_db()
+        cancelled.refresh_from_db()
+        old_meeting.refresh_from_db()
+        self.assertEqual(old_session.status, "completed")
+        self.assertEqual(ended_today.status, "completed")
+        self.assertEqual(future_today.status, "planned")
+        self.assertEqual(cancelled.status, "cancelled")
+        self.assertEqual(old_meeting.status, "completed")
+        self.assertEqual(complete_past_training_schedules(now)["total"], 0)
+
+    def test_loading_sessions_repairs_stale_past_status_immediately(self):
+        old_session = TrainingSession.objects.create(
+            title="Lich hom qua",
+            session_date=timezone.localdate() - timedelta(days=1),
+            status="planned",
+        )
+
+        response = APIClient().get("/api/digital-training/sessions")
+
+        self.assertEqual(response.status_code, 200)
+        old_session.refresh_from_db()
+        self.assertEqual(old_session.status, "completed")
 class TrainingPartnerLocationTests(TestCase):
     def test_partner_keeps_province_and_ward_as_filterable_fields(self):
         serializer = TrainingPartnerSerializer(
@@ -205,7 +259,7 @@ class TrainingAssessmentTests(TestCase):
     def test_public_url_uses_partner_and_class_slug(self):
         self.assertEqual(self.assessment.public_slug, "ubp-giang-vo-lop-2")
 
-    def test_only_one_assessment_is_allowed_per_partner_class(self):
+    def test_multiple_assessment_rounds_are_allowed_per_partner_class(self):
         serializer = TrainingAssessmentSerializer(data={
             "title": "Bài bị trùng",
             "training_class": self.training_class.pk,
@@ -213,8 +267,9 @@ class TrainingAssessmentTests(TestCase):
             "status": "draft",
             "questions": [],
         })
-        self.assertFalse(serializer.is_valid())
-        self.assertIn("training_class", serializer.errors)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        created = serializer.save()
+        self.assertNotEqual(created.public_slug, self.assessment.public_slug)
 
     def test_variant_assignment_stays_balanced_behind_one_link(self):
         variants = []
@@ -250,6 +305,82 @@ class TrainingAssessmentTests(TestCase):
         self.assertEqual(response.data["status"], "submitted")
         self.assertEqual(float(response.data["score"]), 1)
 
+    def test_participant_list_assigns_fixed_variant_and_resumes_active_attempt(self):
+        assigned_variant = self.assessment.questions[2]['variant']
+        self.assessment.participants = [{
+            "code": "GV-001",
+            "name": "Teacher One",
+            "email": "teacher@example.test",
+            "phone": "",
+            "organization": "School A",
+            "group": "THPT",
+            'variant': assigned_variant,
+        }]
+        self.assessment.save(update_fields=["participants", "updated_at"])
+        first = self.client.post(
+            f"/api/training-assessments/{self.assessment.public_slug}/start",
+            {"participant_code": "GV-001"},
+            format="json",
+        )
+        second = self.client.post(
+            f"/api/training-assessments/{self.assessment.public_slug}/start",
+            {"participant_code": "GV-001"},
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(first.data['variant'], assigned_variant)
+        self.assertEqual(second.status_code, 200, second.data)
+        self.assertEqual(second.data["access_token"], first.data["access_token"])
+
+    def test_autosave_accepts_structured_answers_and_progress(self):
+        start = self.client.post(
+            f"/api/training-assessments/{self.assessment.public_slug}/start",
+            {"respondent_name": "Learner", "email": "learner@example.test"},
+            format="json",
+        )
+        question_id = start.data["questions"][0]["id"]
+
+        response = self.client.patch(
+            f"/api/training-assessment-attempts/{start.data['access_token']}",
+            {
+                "answers": {question_id: ["A", "B"]},
+                "progress": {"current_question_id": question_id, "reviewed_question_ids": [question_id]},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["answers"][question_id], ["A", "B"])
+        self.assertEqual(response.data["progress"]["current_question_id"], question_id)
+        self.assertEqual(response.data["progress"]["reviewed_question_ids"], [question_id])
+
+    def test_xlsx_parser_supports_question_bank_schema_and_interactions(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "THPT"
+        sheet.append([
+            "order", "topic", "knowledge type", "question type", "difficulty",
+            "question", "media url", "option 1", "option 2", "option 3",
+            "option 4", "option 5", "answer", "answer image", "points",
+        ])
+        sheet.append([1, "Topic A", "Theory", "multiple choice", "Medium", "Choose values", "", "One", "Two", "Three", "", "", "1;3", "", 2])
+        sheet.append([2, "Topic B", "Theory", "matching", "Hard", "Match values", "", "Left 1", "Left 2", "", "", "", "1-B;2-A", "", 2])
+        sheet.append([3, "Topic C", "Theory", "ordering", "Hard", "Order values", "", "Step 1", "Step 2", "Step 3", "", "", "2-1-3", "", 2])
+        sheet.append([4, "Practice", "Practice", "link upload", "Hard", "Submit product", "", "", "", "", "", "", "Manual", "", 6])
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+
+        result = parse_assessment_workbook(buffer.getvalue(), "bank.xlsx")
+
+        self.assertEqual(result["errors"], [])
+        self.assertEqual([item["type"] for item in result["questions"]], [
+            "multiple_choice", "matching", "ordering", "practical_submission",
+        ])
+        self.assertEqual(result["questions"][0]["correct_answers"], ["1", "3"])
+        self.assertEqual(result["questions"][0]["audience_group"], "THPT")
+        self.assertTrue(all(item["question_code"] for item in result["questions"]))
+
     def test_xlsx_parser_supports_variant_column(self):
         workbook = Workbook()
         sheet = workbook.active
@@ -263,6 +394,31 @@ class TrainingAssessmentTests(TestCase):
         self.assertEqual(result["question_count"], 2)
         self.assertEqual([item["name"] for item in result["variants"]], ["Đề 1", "Đề 2"])
         self.assertEqual(result["errors"], [])
+
+    def test_xlsx_parser_supports_missing_worksheet_dimension_metadata(self):
+        workbook = Workbook()
+        guide = workbook.active
+        guide.title = 'Guide'
+        guide.append(['GUIDE'])
+        sheet = workbook.create_sheet('De 1')
+        sheet.append(['order', 'type', 'question', 'A', 'B', 'answer', 'points'])
+        sheet.append([1, 'single_choice', 'Valid question', 'Wrong', 'Right', 'B', 1])
+        source = io.BytesIO()
+        workbook.save(source)
+
+        dimensionless = io.BytesIO()
+        with ZipFile(io.BytesIO(source.getvalue())) as archive, ZipFile(dimensionless, 'w') as output:
+            for entry in archive.infolist():
+                content = archive.read(entry.filename)
+                if entry.filename.startswith('xl/worksheets/sheet'):
+                    content = re.sub(rb'<dimension\b[^>]*/>', b'', content, count=1)
+                output.writestr(entry, content)
+
+        result = parse_assessment_workbook(dimensionless.getvalue(), 'dimensionless.xlsx')
+
+        self.assertEqual(result['question_count'], 1)
+        self.assertEqual(len(result['variants']), 1)
+        self.assertEqual(result['errors'], [])
 
     def test_import_generation_balances_usage_and_answer_keys(self):
         source_questions = [
@@ -316,6 +472,33 @@ class TrainingAssessmentTests(TestCase):
         result = generate_variants_from_import(source_questions, 2, 3, seed=1)
         self.assertEqual(result["source_question_count"], 4)
         self.assertTrue(any("Đã bỏ 1 câu trùng" in warning for warning in result["warnings"]))
+
+    def test_import_generation_honors_topic_and_difficulty_structure(self):
+        source_questions = []
+        for category, difficulty, count in [("Topic A", "Easy", 5), ("Topic B", "Hard", 5)]:
+            for index in range(count):
+                source_questions.append({
+                    "id": f"{category}-{difficulty}-{index}",
+                    "type": "short_answer",
+                    "text": f"{category} {difficulty} question {index}",
+                    "options": [],
+                    "correct_answers": ["ok"],
+                    "points": 1,
+                    "required": True,
+                    "category": category,
+                    "difficulty": difficulty,
+                })
+        structure = [
+            {"category": "Topic A", "difficulty": "Easy", "count": 2},
+            {"category": "Topic B", "difficulty": "Hard", "count": 3},
+        ]
+        result = generate_variants_from_import(source_questions, 3, 5, seed=7, structure=structure)
+        for variant in result["variants"]:
+            questions = [item for item in result["questions"] if item["variant"] == variant["name"]]
+            counts = Counter((item["category"], item["difficulty"]) for item in questions)
+            self.assertEqual(counts[("Topic A", "Easy")], 2)
+            self.assertEqual(counts[("Topic B", "Hard")], 3)
+        self.assertEqual(sum(item["count"] for item in result["generation_config"]["structure"]), 5)
 
     def test_xlsx_parser_uses_sheet_names_for_prepared_variants(self):
         workbook = Workbook()

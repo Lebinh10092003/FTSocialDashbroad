@@ -161,6 +161,14 @@ class TrainingAssessment(models.Model):
     generation_config = models.JSONField(default=dict, blank=True)
     source_type = models.CharField(max_length=20, blank=True)
     source_name = models.CharField(max_length=500, blank=True)
+    question_bank_url = models.URLField(blank=True)
+    output_sheet_url = models.URLField(blank=True)
+    drive_folder_id = models.CharField(max_length=255, blank=True)
+    audience_group = models.CharField(max_length=255, blank=True)
+    participants = models.JSONField(default=list, blank=True)
+    max_people_per_variant = models.PositiveIntegerField(default=8)
+    sync_status = models.CharField(max_length=20, default="pending")
+    sync_error = models.TextField(blank=True)
     created_by = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -177,7 +185,12 @@ class TrainingAssessment(models.Model):
                 ] if value
             )
             label = label.replace("Đ", "D").replace("đ", "d")
-            self.public_slug = slugify(label) or f"training-assessment-{uuid.uuid4().hex[:8]}"
+            candidate = slugify(label) or f"training-assessment-{uuid.uuid4().hex[:8]}"
+            if TrainingAssessment.objects.filter(public_slug=candidate).exclude(pk=self.pk).exists():
+                candidate = slugify(f"{label} {self.title}") or candidate
+                if TrainingAssessment.objects.filter(public_slug=candidate).exclude(pk=self.pk).exists():
+                    candidate = f"{candidate}-{uuid.uuid4().hex[:8]}"
+            self.public_slug = candidate
         super().save(*args, **kwargs)
 
 
@@ -189,12 +202,19 @@ class TrainingAssessmentAttempt(models.Model):
     email = models.EmailField(blank=True)
     phone = models.CharField(max_length=50, blank=True)
     organization = models.CharField(max_length=255, blank=True)
+    participant_code = models.CharField(max_length=100, blank=True)
     variant = models.CharField(max_length=100)
     answers = models.JSONField(default=dict, blank=True)
+    progress = models.JSONField(default=dict, blank=True)
     score = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     max_score = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     auto_graded_points = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     manual_grading_required = models.BooleanField(default=False)
+    practical_score = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    sync_status = models.CharField(max_length=20, default="pending")
+    sync_error = models.TextField(blank=True)
+    synced_at = models.DateTimeField(null=True, blank=True)
+    purge_after = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="in_progress")
     started_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
@@ -208,7 +228,10 @@ class TrainingAssessmentAttempt(models.Model):
 class TrainingAssessmentUpload(models.Model):
     attempt = models.ForeignKey(TrainingAssessmentAttempt, on_delete=models.CASCADE, related_name="uploads")
     question_id = models.CharField(max_length=100)
-    file = models.FileField(upload_to="digital-training/assessment-answers/%Y/%m/")
+    file = models.FileField(upload_to="digital-training/assessment-answers/%Y/%m/", blank=True)
+    drive_file_id = models.CharField(max_length=255, blank=True)
+    drive_url = models.URLField(blank=True)
+    sync_status = models.CharField(max_length=20, default="local")
     original_name = models.CharField(max_length=500)
     content_type = models.CharField(max_length=100, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

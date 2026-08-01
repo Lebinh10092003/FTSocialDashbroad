@@ -1,3 +1,5 @@
+import json
+import math
 import secrets
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
@@ -13,11 +15,15 @@ from rest_framework.response import Response
 from authentication.permissions import IsAuthenticated
 
 from .assessment_service import (
+    append_assessment_deletion_log,
     fetch_google_sheet,
     generate_variants_from_import,
     grade_attempt,
     parse_assessment_workbook,
+    prepare_assessment_google_sheet,
     public_questions,
+    sync_attempt_to_google_sheet,
+    upload_assessment_file_to_drive,
     variants_for,
 )
 from .models import (
@@ -68,6 +74,9 @@ def _public_assessment(assessment):
             (len(public_questions(assessment, variant)) for variant in variants_for(assessment)),
             default=0,
         ),
+        "participant_count": len(assessment.participants or []),
+        "requires_participant": bool(assessment.participants),
+        "audience_group": assessment.audience_group,
         "availability": availability,
         "message": message,
     }
@@ -151,18 +160,48 @@ def assessment_import_preview(request):
         else:
             return _assessment_error("Vui lòng chọn file XLSX hoặc nhập đường dẫn Google Sheet.")
         result = parse_assessment_workbook(content, source_name)
+        source_questions = result["questions"]
+        available_groups = sorted({str(item.get("audience_group") or "").strip() for item in source_questions if str(item.get("audience_group") or "").strip()}, key=str.casefold)
+        audience_group = str(request.data.get("audience_group") or "").strip()
+        if audience_group:
+            source_questions = [item for item in source_questions if str(item.get("audience_group") or "").strip().casefold() == audience_group.casefold()]
+            if not source_questions:
+                return _assessment_error("Nhom doi tuong khong co cau hoi trong ngan hang da chon.")
+        result["bank_questions"] = source_questions
+        result["available_groups"] = available_groups
         if import_mode == "auto_generate" and not result["errors"]:
+            try:
+                participant_count = max(0, int(request.data.get("participant_count") or 0))
+                max_people = max(1, int(request.data.get("max_people_per_variant") or 8))
+            except (TypeError, ValueError):
+                return _assessment_error("So nguoi tham gia hoac so nguoi tren moi ma de khong hop le.")
+            structure = request.data.get("structure") or []
+            if isinstance(structure, str):
+                try:
+                    structure = json.loads(structure)
+                except json.JSONDecodeError:
+                    return _assessment_error("Co cau chu de/do kho khong dung dinh dang JSON.")
+            if not isinstance(structure, list):
+                return _assessment_error("Co cau chu de/do kho phai la mot danh sach.")
+            computed_variant_count = math.ceil(participant_count / max_people) if participant_count else request.data.get("variant_count", 1)
             generated = generate_variants_from_import(
-                result["questions"],
-                request.data.get("variant_count", 5),
+                source_questions,
+                computed_variant_count,
                 request.data.get("questions_per_variant", 20),
                 request.data.get("seed"),
+                structure,
             )
             result.update(generated)
+            result["generation_config"].update({
+                "participant_count": participant_count,
+                "max_people_per_variant": max_people,
+                "audience_group": audience_group,
+            })
         elif import_mode != "prepared":
             return _assessment_error("Chế độ nhập câu hỏi không hợp lệ.")
         result["import_mode"] = import_mode
         result["source_type"] = source_type
+        result["source_url"] = google_url
         return Response(result)
     except ValueError as error:
         return _assessment_error(str(error))
@@ -195,8 +234,72 @@ def assessment_result_grade(request, pk, attempt_pk):
     if score < 0 or score > attempt.max_score:
         return _assessment_error("Điểm phải nằm trong thang điểm của bài.")
     attempt.score = score
+    attempt.practical_score = max(Decimal("0"), score - (attempt.auto_graded_points or Decimal("0")))
     attempt.manual_grading_required = False
-    attempt.save(update_fields=["score", "manual_grading_required", "updated_at"])
+    if attempt.assessment.output_sheet_url:
+        attempt.purge_after = attempt.purge_after or timezone.now() + timedelta(days=7)
+        try:
+            sync_attempt_to_google_sheet(attempt)
+            attempt.sync_status = "synced"
+            attempt.sync_error = ""
+            attempt.synced_at = timezone.now()
+        except Exception as error:
+            attempt.sync_status = "error"
+            attempt.sync_error = str(error)[:2000]
+    attempt.save(update_fields=[
+        "score", "practical_score", "manual_grading_required", "sync_status",
+        "sync_error", "synced_at", "purge_after", "updated_at",
+    ])
+    return Response(TrainingAssessmentAttemptSerializer(attempt, context={"request": request}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def assessment_prepare_output(request, pk):
+    if not _can_manage(request):
+        return _forbidden()
+    assessment = TrainingAssessment.objects.select_related("partner").filter(pk=pk).first()
+    if not assessment:
+        return _assessment_error("Khong tim thay dot kiem tra.", status.HTTP_404_NOT_FOUND)
+    try:
+        prepare_assessment_google_sheet(assessment)
+        assessment.sync_status = "ready"
+        assessment.sync_error = ""
+    except Exception as error:
+        assessment.sync_status = "error"
+        assessment.sync_error = str(error)[:2000]
+    assessment.save(update_fields=["sync_status", "sync_error", "updated_at"])
+    return Response(TrainingAssessmentSerializer(assessment, context={"request": request}).data)
+
+
+@api_view(["POST", "DELETE"])
+@permission_classes([IsAuthenticated])
+def assessment_result_storage(request, pk, attempt_pk):
+    if not _can_manage(request):
+        return _forbidden()
+    attempt = TrainingAssessmentAttempt.objects.select_related("assessment").filter(pk=attempt_pk, assessment_id=pk).first()
+    if not attempt:
+        return _assessment_error("Khong tim thay luot lam bai.", status.HTTP_404_NOT_FOUND)
+    if request.method == "DELETE":
+        if attempt.sync_status != "synced":
+            return _assessment_error("Chi duoc xoa du lieu tam sau khi dong bo Google Sheets thanh cong.")
+        try:
+            append_assessment_deletion_log(attempt, _actor(request), "Xoa thu cong", "Du lieu tam da dong bo thanh cong.")
+        except Exception as error:
+            return _assessment_error(f"Khong the ghi nhat ky xoa vao Google Sheets: {error}")
+        attempt.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    try:
+        attempt.purge_after = attempt.purge_after or timezone.now() + timedelta(days=7)
+        sync_attempt_to_google_sheet(attempt)
+        attempt.sync_status = "synced"
+        attempt.sync_error = ""
+        attempt.synced_at = timezone.now()
+        attempt.purge_after = timezone.now() + timedelta(days=7)
+    except Exception as error:
+        attempt.sync_status = "error"
+        attempt.sync_error = str(error)[:2000]
+    attempt.save(update_fields=["sync_status", "sync_error", "synced_at", "purge_after", "updated_at"])
     return Response(TrainingAssessmentAttemptSerializer(attempt, context={"request": request}).data)
 
 
@@ -223,19 +326,47 @@ def public_assessment_start(request, slug):
         email = str(request.data.get("email") or "").strip().lower()
         phone = str(request.data.get("phone") or "").strip()
         organization = str(request.data.get("organization") or "").strip()
+        participant_code = str(request.data.get("participant_code") or "").strip()
+        assigned_variant = ""
+        if assessment.participants:
+            participant = next((item for item in assessment.participants if (
+                participant_code and str(item.get("code") or "").strip().casefold() == participant_code.casefold()
+            ) or (
+                email and str(item.get("email") or "").strip().casefold() == email.casefold()
+            ) or (
+                phone and str(item.get("phone") or "").strip() == phone
+            )), None)
+            if not participant:
+                return _assessment_error("Khong tim thay nguoi tham gia trong danh sach cua dot kiem tra.")
+            participant_code = str(participant.get("code") or participant_code).strip()
+            name = str(participant.get("name") or name).strip()
+            email = str(participant.get("email") or email).strip().lower()
+            phone = str(participant.get("phone") or phone).strip()
+            organization = str(participant.get("organization") or organization).strip()
+            assigned_variant = str(participant.get("variant") or "").strip()
         if not name:
             return _assessment_error("Vui lòng nhập họ và tên.")
-        if not email and not phone:
+        if not email and not phone and not participant_code:
             return _assessment_error("Vui lòng nhập email hoặc số điện thoại.")
-        previous = assessment.attempts.filter(email=email) if email else assessment.attempts.filter(phone=phone)
+        previous = (
+            assessment.attempts.filter(email=email) if email else
+            assessment.attempts.filter(phone=phone) if phone else
+            assessment.attempts.filter(participant_code=participant_code)
+        )
+        active_attempt = previous.filter(status="in_progress").order_by("-started_at").first()
+        if active_attempt:
+            return Response(_attempt_payload(active_attempt, request))
         if previous.count() >= assessment.attempt_limit:
             return _assessment_error(f"Bạn đã sử dụng đủ {assessment.attempt_limit} lượt làm bài.")
         variants = variants_for(assessment)
         if not variants:
             return _assessment_error("Bài đánh giá chưa có câu hỏi.")
-        counts = {variant: assessment.attempts.filter(variant=variant).count() for variant in variants}
-        minimum = min(counts.values())
-        variant = secrets.choice([name for name, count in counts.items() if count == minimum])
+        if assigned_variant in variants:
+            variant = assigned_variant
+        else:
+            counts = {variant: assessment.attempts.filter(variant=variant).count() for variant in variants}
+            minimum = min(counts.values())
+            variant = secrets.choice([variant_name for variant_name, count in counts.items() if count == minimum])
         expires_at = timezone.now() + timedelta(minutes=assessment.duration_minutes)
         if assessment.closes_at and expires_at > assessment.closes_at:
             expires_at = assessment.closes_at
@@ -247,11 +378,24 @@ def public_assessment_start(request, slug):
             email=email,
             phone=phone,
             organization=organization,
+            participant_code=participant_code,
             variant=variant,
             expires_at=expires_at,
             max_score=maximum,
         )
     return Response(_attempt_payload(attempt, request), status=status.HTTP_201_CREATED)
+
+
+def _clean_answer_value(value):
+    if isinstance(value, list):
+        return [str(item)[:500] for item in value[:20] if not isinstance(item, (dict, list))]
+    if isinstance(value, dict):
+        return {
+            str(key)[:100]: str(item)[:5000]
+            for key, item in list(value.items())[:30]
+            if not isinstance(item, (dict, list))
+        }
+    return str(value)[:5000]
 
 
 @api_view(["GET", "PATCH"])
@@ -271,18 +415,37 @@ def public_attempt(request, token):
     incoming = request.data.get("answers")
     if isinstance(incoming, dict):
         cleaned = {
-            str(key): str(value)[:5000]
+            str(key): _clean_answer_value(value)
             for key, value in incoming.items()
-            if str(key) in allowed_ids and not isinstance(value, (dict, list))
+            if str(key) in allowed_ids
         }
         attempt.answers = {**attempt.answers, **cleaned}
+    incoming_progress = request.data.get("progress")
+    if isinstance(incoming_progress, dict):
+        current_question_id = str(incoming_progress.get("current_question_id") or "")
+        reviewed = incoming_progress.get("reviewed_question_ids") or []
+        attempt.progress = {
+            "current_question_id": current_question_id if current_question_id in allowed_ids else "",
+            "reviewed_question_ids": [str(item) for item in reviewed if str(item) in allowed_ids][:500] if isinstance(reviewed, list) else [],
+        }
     if request.data.get("submit"):
         grade_attempt(attempt)
         attempt.status = "submitted"
         attempt.submitted_at = timezone.now()
         attempt.save()
+        if attempt.assessment.output_sheet_url:
+            attempt.purge_after = timezone.now() + timedelta(days=7)
+            try:
+                sync_attempt_to_google_sheet(attempt)
+                attempt.sync_status = "synced"
+                attempt.sync_error = ""
+                attempt.synced_at = timezone.now()
+            except Exception as error:
+                attempt.sync_status = "error"
+                attempt.sync_error = str(error)[:2000]
+            attempt.save(update_fields=["sync_status", "sync_error", "synced_at", "purge_after", "updated_at"])
     else:
-        attempt.save(update_fields=["answers", "updated_at"])
+        attempt.save(update_fields=["answers", "progress", "updated_at"])
     return Response(_attempt_payload(attempt, request))
 
 
@@ -301,7 +464,7 @@ def public_attempt_upload(request, token):
         (item for item in public_questions(attempt.assessment, attempt.variant) if str(item.get("id")) == question_id),
         None,
     )
-    if not question or question.get("type") != "file_upload":
+    if not question or question.get("type") not in {"file_upload", "practical_submission"}:
         return _assessment_error("Câu thực hành không hợp lệ.")
     uploaded = request.FILES.get("file")
     if not uploaded:
@@ -310,13 +473,26 @@ def public_attempt_upload(request, token):
         return _assessment_error("Ảnh không được vượt quá 5 MB.")
     if not str(uploaded.content_type or "").startswith("image/"):
         return _assessment_error("Chỉ chấp nhận tệp hình ảnh.")
+    drive_data = {}
+    if attempt.assessment.drive_folder_id:
+        try:
+            drive_data = upload_assessment_file_to_drive(uploaded, attempt.assessment.drive_folder_id)
+        except Exception as error:
+            return _assessment_error(f"Khong the tai anh len Google Drive: {error}")
     item = TrainingAssessmentUpload.objects.create(
         attempt=attempt,
         question_id=question_id,
-        file=uploaded,
+        file=None if drive_data else uploaded,
+        drive_file_id=drive_data.get("id", ""),
+        drive_url=drive_data.get("url", ""),
+        sync_status="drive" if drive_data else "local",
         original_name=uploaded.name,
         content_type=uploaded.content_type or "",
     )
-    attempt.answers = {**attempt.answers, question_id: f"upload:{item.id}"}
+    current_answer = attempt.answers.get(question_id)
+    answer_payload = current_answer if isinstance(current_answer, dict) else {"link": str(current_answer or "")}
+    upload_url = item.drive_url or (item.file.url if item.file else "")
+    answer_payload = {**answer_payload, "upload_id": str(item.id), "upload_file_id": item.drive_file_id, "upload_url": upload_url}
+    attempt.answers = {**attempt.answers, question_id: answer_payload}
     attempt.save(update_fields=["answers", "updated_at"])
-    return Response({"id": item.id, "name": item.original_name, "question_id": question_id}, status=status.HTTP_201_CREATED)
+    return Response({"id": item.id, "file_id": item.drive_file_id, "name": item.original_name, "question_id": question_id, "url": upload_url}, status=status.HTTP_201_CREATED)

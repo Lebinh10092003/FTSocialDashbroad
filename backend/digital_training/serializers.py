@@ -1,9 +1,8 @@
-from datetime import date
-
 from django.db.models import Max
 from rest_framework import serializers
 
 from .assessment_service import variants_for
+from .completion_service import schedule_has_ended
 from .models import (
     TrainingAssessment,
     TrainingAssessmentAttempt,
@@ -120,8 +119,10 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
         return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
 
     def _mark_past_session_completed(self, validated_data):
-        session_date = validated_data.get("session_date")
-        if session_date and session_date < date.today() and validated_data.get("status", "planned") == "planned":
+        session_date = validated_data.get("session_date", getattr(self.instance, "session_date", None))
+        end_time = validated_data.get("end_time", getattr(self.instance, "end_time", None))
+        status = validated_data.get("status", getattr(self.instance, "status", "planned"))
+        if status == "planned" and schedule_has_ended(session_date, end_time):
             validated_data["status"] = "completed"
         return validated_data
     def _sync_primary_category(self, validated_data):
@@ -162,6 +163,14 @@ class TrainingCustomerMeetingSerializer(serializers.ModelSerializer):
             "id", "title", "schedule_type", "activity_type", "customer_type", "representative", "phone", "email", "date",
             "start_time", "end_time", "location", "content", "status", "staff_name", "notes", "created_at", "updated_at",
         ]
+
+    def validate(self, attrs):
+        meeting_date = attrs.get("meeting_date", getattr(self.instance, "meeting_date", None))
+        end_time = attrs.get("end_time", getattr(self.instance, "end_time", None))
+        status = attrs.get("status", getattr(self.instance, "status", "planned"))
+        if status == "planned" and schedule_has_ended(meeting_date, end_time):
+            attrs["status"] = "completed"
+        return attrs
 
 class TrainingMaterialSerializer(serializers.ModelSerializer):
     file_url = serializers.SerializerMethodField()
@@ -219,6 +228,8 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
     submitted_count = serializers.SerializerMethodField()
     average_score = serializers.SerializerMethodField()
     variant_distribution = serializers.SerializerMethodField()
+    participant_count = serializers.SerializerMethodField()
+    sync_counts = serializers.SerializerMethodField()
 
     class Meta:
         model = TrainingAssessment
@@ -228,8 +239,11 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
             "description", "instructions", "duration_minutes", "opens_at", "closes_at",
             "attempt_limit", "status", "public_slug", "questions", "variants",
             "generation_mode", "generation_config",
-            "source_type", "source_name", "created_by", "attempts_count",
-            "submitted_count", "average_score", "variant_distribution", "created_at", "updated_at",
+            "source_type", "source_name", "question_bank_url", "output_sheet_url",
+            "drive_folder_id", "audience_group", "participants", "participant_count",
+            "max_people_per_variant", "sync_status", "sync_error", "sync_counts",
+            "created_by", "attempts_count", "submitted_count", "average_score",
+            "variant_distribution", "created_at", "updated_at",
         ]
         read_only_fields = ["partner", "public_slug", "created_by"]
 
@@ -262,6 +276,16 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
             for variant in variants_for(obj)
         }
 
+    def get_participant_count(self, obj):
+        return len(obj.participants or [])
+
+    def get_sync_counts(self, obj):
+        return {
+            "pending": obj.attempts.filter(sync_status="pending").count(),
+            "synced": obj.attempts.filter(sync_status="synced").count(),
+            "error": obj.attempts.filter(sync_status="error").count(),
+        }
+
     def validate_duration_minutes(self, value):
         if value < 1 or value > 480:
             raise serializers.ValidationError("Thời gian làm bài phải từ 1 đến 480 phút.")
@@ -272,13 +296,47 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Số lượt làm phải từ 1 đến 20.")
         return value
 
+    def validate_max_people_per_variant(self, value):
+        if value < 1 or value > 100:
+            raise serializers.ValidationError("So nguoi toi da tren mot ma de phai tu 1 den 100.")
+        return value
+
+    def validate_participants(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Danh sach nguoi tham gia khong hop le.")
+        result = []
+        seen = set()
+        for index, item in enumerate(value, start=1):
+            if not isinstance(item, dict):
+                raise serializers.ValidationError(f"Dong nguoi tham gia {index} khong hop le.")
+            participant = {
+                "code": str(item.get("code") or "").strip(),
+                "name": str(item.get("name") or "").strip(),
+                "email": str(item.get("email") or "").strip().lower(),
+                "phone": str(item.get("phone") or "").strip(),
+                "organization": str(item.get("organization") or "").strip(),
+                "group": str(item.get("group") or "").strip(),
+                "variant": str(item.get("variant") or "").strip(),
+            }
+            identity = participant["code"].casefold() or participant["email"].casefold() or participant["phone"]
+            if not participant["name"] or not identity:
+                raise serializers.ValidationError(f"Dong {index} can co ho ten va ma/email/so dien thoai.")
+            if identity in seen:
+                raise serializers.ValidationError(f"Dong {index} bi trung nguoi tham gia.")
+            seen.add(identity)
+            result.append(participant)
+        return result
+
     def validate_questions(self, value):
         if not isinstance(value, list):
             raise serializers.ValidationError("Danh sách câu hỏi không hợp lệ.")
         for index, question in enumerate(value, start=1):
             if not isinstance(question, dict) or not str(question.get("text") or "").strip():
                 raise serializers.ValidationError(f"Câu {index} chưa có nội dung.")
-            if question.get("type") not in {"single_choice", "short_answer", "file_upload"}:
+            if question.get("type") not in {
+                "single_choice", "multiple_choice", "short_answer", "matching",
+                "ordering", "practical_submission", "file_upload",
+            }:
                 raise serializers.ValidationError(f"Câu {index} có loại câu chưa được hỗ trợ.")
         return value
 
@@ -295,14 +353,16 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"training_class": "Vui lòng chọn đơn vị hoặc phân lớp tập huấn."})
         if session and training_class and session.training_class_id and session.training_class_id != training_class.id:
             raise serializers.ValidationError({"session": "Buổi tập huấn không thuộc phân lớp đã chọn."})
-        duplicate = TrainingAssessment.objects.filter(partner=partner, training_class=training_class)
-        if self.instance:
-            duplicate = duplicate.exclude(pk=self.instance.pk)
-        if duplicate.exists():
-            raise serializers.ValidationError({"training_class": "Đơn vị/phân lớp này đã có một khảo sát kết thúc tập huấn."})
         attrs["partner"] = partner
         status_value = attrs.get("status", getattr(self.instance, "status", "draft"))
         questions = attrs.get("questions", getattr(self.instance, "questions", []))
+        participants = attrs.get("participants", getattr(self.instance, "participants", []))
+        variant_names = sorted({str(item.get("variant") or "") for item in questions if str(item.get("variant") or "")}, key=str.casefold)
+        if participants and variant_names:
+            attrs["participants"] = [
+                {**item, "variant": item.get("variant") if item.get("variant") in variant_names else variant_names[index % len(variant_names)]}
+                for index, item in enumerate(participants)
+            ]
         if status_value == "published" and not questions:
             raise serializers.ValidationError({"questions": "Cần nhập câu hỏi trước khi phát hành."})
         opens_at = attrs.get("opens_at", getattr(self.instance, "opens_at", None))
@@ -325,9 +385,11 @@ class TrainingAssessmentAttemptSerializer(serializers.ModelSerializer):
     class Meta:
         model = TrainingAssessmentAttempt
         fields = [
-            "id", "respondent_name", "email", "phone", "organization", "variant",
-            "answers", "score", "max_score", "auto_graded_points",
-            "manual_grading_required", "status", "started_at", "expires_at",
+            "id", "respondent_name", "email", "phone", "organization",
+            "participant_code", "variant", "answers", "progress", "score",
+            "max_score", "auto_graded_points", "practical_score",
+            "manual_grading_required", "status", "sync_status", "sync_error",
+            "synced_at", "purge_after", "started_at", "expires_at",
             "submitted_at", "updated_at", "uploads",
         ]
 
@@ -335,11 +397,13 @@ class TrainingAssessmentAttemptSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         result = []
         for upload in obj.uploads.all():
-            url = upload.file.url
+            url = upload.drive_url or (upload.file.url if upload.file else "")
             result.append({
                 "id": upload.id,
+                "file_id": upload.drive_file_id,
+                "storage": upload.sync_status,
                 "question_id": upload.question_id,
                 "name": upload.original_name,
-                "url": request.build_absolute_uri(url) if request else url,
+                "url": request.build_absolute_uri(url) if request and url.startswith("/") else url,
             })
         return result

@@ -1733,9 +1733,14 @@ export default function DigitalTraining({
     load = async () => {
       setLoading(true);
       try {
+        const sessionResponse = await fetch("/api/digital-training/sessions", {
+          headers: auth(),
+        });
+        if (!sessionResponse.ok)
+          throw Error("Không thể tải dữ liệu Đào tạo số.");
+        const sessionRows = await sessionResponse.json();
         const list = await Promise.all(
           [
-            "sessions",
             "customer-meetings",
             "partners",
             "classes",
@@ -1749,12 +1754,12 @@ export default function DigitalTraining({
             return r.json();
           }),
         );
-        setSessions(list[0]);
-        setMeetings(list[1]);
-        setPartners(list[2]);
-        setClasses(list[3]);
-        setMaterials(list[4]);
-        setSurveys(list[5]);
+        setSessions(sessionRows);
+        setMeetings(list[0]);
+        setPartners(list[1]);
+        setClasses(list[2]);
+        setMaterials(list[3]);
+        setSurveys(list[4]);
       } catch (e: any) {
         setNotice(e.message);
       } finally {

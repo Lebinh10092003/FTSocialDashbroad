@@ -1,0 +1,10 @@
+[Unit]
+Description=Complete past digital-training schedules every day at 06:00
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 Asia/Ho_Chi_Minh
+Persistent=true
+Unit=workspace-training-completion.service
+
+[Install]
+WantedBy=timers.target

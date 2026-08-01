@@ -8,6 +8,7 @@ import uuid
 from authentication.permissions import IsManagerOrAdmin
 from authentication.models import UserProfile
 from examination.models import LogNote
+from .completion_service import complete_past_training_schedules
 from .models import TrainingClass, TrainingCustomerMeeting, TrainingMaterial, TrainingPartner, TrainingSession, TrainingSurvey
 from .serializers import TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingMaterialSerializer, TrainingPartnerSerializer, TrainingSessionSerializer, TrainingSurveySerializer
 
@@ -100,6 +101,8 @@ def _crud_detail(request, queryset, serializer_class, pk, kind):
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticatedOrReadOnly])
 def training_sessions(request):
+    if request.method == "GET":
+        complete_past_training_schedules()
     return _crud_collection(request, TrainingSession.objects.select_related("partner_ref", "training_class").all(), TrainingSessionSerializer, "buổi tập huấn")
 
 
@@ -112,6 +115,8 @@ def training_session_detail(request, pk):
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticatedOrReadOnly])
 def training_customer_meetings(request):
+    if request.method == "GET":
+        complete_past_training_schedules()
     return _crud_collection(request, TrainingCustomerMeeting.objects.all(), TrainingCustomerMeetingSerializer, "cuộc gặp khách hàng")
 
 
@@ -133,6 +138,7 @@ def training_partner_detail(request, pk):
     if not partner:
         return Response({"error": "Không tìm thấy khách hàng."}, status=status.HTTP_404_NOT_FOUND)
     if request.method == "GET":
+        complete_past_training_schedules()
         data = TrainingPartnerSerializer(partner, context={"request": request}).data
         data["classes"] = TrainingClassSerializer(partner.classes.all(), many=True, context={"request": request}).data
         data["sessions"] = TrainingSessionSerializer(partner.sessions.select_related("partner_ref", "training_class").all(), many=True, context={"request": request}).data
