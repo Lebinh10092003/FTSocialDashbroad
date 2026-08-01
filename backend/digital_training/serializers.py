@@ -1,8 +1,10 @@
-from django.db.models import Max
+from django.db.models import Max, Sum
+from django.utils import timezone
 from rest_framework import serializers
 
 from .assessment_service import variants_for
 from .completion_service import schedule_has_ended
+from .product_service import sync_partner_product_subscriptions
 from .models import (
     TrainingAssessment,
     TrainingAssessmentAttempt,
@@ -10,9 +12,23 @@ from .models import (
     TrainingCustomerMeeting,
     TrainingMaterial,
     TrainingPartner,
+    TrainingProduct,
+    TrainingProductSubscription,
     TrainingSession,
     TrainingSurvey,
 )
+
+
+def product_subscription_status(subscription):
+    if subscription.status in {"paused", "cancelled"}:
+        return subscription.status
+    if subscription.expires_at:
+        days = (subscription.expires_at - timezone.localdate()).days
+        if days < 0:
+            return "expired"
+        if days <= 30:
+            return "expiring"
+    return "active"
 
 
 class TrainingPartnerSerializer(serializers.ModelSerializer):
@@ -64,12 +80,100 @@ class TrainingPartnerSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         partner = super().create(validated_data)
         self._sync_registered_sessions(partner)
+        sync_partner_product_subscriptions(partner)
         return partner
 
     def update(self, instance, validated_data):
         partner = super().update(instance, validated_data)
         self._sync_registered_sessions(partner)
+        sync_partner_product_subscriptions(partner)
         return partner
+
+
+class TrainingProductSerializer(serializers.ModelSerializer):
+    customer_count = serializers.SerializerMethodField()
+    active_customer_count = serializers.SerializerMethodField()
+    expired_customer_count = serializers.SerializerMethodField()
+    total_quantity = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TrainingProduct
+        fields = [
+            "id", "name", "code", "description", "active", "display_order",
+            "customer_count", "active_customer_count", "expired_customer_count",
+            "total_quantity", "created_at", "updated_at",
+        ]
+        read_only_fields = ["code"]
+
+    def _subscriptions(self, obj):
+        return list(obj.subscriptions.exclude(status="cancelled").all())
+
+    def get_customer_count(self, obj):
+        return len(self._subscriptions(obj))
+
+    def get_active_customer_count(self, obj):
+        return sum(product_subscription_status(item) in {"active", "expiring"} for item in self._subscriptions(obj))
+
+    def get_expired_customer_count(self, obj):
+        return sum(product_subscription_status(item) == "expired" for item in self._subscriptions(obj))
+
+    def get_total_quantity(self, obj):
+        return obj.subscriptions.exclude(status="cancelled").aggregate(total=Sum("quantity"))["total"] or 0
+
+    def create(self, validated_data):
+        if "display_order" not in validated_data:
+            validated_data["display_order"] = (TrainingProduct.objects.order_by("-display_order").values_list("display_order", flat=True).first() or 0) + 1
+        return super().create(validated_data)
+
+
+class TrainingProductSubscriptionSerializer(serializers.ModelSerializer):
+    partner_name = serializers.CharField(source="partner.name", read_only=True)
+    partner_group = serializers.CharField(source="partner.partner_type", read_only=True)
+    partner_subtype = serializers.CharField(source="partner.partner_subtype", read_only=True)
+    partner_province = serializers.CharField(source="partner.province", read_only=True)
+    partner_ward = serializers.CharField(source="partner.ward", read_only=True)
+    product_name = serializers.CharField(source="product.name", read_only=True)
+    product_code = serializers.CharField(source="product.code", read_only=True)
+    effective_status = serializers.SerializerMethodField()
+    days_remaining = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TrainingProductSubscription
+        fields = [
+            "id", "partner", "partner_name", "partner_group", "partner_subtype",
+            "partner_province", "partner_ward", "product", "product_name",
+            "product_code", "quantity", "starts_at", "expires_at", "status",
+            "effective_status", "days_remaining", "notes", "created_at", "updated_at",
+        ]
+
+    def get_effective_status(self, obj):
+        return product_subscription_status(obj)
+
+    def get_days_remaining(self, obj):
+        return (obj.expires_at - timezone.localdate()).days if obj.expires_at else None
+
+    def validate(self, attrs):
+        starts_at = attrs.get("starts_at", getattr(self.instance, "starts_at", None))
+        expires_at = attrs.get("expires_at", getattr(self.instance, "expires_at", None))
+        if starts_at and expires_at and expires_at < starts_at:
+            raise serializers.ValidationError({"expires_at": "Han su dung phai sau ngay bat dau."})
+        return attrs
+
+    def _sync_partner_product_name(self, subscription):
+        values = list(subscription.partner.products or [])
+        if subscription.product.name not in values:
+            subscription.partner.products = [*values, subscription.product.name]
+            subscription.partner.save(update_fields=["products", "updated_at"])
+
+    def create(self, validated_data):
+        subscription = super().create(validated_data)
+        self._sync_partner_product_name(subscription)
+        return subscription
+
+    def update(self, instance, validated_data):
+        subscription = super().update(instance, validated_data)
+        self._sync_partner_product_name(subscription)
+        return subscription
 
 class TrainingClassSerializer(serializers.ModelSerializer):
     partner_name = serializers.CharField(source="partner.name", read_only=True)

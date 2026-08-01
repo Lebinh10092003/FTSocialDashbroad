@@ -9,8 +9,8 @@ from authentication.permissions import IsManagerOrAdmin
 from authentication.models import UserProfile
 from examination.models import LogNote
 from .completion_service import complete_past_training_schedules
-from .models import TrainingClass, TrainingCustomerMeeting, TrainingMaterial, TrainingPartner, TrainingSession, TrainingSurvey
-from .serializers import TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingMaterialSerializer, TrainingPartnerSerializer, TrainingSessionSerializer, TrainingSurveySerializer
+from .models import TrainingClass, TrainingCustomerMeeting, TrainingMaterial, TrainingPartner, TrainingProduct, TrainingProductSubscription, TrainingSession, TrainingSurvey
+from .serializers import TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingMaterialSerializer, TrainingPartnerSerializer, TrainingProductSerializer, TrainingProductSubscriptionSerializer, TrainingSessionSerializer, TrainingSurveySerializer
 
 
 def _can_manage(request):
@@ -158,6 +158,40 @@ def training_classes(request):
 @permission_classes([IsAuthenticatedOrReadOnly])
 def training_class_detail(request, pk):
     return _crud_detail(request, TrainingClass.objects.select_related("partner").all(), TrainingClassSerializer, pk, "lớp/phân nhóm")
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticatedOrReadOnly])
+def training_products(request):
+    queryset = TrainingProduct.objects.prefetch_related("subscriptions").all()
+    return _crud_collection(request, queryset, TrainingProductSerializer, "sản phẩm")
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAuthenticatedOrReadOnly])
+def training_product_detail(request, pk):
+    if request.method == "DELETE" and not _can_manage(request):
+        return _forbidden()
+    item = TrainingProduct.objects.prefetch_related("subscriptions").filter(pk=pk).first()
+    if request.method == "DELETE" and item and item.subscriptions.exists():
+        return Response({"error": "San pham dang co khach hang su dung; hay chuyen sang ngung hoat dong thay vi xoa."}, status=status.HTTP_400_BAD_REQUEST)
+    return _crud_detail(request, TrainingProduct.objects.prefetch_related("subscriptions").all(), TrainingProductSerializer, pk, "sản phẩm")
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticatedOrReadOnly])
+def training_product_subscriptions(request):
+    queryset = TrainingProductSubscription.objects.select_related("partner", "product").all()
+    return _crud_collection(request, queryset, TrainingProductSubscriptionSerializer, "đăng ký sản phẩm")
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAuthenticatedOrReadOnly])
+def training_product_subscription_detail(request, pk):
+    queryset = TrainingProductSubscription.objects.select_related("partner", "product").all()
+    return _crud_detail(request, queryset, TrainingProductSubscriptionSerializer, pk, "đăng ký sản phẩm")
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticatedOrReadOnly])
 def training_materials(request):

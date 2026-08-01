@@ -12,6 +12,7 @@ import {
   ExternalLink,
   GraduationCap,
   Handshake,
+  PackageSearch,
   Pencil,
   Plus,
   Search,
@@ -27,12 +28,14 @@ import AccountMenu from "../AccountMenu";
 import ConfirmModal from "../ConfirmModal";
 import SearchableSelect from "../SearchableSelect";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import ProductManagement from "./ProductManagement";
 
 type Tab =
   | "calendar"
   | "sessions"
   | "partner-sessions"
   | "partners"
+  | "products"
   | "survey"
   | "materials";
 type Mode = "week" | "month";
@@ -355,6 +358,7 @@ const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
     icon: ClipboardList,
   },
   { id: "partners", label: "Khách hàng", icon: Handshake },
+  { id: "products", label: "Quản lý sản phẩm", icon: PackageSearch },
   { id: "survey", label: "Khảo sát", icon: Users },
   { id: "materials", label: "Tài liệu", icon: BookOpen },
 ];
@@ -3668,6 +3672,13 @@ export default function DigitalTraining({
             Khách hàng
           </button>
           <button
+            onClick={() => go("products")}
+            className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "products" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
+          >
+            <PackageSearch className="h-4 w-4" />
+            Quản lý sản phẩm
+          </button>
+          <button
             onClick={() => setSurveyOpen(!surveyOpen)}
             className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "survey" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
           >
@@ -4211,6 +4222,13 @@ export default function DigitalTraining({
                     </div>
                   </article>
                 </section>
+              )}
+              {tab === "products" && (
+                <ProductManagement
+                  partners={partners}
+                  idToken={idToken}
+                  isGuest={isGuest}
+                />
               )}
               {tab === "partners" && !partner && (
                 <section className="mt-6 overflow-hidden rounded-2xl border bg-white shadow-sm">

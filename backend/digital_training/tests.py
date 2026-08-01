@@ -12,8 +12,8 @@ from rest_framework.test import APIClient
 
 from .assessment_service import generate_variants_from_import, parse_assessment_workbook
 from .completion_service import complete_past_training_schedules
-from .models import TrainingAssessment, TrainingClass, TrainingCustomerMeeting, TrainingPartner, TrainingSession, TrainingSurvey
-from .serializers import TrainingAssessmentSerializer, TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingPartnerSerializer, TrainingSessionSerializer, TrainingSurveySerializer
+from .models import TrainingAssessment, TrainingClass, TrainingCustomerMeeting, TrainingPartner, TrainingProduct, TrainingProductSubscription, TrainingSession, TrainingSurvey
+from .serializers import TrainingAssessmentSerializer, TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingPartnerSerializer, TrainingProductSerializer, TrainingProductSubscriptionSerializer, TrainingSessionSerializer, TrainingSurveySerializer
 
 
 class TrainingSurveySerializerTests(TestCase):
@@ -154,6 +154,63 @@ class TrainingPartnerLocationTests(TestCase):
         self.assertTrue(serializer.is_valid(), serializer.errors)
         training_class = serializer.save()
         self.assertEqual(training_class.training_contents, ["Dashboard", "AI"])
+
+
+class TrainingProductManagementTests(TestCase):
+    def setUp(self):
+        self.partner = TrainingPartner.objects.create(
+            name="Khach hang san pham",
+            partner_type="Khoi Giao duc",
+            partner_subtype="THPT",
+        )
+
+    def test_product_and_subscription_expose_quantity_and_remaining_status(self):
+        product_serializer = TrainingProductSerializer(data={"name": "San pham moi", "description": "Mo ta"})
+        self.assertTrue(product_serializer.is_valid(), product_serializer.errors)
+        product = product_serializer.save()
+        self.assertEqual(product.code, "san-pham-moi")
+        subscription_serializer = TrainingProductSubscriptionSerializer(data={
+            "partner": self.partner.pk,
+            "product": product.pk,
+            "quantity": 25,
+            "starts_at": timezone.localdate() - timedelta(days=30),
+            "expires_at": timezone.localdate() + timedelta(days=14),
+            "status": "active",
+            "notes": "Gia han trong thang",
+        })
+        self.assertTrue(subscription_serializer.is_valid(), subscription_serializer.errors)
+        subscription = subscription_serializer.save()
+        data = TrainingProductSubscriptionSerializer(subscription).data
+        self.assertEqual(data["effective_status"], "expiring")
+        self.assertEqual(data["days_remaining"], 14)
+        self.assertEqual(data["quantity"], 25)
+
+    def test_product_subscription_is_unique_per_customer(self):
+        product = TrainingProduct.objects.create(name="Unique product", code="unique-product")
+        TrainingProductSubscription.objects.create(partner=self.partner, product=product, quantity=1)
+        duplicate = TrainingProductSubscriptionSerializer(data={
+            "partner": self.partner.pk,
+            "product": product.pk,
+            "quantity": 2,
+        })
+        self.assertFalse(duplicate.is_valid())
+        self.assertIn("non_field_errors", duplicate.errors)
+
+    def test_partner_legacy_products_create_product_subscriptions(self):
+        ai_product, _ = TrainingProduct.objects.get_or_create(
+            code="ai-dung-chung",
+            defaults={"name": "AI dùng chung", "display_order": 2},
+        )
+        serializer = TrainingPartnerSerializer(data={
+            "name": "Khach hang dong bo san pham",
+            "products": ["AI có bản quyền dùng chung"],
+            "ai_account_count": 18,
+        })
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        partner = serializer.save()
+        subscription = TrainingProductSubscription.objects.get(partner=partner, product=ai_product)
+        self.assertEqual(subscription.quantity, 18)
+        self.assertEqual(subscription.status, "active")
 
 class TrainingSessionLocationTests(TestCase):
     def test_new_session_has_no_automatic_responsible_staff(self):
