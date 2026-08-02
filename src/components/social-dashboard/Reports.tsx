@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { appDialog } from '../AppDialog';
 import { 
   BarChart3, FileSpreadsheet, Download, ExternalLink, Calendar, Radio, TrendingUp, AlertCircle
 } from 'lucide-react';
@@ -71,7 +72,7 @@ export default function Reports({ idToken, channels }: ReportsProps) {
       link.remove();
     })
     .catch(err => {
-      alert('Không thể tải CSV: ' + err.message);
+      void appDialog.alert('Không thể tải CSV: ' + err.message, { title: 'Xuất báo cáo thất bại', tone: 'danger' });
     });
   };
 

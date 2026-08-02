@@ -1,4 +1,5 @@
 import React, { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react';
+import { appDialog } from './components/AppDialog';
 import { BadgeDollarSign, CalendarCheck, ChartColumnBig, ClipboardList, FileCheck2, GraduationCap, Mail, QrCode, ShieldUser } from 'lucide-react';
 
 import { Channel, UserRole } from './types';
@@ -248,6 +249,25 @@ export default function App() {
     if (window.location.pathname !== path) window.history.pushState(null, '', path);
   };
 
+  useEffect(() => {
+    if (authChecking || viewMode === 'workspace' || viewMode === 'training-assessment-public' || viewMode === 'qr-generator') return;
+    if (!canAccessView(viewMode)) {
+      setViewModeState('workspace');
+      window.history.replaceState(null, '', '/');
+      if (isGuest) {
+        setAuthError('Vui lòng đăng nhập để truy cập mô-đun.');
+        setShowLoginModal(true);
+      } else {
+        setAccessNotice('Tài khoản của bạn chưa được cấp quyền truy cập mô-đun này.');
+      }
+      return;
+    }
+    if (viewMode === 'social-dashboard' && isGuest && (activeTab === 'sync' || activeTab === 'config')) {
+      setActiveTab('dashboard');
+      window.history.replaceState(null, '', socialPathFor('dashboard'));
+    }
+  }, [activeTab, authChecking, canViewFinance, isGuest, user.accessModules, userRole, viewMode]);
+
   const openProtectedView = (mode: ViewMode, tab?: string) => {
     if (!canAccessView(mode)) {
       if (isGuest) { setAuthError('Vui lòng đăng nhập để truy cập mô-đun.'); setShowLoginModal(true); }
@@ -305,7 +325,7 @@ export default function App() {
   };
 
   const handleConnectGoogle = async () => {
-    alert('Tính năng kết nối Google Sheets hiện chưa sẵn sàng.');
+    void appDialog.alert('Tính năng kết nối Google Sheets hiện chưa sẵn sàng.', { title: 'Kết nối Google Sheets', tone: 'info' });
     return false;
   };
 
@@ -503,7 +523,7 @@ export default function App() {
     );
   }
 
-  if (viewMode === 'finance-report' && !canAccessView('finance-report')) { setViewMode('workspace'); return null; }
+  if (viewMode === 'finance-report' && !canAccessView('finance-report')) return null;
 
   if (viewMode === 'finance-report') {
     return (
@@ -526,7 +546,7 @@ export default function App() {
   }
 
   if (viewMode === 'account-management') {
-    if (userRole !== 'ADMIN') { setViewMode('workspace'); return null; }
+    if (userRole !== 'ADMIN') return null;
     return (
       <>
         <div className="min-h-screen bg-slate-50 font-sans">
@@ -547,7 +567,7 @@ export default function App() {
     );
   }
 
-  if (viewMode === 'training-assessments' && !canAccessView('training-assessments')) { setViewMode('workspace'); return null; }
+  if (viewMode === 'training-assessments' && !canAccessView('training-assessments')) return null;
 
   if (viewMode === 'training-assessments') {
     return (
@@ -577,7 +597,7 @@ export default function App() {
     );
   }
 
-  if (viewMode === 'attendance' && isGuest) { setViewMode('workspace'); return null; }
+  if (viewMode === 'attendance' && isGuest) return null;
 
   if (viewMode === 'attendance') {
     return (
@@ -587,7 +607,7 @@ export default function App() {
     );
   }
 
-  if (viewMode === 'email-builder' && !canAccessView('email-builder')) { setViewMode('workspace'); return null; }
+  if (viewMode === 'email-builder' && !canAccessView('email-builder')) return null;
 
   if (viewMode === 'email-builder') {
     return (
@@ -608,7 +628,7 @@ export default function App() {
     );
   }
 
-  if (viewMode === 'digital-training' && !canAccessView('digital-training')) { setViewMode('workspace'); return null; }
+  if (viewMode === 'digital-training' && !canAccessView('digital-training')) return null;
 
   if (viewMode === 'digital-training') {
     return (
@@ -633,7 +653,7 @@ export default function App() {
     );
   }
 
-  if (viewMode === 'examination' && !canAccessView('examination')) { setViewMode('workspace'); return null; }
+  if (viewMode === 'examination' && !canAccessView('examination')) return null;
 
   if (viewMode === 'examination') {
     return (
@@ -659,8 +679,8 @@ export default function App() {
     );
   }
 
-  if (!canAccessView('social-dashboard')) { setViewMode('workspace'); return null; }
-  if (isGuest && (activeTab === 'sync' || activeTab === 'config')) { setSocialTab('dashboard'); return null; }
+  if (!canAccessView('social-dashboard')) return null;
+  if (isGuest && (activeTab === 'sync' || activeTab === 'config')) return null;
 
   return (
     <div className="ft-module-shell flex h-screen overflow-hidden font-sans">

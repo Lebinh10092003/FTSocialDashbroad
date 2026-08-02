@@ -102,6 +102,69 @@ class LogNoteApiTests(TestCase):
         self.assertEqual(self.client.get(self.url).data, [])
         self.assertFalse(LogNote.objects.exists())
 
+    def test_manual_note_uses_authenticated_identity_and_cannot_spoof_system_event(self):
+        response = self.client.post(
+            self.url,
+            {'content': 'Ghi chú kiểm tra.', 'actor': 'Người khác', 'system': True},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        note = LogNote.objects.get(entity_key='session-demo')
+        self.assertEqual(note.updated_by, 'LogNote Admin')
+        self.assertEqual(note.actor_email, self.user.email)
+        self.assertFalse(note.system)
+        self.assertEqual(response.data['note']['createdAt'], note.created_at.isoformat())
+
+    def test_nested_partner_values_are_written_as_readable_text(self):
+        response = self.client.put('/api/examination/partners', {'partners': [{
+            'id': 'partner-readable', 'school': 'Trường A', 'contests': ['AYSBC'],
+            'studentCounts': [{'session': 'AYSBC 2026', 'count': 8}],
+        }]}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        content = LogNote.objects.get(entity_key='partner-partner-readable').content
+        self.assertIn('Kỳ tổ chức: AYSBC 2026; Số lượng: 8', content)
+        self.assertNotIn(chr(123) + chr(39) + 'session', content)
+
+    def test_legacy_dictionary_change_log_is_humanized_when_read(self):
+        before = {'name': 'Lớp A', 'studentCounts': [{'session': 'FIMO 2025', 'count': 4}]}
+        after = {'name': 'Lớp B', 'studentCounts': [{'session': 'FIMO 2026', 'count': 8}]}
+        LogNote.objects.create(
+            key='legacy-change',
+            entity_key='session-demo',
+            updated_by='Legacy User',
+            content=f'Cập nhật lớp. Thông tin trước: {before}. Thông tin sau: {after}.',
+        )
+
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        content = response.data[0]['content']
+        quoted_change = f'Đã đổi Tên từ {chr(34)}Lớp A{chr(34)} thành {chr(34)}Lớp B{chr(34)}.'
+        self.assertIn(quoted_change, content)
+        self.assertIn('Kỳ tổ chức: FIMO 2026; Số lượng: 8', content)
+        self.assertNotIn(chr(123) + chr(39) + 'name', content)
+
+    def test_partner_recovery_accepts_python_dictionary_legacy_log(self):
+        partner = {
+            'id': 'partner-legacy',
+            'school': 'Trường Legacy',
+            'contests': ['FIMO'],
+            'studentCounts': [{'session': 'FIMO 2026', 'count': 12}],
+        }
+        LogNote.objects.create(
+            key='legacy-partner',
+            entity_key='partner-partner-legacy',
+            updated_by='Legacy User',
+            content=f'Cập nhật đối tác. Thông tin trước: {dict()}. Thông tin sau: {partner}.',
+        )
+
+        response = self.client.get('/api/examination/partners')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['partners'][0]['school'], 'Trường Legacy')
+        self.assertEqual(response.data['partners'][0]['studentCounts'][0]['count'], 12)
+
 
 class CandidateRoundHistoryTests(TestCase):
     def setUp(self):

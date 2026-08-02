@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { appDialog } from "../AppDialog";
 import {
   BarChart3,
   Boxes,

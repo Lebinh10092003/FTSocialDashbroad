@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { appDialog } from '../AppDialog';
 import { 
   Radio, Plus, RefreshCw, CheckCircle2, XCircle, Settings, Trash2, ShieldAlert, Wifi, Globe, AlertTriangle
 } from 'lucide-react';
@@ -44,7 +45,7 @@ export default function Channels({ idToken, googleAccessToken, channels, userRol
     e.preventDefault();
     if (!isAdmin) return;
     if (!newChanName || !newChanExternalId) {
-      alert('Vui lòng điền đầy đủ tên kênh và ID nền tảng!');
+      void appDialog.alert('Vui lòng điền đầy đủ tên kênh và ID nền tảng!', { title: 'Thiếu thông tin', tone: 'warning' });
       return;
     }
 

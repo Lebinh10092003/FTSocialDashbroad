@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { appDialog } from '../AppDialog';
 import {
   CheckCircle2,
   Copy,
@@ -656,7 +657,7 @@ function BlueprintImportLauncher({
       onNavigate('blueprint-detail', result.blueprint.id);
     } catch (error: any) {
       setNotice(error.message);
-      window.alert(error.message);
+      void appDialog.alert(error.message, { title: 'Không thể nhập ma trận', tone: 'danger' });
     } finally {
       setBusy(false);
     }

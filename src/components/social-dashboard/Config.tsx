@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { appDialog } from '../AppDialog';
 import { 
   Settings, FileSpreadsheet, Lock, Users, AlertCircle, CheckCircle2, Shield, Plus, Trash2, Eye, ShieldAlert, KeyRound, ExternalLink, Edit3, EyeOff, FileCode, HelpCircle,
   Check, Layers, Search, Sparkles, Copy
@@ -374,20 +375,20 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
 
   const handleAddOrUpdateToken = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formPageId.trim() || !formAccessToken.trim()) { alert('Vui lòng nhập đầy đủ ID Trang/OA và mã Access Token!'); return; }
+    if (!formPageId.trim() || !formAccessToken.trim()) { void appDialog.alert('Vui lòng nhập đầy đủ ID Trang/OA và mã Access Token!', { title: 'Thiếu thông tin', tone: 'warning' }); return; }
     const cleanPageId = formPageId.trim();
     const cleanPageName = formPageName.trim() || `${formPlatform === 'facebook' ? 'Trang Facebook' : 'Zalo OA'} ${cleanPageId}`;
     const cleanAccessToken = formAccessToken.trim();
     const baseRow = { id: editingTokenId || `${formPlatform}-${cleanPageId}`, platform: formPlatform, pageId: cleanPageId, pageName: cleanPageName, accessToken: cleanAccessToken } as Omit<TokenRow, 'issuedAt' | 'expiresAt'>;
     let nextList: TokenRow[];
     if (editingTokenId) { nextList = tokensList.map(token => token.id === editingTokenId ? tokenLifetime(baseRow, token) : token); setEditingTokenId(null); }
-    else { if (tokensList.some(token => token.id === baseRow.id)) { alert('Mã ID trang/OA này đã tồn tại trong bảng quản lý.'); return; } nextList = [...tokensList, tokenLifetime(baseRow)]; }
+    else { if (tokensList.some(token => token.id === baseRow.id)) { void appDialog.alert('Mã ID trang/OA này đã tồn tại trong bảng quản lý.', { title: 'ID đã tồn tại', tone: 'warning' }); return; } nextList = [...tokensList, tokenLifetime(baseRow)]; }
     setTokensList(nextList); setFormPageId(''); setFormPageName(''); setFormAccessToken(''); setShowAddForm(false); void autoSaveTokensList(nextList);
   };
 
   const handleFbScan = async () => {
     if (!fbUserToken.trim()) {
-      alert('Vui lòng dán mã Facebook User Access Token!');
+      void appDialog.alert('Vui lòng dán mã Facebook User Access Token!', { title: 'Thiếu Access Token', tone: 'warning' });
       return;
     }
     setScanningFb(true);
@@ -423,7 +424,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
 
   const handleImportScannedPages = () => {
     const selected = scannedPages.filter(page => page.checked);
-    if (selected.length === 0) { alert('Vui lòng chọn ít nhất một Trang để nhập!'); return; }
+    if (selected.length === 0) { void appDialog.alert('Vui lòng chọn ít nhất một Trang để nhập!', { title: 'Chưa chọn trang', tone: 'warning' }); return; }
     const selectedPageIds = new Set(selected.map(page => page.id));
     const existingScanToken = facebookScanTokens.find(token => token.accessToken === fbUserToken.trim());
     // A replacement token for the same complete page group supersedes the old
@@ -448,9 +449,9 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
   };
 
   const handleImportPresets = () => {
-    if (!presetToken.trim()) { alert('Vui lòng dán mã Access Token áp dụng cho các trang mẫu!'); return; }
+    if (!presetToken.trim()) { void appDialog.alert('Vui lòng dán mã Access Token áp dụng cho các trang mẫu!', { title: 'Thiếu Access Token', tone: 'warning' }); return; }
     const selectedList = FERMAT_PRESETS.filter(page => selectedPresets[page.pageId]);
-    if (selectedList.length === 0) { alert('Vui lòng tích chọn ít nhất một Trang mẫu để nhập!'); return; }
+    if (selectedList.length === 0) { void appDialog.alert('Vui lòng tích chọn ít nhất một Trang mẫu để nhập!', { title: 'Chưa chọn trang mẫu', tone: 'warning' }); return; }
     const selectedPages = selectedList.map(page => ({ id: page.pageId, name: page.pageName }));
     const selectedIds = new Set(selectedList.map(page => page.pageId));
     const existingScanToken = facebookScanTokens.find(token => token.accessToken === presetToken.trim()) || facebookScanTokens.find(token => token.pageIds.some(id => selectedIds.has(id)));
@@ -512,7 +513,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
     e.preventDefault();
     if (!isAdmin) return;
     if (!spreadsheetId) {
-      alert('Vui lòng nhập Spreadsheet ID hoặc đường dẫn URL đầy đủ!');
+      void appDialog.alert('Vui lòng nhập Spreadsheet ID hoặc đường dẫn URL đầy đủ!', { title: 'Thiếu Spreadsheet ID', tone: 'warning' });
       return;
     }
 
@@ -547,12 +548,12 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin || !newEmail.trim() || !newPassword.trim()) {
-      alert('Vui lòng điền đầy đủ Email và Mật khẩu khởi tạo!');
+      void appDialog.alert('Vui lòng điền đầy đủ Email và Mật khẩu khởi tạo!', { title: 'Thiếu thông tin tài khoản', tone: 'warning' });
       return;
     }
 
     if (newPassword.trim().length < 6) {
-      alert('Mật khẩu khởi tạo tối thiểu phải từ 6 ký tự!');
+      void appDialog.alert('Mật khẩu khởi tạo tối thiểu phải từ 6 ký tự!', { title: 'Mật khẩu chưa hợp lệ', tone: 'warning' });
       return;
     }
 
@@ -584,9 +585,9 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
       setNewEmail('');
       setNewName('');
       setNewPassword('');
-      alert(data.message || 'Đã tạo/cập nhật tài khoản người dùng thành công!');
+      void appDialog.alert(data.message || 'Đã tạo/cập nhật tài khoản người dùng thành công!', { title: 'Cập nhật tài khoản hoàn tất', tone: 'success' });
     } catch (e: any) {
-      alert('Lỗi tạo tài khoản: ' + e.message);
+      void appDialog.alert('Lỗi tạo tài khoản: ' + e.message, { title: 'Không thể cập nhật tài khoản', tone: 'danger' });
     } finally {
       setUserActionLoading(false);
     }
@@ -618,9 +619,9 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
           }
 
           setUsersList(prev => prev.filter(u => u.email !== email));
-          alert(data.message || 'Đã xóa tài khoản thành công!');
+          void appDialog.alert(data.message || 'Đã xóa tài khoản thành công!', { title: 'Xóa tài khoản hoàn tất', tone: 'success' });
         } catch (e: any) {
-          alert('Lỗi xóa người dùng: ' + e.message);
+          void appDialog.alert('Lỗi xóa người dùng: ' + e.message, { title: 'Không thể xóa tài khoản', tone: 'danger' });
         } finally {
           setUserActionLoading(false);
         }

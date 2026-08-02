@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { appDialog } from '../AppDialog';
 import * as XLSX from 'xlsx';
 import {
   CheckCircle2, Download, FileSpreadsheet, Link2, LoaderCircle,

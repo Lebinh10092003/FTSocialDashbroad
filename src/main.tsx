@@ -1,6 +1,7 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
+import {AppDialogProvider} from './components/AppDialog.tsx';
 import './index.css';
 
 const originalFetch = window.fetch.bind(window);
@@ -90,5 +91,5 @@ document.addEventListener('click', event => {
 document.addEventListener('pointerup', endDragScroll);
 document.addEventListener('pointercancel', endDragScroll);
 createRoot(document.getElementById('root')!).render(
-  <StrictMode><App /></StrictMode>,
+  <StrictMode><AppDialogProvider><App /></AppDialogProvider></StrictMode>,
 );

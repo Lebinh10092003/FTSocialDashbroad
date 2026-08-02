@@ -1,6 +1,7 @@
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
+import ast
 import uuid
 import json
 import re
@@ -74,7 +75,10 @@ def describe_registration(value):
         try:
             value = json.loads(value)
         except (TypeError, ValueError):
-            return str(value or '').strip()
+            try:
+                value = ast.literal_eval(value)
+            except (SyntaxError, ValueError):
+                return str(value or '').strip()
     if not isinstance(value, dict):
         return ''
     labels = {
@@ -86,12 +90,68 @@ def describe_registration(value):
     return '; '.join(details)
 
 
+AUDIT_VALUE_LABELS = {
+    'id': 'Mã', 'name': 'Tên', 'title': 'Tiêu đề', 'code': 'Mã',
+    'date': 'Ngày', 'start': 'Ngày bắt đầu', 'end': 'Ngày kết thúc',
+    'start_time': 'Giờ bắt đầu', 'end_time': 'Giờ kết thúc',
+    'startTime': 'Giờ bắt đầu', 'endTime': 'Giờ kết thúc',
+    'time': 'Thời gian', 'day': 'Ngày trong tuần', 'month': 'Tháng', 'year': 'Năm',
+    'status': 'Trạng thái', 'phase': 'Giai đoạn', 'mode': 'Hình thức',
+    'note': 'Ghi chú', 'description': 'Mô tả', 'content': 'Nội dung',
+    'session': 'Kỳ tổ chức', 'sessionId': 'Kỳ tổ chức', 'sessionIds': 'Các kỳ tổ chức',
+    'count': 'Số lượng', 'studentCounts': 'Số học sinh cộng tác theo kỳ',
+    'candidateCodes': 'Danh sách học viên', 'attendance': 'Điểm danh',
+    'teacher': 'Giáo viên', 'teacherEmail': 'Email giáo viên',
+    'school': 'Trường', 'province': 'Tỉnh/Thành phố', 'ward': 'Phường/Xã',
+    'representative': 'Đầu mối liên hệ', 'phone': 'Số điện thoại', 'email': 'Email',
+    'subject': 'Môn/Nội dung', 'category': 'Bảng thi', 'level': 'Cấp học',
+    'contests': 'Các cuộc thi', 'location': 'Địa điểm', 'link': 'Đường dẫn',
+    'planned': 'Dự kiến', 'unknown': 'Chưa xác định',
+}
+
+
+def parse_structured_audit_value(value):
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if len(text) < 2 or (text[0], text[-1]) not in {('{', '}'), ('[', ']'), ('(', ')')}:
+        return value
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        try:
+            parsed = ast.literal_eval(text)
+        except (SyntaxError, ValueError):
+            return value
+    return parsed if isinstance(parsed, (dict, list, tuple)) else value
+
+
 def audit_display_value(field, value):
     if field == 'rounds':
         return describe_rounds(value) or 'chưa có vòng thi'
     if field == 'registration':
         return describe_registration(value) or 'chưa có thông tin'
-    return str(value or '').strip() or 'chưa có thông tin'
+    value = parse_structured_audit_value(value)
+    if value is None or value == '':
+        return 'chưa có thông tin'
+    if isinstance(value, bool):
+        return 'Có' if value else 'Không'
+    if isinstance(value, dict):
+        details = []
+        for key, item in value.items():
+            rendered = audit_display_value(str(key), item)
+            if rendered == 'chưa có thông tin':
+                continue
+            details.append(f'{AUDIT_VALUE_LABELS.get(str(key), str(key))}: {rendered}')
+        return '; '.join(details) or 'chưa có thông tin'
+    if isinstance(value, (list, tuple, set)):
+        items = [audit_display_value(field, item) for item in value]
+        items = [item for item in items if item != 'chưa có thông tin']
+        return '; '.join(items) or 'chưa có thông tin'
+    text = str(value).strip()
+    if re.fullmatch(r'\d{4}-\d{2}-\d{2}', text):
+        return datetime.strptime(text, '%Y-%m-%d').strftime('%d/%m/%Y')
+    return text or 'chưa có thông tin'
 
 
 def audit_values(before, after, labels):
@@ -109,6 +169,83 @@ def audit_values(before, after, labels):
         else:
             changes.append(f'Đã đổi {label} từ "{old_value}" thành "{new_value}".')
     return '\n'.join(changes)
+
+
+def _humanize_legacy_before_after(content):
+    before_markers = ('. Thông tin trước: ', '. Dữ liệu trước: ')
+    after_markers = ('. Thông tin sau: ', '. Dữ liệu sau: ')
+    for before_marker in before_markers:
+        if before_marker not in content:
+            continue
+        title, remainder = content.split(before_marker, 1)
+        for after_marker in after_markers:
+            if after_marker not in remainder:
+                continue
+            before_text, after_text = remainder.split(after_marker, 1)
+            before_value = parse_structured_audit_value(before_text.strip().rstrip('.'))
+            after_value = parse_structured_audit_value(after_text.strip().rstrip('.'))
+            if not isinstance(before_value, dict) or not isinstance(after_value, dict):
+                continue
+            keys = list(dict.fromkeys([*before_value.keys(), *after_value.keys()]))
+            labels = {str(key): AUDIT_VALUE_LABELS.get(str(key), str(key)) for key in keys}
+            changes = audit_values(before_value, after_value, labels)
+            heading = title.rstrip(' .:')
+            return f'{heading}.\n{changes}' if changes else f'{heading}. Không có thay đổi dữ liệu.'
+    return ''
+
+
+def _replace_structured_literals(content):
+    result, index = [], 0
+    pairs = {'{': '}', '[': ']'}
+    while index < len(content):
+        opener = content[index]
+        if opener not in pairs:
+            result.append(opener)
+            index += 1
+            continue
+        stack, quote, escaped, cursor = [pairs[opener]], '', False, index + 1
+        while cursor < len(content) and stack:
+            char = content[cursor]
+            if quote:
+                if escaped:
+                    escaped = False
+                elif char == '\\':
+                    escaped = True
+                elif char == quote:
+                    quote = ''
+            elif char in {'\'', chr(34)}:
+                quote = char
+            elif char in pairs:
+                stack.append(pairs[char])
+            elif char == stack[-1]:
+                stack.pop()
+            cursor += 1
+        if stack:
+            result.append(opener)
+            index += 1
+            continue
+        candidate = content[index:cursor]
+        parsed = parse_structured_audit_value(candidate)
+        if isinstance(parsed, (dict, list, tuple)):
+            result.append(audit_display_value('', parsed))
+            index = cursor
+        else:
+            result.append(opener)
+            index += 1
+    return ''.join(result)
+
+
+def humanize_lognote_content(content):
+    text = str(content or '').strip()
+    if not text:
+        return ''
+    legacy_change = _humanize_legacy_before_after(text)
+    if legacy_change:
+        return legacy_change
+    parsed = parse_structured_audit_value(text)
+    if isinstance(parsed, (dict, list, tuple)):
+        return audit_display_value('', parsed)
+    return _replace_structured_literals(text)
 
 
 def append_audit(entity_key, content, request=None, system=False, actor=''):
@@ -621,7 +758,7 @@ def serialize_lognote(note):
         'actor': note.updated_by or 'Nhân viên FT Workspace',
         'actorEmail': note.actor_email or '',
         'actorPhotoURL': note.actor_photo_url or '',
-        'content': note.content,
+        'content': humanize_lognote_content(note.content),
         'system': note.system,
     }
 
@@ -658,15 +795,18 @@ def normalize_partners(rows):
 
 
 def recover_partners_from_lognotes():
-    recovered, marker = {}, '. Thông tin sau: '
+    recovered = {}
+    markers = ('. Thông tin sau: ', '. Dữ liệu sau: ')
     for note in LogNote.objects.filter(entity_key__startswith='partner-').order_by('created_at'):
         content = str(note.content or '')
-        if marker not in content:
+        marker = next((item for item in markers if item in content), None)
+        if not marker:
             continue
         try:
             after = content.split(marker, 1)[1].strip()
-            partner = normalize_partners([json.loads(after[:-1] if after.endswith('.') else after)])
-        except (TypeError, ValueError, json.JSONDecodeError):
+            raw_partner = parse_structured_audit_value(after[:-1] if after.endswith('.') else after)
+            partner = normalize_partners([raw_partner] if isinstance(raw_partner, dict) else [])
+        except (TypeError, ValueError):
             partner = []
         if partner:
             recovered[partner[0]['id']] = partner[0]
@@ -1886,21 +2026,21 @@ def lognotes_detail(request, entityKey):
 
         data = request.data or {}
         content = data.get('content', '').strip()
-        actor = data.get('actor', '').strip()
-        system = bool(data.get('system', False))
         if not content:
             return Response({'error': 'Nội dung không được để trống.'}, status=status.HTTP_400_BAD_REQUEST)
 
         actor_email = getattr(request.user, 'email', '') or ''
         profile = UserProfile.objects.filter(email=actor_email).first() if actor_email else None
+        actor = (profile.name or '').strip() if profile else ''
         note = LogNote.objects.create(
             key=f"{entityKey}:{uuid.uuid4().hex}",
             entity_key=entityKey,
             content=content,
-            updated_by=actor or getattr(request.user, 'email', '') or 'Nhân viên FT Workspace',
+            updated_by=actor or actor_email or 'Nhân viên FT Workspace',
             actor_email=actor_email or None,
             actor_photo_url=(profile.photo_url or '') if profile else '',
-            system=system,
+            # Only server-side workflows may create system audit entries.
+            system=False,
         )
         return Response({'success': True, 'note': serialize_lognote(note)}, status=status.HTTP_201_CREATED)
     except Exception as e:

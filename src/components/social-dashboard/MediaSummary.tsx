@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { appDialog } from '../AppDialog';
 import { AlertCircle, BarChart3, Download, FileSpreadsheet, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react';
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Channel, Platform } from '../../types';
@@ -74,7 +75,7 @@ export default function MediaSummary({ idToken, channels }: MediaSummaryProps) {
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (downloadError: any) {
-      alert(downloadError.message || 'Không thể tải file Excel.');
+      void appDialog.alert(downloadError.message || 'Không thể tải file Excel.', { title: 'Tải file thất bại', tone: 'danger' });
     } finally {
       setExporting(false);
     }

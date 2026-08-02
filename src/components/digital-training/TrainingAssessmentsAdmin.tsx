@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { appDialog } from "../AppDialog";
 import {
   ArrowLeft,
   BarChart3,

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { appDialog } from '../AppDialog';
 import { 
   Search, Radio, Layers, ExternalLink, Download, ArrowUpDown, ChevronLeft, ChevronRight, AlertCircle, FileText, Calendar
 } from 'lucide-react';
@@ -120,7 +121,7 @@ export default function Posts({ idToken, channels }: PostsProps) {
       link.remove();
     })
     .catch(err => {
-      alert('Không thể xuất báo cáo CSV: ' + err.message);
+      void appDialog.alert('Không thể xuất báo cáo CSV: ' + err.message, { title: 'Xuất báo cáo thất bại', tone: 'danger' });
     });
   };
 

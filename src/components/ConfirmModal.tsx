@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { AlertTriangle, Trash2, HelpCircle, X } from 'lucide-react';
 
 interface ConfirmModalProps {
@@ -22,16 +22,23 @@ export default function ConfirmModal({
   cancelText = 'Hủy bỏ',
   type = 'warning'
 }: ConfirmModalProps) {
+  const titleId = useId();
+  const [confirming, setConfirming] = useState(false);
   
   // Close on ESC key
   useEffect(() => {
     if (!isOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !confirming) onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [confirming, isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -67,23 +74,30 @@ export default function ConfirmModal({
   };
 
   const colors = getColorClasses();
+  const close = () => {
+    if (!confirming) onClose();
+  };
 
   return (
     <div className="fixed inset-0 z-[9999] overflow-y-auto flex items-center justify-center p-4">
       {/* Backdrop overlay */}
       <div
-        onClick={onClose}
+        onClick={close}
         className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity duration-200 cursor-pointer"
       />
 
       {/* Modal container */}
       <div
+        role={'dialog'}
+        aria-modal={'true'}
+        aria-labelledby={titleId}
         className="relative w-full max-w-lg transform overflow-hidden rounded-2xl bg-white px-4 pt-5 pb-4 text-left shadow-2xl transition-all sm:my-8 sm:p-6 border border-slate-100 z-10 animate-in fade-in zoom-in-95 duration-150"
       >
         {/* Close button top right */}
         <button
+          aria-label={'Đóng hộp thoại xác nhận'}
           type="button"
-          onClick={onClose}
+          onClick={close}
           className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 rounded-lg p-1 hover:bg-slate-50 transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
@@ -97,7 +111,7 @@ export default function ConfirmModal({
 
           <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
             <h3 className="text-base font-bold text-slate-900 leading-6">
-              {title}
+              <span id={titleId}>{title}</span>
             </h3>
             <div className="mt-2">
               <p className="text-sm text-slate-500 leading-relaxed">
@@ -111,17 +125,25 @@ export default function ConfirmModal({
         <div className="mt-5 sm:mt-6 sm:flex sm:flex-row-reverse gap-3">
           <button
             type="button"
+            disabled={confirming}
             onClick={async () => {
-              await onConfirm();
-              onClose();
+              if (confirming) return;
+              setConfirming(true);
+              try {
+                await onConfirm();
+                onClose();
+              } finally {
+                setConfirming(false);
+              }
             }}
             className={`inline-flex w-full justify-center rounded-xl px-4 py-2.5 text-xs font-semibold shadow-xs transition-all focus:outline-none cursor-pointer sm:ml-3 sm:w-auto ${colors.confirmBtn}`}
           >
-            {confirmText}
+            {confirming ? 'Đang xử lý…' : confirmText}
           </button>
           <button
             type="button"
-            onClick={onClose}
+            disabled={confirming}
+            onClick={close}
             className="mt-3 inline-flex w-full justify-center rounded-xl bg-white border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-700 shadow-xs hover:bg-slate-50 transition-all focus:outline-none cursor-pointer sm:mt-0 sm:w-auto"
           >
             {cancelText}

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { appDialog } from '../AppDialog';
 import { ChevronDown, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { formatBirthDate, LIST_PAGE_SIZE, TablePagination } from './ui';
 import type { Candidate, CandidateExamHistory, ExaminationSession, SessionRound, SessionRoundSlot } from './types';

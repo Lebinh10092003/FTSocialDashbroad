@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { appDialog } from '../AppDialog';
 import { Bot, CheckCircle2, Copy, Download, FilePlus2, FileText, LoaderCircle, Pencil, Plus, Search, Sparkles, Trash2, UploadCloud, X } from 'lucide-react';
 import type { Competition, ExaminationSession } from './types';
 import PaperPreviewStudio from './PaperPreviewStudio';

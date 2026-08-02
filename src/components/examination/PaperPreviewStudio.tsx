@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { appDialog } from '../AppDialog';
 import { Bot, Eye, LoaderCircle, MessageSquareText, Send } from 'lucide-react';
 import type { ExamPaper, PaperChatMessage, PaperQuestion } from './ExamPapers';
 import PaperWorkflowPanel from './PaperWorkflowPanel';

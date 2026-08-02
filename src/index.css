@@ -1056,3 +1056,40 @@ body {
 .dt-calendar-cell.is-drop-target:hover {
   background: #dbeafe;
 }
+
+/* Cross-module resilience: keyboard focus, long data and narrow viewports. */
+:where(button, a, input, select, textarea, [role=button]):focus-visible {
+  outline: 3px solid rgba(0, 85, 218, .35);
+  outline-offset: 2px;
+}
+
+:where(h1, h2, h3, p, td, th) {
+  overflow-wrap: anywhere;
+}
+
+.ft-lognote-error {
+  margin-top: 1.5rem;
+  border: 1px solid #fecaca;
+  border-radius: .75rem;
+  background: #fff1f2;
+  padding: 1.25rem;
+  color: #be123c;
+}
+.ft-lognote-error p { font-size: .875rem; font-weight: 600; }
+.ft-lognote-error button {
+  margin-top: 1rem;
+  border: 1px solid #fda4af;
+  border-radius: .5rem;
+  background: #fff;
+  padding: .6rem 1rem;
+  font-size: .875rem;
+  font-weight: 700;
+}
+
+@media (max-width: 767px) {
+  /* Avoid iOS form zoom and let legacy table cards scroll instead of clipping. */
+  input, select, textarea { font-size: 16px; }
+  .ft-surface.overflow-hidden { overflow-x: auto; overscroll-behavior-x: contain; }
+  .ft-toolbar > *, .ft-page-header > * { min-width: 0; }
+  .ft-page-header :is(h1, h2), .ft-toolbar :is(h1, h2) { overflow-wrap: anywhere; }
+}
