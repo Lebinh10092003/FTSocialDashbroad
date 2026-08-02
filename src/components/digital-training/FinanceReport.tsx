@@ -190,7 +190,13 @@ export default function FinanceReport({
   };
 
   const remove = async () => {
-    if (!draft.id || !canEdit || !window.confirm("Xóa khoản thu chi này?")) return;
+    if (!draft.id || !canEdit) return;
+    const confirmed = await appDialog.confirm("Xóa khoản thu chi này?", {
+      title: "Xóa khoản thu chi",
+      confirmText: "Xóa khoản",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setBusy(true);
     try {
       const response = await fetch(`/api/digital-training/finance-entries/${draft.id}`, {

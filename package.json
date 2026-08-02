@@ -9,7 +9,8 @@
                     "prune:frontend":  "node scripts/prune-vite-assets.mjs --keep 5",
                     "preview":  "vite preview",
                     "clean":  "node -e \"require(\u0027fs\u0027).rmSync(\u0027dist\u0027,{recursive:true,force:true})\"",
-                    "lint":  "tsc --noEmit"
+                    "check:dialogs":  "node scripts/check-native-dialogs.mjs",
+                    "lint":  "npm run check:dialogs && tsc --noEmit"
                 },
     "dependencies":  {
                          "@google/genai":  "^2.4.0",

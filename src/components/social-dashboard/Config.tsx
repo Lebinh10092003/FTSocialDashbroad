@@ -444,7 +444,10 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
     });
     const nextScanTokens = replacedScanToken ? facebookScanTokens.map(token => token.id === replacedScanToken.id ? nextScanToken : token) : [...facebookScanTokens, nextScanToken];
     setTokensList(nextList); setFacebookScanTokens(nextScanTokens); void autoSaveTokensList(nextList, nextScanTokens);
-    alert(`Đã nạp thành công ${selected.length} trang Facebook vào bảng cấu hình!`);
+    void appDialog.alert(`Đã nạp thành công ${selected.length} trang Facebook vào bảng cấu hình!`, {
+      title: 'Đã nạp trang Facebook',
+      tone: 'success',
+    });
     setShowAddForm(false); setFbUserToken(''); setScannedPages([]);
   };
 
@@ -467,7 +470,10 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
     });
     const nextScanTokens = existingScanToken ? facebookScanTokens.map(token => token.id === existingScanToken.id ? nextScanToken : token) : [...facebookScanTokens, nextScanToken];
     setTokensList(nextList); setFacebookScanTokens(nextScanTokens); void autoSaveTokensList(nextList, nextScanTokens);
-    alert(`Đã nạp thành công ${selectedList.length} trang mẫu của Fermat vào bảng cấu hình!`);
+    void appDialog.alert(`Đã nạp thành công ${selectedList.length} trang mẫu của Fermat vào bảng cấu hình!`, {
+      title: 'Đã nạp trang mẫu',
+      tone: 'success',
+    });
     setShowAddForm(false); setPresetToken('');
   };
   const toggleAllPresets = (checked: boolean) => {

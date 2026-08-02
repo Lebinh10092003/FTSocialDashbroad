@@ -423,7 +423,12 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   };
 
   const handleDeleteSheet = async (id: string) => {
-    if (!window.confirm('Bạn có chắc chắn muốn xóa nguồn Google Sheets này?')) return;
+    const confirmed = await appDialog.confirm('Bạn có chắc chắn muốn xóa nguồn Google Sheets này?', {
+      title: 'Xóa nguồn Google Sheets',
+      confirmText: 'Xóa nguồn',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     setLoading(true);
     setMessage('');
     try {

@@ -235,7 +235,13 @@ export default function ProductManagement({
   };
 
   const deleteSubscription = async () => {
-    if (!subscriptionDraft.id || !window.confirm("Xóa đăng ký sản phẩm này?")) return;
+    if (!subscriptionDraft.id) return;
+    const confirmed = await appDialog.confirm("Xóa đăng ký sản phẩm này?", {
+      title: "Xóa đăng ký sản phẩm",
+      confirmText: "Xóa đăng ký",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setBusy(true);
     try {
       const response = await fetch(`/api/digital-training/product-subscriptions/${subscriptionDraft.id}`, { method: "DELETE", headers: auth });

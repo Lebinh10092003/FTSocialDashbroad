@@ -897,9 +897,14 @@ export function BlueprintEditor({
   const lock = async () => {
     if (
       !version ||
-      !window.confirm(
+      !(await appDialog.confirm(
         'Khóa phiên bản này? Sau đó muốn sửa phải tạo phiên bản mới.',
-      )
+        {
+          title: 'Khóa phiên bản ma trận',
+          confirmText: 'Khóa phiên bản',
+          tone: 'warning',
+        },
+      ))
     )
       return;
     setBusy('lock');
