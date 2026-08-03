@@ -3,15 +3,11 @@ from django.db import migrations, models
 
 def classify_existing_sheets(apps, schema_editor):
     ExaminationSheet = apps.get_model('examination', 'ExaminationSheet')
-    ExamSession = apps.get_model('examination', 'ExamSession')
     for sheet in ExaminationSheet.objects.exclude(stage__in=['registration-source', 'session-output']):
-        session = ExamSession.objects.filter(id=sheet.session_id).first()
-        is_output = bool(
-            session
-            and session.output_sheet_url
-            and str(session.output_sheet_url).strip() == str(sheet.url).strip()
-        )
-        sheet.stage = 'session-output' if is_output else 'registration-source'
+        # Output sources created by the session workflow already used the
+        # canonical `session-output` stage. Legacy free-form stages came from
+        # the generic import UI and must remain input sources.
+        sheet.stage = 'registration-source'
         sheet.save(update_fields=['stage'])
 
 
