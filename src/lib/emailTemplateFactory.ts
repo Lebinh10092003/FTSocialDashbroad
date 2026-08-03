@@ -1,5 +1,6 @@
 import { EmailSettings, EmailTemplate } from '../types/emailBuilder';
 import { inlineCustomCss, sanitizeCustomHtml } from './emailSanitizer';
+import { importHtmlToEmailBlocks } from './emailHtmlBlockImporter';
 
 export const FERMATTECH_EMAIL_LOGO_URL = 'https://workspace.fermat.vn/logo.png';
 
@@ -70,7 +71,9 @@ export function createBlankEmailTemplate(name: string, timestamp = Date.now()): 
   };
 }
 
-export function createEmailTemplateFromHtml(source: string, fileName: string, timestamp = Date.now()): EmailTemplate {
+export type HtmlImportMode = 'editable' | 'preserve';
+
+export function createEmailTemplateFromHtml(source: string, fileName: string, timestamp = Date.now(), mode: HtmlImportMode = 'editable'): EmailTemplate {
   if (typeof DOMParser === 'undefined') throw new Error('Trình duyệt không hỗ trợ đọc tệp HTML.');
   const documentNode = new DOMParser().parseFromString(source || '', 'text/html');
   const parserError = documentNode.querySelector('parsererror');
@@ -84,18 +87,21 @@ export function createEmailTemplateFromHtml(source: string, fileName: string, ti
     || /<(?:img|table|hr)\b/i.test(importedBody);
   if (!hasVisibleContent) throw new Error('Tệp HTML không có nội dung email để nhập.');
 
+  const converted = mode === 'editable' ? importHtmlToEmailBlocks(importedBody, timestamp) : null;
+  const blocks = converted?.blocks.length ? converted.blocks : [{
+    id: `custom-html-${timestamp}`,
+    type: 'custom-html' as const,
+    content: { variant: 'style-1', html: importedBody },
+    styles: { marginTop: 0, marginBottom: 0 },
+    visible: true,
+  }];
+
   return {
     id: `imported-html-${timestamp}`,
     name: safeTemplateName(fileNameWithoutExtension(fileName)),
     subject,
     settings: { ...DEFAULT_EMAIL_SETTINGS },
-    blocks: [{
-      id: `custom-html-${timestamp}`,
-      type: 'custom-html',
-      content: { variant: 'style-1', html: importedBody },
-      styles: { marginTop: 0, marginBottom: 0 },
-      visible: true,
-    }],
+    blocks,
     lastUpdated: timestamp,
   };
 }

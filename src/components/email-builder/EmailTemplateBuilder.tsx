@@ -30,7 +30,7 @@ import {
 import { DEFAULT_EMAIL_VARIABLES } from '../../data/defaultEmailVariables';
 import { generateEmailHtml } from '../../lib/emailHtmlGenerator';
 import { copyEmailToClipboard, copyTextToClipboard } from '../../lib/emailClipboard';
-import { createBlankEmailTemplate, createEmailTemplateFromHtml, isHtmlEmailFile } from '../../lib/emailTemplateFactory';
+import { createBlankEmailTemplate, createEmailTemplateFromHtml, HtmlImportMode, isHtmlEmailFile } from '../../lib/emailTemplateFactory';
 import { prepareEmailIconsForDelivery } from '../../lib/emailIconDelivery';
 
 import BlockLibrary from './BlockLibrary';
@@ -61,6 +61,10 @@ function sortEmailTemplates(templates: EmailTemplate[]): EmailTemplate[] {
     if (aIsSystem !== bIsSystem) return aIsSystem ? -1 : 1;
     return Number(b.lastUpdated || 0) - Number(a.lastUpdated || 0);
   });
+}
+
+function countEmailBlocks(blocks: EmailBlock[]): number {
+  return blocks.reduce((total, block) => total + 1 + countEmailBlocks(block.children || []) + (block.columns || []).reduce((columnTotal, slot) => columnTotal + countEmailBlocks(slot), 0), 0);
 }
 
 export default function EmailTemplateBuilder(props: EmailTemplateBuilderProps) {
@@ -557,7 +561,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
       if (isHtmlEmailFile(file, contents)) {
         const imported = createEmailTemplateFromHtml(contents, file.name);
         handleImportTemplate(imported);
-        showToast('Đã nhập mẫu từ tệp HTML.');
+        showToast(`Đã nhập và tách HTML thành ${countEmailBlocks(imported.blocks)} khối chỉnh sửa.`);
         return;
       }
       const parsed = JSON.parse(contents);
@@ -571,11 +575,12 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     }
   };
 
-  const handleImportPastedHtml = async (templateName: string, source: string): Promise<string | null> => {
+  const handleImportPastedHtml = async (templateName: string, source: string, mode: HtmlImportMode): Promise<string | null> => {
     try {
-      const imported = createEmailTemplateFromHtml(source, templateName);
+      const imported = createEmailTemplateFromHtml(source, templateName, Date.now(), mode);
       handleImportTemplate(imported);
-      showToast('Đã tạo mẫu từ mã HTML được dán.');
+      const count = countEmailBlocks(imported.blocks);
+      showToast(mode === 'editable' ? `Đã tách mã HTML thành ${count} khối chỉnh sửa.` : 'Đã giữ nguyên HTML trong một khối tùy chỉnh.');
       return null;
     } catch (error: any) {
       return error?.message || 'Không thể đọc mã HTML.';

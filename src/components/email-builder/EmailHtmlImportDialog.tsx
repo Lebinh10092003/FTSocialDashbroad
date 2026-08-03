@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { Code2, FileCheck2, X } from 'lucide-react';
+import { HtmlImportMode } from '../../lib/emailTemplateFactory';
 
 interface EmailHtmlImportDialogProps {
   onClose: () => void;
-  onImport: (templateName: string, html: string) => Promise<string | null>;
+  onImport: (templateName: string, html: string, mode: HtmlImportMode) => Promise<string | null>;
 }
 
 const defaultTemplateName = () => `Mẫu HTML ${new Date().toLocaleString('vi-VN', {
@@ -19,6 +20,7 @@ export default function EmailHtmlImportDialog({ onClose, onImport }: EmailHtmlIm
   const [html, setHtml] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [mode, setMode] = useState<HtmlImportMode>('editable');
 
   const detectedSubject = useMemo(() => {
     if (!html.trim() || typeof DOMParser === 'undefined') return '';
@@ -39,7 +41,7 @@ export default function EmailHtmlImportDialog({ onClose, onImport }: EmailHtmlIm
     }
     setSubmitting(true);
     setError('');
-    const importError = await onImport(name, source);
+    const importError = await onImport(name, source, mode);
     setSubmitting(false);
     if (importError) setError(importError);
     else onClose();
@@ -62,6 +64,22 @@ export default function EmailHtmlImportDialog({ onClose, onImport }: EmailHtmlIm
             <span className="mb-1.5 block text-xs font-bold text-slate-700">Tên mẫu email <span className="text-rose-500">*</span></span>
             <input value={templateName} onChange={event => setTemplateName(event.target.value)} maxLength={160} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
           </label>
+
+          <fieldset>
+            <legend className="mb-1.5 text-xs font-bold text-slate-700">Cách chuyển đổi</legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className={`cursor-pointer rounded-xl border p-3 transition ${mode === 'editable' ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'border-slate-200 hover:bg-slate-50'}`}>
+                <input type="radio" name="html-import-mode" value="editable" checked={mode === 'editable'} onChange={() => setMode('editable')} className="sr-only" />
+                <span className="block text-xs font-black text-slate-800">Tách thành các khối chỉnh sửa được</span>
+                <span className="mt-1 block text-[11px] leading-4 text-slate-500">Khuyến nghị — tự nhận diện tiêu đề, đoạn văn, ảnh, nút, danh sách, bảng và bố cục.</span>
+              </label>
+              <label className={`cursor-pointer rounded-xl border p-3 transition ${mode === 'preserve' ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'border-slate-200 hover:bg-slate-50'}`}>
+                <input type="radio" name="html-import-mode" value="preserve" checked={mode === 'preserve'} onChange={() => setMode('preserve')} className="sr-only" />
+                <span className="block text-xs font-black text-slate-800">Giữ nguyên HTML trong một khối</span>
+                <span className="mt-1 block text-[11px] leading-4 text-slate-500">Dùng khi cần ưu tiên giao diện giống tuyệt đối và không cần sửa từng phần.</span>
+              </label>
+            </div>
+          </fieldset>
 
           <label className="block">
             <span className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-700"><span>Mã HTML <span className="text-rose-500">*</span></span><span className="font-medium text-slate-400">Có thể dán toàn bộ tài liệu hoặc phần nội dung email</span></span>

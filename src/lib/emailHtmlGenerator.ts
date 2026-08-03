@@ -509,7 +509,10 @@ export function generateEmailHtml(
         const title = rep(content.heading || '');
         const body = rep(content.body || '');
         const children = (block.children || []).map(child => renderBlock(child, blockTextColor)).join('');
-        return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:' + (content.padding ?? 24) + 'px;background:' + (content.bg || '#f8fafc') + ';border:1px solid #e2e8f0;font-family:' + fontFamily + ';color:' + blockTextColor + '"><strong style="color:#0F3A72">' + title + '</strong><div style="margin-top:6px;line-height:1.5">' + body + '</div>' + children + '</td></tr></table>';
+        const titleHtml = title ? '<strong style="display:block;color:' + (content.color || '#0F3A72') + '">' + title + '</strong>' : '';
+        const bodyHtml = body ? '<div style="margin-top:' + (title ? 6 : 0) + 'px;line-height:1.5">' + body + '</div>' : '';
+        const borderWidth = content.borderWidth ?? 1;
+        return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:' + (content.padding ?? 24) + 'px;background:' + (content.bg || '#f8fafc') + ';border:' + borderWidth + 'px solid ' + (content.borderColor || '#e2e8f0') + ';border-radius:' + (content.borderRadius || 0) + 'px;font-family:' + fontFamily + ';color:' + (content.color || blockTextColor) + '">' + titleHtml + bodyHtml + children + '</td></tr></table>';
       }
       case 'image-text': case 'testimonial': case 'callout': case 'gallery': case 'video': case 'feature-list': case 'product-card': case 'product-grid': case 'pricing-table': case 'header': case 'footer': case 'merge-tag': {
         const title = rep(content.heading || content.title || content.name || content.company || content.author || '');
