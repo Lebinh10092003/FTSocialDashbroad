@@ -29,7 +29,7 @@ const OverviewChartTick = ({ x, y, payload }: { x?: number; y?: number; payload?
   const [code = '', timeline = ''] = String(payload?.value || '').split(' · ');
   return <g transform={`translate(${x || 0},${y || 0})`}><text x={0} y={12} textAnchor="middle" fill="#52677f" fontSize={11}><tspan x={0} dy={0} fontWeight={700}>{code}</tspan><tspan x={0} dy={13} fontSize={10}>{timeline}</tspan></text></g>;
 };
-const EXAMINATION_CACHE_KEY = 'ft-examination-bootstrap-v3';
+const EXAMINATION_CACHE_KEY = 'ft-examination-bootstrap-v4';
 const EXAMINATION_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const loadExaminationCache = () => {
   try {
@@ -38,7 +38,9 @@ const loadExaminationCache = () => {
       window.localStorage.removeItem(EXAMINATION_CACHE_KEY);
       return null;
     }
-    return record.payload || null;
+    // Cache is only retained for diagnostics; the module must always revalidate
+    // its source of truth on entry so changed schedules never remain stale.
+    return null;
   } catch { return null; }
 };
 const storeExaminationCache = (payload: unknown) => {
