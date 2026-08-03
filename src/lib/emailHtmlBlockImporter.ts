@@ -1,6 +1,7 @@
 import { EmailBlock, EmailLayoutCell, EmailLayoutColumn } from '../types/emailBuilder';
 import { createLayoutColumn } from './emailLayout';
 import { sanitizeHtml } from './emailSanitizer';
+import { parseImportedLineHeight, resolveEmailContainerTextColor } from './emailPresentation';
 
 const HEADING_SIZES: Record<string, number> = { h1: 30, h2: 24, h3: 20, h4: 18, h5: 16, h6: 14 };
 const CONTAINER_TAGS = new Set(['body', 'main', 'article', 'section', 'header', 'footer', 'div', 'center', 'tbody', 'thead', 'tfoot', 'tr', 'td', 'th']);
@@ -51,23 +52,27 @@ export function importHtmlToEmailBlocks(html: string, seed = Date.now()): EmailH
     return !value || value === 'transparent' || value === 'rgba(0, 0, 0, 0)' ? fallback : value;
   };
 
-  const paragraphBlock = (htmlValue: string, source: Element): EmailBlock => ({
-    id: nextId('paragraph'),
-    type: 'paragraph',
-    content: {
-      html: sanitizeHtml(htmlValue),
-      align: alignment(source),
-      fontSize: clamp(px(inheritedStyle(source, 'fontSize'), 15), 9, 72),
-      lineHeight: clamp(Number.parseFloat(inheritedStyle(source, 'lineHeight')) || 1.6, 1, 3),
-      color: textColor(source),
-      fontWeight: inheritedStyle(source, 'fontWeight') || 'normal',
-      fontStyle: inheritedStyle(source, 'fontStyle') || 'normal',
-      letterSpacing: clamp(px(inheritedStyle(source, 'letterSpacing'), 0), -4, 20),
-      textTransform: inheritedStyle(source, 'textTransform') || 'none',
-    },
-    styles: blockStyles(source),
-    visible: true,
-  });
+  const paragraphBlock = (htmlValue: string, source: Element): EmailBlock => {
+    const fontSize = clamp(px(inheritedStyle(source, 'fontSize'), 15), 9, 72);
+    return ({
+      id: nextId('paragraph'),
+      type: 'paragraph',
+      content: {
+        html: sanitizeHtml(htmlValue),
+        align: alignment(source),
+        fontSize,
+        lineHeight: parseImportedLineHeight(inheritedStyle(source, 'lineHeight'), fontSize),
+        lineHeightVersion: 2,
+        color: textColor(source),
+        fontWeight: inheritedStyle(source, 'fontWeight') || 'normal',
+        fontStyle: inheritedStyle(source, 'fontStyle') || 'normal',
+        letterSpacing: clamp(px(inheritedStyle(source, 'letterSpacing'), 0), -4, 20),
+        textTransform: inheritedStyle(source, 'textTransform') || 'none',
+      },
+      styles: blockStyles(source),
+      visible: true,
+    });
+  };
 
   const customBlock = (source: Element): EmailBlock => {
     customBlockCount += 1;
@@ -254,24 +259,27 @@ export function importHtmlToEmailBlocks(html: string, seed = Date.now()): EmailH
     return Boolean(ownBg && ownBg !== 'transparent') || padding >= 8 || border > 0 || radius > 0;
   };
 
-  const sectionBlock = (element: HTMLElement, children: EmailBlock[]): EmailBlock => ({
-    id: nextId('section'),
-    type: 'section',
-    content: {
-      variant: 'style-1', heading: '', body: '', importedContainer: true,
-      bg: background(element, '#ffffff'),
-      color: textColor(element, ''),
-      padding: clamp(px(element.style.padding, 16), 0, 64),
-      borderColor: element.style.borderColor || '#e2e8f0',
-      borderWidth: clamp(px(element.style.borderWidth || element.style.border, 0), 0, 12),
-      borderRadius: clamp(px(element.style.borderRadius, 0), 0, 80),
-      boxShadow: element.style.boxShadow || '',
-      overflow: element.style.overflow === 'hidden' ? 'hidden' : 'visible',
-    },
-    styles: blockStyles(element, 0),
-    visible: true,
-    children,
-  });
+  const sectionBlock = (element: HTMLElement, children: EmailBlock[]): EmailBlock => {
+    const sectionBackground = background(element, '#ffffff');
+    return ({
+      id: nextId('section'),
+      type: 'section',
+      content: {
+        variant: 'style-1', heading: '', body: '', importedContainer: true,
+        bg: sectionBackground,
+        color: resolveEmailContainerTextColor(sectionBackground, textColor(element, ''), '', ''),
+        padding: clamp(px(element.style.padding, 16), 0, 64),
+        borderColor: element.style.borderColor || '#e2e8f0',
+        borderWidth: clamp(px(element.style.borderWidth || element.style.border, 0), 0, 12),
+        borderRadius: clamp(px(element.style.borderRadius, 0), 0, 80),
+        boxShadow: element.style.boxShadow || '',
+        overflow: element.style.overflow === 'hidden' ? 'hidden' : 'visible',
+      },
+      styles: blockStyles(element, 0),
+      visible: true,
+      children,
+    });
+  };
 
   function convertElement(element: HTMLElement, depth = 0): EmailBlock[] {
     const tag = element.tagName.toLowerCase();

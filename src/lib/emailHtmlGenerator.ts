@@ -4,6 +4,7 @@ import { getVariablesInText, detectVariableWarnings, replaceVariables } from './
 import { getEmailLayoutColumnWidths, getLayoutSlotIndex, normalizeEmailLayout } from './emailLayout';
 import { renderEmailIconDataUri } from './emailIcon';
 import { emailIconRasterKey } from './emailIconDelivery';
+import { isDarkEmailColor, resolveEmailContainerTextColor, resolveEmailLineHeight } from './emailPresentation';
 
 interface GeneratedEmail {
   subject: string;
@@ -203,7 +204,7 @@ export function generateEmailHtml(
         const rawHtml = content.html || '';
         const align = content.align || 'left';
         const fontSize = content.fontSize || 15;
-        const lineHeight = content.lineHeight || 1.6;
+        const lineHeight = resolveEmailLineHeight(content.lineHeight, content.lineHeightVersion);
         const fontWeight = content.fontWeight || 'normal';
         const fontStyle = content.fontStyle || 'normal';
         const letterSpacing = Number(content.letterSpacing) || 0;
@@ -512,11 +513,14 @@ export function generateEmailHtml(
       case 'section': {
         const title = rep(content.heading || '');
         const body = rep(content.body || '');
-        const children = (block.children || []).map(child => renderBlock(child, blockTextColor)).join('');
-        const titleHtml = title ? '<strong style="display:block;color:' + (content.color || '#0F3A72') + '">' + title + '</strong>' : '';
+        const sectionBackground = content.bg || '#f8fafc';
+        const sectionTextColor = resolveEmailContainerTextColor(sectionBackground, content.color, inheritedTextColor, textColor);
+        const children = (block.children || []).map(child => renderBlock(child, sectionTextColor)).join('');
+        const titleColor = content.color || (isDarkEmailColor(sectionBackground) ? '#ffffff' : '#0F3A72');
+        const titleHtml = title ? '<strong style="display:block;color:' + titleColor + '">' + title + '</strong>' : '';
         const bodyHtml = body ? '<div style="margin-top:' + (title ? 6 : 0) + 'px;line-height:1.5">' + body + '</div>' : '';
         const borderWidth = content.borderWidth ?? 1;
-        return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td bgcolor="' + (content.bg || '#f8fafc') + '" style="padding:' + (content.padding ?? 24) + 'px;background-color:' + (content.bg || '#f8fafc') + ';border:' + borderWidth + 'px solid ' + (content.borderColor || '#e2e8f0') + ';border-radius:' + (content.borderRadius || 0) + 'px;box-shadow:' + (content.boxShadow || 'none') + ';overflow:' + (content.overflow || 'visible') + ';font-family:' + fontFamily + ';color:' + (content.color || blockTextColor) + '">' + titleHtml + bodyHtml + children + '</td></tr></table>';
+        return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td bgcolor="' + sectionBackground + '" style="padding:' + (content.padding ?? 24) + 'px;background-color:' + sectionBackground + ';border:' + borderWidth + 'px solid ' + (content.borderColor || '#e2e8f0') + ';border-radius:' + (content.borderRadius || 0) + 'px;box-shadow:' + (content.boxShadow || 'none') + ';overflow:' + (content.overflow || 'visible') + ';font-family:' + fontFamily + ';color:' + sectionTextColor + '">' + titleHtml + bodyHtml + children + '</td></tr></table>';
       }
       case 'image-text': case 'testimonial': case 'callout': case 'gallery': case 'video': case 'feature-list': case 'product-card': case 'product-grid': case 'pricing-table': case 'header': case 'footer': case 'merge-tag': {
         const title = rep(content.heading || content.title || content.name || content.company || content.author || '');
