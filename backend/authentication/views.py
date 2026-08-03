@@ -1,5 +1,6 @@
 import base64
 import binascii
+import hashlib
 import json
 import os
 import re
@@ -13,6 +14,7 @@ from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
@@ -516,16 +518,40 @@ def health(request):
 
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def resolve_google_form_link(request):
-    try:
-        resolved_url = _resolve_google_form_short_url(request.data.get("url"))
-    except GoogleFormLinkError as exc:
+    raw_url = str(request.data.get("url") or "").strip()
+    cache_key = "qr-google-form:" + hashlib.sha256(raw_url.encode("utf-8")).hexdigest()
+    cached = cache.get(cache_key)
+    if isinstance(cached, dict):
+        return Response(cached["payload"], status=cached["status"])
+
+    client_key = "qr-google-form-rate:" + hashlib.sha256(_client_ip(request).encode("utf-8")).hexdigest()
+    if cache.add(client_key, 1, timeout=60):
+        request_count = 1
+    else:
+        try:
+            request_count = cache.incr(client_key)
+        except ValueError:
+            cache.set(client_key, 1, timeout=60)
+            request_count = 1
+    if request_count > 30:
         return Response(
-            {"error": str(exc), "temporary": exc.temporary},
-            status=status.HTTP_503_SERVICE_UNAVAILABLE if exc.temporary else status.HTTP_400_BAD_REQUEST,
+            {"error": "Bạn đã kiểm tra quá nhiều liên kết trong một phút. Vui lòng thử lại sau.", "temporary": True},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
         )
-    return Response({"resolvedUrl": resolved_url, "verified": True})
+
+    try:
+        resolved_url = _resolve_google_form_short_url(raw_url)
+    except GoogleFormLinkError as exc:
+        response_status = status.HTTP_503_SERVICE_UNAVAILABLE if exc.temporary else status.HTTP_400_BAD_REQUEST
+        payload = {"error": str(exc), "temporary": exc.temporary}
+        if not exc.temporary:
+            cache.set(cache_key, {"payload": payload, "status": response_status}, timeout=600)
+        return Response(payload, status=response_status)
+    payload = {"resolvedUrl": resolved_url, "verified": True}
+    cache.set(cache_key, {"payload": payload, "status": status.HTTP_200_OK}, timeout=21600)
+    return Response(payload)
 
 
 @api_view(["POST"])

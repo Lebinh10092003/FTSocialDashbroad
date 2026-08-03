@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from rest_framework.authtoken.models import Token
 from django.utils import timezone
 
@@ -211,6 +212,7 @@ class AccountAdministrationTests(TestCase):
 
 class GoogleFormLinkResolutionTests(TestCase):
     def setUp(self):
+        cache.clear()
         email = "qr-user@example.com"
         user = get_user_model().objects.create_user(username=email, email=email, password="StrongPassword9921")
         UserProfile.objects.create(email=email, name="QR User", role="EMPLOYEE")
@@ -222,6 +224,13 @@ class GoogleFormLinkResolutionTests(TestCase):
             {"url": url},
             content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {self.token}",
+        )
+
+    def guest_request(self, url):
+        return self.client.post(
+            "/api/auth/qr/resolve-google-form",
+            {"url": url},
+            content_type="application/json",
         )
 
     @patch("authentication.views.requests.get")
@@ -248,6 +257,18 @@ class GoogleFormLinkResolutionTests(TestCase):
         response.text = "<h1>Invalid Dynamic Link</h1>"
 
         result = self.request("https://forms.gle/incomplete")
+
+        self.assertEqual(result.status_code, 400)
+        self.assertIn("không còn hợp lệ", result.json()["error"])
+
+    @patch("authentication.views.requests.get")
+    def test_guest_can_validate_a_link_without_an_account(self, get):
+        response = get.return_value
+        response.status_code = 200
+        response.headers = {}
+        response.text = "<h1>Invalid Dynamic Link</h1>"
+
+        result = self.guest_request("https://forms.gle/guest-invalid")
 
         self.assertEqual(result.status_code, 400)
         self.assertIn("không còn hợp lệ", result.json()["error"])

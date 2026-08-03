@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowLeft, Check, Clipboard, Download, ExternalLink, FileImage, Link2, LockKeyhole, QrCode, ShieldCheck } from 'lucide-react';
 import QRCode from 'qrcode';
 
-type QRCodeGeneratorProps = { onBackToWorkspace: () => void; idToken: string };
+type QRCodeGeneratorProps = { onBackToWorkspace: () => void };
 type UrlAssessment = { normalizedUrl: string; hostname: string; error: string; warnings: string[]; checks: Array<{ label: string; passed: boolean }> };
 type LinkVerification = {
   status: 'idle' | 'checking' | 'valid' | 'invalid';
@@ -51,7 +51,7 @@ function triggerDownload(dataUrl: string, filename: string) {
   const anchor = document.createElement('a'); anchor.href = dataUrl; anchor.download = filename; anchor.click();
 }
 
-export default function QRCodeGenerator({ onBackToWorkspace, idToken }: QRCodeGeneratorProps) {
+export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [rawUrl, setRawUrl] = useState('');
   const [title, setTitle] = useState('');
@@ -100,7 +100,6 @@ export default function QRCodeGenerator({ onBackToWorkspace, idToken }: QRCodeGe
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: 'Bearer ' + idToken,
           },
           body: JSON.stringify({ url: sourceUrl }),
           signal: controller.signal,
@@ -125,7 +124,7 @@ export default function QRCodeGenerator({ onBackToWorkspace, idToken }: QRCodeGe
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [assessment.error, assessment.normalizedUrl, idToken, isGoogleShortLink]);
+  }, [assessment.error, assessment.normalizedUrl, isGoogleShortLink]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
