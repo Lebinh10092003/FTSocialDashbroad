@@ -4,7 +4,7 @@ from django.test import TestCase
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
-from .models import Candidate, CandidateParticipation, Competition, ExamSession, ExaminationSheet, LogNote, RoundResult
+from .models import Candidate, CandidateParticipation, Competition, ExamRoom, ExamSession, ExaminationSheet, LogNote, RoundResult
 
 
 class ExistingSessionRoundBackfillTests(TestCase):
@@ -366,6 +366,127 @@ class CandidateRoundHistoryTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(CandidateParticipation.objects.filter(candidate=self.candidate, session=self.session).exists())
         self.assertEqual(response.data['candidate']['sessionIds'], [])
+
+class ExamRoomAllocationTests(TestCase):
+    def setUp(self):
+        self.user = UserProfile.objects.create(email='rooms-admin@example.com', name='Rooms Admin', role='ADMIN')
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        self.competition = Competition.objects.create(
+            id='room-comp', code='ROOM', name='Room Competition', parent='ROOM',
+            organizer='FermatTech', sort_key='room-comp',
+        )
+        self.session = ExamSession.objects.create(
+            id='room-session', competition_id=self.competition.id, code='ROOM', name='Room Session',
+            parent='ROOM', organizer='FermatTech', time='', sort_key='room-session',
+            rounds=[{'id': 'round-1', 'name': 'Vòng 1', 'label': '', 'date': '', 'slots': []}],
+        )
+        for index in range(5):
+            candidate = Candidate.objects.create(
+                id=f'ROOM-{index + 1:03d}', code=f'ROOM-{index + 1:03d}', name=f'Thí sinh {index + 1}',
+                school='Trường A', session_ids=[self.session.id], contests='ROOM',
+                sort_key=f'candidate-{index + 1:03d}',
+            )
+            participation = CandidateParticipation.objects.create(candidate=candidate, session=self.session)
+            RoundResult.objects.create(
+                participation=participation,
+                round_id='round-1',
+                round_name='Round 1' if index == 0 else 'Vòng 1',
+            )
+        self.url = f'/api/examination/sessions/{self.session.id}/rounds/round-1/rooms'
+
+    def test_balanced_allocation_persists_rooms_and_candidate_round_data(self):
+        response = self.client.post(self.url, {
+            'commonName': 'Phòng thi A',
+            'mode': 'IN_PERSON',
+            'allocationStrategy': 'BALANCED',
+            'rooms': [
+                {'number': '101', 'location': 'Tầng 1, 10 Trần Phú'},
+                {'number': '102', 'location': 'Tầng 1, 10 Trần Phú'},
+            ],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['candidateCount'], 5)
+        self.assertEqual(response.data['assignedCount'], 5)
+        self.assertEqual(sorted(room.assignments.count() for room in ExamRoom.objects.all()), [2, 3])
+        self.assertEqual(len(response.data['updatedCandidates']), 5)
+        first_round = response.data['updatedCandidates'][0]['participations'][0]['rounds'][0]
+        self.assertTrue(first_round['roomId'])
+        self.assertTrue(first_round['roomName'].startswith('Phòng thi A'))
+        self.assertIn('10 Trần Phú', first_round['location'])
+        self.assertEqual(first_round['mode'], 'Trực tiếp')
+
+        listing = self.client.get(self.url)
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(listing.data['candidateCount'], 5)
+        self.assertEqual(listing.data['assignedCount'], 5)
+        self.assertEqual(len(listing.data['rooms']), 2)
+
+    def test_capacity_allocation_rejects_insufficient_rooms_without_replacing_data(self):
+        ExamRoom.objects.create(
+            session=self.session, round_id='round-1', round_name='Vòng 1', common_name='Phòng cũ',
+            room_number='A', label='Phòng cũ A', mode=ExamRoom.MODE_IN_PERSON, location='Địa chỉ cũ',
+        )
+
+        response = self.client.post(self.url, {
+            'commonName': 'Phòng mới',
+            'mode': 'IN_PERSON',
+            'allocationStrategy': 'CAPACITY',
+            'maxCandidates': 2,
+            'rooms': [
+                {'number': '1', 'location': 'Hà Nội'},
+                {'number': '2', 'location': 'Hà Nội'},
+            ],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('chỉ có 4 chỗ', response.data['error'])
+        self.assertTrue(ExamRoom.objects.filter(label='Phòng cũ A').exists())
+
+    def test_online_room_assignment_is_ready_for_google_sheet_export(self):
+        from .sync import PROFILE_EXPORT_HEADERS, REGISTRATION_EXPORT_HEADERS, session_export_rows
+
+        response = self.client.post(self.url, {
+            'commonName': 'Zoom',
+            'mode': 'ONLINE',
+            'allocationStrategy': 'CAPACITY',
+            'maxCandidates': 3,
+            'rooms': [
+                {'number': '01', 'link': 'https://meet.example.test/room-01'},
+                {'number': '02', 'link': 'https://meet.example.test/room-02'},
+            ],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        results = list(RoundResult.objects.order_by('participation__candidate__sort_key'))
+        self.assertEqual([result.room_name for result in results[:3]], ['Zoom 01'] * 3)
+        self.assertEqual([result.room_name for result in results[3:]], ['Zoom 02'] * 2)
+        self.assertTrue(all(result.mode == 'Trực tuyến' for result in results))
+        self.assertTrue(all(result.location.startswith('Zoom ') for result in results))
+
+        exported = session_export_rows(self.session.id)
+        round_start = len(PROFILE_EXPORT_HEADERS) + len(REGISTRATION_EXPORT_HEADERS)
+        self.assertEqual(exported[2][round_start + 4], 'Trực tuyến')
+        self.assertTrue(exported[2][round_start + 5].startswith('Zoom 01'))
+        self.assertEqual(exported[2][round_start + 6], 'https://meet.example.test/room-01')
+
+    def test_import_uses_stable_round_id_when_round_name_changes(self):
+        from .views import upsert_participation_history
+
+        candidate = Candidate.objects.get(id='ROOM-001')
+        upsert_participation_history(candidate, self.session.id, [{
+            'roundId': 'round-1',
+            'round': 'Renamed round',
+            'sbd': 'ROOM-UPDATED',
+        }])
+
+        participation = CandidateParticipation.objects.get(candidate=candidate, session=self.session)
+        self.assertEqual(participation.round_results.count(), 1)
+        result = participation.round_results.get()
+        self.assertEqual(result.round_id, 'round-1')
+        self.assertEqual(result.sbd, 'ROOM-UPDATED')
+
 
 class CandidateImportReuseTests(TestCase):
     def setUp(self):

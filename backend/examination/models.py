@@ -94,11 +94,59 @@ class CandidateParticipation(models.Model):
         return f"{self.candidate.code} / {self.session.code}"
 
 
+class ExamRoom(models.Model):
+    """A reusable room definition belonging to one configured session round."""
+    MODE_IN_PERSON = 'IN_PERSON'
+    MODE_ONLINE = 'ONLINE'
+    MODE_CHOICES = [
+        (MODE_IN_PERSON, 'Trực tiếp'),
+        (MODE_ONLINE, 'Trực tuyến'),
+    ]
+    STRATEGY_BALANCED = 'BALANCED'
+    STRATEGY_CAPACITY = 'CAPACITY'
+    STRATEGY_CHOICES = [
+        (STRATEGY_BALANCED, 'Chia đều'),
+        (STRATEGY_CAPACITY, 'Theo sức chứa tối đa'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    session = models.ForeignKey(ExamSession, on_delete=models.CASCADE, related_name='exam_rooms')
+    round_id = models.CharField(max_length=255)
+    round_name = models.CharField(max_length=255)
+    common_name = models.CharField(max_length=255)
+    room_number = models.CharField(max_length=100)
+    label = models.CharField(max_length=500)
+    mode = models.CharField(max_length=20, choices=MODE_CHOICES)
+    location = models.CharField(max_length=1000, blank=True, default='')
+    link = models.CharField(max_length=2000, blank=True, default='')
+    allocation_strategy = models.CharField(max_length=20, choices=STRATEGY_CHOICES, default=STRATEGY_BALANCED)
+    capacity = models.PositiveIntegerField(null=True, blank=True)
+    position = models.PositiveIntegerField(default=0)
+    created_by = models.CharField(max_length=255, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['position', 'room_number']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['session', 'round_id', 'room_number'],
+                name='unique_exam_room_number_per_round',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.session.code} / {self.round_name} / {self.label}"
+
+
 class RoundResult(models.Model):
     """One round inside a participation. One imported tab can populate many rows."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     participation = models.ForeignKey(CandidateParticipation, on_delete=models.CASCADE, related_name='round_results')
+    round_id = models.CharField(max_length=255, blank=True, default='', db_index=True)
     round_name = models.CharField(max_length=255)
+    exam_room = models.ForeignKey(ExamRoom, on_delete=models.SET_NULL, null=True, blank=True, related_name='assignments')
+    room_name = models.CharField(max_length=500, blank=True, default='')
     eligibility = models.CharField(max_length=1000, blank=True, default='')
     sbd = models.CharField(max_length=255, blank=True, default='')
     exam_date = models.CharField(max_length=255, blank=True, default='')

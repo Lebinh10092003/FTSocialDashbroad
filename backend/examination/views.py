@@ -6,9 +6,12 @@ import uuid
 import json
 import re
 import unicodedata
+import urllib.parse
 from datetime import datetime, timedelta
+from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
-from .models import Competition, ExamSession, Candidate, CandidateParticipation, RoundResult, LogNote, ExaminationSheet, ExaminationSheetPublication
+from .models import Competition, ExamSession, Candidate, CandidateParticipation, RoundResult, ExamRoom, LogNote, ExaminationSheet, ExaminationSheetPublication
 from authentication.models import SystemConfig, UserProfile
 from authentication.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, IsManagerOrAdmin, IsAdmin
 from .sheet_publication import academic_year_for_date, publication_payload, session_academic_year, session_tab_name, sync_publication
@@ -547,7 +550,8 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
     if updates:
         participation.save(update_fields=list(set(updates)) + ['updated_at'])
 
-    for item in history or []:
+    configured_rounds = [item for item in (session.rounds or []) if isinstance(item, dict)]
+    for history_index, item in enumerate(history or []):
         if not isinstance(item, dict):
             continue
         round_name = str(item.get('round') or '').strip()
@@ -557,23 +561,47 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
             model_field: str(item.get(payload_field) or '').strip()
             for payload_field, model_field in ROUND_FIELD_MAP.items()
         }
+        matching_round = next(
+            (
+                config for config in configured_rounds
+                if str(config.get('name') or '').strip().casefold() == round_name.casefold()
+            ),
+            configured_rounds[history_index] if history_index < len(configured_rounds) else None,
+        )
+        values['round_id'] = str(item.get('roundId') or (matching_round or {}).get('id') or '').strip()
         if values.get('exam_date'):
             values['exam_date'] = parse_dob(values['exam_date']) or values['exam_date']
         values['raw_data'] = {str(key): value for key, value in item.items() if value not in (None, '')}
         existing_result = RoundResult.objects.filter(participation=participation, round_name=round_name).first()
+        if not existing_result and values.get('round_id'):
+            existing_result = RoundResult.objects.filter(
+                participation=participation,
+                round_id=values['round_id'],
+            ).first()
         if existing_result:
+            if not values.get('round_id'):
+                values['round_id'] = existing_result.round_id
             for model_field in ROUND_FIELD_MAP.values():
                 if not values.get(model_field):
                     values[model_field] = getattr(existing_result, model_field)
-        RoundResult.objects.update_or_create(
-            participation=participation,
-            round_name=round_name,
-            defaults=values,
-        )
+            for field_name, value in values.items():
+                setattr(existing_result, field_name, value)
+            existing_result.save()
+        else:
+            RoundResult.objects.create(
+                participation=participation,
+                round_name=round_name,
+                **values,
+            )
     # A new registration always enters the first configured round so it is visible and manageable in the round roster.
     if not participation.round_results.exists():
         first_round = next((str(item.get('name') or '').strip() for item in (session.rounds or []) if isinstance(item, dict) and item.get('name')), 'Vòng 1')
-        RoundResult.objects.get_or_create(participation=participation, round_name=first_round)
+        first_round_config = next((item for item in configured_rounds if item.get('name')), {})
+        RoundResult.objects.get_or_create(
+            participation=participation,
+            round_name=first_round,
+            defaults={'round_id': str(first_round_config.get('id') or '')},
+        )
     return participation
 
 
@@ -585,9 +613,12 @@ def normalized_exam_history(candidate):
             rows.append({
             'sessionId': participation.session_id,
                 'sessionCode': participation.session.code,
+                'roundId': result.round_id,
                 'round': result.round_name,
                 'eligibility': result.eligibility,
                 'sbd': result.sbd,
+                'roomId': str(result.exam_room_id or ''),
+                'roomName': result.room_name,
                 'date': result.exam_date,
                 'time': result.time_slot,
                 'mode': result.mode,
@@ -713,7 +744,8 @@ def serialize_candidate_participations(cand, include_private=True):
             },
             'rounds': [{
                 'id': str(result.id),
-                'round': result.round_name, 'eligibility': result.eligibility, 'sbd': result.sbd,
+                'roundId': result.round_id, 'round': result.round_name, 'eligibility': result.eligibility, 'sbd': result.sbd,
+                'roomId': str(result.exam_room_id or ''), 'roomName': result.room_name,
                 'date': result.exam_date, 'time': result.time_slot, 'mode': result.mode,
                 'location': result.location, 'link': result.link, 'account': result.account if include_private else '', 'password': result.password if include_private else '',
                 'attendance': result.attendance, 'score': result.score, 'scoreRate': result.score_rate,
@@ -1302,6 +1334,196 @@ def session_detail(request, pk):
         sess.delete()
         sync_session_candidate_totals()
         return Response({'success': True})
+
+
+def _session_round_config(session, round_id):
+    return next(
+        (
+            item for item in (session.rounds or [])
+            if isinstance(item, dict) and str(item.get('id') or '') == str(round_id or '')
+        ),
+        None,
+    )
+
+
+def _serialize_exam_room(room):
+    return {
+        'id': str(room.id),
+        'roundId': room.round_id,
+        'roundName': room.round_name,
+        'commonName': room.common_name,
+        'number': room.room_number,
+        'label': room.label,
+        'mode': room.mode,
+        'location': room.location,
+        'link': room.link,
+        'allocationStrategy': room.allocation_strategy,
+        'capacity': room.capacity,
+        'assignedCount': room.assignments.count(),
+    }
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsManagerOrAdmin])
+def exam_room_allocation(request, session_id, round_id):
+    try:
+        session = ExamSession.objects.get(id=session_id)
+    except ExamSession.DoesNotExist:
+        return Response({'error': 'Không tìm thấy kỳ tổ chức.'}, status=status.HTTP_404_NOT_FOUND)
+
+    round_config = _session_round_config(session, round_id)
+    if not round_config:
+        return Response({'error': 'Không tìm thấy vòng thi trong kỳ tổ chức này.'}, status=status.HTTP_404_NOT_FOUND)
+    round_name = str(round_config.get('name') or '').strip()
+    result_query = RoundResult.objects.filter(
+        participation__session=session,
+    ).filter(
+        Q(round_id=str(round_id)) | Q(round_id='', round_name=round_name),
+    )
+
+    if request.method == 'GET':
+        rooms = list(ExamRoom.objects.filter(session=session, round_id=round_id))
+        return Response({
+            'sessionId': session.id,
+            'roundId': str(round_id),
+            'roundName': round_name,
+            'candidateCount': result_query.count(),
+            'assignedCount': result_query.exclude(exam_room=None).count(),
+            'rooms': [_serialize_exam_room(room) for room in rooms],
+        })
+
+    data = request.data or {}
+    common_name = str(data.get('commonName') or '').strip()
+    mode = str(data.get('mode') or '').strip().upper()
+    strategy = str(data.get('allocationStrategy') or '').strip().upper()
+    incoming_rooms = data.get('rooms') if isinstance(data.get('rooms'), list) else []
+
+    if not common_name:
+        return Response({'error': 'Vui lòng nhập tên gọi chung của phòng thi.'}, status=status.HTTP_400_BAD_REQUEST)
+    if len(common_name) > 255:
+        return Response({'error': 'Tên gọi chung không được dài quá 255 ký tự.'}, status=status.HTTP_400_BAD_REQUEST)
+    if mode not in {ExamRoom.MODE_IN_PERSON, ExamRoom.MODE_ONLINE}:
+        return Response({'error': 'Hình thức thi phải là trực tiếp hoặc trực tuyến.'}, status=status.HTTP_400_BAD_REQUEST)
+    if strategy not in {ExamRoom.STRATEGY_BALANCED, ExamRoom.STRATEGY_CAPACITY}:
+        return Response({'error': 'Cách chia phòng không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not incoming_rooms:
+        return Response({'error': 'Vui lòng khai báo ít nhất một phòng thi.'}, status=status.HTTP_400_BAD_REQUEST)
+    if len(incoming_rooms) > 200:
+        return Response({'error': 'Mỗi lần chỉ có thể tạo tối đa 200 phòng thi.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    max_candidates = None
+    if strategy == ExamRoom.STRATEGY_CAPACITY:
+        try:
+            max_candidates = int(data.get('maxCandidates') or 0)
+        except (TypeError, ValueError):
+            max_candidates = 0
+        if max_candidates <= 0:
+            return Response({'error': 'Số thí sinh tối đa mỗi phòng phải lớn hơn 0.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    cleaned_rooms = []
+    seen_numbers = set()
+    for position, item in enumerate(incoming_rooms):
+        if not isinstance(item, dict):
+            return Response({'error': f'Phòng thứ {position + 1} không đúng định dạng.'}, status=status.HTTP_400_BAD_REQUEST)
+        number = str(item.get('number') or '').strip()
+        location = str(item.get('location') or '').strip()
+        link = str(item.get('link') or '').strip()
+        if not number:
+            return Response({'error': f'Vui lòng nhập số hoặc mã cho phòng thứ {position + 1}.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(number) > 100:
+            return Response({'error': f'Số hoặc mã phòng thứ {position + 1} quá dài.'}, status=status.HTTP_400_BAD_REQUEST)
+        number_key = number.casefold()
+        if number_key in seen_numbers:
+            return Response({'error': f'Phòng "{number}" đang bị nhập trùng.'}, status=status.HTTP_400_BAD_REQUEST)
+        seen_numbers.add(number_key)
+        if mode == ExamRoom.MODE_IN_PERSON and not location:
+            return Response({'error': f'Vui lòng nhập địa chỉ/số phòng cho phòng "{number}".'}, status=status.HTTP_400_BAD_REQUEST)
+        if mode == ExamRoom.MODE_ONLINE:
+            parsed_link = urllib.parse.urlparse(link)
+            if parsed_link.scheme not in {'http', 'https'} or not parsed_link.netloc:
+                return Response({'error': f'Link của phòng "{number}" chưa hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
+        cleaned_rooms.append({
+            'number': number,
+            'label': f'{common_name} {number}'.strip(),
+            'location': location,
+            'link': link if mode == ExamRoom.MODE_ONLINE else '',
+            'position': position,
+        })
+
+    candidate_count = result_query.count()
+    if strategy == ExamRoom.STRATEGY_CAPACITY and len(cleaned_rooms) * max_candidates < candidate_count:
+        capacity = len(cleaned_rooms) * max_candidates
+        return Response({
+            'error': f'Tổng sức chứa chỉ có {capacity} chỗ nhưng vòng thi có {candidate_count} thí sinh. Hãy thêm phòng hoặc tăng số lượng tối đa.',
+            'candidateCount': candidate_count,
+            'capacity': capacity,
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    with transaction.atomic():
+        locked_results = list(
+            result_query.select_for_update()
+            .select_related('participation__candidate')
+            .order_by('participation__candidate__sort_key', 'participation__candidate__code')
+        )
+        candidate_count = len(locked_results)
+        if strategy == ExamRoom.STRATEGY_CAPACITY and len(cleaned_rooms) * max_candidates < len(locked_results):
+            capacity = len(cleaned_rooms) * max_candidates
+            return Response({
+                'error': f'Tổng sức chứa chỉ có {capacity} chỗ nhưng vòng thi hiện có {len(locked_results)} thí sinh. Hãy tải lại và tăng sức chứa.',
+                'candidateCount': len(locked_results),
+                'capacity': capacity,
+            }, status=status.HTTP_409_CONFLICT)
+        ExamRoom.objects.filter(session=session, round_id=round_id).delete()
+        created_rooms = [
+            ExamRoom.objects.create(
+                session=session,
+                round_id=str(round_id),
+                round_name=round_name,
+                common_name=common_name,
+                room_number=item['number'],
+                label=item['label'],
+                mode=mode,
+                location=item['location'],
+                link=item['link'],
+                allocation_strategy=strategy,
+                capacity=max_candidates,
+                position=item['position'],
+                created_by=audit_actor(request),
+            )
+            for item in cleaned_rooms
+        ]
+
+        for index, result in enumerate(locked_results):
+            room_index = index % len(created_rooms) if strategy == ExamRoom.STRATEGY_BALANCED else index // max_candidates
+            room = created_rooms[room_index]
+            result.exam_room = room
+            result.round_id = str(round_id)
+            result.room_name = room.label
+            result.mode = 'Trực tiếp' if mode == ExamRoom.MODE_IN_PERSON else 'Trực tuyến'
+            result.location = ' · '.join(value for value in [room.label, room.location] if value)
+            result.link = room.link if mode == ExamRoom.MODE_ONLINE else ''
+            result.save(update_fields=['exam_room', 'round_id', 'room_name', 'mode', 'location', 'link', 'updated_at'])
+
+    strategy_label = 'chia đều' if strategy == ExamRoom.STRATEGY_BALANCED else f'tối đa {max_candidates} thí sinh/phòng'
+    audit_content = (
+        f'Phân phòng thi cho {round_name}: tạo {len(created_rooms)} phòng với tên chung "{common_name}", '
+        f'phân {candidate_count} thí sinh theo cách {strategy_label}.'
+    )
+    append_audit(f'session-{session.id}', audit_content, request)
+    append_competition_scope_audit(session, audit_content, request)
+
+    candidate_ids = [result.participation.candidate_id for result in locked_results]
+    updated_candidates = Candidate.objects.filter(id__in=candidate_ids).order_by('sort_key', 'code')
+    return Response({
+        'sessionId': session.id,
+        'roundId': str(round_id),
+        'roundName': round_name,
+        'candidateCount': candidate_count,
+        'assignedCount': len(locked_results),
+        'rooms': [_serialize_exam_room(room) for room in created_rooms],
+        'updatedCandidates': [serialize_candidate(candidate, include_private=True) for candidate in updated_candidates],
+    })
+
 
 @api_view(['PUT', 'DELETE'])
 @permission_classes([IsManagerOrAdmin])

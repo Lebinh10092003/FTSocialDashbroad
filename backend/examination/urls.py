@@ -36,6 +36,7 @@ urlpatterns = [
     path('examination/competitions/<str:pk>', views.competition_detail, name='competition_detail'),
     path('examination/sessions', views.session_create, name='session_create'),
     path('examination/sessions/<str:pk>', views.session_detail, name='session_detail'),
+    path('examination/sessions/<str:session_id>/rounds/<str:round_id>/rooms', views.exam_room_allocation, name='exam_room_allocation'),
     path('examination/candidates/<str:pk>', views.candidate_detail, name='candidate_detail'),
     path('examination/round-results/<uuid:pk>', views.round_result_detail, name='round_result_detail'),
     path('examination/candidates/<str:pk>/sessions/<str:session_id>', views.candidate_remove_from_session, name='candidate_remove_from_session'),
