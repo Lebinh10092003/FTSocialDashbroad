@@ -2,8 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowLeft, Check, Clipboard, Download, ExternalLink, FileImage, Link2, LockKeyhole, QrCode, ShieldCheck } from 'lucide-react';
 import QRCode from 'qrcode';
 
-type QRCodeGeneratorProps = { onBackToWorkspace: () => void };
+type QRCodeGeneratorProps = { onBackToWorkspace: () => void; idToken: string };
 type UrlAssessment = { normalizedUrl: string; hostname: string; error: string; warnings: string[]; checks: Array<{ label: string; passed: boolean }> };
+type LinkVerification = {
+  status: 'idle' | 'checking' | 'valid' | 'invalid';
+  sourceUrl: string;
+  resolvedUrl: string;
+  error: string;
+};
 
 const SHORT_LINK_HOSTS = new Set(['bit.ly', 'tinyurl.com', 't.co', 'goo.gl', 'forms.gle', 'shorturl.at', 'rebrand.ly', 'ow.ly', 'buff.ly', 'cutt.ly', 'vnlink.top']);
 const REDIRECT_PARAM_NAMES = new Set(['redirect', 'redirect_url', 'redirect_uri', 'return', 'return_url', 'target', 'url', 'destination', 'dest']);
@@ -45,7 +51,7 @@ function triggerDownload(dataUrl: string, filename: string) {
   const anchor = document.createElement('a'); anchor.href = dataUrl; anchor.download = filename; anchor.click();
 }
 
-export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorProps) {
+export default function QRCodeGenerator({ onBackToWorkspace, idToken }: QRCodeGeneratorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [rawUrl, setRawUrl] = useState('');
   const [title, setTitle] = useState('');
@@ -54,8 +60,72 @@ export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorPr
   const [previewUrl, setPreviewUrl] = useState('');
   const [renderError, setRenderError] = useState('');
   const [notice, setNotice] = useState('');
+  const [verification, setVerification] = useState<LinkVerification>({ status: 'idle', sourceUrl: '', resolvedUrl: '', error: '' });
   const assessment = useMemo(() => assessUrl(rawUrl), [rawUrl]);
-  const canGenerate = Boolean(assessment.normalizedUrl && !assessment.error);
+  const isGoogleShortLink = assessment.hostname === 'forms.gle';
+  const verifiedGoogleShortLink = isGoogleShortLink
+    && verification.status === 'valid'
+    && verification.sourceUrl === assessment.normalizedUrl;
+  const effectiveUrl = isGoogleShortLink
+    ? (verifiedGoogleShortLink ? verification.resolvedUrl : '')
+    : assessment.normalizedUrl;
+  const effectiveHostname = useMemo(() => {
+    if (!effectiveUrl) return assessment.hostname;
+    try { return new URL(effectiveUrl).hostname; } catch { return assessment.hostname; }
+  }, [assessment.hostname, effectiveUrl]);
+  const hasUrlError = Boolean(
+    assessment.error
+    || (isGoogleShortLink && verification.sourceUrl === assessment.normalizedUrl && verification.status === 'invalid'),
+  );
+  const displayedChecks = verifiedGoogleShortLink
+    ? assessment.checks.map(check => check.label === 'Không dùng link rút gọn' ? { label: 'Đã giải nén forms.gle', passed: true } : check)
+    : assessment.checks;
+  const displayedWarnings = verifiedGoogleShortLink
+    ? assessment.warnings.filter(warning => !warning.includes('forms.gle'))
+    : assessment.warnings;
+  const canGenerate = Boolean(effectiveUrl && !assessment.error);
+
+  useEffect(() => {
+    if (!isGoogleShortLink || !assessment.normalizedUrl || assessment.error) {
+      setVerification({ status: 'idle', sourceUrl: '', resolvedUrl: '', error: '' });
+      return;
+    }
+
+    const sourceUrl = assessment.normalizedUrl;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setVerification({ status: 'checking', sourceUrl, resolvedUrl: '', error: '' });
+      try {
+        const response = await fetch('/api/auth/qr/resolve-google-form', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + idToken,
+          },
+          body: JSON.stringify({ url: sourceUrl }),
+          signal: controller.signal,
+        });
+        const payload = await response.json().catch(() => ({})) as { resolvedUrl?: string; error?: string };
+        if (!response.ok || !payload.resolvedUrl) {
+          throw new Error(payload.error || 'Không thể xác minh liên kết Google Forms này.');
+        }
+        setVerification({ status: 'valid', sourceUrl, resolvedUrl: payload.resolvedUrl, error: '' });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setVerification({
+          status: 'invalid',
+          sourceUrl,
+          resolvedUrl: '',
+          error: error instanceof Error ? error.message : 'Không thể xác minh liên kết Google Forms này.',
+        });
+      }
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [assessment.error, assessment.normalizedUrl, idToken, isGoogleShortLink]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -63,17 +133,17 @@ export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorPr
     let cancelled = false;
     if (!canGenerate) { const context = canvas.getContext('2d'); if (context) context.clearRect(0, 0, canvas.width, canvas.height); setPreviewUrl(''); setRenderError(''); return; }
     setPreviewUrl('');
-    QRCode.toCanvas(canvas, assessment.normalizedUrl, { width: 960, margin: 4, errorCorrectionLevel: 'H', color: { dark: foreground, light: '#FFFFFF' } })
+    QRCode.toCanvas(canvas, effectiveUrl, { width: 960, margin: 4, errorCorrectionLevel: 'H', color: { dark: foreground, light: '#FFFFFF' } })
       .then(() => { if (!cancelled) { setPreviewUrl(canvas.toDataURL('image/png')); setRenderError(''); } })
       .catch(() => { if (!cancelled) { setPreviewUrl(''); setRenderError('Không thể tạo mã QR từ đường dẫn này.'); } });
     return () => { cancelled = true; };
-  }, [assessment.normalizedUrl, canGenerate, foreground]);
+  }, [canGenerate, effectiveUrl, foreground]);
 
   useEffect(() => { if (!notice) return; const timeout = window.setTimeout(() => setNotice(''), 2600); return () => window.clearTimeout(timeout); }, [notice]);
 
   const downloadQR = () => {
     const canvas = canvasRef.current; if (!canvas || !canGenerate) return;
-    triggerDownload(canvas.toDataURL('image/png'), `${safeFilename(title || assessment.hostname)}-qr.png`); setNotice('Đã tải mã QR PNG chất lượng cao.');
+    triggerDownload(canvas.toDataURL('image/png'), `${safeFilename(title || effectiveHostname)}-qr.png`); setNotice('Đã tải mã QR PNG chất lượng cao.');
   };
 
   const copyQR = async () => {
@@ -130,7 +200,7 @@ export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorPr
     context.fillText('Mở camera điện thoại và hướng vào mã QR', poster.width / 2, qrY + qrSize + 120);
     context.fillStyle = '#64748B';
     context.font = '500 28px "Be Vietnam Pro", Arial, sans-serif';
-    context.fillText(assessment.hostname, poster.width / 2, qrY + qrSize + 180);
+    context.fillText(effectiveHostname, poster.width / 2, qrY + qrSize + 180);
     triggerDownload(poster.toDataURL('image/png'), `${safeFilename(title || purpose)}-poster.png`);
     setNotice('Đã tải poster QR sẵn sàng để trình chiếu hoặc in.');
   };
@@ -152,7 +222,7 @@ export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorPr
             <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#102A43] text-white"><QrCode className="h-5 w-5" /></div>
             <span className="text-sm font-extrabold tracking-tight">QR Studio</span>
           </div>
-          <div className="hidden items-center gap-2 text-xs font-semibold text-[#52677a] sm:flex"><LockKeyhole className="h-4 w-4 text-emerald-700" />Xử lý ngay trên thiết bị</div>
+          <div className="hidden items-center gap-2 text-xs font-semibold text-[#52677a] sm:flex"><LockKeyhole className="h-4 w-4 text-emerald-700" />Kiểm tra link trước khi xuất</div>
         </div>
       </header>
 
@@ -172,12 +242,22 @@ export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorPr
             <div className="mt-6 space-y-5">
               <label className="block">
                 <span className="mb-2 block text-sm font-bold">URL đích</span>
-                <div className={`flex items-center border bg-[#fbfaf7] transition focus-within:ring-4 ${assessment.error ? 'border-rose-400 focus-within:ring-rose-100' : 'border-[#102A43]/20 focus-within:border-[#de6b35] focus-within:ring-[#de6b35]/10'}`}>
+                <div className={`flex items-center border bg-[#fbfaf7] transition focus-within:ring-4 ${hasUrlError ? 'border-rose-400 focus-within:ring-rose-100' : 'border-[#102A43]/20 focus-within:border-[#de6b35] focus-within:ring-[#de6b35]/10'}`}>
                   <Link2 className="ml-4 h-5 w-5 shrink-0 text-[#718294]" />
                   <input type="url" inputMode="url" autoComplete="url" value={rawUrl} onChange={event => setRawUrl(event.target.value)} placeholder="https://docs.google.com/forms/..." className="min-w-0 flex-1 bg-transparent px-3 py-4 text-sm font-medium outline-none placeholder:text-[#93a1ad]" aria-describedby="url-help" />
                   {canGenerate && <Check className="mr-4 h-5 w-5 text-emerald-700" />}
                 </div>
-                <span id="url-help" className={`mt-2 block text-xs leading-5 ${assessment.error ? 'font-semibold text-rose-600' : 'text-[#718294]'}`}>{assessment.error || 'Có thể dán link không có https:// — hệ thống sẽ tự bổ sung.'}</span>
+                <span id="url-help" className={`mt-2 block text-xs leading-5 ${hasUrlError ? 'font-semibold text-rose-600' : 'text-[#718294]'}`}>{assessment.error || 'Có thể dán link không có https:// — hệ thống sẽ tự bổ sung.'}</span>
+                {isGoogleShortLink && verification.sourceUrl === assessment.normalizedUrl && verification.status === 'checking' && (
+                  <span className="mt-2 flex items-center gap-2 text-xs font-semibold text-sky-700" role="status">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-sky-600" />Đang xác minh và giải nén liên kết forms.gle...
+                  </span>
+                )}
+                {isGoogleShortLink && verification.sourceUrl === assessment.normalizedUrl && verification.status === 'invalid' && (
+                  <span className="mt-2 flex items-start gap-2 text-xs font-semibold leading-5 text-rose-700" role="alert">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{verification.error}
+                  </span>
+                )}
               </label>
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
@@ -205,16 +285,23 @@ export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorPr
                 <p className="mt-4 border-l-2 border-[#de6b35] pl-4 text-sm leading-6 text-[#52677a]">Nhập URL để kiểm tra HTTPS, link rút gọn và dấu hiệu chuyển hướng.</p>
               ) : assessment.error ? (
                 <div className="mt-4 flex items-start gap-3 bg-rose-50 p-4 text-sm text-rose-800"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" /><p>{assessment.error}</p></div>
+              ) : isGoogleShortLink && !verifiedGoogleShortLink ? (
+                <div className="mt-4 flex items-start gap-3 bg-sky-50 p-4 text-sm leading-6 text-sky-900">
+                  <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />
+                  <p>{verification.status === 'invalid' ? 'Mã QR đang bị khóa để tránh phát hành một liên kết hỏng.' : 'Hệ thống đang kiểm tra đích thật của liên kết trước khi cho phép tải mã QR.'}</p>
+                </div>
               ) : (
                 <div className="mt-4 space-y-4">
                   <div className="flex items-center gap-3 bg-emerald-50 p-4">
                     <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-emerald-700 text-white"><ExternalLink className="h-4 w-4" /></div>
-                    <div className="min-w-0"><p className="text-xs font-semibold text-emerald-800">Người dùng sẽ được đưa trực tiếp tới</p><p className="truncate text-sm font-extrabold text-emerald-950">{assessment.hostname}</p></div>
+                    <div className="min-w-0"><p className="text-xs font-semibold text-emerald-800">URL chính xác được mã hóa vào QR</p><p className="break-all text-sm font-extrabold leading-5 text-emerald-950">{effectiveUrl}</p></div>
                   </div>
+                  <a href={effectiveUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-xs font-extrabold text-[#a94720] underline decoration-[#de6b35]/40 underline-offset-4 hover:text-[#7c3218]"><ExternalLink className="h-4 w-4" />Mở thử URL đích trước khi tải QR</a>
+                  {verifiedGoogleShortLink && <div className="flex items-start gap-3 border-l-2 border-emerald-600 bg-emerald-50/70 px-4 py-3 text-xs font-medium leading-5 text-emerald-900"><Check className="mt-0.5 h-4 w-4 shrink-0" />Đã giải nén forms.gle và thay bằng URL Google Forms đầy đủ để tránh lỗi Dynamic Link.</div>}
                   <div className="grid gap-2 sm:grid-cols-3">
-                    {assessment.checks.map(check => <div key={check.label} className={`flex items-center gap-2 border px-3 py-2.5 text-xs font-bold ${check.passed ? 'border-emerald-200 bg-emerald-50/60 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>{check.passed ? <Check className="h-4 w-4 shrink-0" /> : <AlertTriangle className="h-4 w-4 shrink-0" />}{check.label}</div>)}
+                    {displayedChecks.map(check => <div key={check.label} className={`flex items-center gap-2 border px-3 py-2.5 text-xs font-bold ${check.passed ? 'border-emerald-200 bg-emerald-50/60 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>{check.passed ? <Check className="h-4 w-4 shrink-0" /> : <AlertTriangle className="h-4 w-4 shrink-0" />}{check.label}</div>)}
                   </div>
-                  {assessment.warnings.map(warning => <div key={warning} className="flex items-start gap-3 border-l-2 border-amber-500 bg-amber-50/70 px-4 py-3 text-xs font-medium leading-5 text-amber-900"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{warning}</div>)}
+                  {displayedWarnings.map(warning => <div key={warning} className="flex items-start gap-3 border-l-2 border-amber-500 bg-amber-50/70 px-4 py-3 text-xs font-medium leading-5 text-amber-900"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{warning}</div>)}
                 </div>
               )}
             </div>
@@ -233,20 +320,20 @@ export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorPr
                     <p className="text-sm font-extrabold text-[#102A43]">Mã QR sẽ xuất hiện tại đây</p>
                     <p className="mt-2 text-xs leading-5">Dán một đường dẫn hợp lệ để bắt đầu.</p>
                   </div>
-                ) : previewUrl ? <img src={previewUrl} className="block h-full w-full object-contain" alt={`Mã QR dẫn tới ${assessment.hostname}`} /> : <p className="text-sm font-bold text-[#718294]">Đang tạo mã QR...</p>}
+                ) : previewUrl ? <img src={previewUrl} className="block h-full w-full object-contain" alt={`Mã QR dẫn tới ${effectiveHostname}`} /> : <p className="text-sm font-bold text-[#718294]">Đang tạo mã QR...</p>}
               </div>
               <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
               {renderError && <p className="mt-3 text-center text-xs font-semibold text-rose-300">{renderError}</p>}
               <div className="mt-5 min-h-12 border border-white/10 bg-white/[0.06] px-4 py-3">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45">Đích đến hiển thị</p>
-                <p className="mt-1 truncate text-sm font-bold">{assessment.hostname || 'Chưa có đường dẫn'}</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45">URL được mã hóa trong QR</p>
+                <p className="mt-1 break-all text-xs font-bold leading-5">{effectiveUrl || assessment.normalizedUrl || 'Chưa có đường dẫn'}</p>
               </div>
               <button type="button" onClick={downloadQR} disabled={!canGenerate} className="mt-4 inline-flex w-full items-center justify-center gap-2 bg-[#f4a261] px-4 py-3.5 text-sm font-extrabold text-[#102A43] transition hover:bg-[#ffb37a] disabled:cursor-not-allowed disabled:opacity-40"><Download className="h-4 w-4" />Tải mã QR (PNG)</button>
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <button type="button" onClick={copyQR} disabled={!canGenerate} className="inline-flex items-center justify-center gap-2 border border-white/15 px-3 py-3 text-xs font-bold transition hover:bg-white/10 disabled:opacity-35"><Clipboard className="h-4 w-4" />Sao chép ảnh</button>
                 <button type="button" onClick={downloadPoster} disabled={!canGenerate} className="inline-flex items-center justify-center gap-2 border border-white/15 px-3 py-3 text-xs font-bold transition hover:bg-white/10 disabled:opacity-35"><FileImage className="h-4 w-4" />Tải poster</button>
               </div>
-              <div className="mt-5 flex items-start gap-3 text-xs leading-5 text-white/58"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" /><p>Mã hóa trực tiếp URL bạn nhập. Link không đi qua máy chủ Fermat Workspace.</p></div>
+              <div className="mt-5 flex items-start gap-3 text-xs leading-5 text-white/58"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" /><p>URL thường được mã hóa ngay trên thiết bị. Riêng forms.gle được gửi tới máy chủ Fermat để xác minh và giải nén trước khi tạo QR.</p></div>
             </div>
             <p className="mt-4 px-1 text-xs leading-5 text-[#718294]">Mẹo: thử quét bằng ít nhất một iPhone và một máy Android trước khi trình chiếu hoặc in số lượng lớn.</p>
           </aside>

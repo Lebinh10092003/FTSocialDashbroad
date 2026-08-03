@@ -592,7 +592,7 @@ export default function App() {
   if (viewMode === 'qr-generator') {
     return (
       <Suspense fallback={<div className="grid h-screen place-items-center bg-[#f7f4ee]">Đang nạp Trình tạo mã QR...</div>}>
-        <QRCodeGenerator onBackToWorkspace={() => setViewMode('workspace')} />
+        <QRCodeGenerator onBackToWorkspace={() => setViewMode('workspace')} idToken={idToken || ''} />
       </Suspense>
     );
   }

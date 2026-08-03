@@ -208,6 +208,81 @@ class AccountAdministrationTests(TestCase):
         self.assertEqual(response.status_code, 403)
         rescan.assert_not_called()
 
+
+class GoogleFormLinkResolutionTests(TestCase):
+    def setUp(self):
+        email = "qr-user@example.com"
+        user = get_user_model().objects.create_user(username=email, email=email, password="StrongPassword9921")
+        UserProfile.objects.create(email=email, name="QR User", role="EMPLOYEE")
+        self.token = Token.objects.create(user=user).key
+
+    def request(self, url):
+        return self.client.post(
+            "/api/auth/qr/resolve-google-form",
+            {"url": url},
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.token}",
+        )
+
+    @patch("authentication.views.requests.get")
+    def test_resolves_a_valid_forms_short_link_to_the_full_google_form(self, get):
+        response = get.return_value
+        response.status_code = 302
+        response.headers = {"Location": "https://docs.google.com/forms/d/e/form-id/viewform?usp=sf_link"}
+
+        result = self.request("https://forms.gle/AbCdEf123")
+
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(
+            result.json()["resolvedUrl"],
+            "https://docs.google.com/forms/d/e/form-id/viewform?usp=sf_link",
+        )
+        get.assert_called_once()
+        response.close.assert_called_once()
+
+    @patch("authentication.views.requests.get")
+    def test_rejects_an_invalid_dynamic_link_page(self, get):
+        response = get.return_value
+        response.status_code = 200
+        response.headers = {}
+        response.text = "<h1>Invalid Dynamic Link</h1>"
+
+        result = self.request("https://forms.gle/incomplete")
+
+        self.assertEqual(result.status_code, 400)
+        self.assertIn("không còn hợp lệ", result.json()["error"])
+
+    @patch("authentication.views.requests.get")
+    def test_rejects_non_google_hosts_without_making_a_request(self, get):
+        result = self.request("https://example.com/private")
+
+        self.assertEqual(result.status_code, 400)
+        get.assert_not_called()
+
+    @patch("authentication.views.requests.get")
+    def test_rejects_a_redirect_outside_the_google_form_allowlist(self, get):
+        response = get.return_value
+        response.status_code = 302
+        response.headers = {"Location": "http://127.0.0.1/internal"}
+
+        result = self.request("https://forms.gle/AbCdEf123")
+
+        self.assertEqual(result.status_code, 400)
+        get.assert_called_once()
+        response.close.assert_called_once()
+
+    @patch("authentication.views.requests.get")
+    def test_reports_google_rate_limiting_as_a_temporary_failure(self, get):
+        response = get.return_value
+        response.status_code = 429
+        response.headers = {}
+
+        result = self.request("https://forms.gle/AbCdEf123")
+
+        self.assertEqual(result.status_code, 503)
+        self.assertTrue(result.json()["temporary"])
+
+
 class PersistentLoginTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(

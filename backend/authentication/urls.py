@@ -4,6 +4,7 @@ from . import views
 
 urlpatterns = [
     path("health", views.health, name="health"),
+    path("auth/qr/resolve-google-form", views.resolve_google_form_link, name="resolve_google_form_link"),
     path("auth/login", views.login_view, name="auth_login"),
     path("auth/logout", views.logout_view, name="auth_logout"),
     path("auth/me", views.auth_me, name="auth_me"),

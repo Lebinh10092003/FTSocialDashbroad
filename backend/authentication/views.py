@@ -8,6 +8,7 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 
+import requests
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
@@ -31,6 +32,9 @@ from .permissions import IsAdmin, IsAuthenticated, IsManagerOrAdmin
 
 User = get_user_model()
 VALID_ROLES = {"ADMIN", "MANAGER", "EMPLOYEE", "VIEWER"}
+GOOGLE_FORM_SHORT_HOST = "forms.gle"
+GOOGLE_FORM_DESTINATION_HOST = "docs.google.com"
+GOOGLE_FORM_ALLOWED_HOSTS = {GOOGLE_FORM_SHORT_HOST, GOOGLE_FORM_DESTINATION_HOST}
 SENSITIVE_CONFIG_KEYS = {
     "metaPageTokensJson",
     "zaloOaTokensJson",
@@ -55,6 +59,81 @@ def _client_ip(request) -> str:
     if forwarded:
         return forwarded.split(",", 1)[0].strip()[:50]
     return str(request.META.get("REMOTE_ADDR", ""))[:50]
+
+
+class GoogleFormLinkError(Exception):
+    def __init__(self, message: str, *, temporary: bool = False):
+        super().__init__(message)
+        self.temporary = temporary
+
+
+def _validated_google_form_url(value: str, *, require_short_host: bool = False) -> urllib.parse.ParseResult:
+    try:
+        parsed = urllib.parse.urlparse(str(value or "").strip())
+        port = parsed.port
+    except (TypeError, ValueError):
+        raise GoogleFormLinkError("Liên kết Google Forms không đúng định dạng.")
+
+    hostname = str(parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme != "https" or parsed.username or parsed.password or port not in (None, 443):
+        raise GoogleFormLinkError("Liên kết Google Forms phải dùng HTTPS và không chứa thông tin đăng nhập.")
+    if hostname not in GOOGLE_FORM_ALLOWED_HOSTS or (require_short_host and hostname != GOOGLE_FORM_SHORT_HOST):
+        raise GoogleFormLinkError("Chỉ có thể xác minh liên kết rút gọn từ forms.gle.")
+    if not parsed.path or parsed.path == "/":
+        raise GoogleFormLinkError("Liên kết forms.gle đang thiếu mã biểu mẫu.")
+    if hostname == GOOGLE_FORM_DESTINATION_HOST and not parsed.path.startswith("/forms/"):
+        raise GoogleFormLinkError("Liên kết chuyển hướng không dẫn tới một Google Form.")
+    return parsed
+
+
+def _resolve_google_form_short_url(value: str) -> str:
+    current = urllib.parse.urlunparse(_validated_google_form_url(value, require_short_host=True))
+    headers = {"User-Agent": "Fermat-Workspace-QR-Link-Validator/1.0"}
+
+    for _ in range(5):
+        parsed = _validated_google_form_url(current)
+        try:
+            response = requests.get(
+                current,
+                allow_redirects=False,
+                headers=headers,
+                timeout=(4, 8),
+            )
+        except requests.RequestException as exc:
+            raise GoogleFormLinkError(
+                "Chưa thể kết nối Google để xác minh liên kết. Vui lòng thử lại hoặc dùng URL đầy đủ từ Google Forms.",
+                temporary=True,
+            ) from exc
+
+        try:
+            if response.status_code in {301, 302, 303, 307, 308}:
+                location = str(response.headers.get("Location") or "").strip()
+                if not location:
+                    raise GoogleFormLinkError("Liên kết rút gọn không cung cấp địa chỉ chuyển hướng.")
+                current = urllib.parse.urljoin(current, location)
+                destination = _validated_google_form_url(current)
+                if str(destination.hostname or "").lower().rstrip(".") == GOOGLE_FORM_DESTINATION_HOST:
+                    return urllib.parse.urlunparse(destination)
+                continue
+
+            if response.status_code == 429 or response.status_code >= 500:
+                raise GoogleFormLinkError(
+                    "Google đang tạm giới hạn việc kiểm tra liên kết. Vui lòng thử lại sau hoặc dùng URL đầy đủ từ Google Forms.",
+                    temporary=True,
+                )
+
+            body = str(getattr(response, "text", "") or "")[:50000].lower()
+            if response.status_code >= 400 or "invalid dynamic link" in body:
+                raise GoogleFormLinkError(
+                    "Liên kết forms.gle không còn hợp lệ hoặc đã bị thiếu ký tự. Hãy sao chép lại liên kết dành cho người trả lời."
+                )
+            raise GoogleFormLinkError(
+                "Không tìm thấy biểu mẫu đích từ liên kết này. Hãy dùng URL đầy đủ dạng docs.google.com/forms/..."
+            )
+        finally:
+            response.close()
+
+    raise GoogleFormLinkError("Liên kết chuyển hướng qua quá nhiều bước và không thể xác minh an toàn.")
 
 
 def _user_payload(profile: UserProfile) -> dict:
@@ -434,6 +513,19 @@ def _sync_channels(tokens: list[dict]) -> list[str]:
 @permission_classes([AllowAny])
 def health(request):
     return Response({"status": "ok"})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def resolve_google_form_link(request):
+    try:
+        resolved_url = _resolve_google_form_short_url(request.data.get("url"))
+    except GoogleFormLinkError as exc:
+        return Response(
+            {"error": str(exc), "temporary": exc.temporary},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE if exc.temporary else status.HTTP_400_BAD_REQUEST,
+        )
+    return Response({"resolvedUrl": resolved_url, "verified": True})
 
 
 @api_view(["POST"])
