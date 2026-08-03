@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
+from unittest.mock import MagicMock, patch
 
 from .models import Candidate, CandidateParticipation, Competition, ExamRoom, ExamSession, ExaminationSheet, LogNote, RoundResult
 
@@ -814,3 +815,117 @@ class SessionOutputSheetTests(TestCase):
         output = ExaminationSheet.objects.get(session_id=self.session.id, stage='session-output')
         self.assertEqual(output.url, 'https://docs.google.com/spreadsheets/d/output-only')
         self.assertEqual(output.sheet_tab, 'SCO - IEO')
+
+
+class SheetCandidateImportPreviewTests(TestCase):
+    def setUp(self):
+        self.user = UserProfile.objects.create(email='iso-import-admin@example.com', name='ISO Import Admin', role='ADMIN')
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        self.session = ExamSession.objects.create(
+            id='iso-upcoming', competition_id='iso', code='ISO', name='Olympic Khoa học Quốc tế',
+            parent='ISO', organizer='SCO', time='2026-2027', sort_key='iso-upcoming',
+            rounds=[
+                {'id': 'national', 'name': 'Vòng Chung kết Quốc gia'},
+                {'id': 'international', 'name': 'Vòng Quốc tế'},
+            ],
+        )
+
+    @patch('examination.sync.requests.get')
+    def test_preview_reads_two_row_schema_without_mutating_candidates(self, mock_get):
+        csv_text = (
+            'HỒ SƠ THÍ SINH,,,,,,,VÒNG 2 – VÒNG QUỐC TẾ,\n'
+            'Mã hồ sơ,Họ và tên thí sinh,Ngày sinh,Email,Số điện thoại,Trường,Lớp đang học,Ngày thi,Số báo danh (SBD)\n'
+            ',Nguyễn An,12/03/2014,an@example.com,0901000000,THCS Fermat,6A1,09/08/2026,ISO-001\n'
+        )
+        response_mock = MagicMock(status_code=200, text=csv_text, url='https://docs.google.com/export.csv')
+        response_mock.raise_for_status.return_value = None
+        mock_get.return_value = response_mock
+
+        response = self.client.post('/api/examination/sheets/preview', {
+            'url': 'https://docs.google.com/spreadsheets/d/example/edit?gid=1114066817',
+            'sheetTab': 'SCO - ISO',
+            'sessionId': self.session.id,
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['summary']['total'], 1)
+        self.assertEqual(response.data['summary']['new'], 1)
+        self.assertEqual(response.data['records'][0]['_preview']['sourceRow'], 3)
+        self.assertEqual(response.data['records'][0]['examHistory'][0]['round'], 'VÒNG QUỐC TẾ')
+        self.assertIn('VÒNG 2 – VÒNG QUỐC TẾ', response.data['mapping']['roundGroups'])
+        self.assertEqual(Candidate.objects.count(), 0)
+        requested_url = mock_get.call_args.args[0]
+        self.assertIn('sheet=SCO%20-%20ISO', requested_url)
+
+    def test_fill_empty_policy_preserves_existing_values_and_adds_missing_values(self):
+        Candidate.objects.create(
+            id='FT-ISO-001', code='FT-ISO-001', name='Nguyễn An', school='Trường đang dùng',
+            identity='001214000001', email='', sort_key='nguyen-an',
+        )
+
+        response = self.client.post('/api/examination/import/candidates', {
+            'sessionId': self.session.id,
+            'source': 'ISO Sheet preview',
+            'updateMode': 'fill-empty',
+            'records': [{
+                'code': 'FT-ISO-001', 'name': 'Nguyễn An', 'identity': '001214000001',
+                'school': 'Trường trong Sheet', 'email': 'an@example.com',
+            }],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        candidate = Candidate.objects.get(code='FT-ISO-001')
+        self.assertEqual(candidate.school, 'Trường đang dùng')
+        self.assertEqual(candidate.email, 'an@example.com')
+        self.assertTrue(CandidateParticipation.objects.filter(candidate=candidate, session=self.session).exists())
+
+    def test_replace_nonempty_policy_updates_values_but_never_uses_blank_to_erase(self):
+        Candidate.objects.create(
+            id='FT-ISO-002', code='FT-ISO-002', name='Nguyễn Bình', school='Trường cũ',
+            email='keep@example.com', identity='001214000002', sort_key='nguyen-binh',
+        )
+
+        response = self.client.post('/api/examination/import/candidates', {
+            'sessionId': self.session.id,
+            'source': 'ISO Sheet preview',
+            'updateMode': 'replace-nonempty',
+            'records': [{
+                'code': 'FT-ISO-002', 'name': 'Nguyễn Bình', 'identity': '001214000002',
+                'school': 'Trường mới', 'email': '',
+            }],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        candidate = Candidate.objects.get(code='FT-ISO-002')
+        self.assertEqual(candidate.school, 'Trường mới')
+        self.assertEqual(candidate.email, 'keep@example.com')
+
+    @patch('examination.sync.requests.get')
+    def test_empty_sheet_returns_a_safe_zero_record_preview(self, mock_get):
+        response_mock = MagicMock(
+            status_code=200,
+            text='Họ và tên thí sinh,Email\n,\n',
+            url='https://docs.google.com/export.csv',
+        )
+        response_mock.raise_for_status.return_value = None
+        mock_get.return_value = response_mock
+
+        response = self.client.post('/api/examination/sheets/preview', {
+            'url': 'https://docs.google.com/spreadsheets/d/example/edit',
+            'sessionId': self.session.id,
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['summary']['total'], 0)
+        self.assertTrue(any('Không có hồ sơ hợp lệ' in item for item in response.data['warnings']))
+        self.assertEqual(Candidate.objects.count(), 0)
+
+    def test_preview_rejects_non_google_urls(self):
+        response = self.client.post('/api/examination/sheets/preview', {
+            'url': 'http://127.0.0.1:8000/api/health',
+            'sessionId': self.session.id,
+        }, format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('Google Sheets', response.data['error'])

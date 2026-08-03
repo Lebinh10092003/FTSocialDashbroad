@@ -61,6 +61,22 @@ interface SheetSource {
   stage?: string;
 }
 
+type PreviewStatus = 'new' | 'changed' | 'unchanged' | 'conflict';
+type PreviewCandidate = Candidate & {
+  examHistory?: RoundHistory[];
+  _preview?: { sourceRow: number; status: PreviewStatus; matchedCode?: string; changedFields?: string[] };
+};
+type SheetImportPreview = {
+  records: PreviewCandidate[];
+  sessionId: string;
+  timestamp: string;
+  summary: { total: number; new: number; matched: number; changed: number; unchanged: number; conflicts: number };
+  mapping: { headerCount: number; mapped: { field: string; column: string; index: number }[]; unmapped: string[]; roundGroups: string[] };
+  warnings: string[];
+  source: { name?: string; url: string; sheetTab?: string; fingerprint: string };
+  targetSession: { id: string; code: string; name: string; time?: string };
+};
+
 // ─── Cột & alias cho import từ file ──────────────────────────────────────────
 // Mẫu chính thức có 2 hàng tiêu đề: nhóm thông tin và tên cột.
 const previewGroups = [
@@ -110,7 +126,10 @@ function historyFromRow(row: ImportRow): RoundHistory[] {
   return [1, 2, 3].map(roundNumber => {
     const prefix = `vong ${roundNumber}`;
     const entries = Object.entries(row).map(([key, value]) => [normalise(key), text(value)] as [string, string]).filter(([key]) => key.startsWith(prefix));
-    const item: RoundHistory = { round: `Vòng ${roundNumber}` };
+    const sourceHeader = Object.keys(row).find(key => normalise(key).startsWith(prefix)) || '';
+    const sourceGroup = sourceHeader.split(':', 1)[0].replace(/\s+Điều kiện tham gia\s*$/iu, '').trim();
+    const detailedRound = sourceGroup.replace(new RegExp(`^Vòng\\s*${roundNumber}\\s*[–—-]?\\s*`, 'iu'), '').trim();
+    const item: RoundHistory = { round: detailedRound || `Vòng ${roundNumber}` };
     Object.entries(fields).forEach(([field, names]) => { const value = entries.find(([key]) => matchesField(field, key, names))?.[1] || ''; if (value) item[field as keyof RoundHistory] = (field === 'date' ? normaliseBirthDate(value) : value) as never; });
     return item;
   }).filter(item => Object.keys(item).length > 1);
@@ -144,9 +163,19 @@ function rowsFromSheet(sheet: XLSX.WorkSheet): ImportRow[] {
     const group = text(groups[index]); if (group) currentGroup = group;
     const label = text(header); return currentGroup && label ? `${currentGroup}: ${label}` : label;
   });
+  let inlineRoundGroup = '';
+  const expandedHeaders = headers.map(header => {
+    const normalized = normalise(header);
+    if (/^vong [123]/.test(normalized)) {
+      inlineRoundGroup = header.includes(':') ? header.split(':', 1)[0] : header.replace(/\s+Điều kiện tham gia\s*$/iu, '').trim();
+      return header;
+    }
+    if (normalized.startsWith('tong hop')) inlineRoundGroup = '';
+    return inlineRoundGroup && header ? `${inlineRoundGroup}: ${header}` : header;
+  });
   return grid.slice(headerIndex + 1)
     .filter(row => (row as unknown[]).some(cell => text(cell)))
-    .map(row => Object.fromEntries(headers.map((header, index) => [header || `column_${index + 1}`, (row as unknown[])[index] ?? ''])));
+    .map(row => Object.fromEntries(expandedHeaders.map((header, index) => [header || `column_${index + 1}`, (row as unknown[])[index] ?? ''])));
 }
 
 const sessionOptionLabel = (session: ExaminationSession) => sessionDisplayName(session);
@@ -157,11 +186,12 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   const inputRef = useRef<HTMLInputElement>(null);
   const duplicateCheckRef = useRef(0);
   const [sourceUrl, setSourceUrl] = useState('');
+  const [sourceSheetTab, setSourceSheetTab] = useState('');
   const [targetSessionId, setTargetSessionId] = useState(sessionId || '');
   const [sessionYearFilter, setSessionYearFilter] = useState('');
   const [sessionOrganizerFilter, setSessionOrganizerFilter] = useState('');
   const [sessionCompetitionFilter, setSessionCompetitionFilter] = useState('');
-  const [rows, setRows] = useState<Candidate[]>([]);
+  const [rows, setRows] = useState<PreviewCandidate[]>([]);
   const [previewPage, setPreviewPage] = useState(1);
   const [source, setSource] = useState('');
   const [loading, setLoading] = useState(false);
@@ -169,6 +199,8 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>([]);
   const [confirmedMatches, setConfirmedMatches] = useState<Record<string, string>>({});
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [updateMode, setUpdateMode] = useState<'fill-empty' | 'replace-nonempty'>('replace-nonempty');
+  const [sheetPreview, setSheetPreview] = useState<SheetImportPreview | null>(null);
   const previewPageCount = Math.max(1, Math.ceil(rows.length / LIST_PAGE_SIZE));
   const activePreviewPage = Math.min(previewPage, previewPageCount);
   const sample = useMemo(() => rows.slice((activePreviewPage - 1) * LIST_PAGE_SIZE, activePreviewPage * LIST_PAGE_SIZE), [rows, activePreviewPage]);
@@ -317,12 +349,35 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     setConfirmedMatches({});
     setRows(parsed);
     setSource(sourceName);
+    setUpdateMode('replace-nonempty');
+    setSheetPreview(null);
     void checkDuplicateCandidates(parsed);
     setMessage(
       parsed.length
         ? `Đã nhận diện ${parsed.length} thí sinh. Kiểm tra mẫu xem trước rồi nhập dữ liệu.`
         : 'Không nhận diện được cột "Họ và tên". Hãy dùng file mẫu hoặc kiểm tra lại cấu trúc file.',
     );
+  };
+
+  const requestSheetPreview = async (payload: { id?: string; url?: string; sessionId?: string; sheetTab?: string }) => {
+    const response = await fetch('/api/examination/sheets/preview', {
+      method: 'POST', headers: authHeaders, body: JSON.stringify(payload),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || 'Không thể đọc và phân tích Google Sheets.');
+    setSheetPreview(body as SheetImportPreview);
+  };
+
+  const acceptSheetPreview = () => {
+    if (!sheetPreview) return;
+    setTargetSessionId(sheetPreview.sessionId);
+    setRows(sheetPreview.records || []);
+    setSource(`${sheetPreview.source.name || 'Google Sheets'}${sheetPreview.source.sheetTab ? ` · ${sheetPreview.source.sheetTab}` : ''}`);
+    setUpdateMode('fill-empty');
+    setConfirmedMatches({});
+    void checkDuplicateCandidates(sheetPreview.records || []);
+    setMessage(`Đã chuẩn bị ${sheetPreview.summary.total} hồ sơ. Hãy đối chiếu hồ sơ trùng và chọn chính sách cập nhật trước khi nhập.`);
+    setSheetPreview(null);
   };
 
   const readFile = async (file: File) => {
@@ -338,18 +393,10 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   const loadSheet = async () => {
     if (!sourceUrl.trim()) return setMessage('Hãy dán liên kết Google Sheets có quyền xem.');
     const resolvedSessionId = targetSessionId || sessionId;
-    if (!resolvedSessionId) return setMessage('Chọn kỳ tổ chức trước khi đồng bộ dữ liệu.');
+    if (!resolvedSessionId) return setMessage('Chọn kỳ tổ chức trước khi kiểm tra dữ liệu.');
     setLoading(true); setMessage('');
     try {
-      const res = await fetch('/api/examination/sync/google-sheet', {
-        method: 'POST', headers: authHeaders,
-        body: JSON.stringify({ url: sourceUrl.trim(), sessionId: resolvedSessionId }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Không thể đọc Google Sheets.');
-      
-      setMessage(`✅ ${body.message}`);
-      onImported(body.candidates || []);
+      await requestSheetPreview({ url: sourceUrl.trim(), sessionId: resolvedSessionId, sheetTab: sourceSheetTab.trim() });
     } catch (err: any) { setMessage(`❌ ${err.message || 'Không thể đọc Google Sheets.'}`); }
     finally { setLoading(false); }
   };
@@ -362,7 +409,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     try {
       const res = await fetch('/api/examination/import/candidates', {
         method: 'POST', headers: authHeaders,
-        body: JSON.stringify({ records: rows, source, sessionId: resolvedSessionId, confirmedMatches }),
+        body: JSON.stringify({ records: rows, source, sessionId: resolvedSessionId, confirmedMatches, updateMode }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Không thể nhập dữ liệu.');
@@ -452,25 +499,11 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     if (!canImport) return;
     setSyncingSheetId(sheet.id);
     setMessage('');
-    setSheets(prev =>
-      prev.map(s => (s.id === sheet.id ? { ...s, status: 'running' } : s))
-    );
     try {
-      const res = await fetch('/api/examination/sync/google-sheet', {
-        method: 'POST',
-        headers: authHeaders,
-        body: JSON.stringify({ id: sheet.id }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Đồng bộ thất bại.');
-      
-      setMessage(`✅ Đồng bộ thành công nguồn "${sheet.name}": ${body.message}`);
-      await loadSheets();
-      onImported(body.candidates || []);
+      await requestSheetPreview({ id: sheet.id });
     } catch (err: any) {
       const errMsg = err.message || 'Lỗi không xác định.';
-      setMessage(`❌ Lỗi đồng bộ nguồn "${sheet.name}": ${errMsg}`);
-      await loadSheets();
+      setMessage(`❌ Không thể kiểm tra nguồn "${sheet.name}": ${errMsg}`);
     } finally {
       setSyncingSheetId(null);
     }
@@ -557,7 +590,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
           <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">{'Chưa có liên kết Sheet cho kỳ đang tổ chức. Các kỳ đã kết thúc được ẩn khỏi bảng này.'}</div>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-slate-100"><table className="min-w-full divide-y divide-slate-100 text-sm"><thead className="bg-slate-50 text-slate-500"><tr><th className="px-4 py-3 text-left">{'Kỳ tổ chức'}</th><th className="px-4 py-3 text-left">Google Sheet</th><th className="px-4 py-3 text-center">{'Nhập dữ liệu'}</th><th className="px-4 py-3 text-center">{'Xuất dữ liệu'}</th><th className="px-4 py-3 text-right"></th></tr></thead><tbody className="divide-y divide-slate-100 bg-white">
-            {activeSheetSources.map(sheet => { const linkedSession=sessions.find(item=>item.id===sheet.sessionId); const busy=syncingSheetId===sheet.id||exportingSheetId===sheet.id; return <tr key={sheet.id} className="hover:bg-slate-50/50"><td className="px-4 py-3"><b className="block text-[#001e40]">{linkedSession?.code} · {linkedSession?.time}</b><span className="mt-1 block text-xs text-slate-500">{linkedSession?.name}{sheet.sheetTab ? ` · ${sheet.sheetTab}` : ''}</span></td><td className="px-4 py-3"><a href={sheet.url} target="_blank" rel="noreferrer" className="inline-flex max-w-[360px] items-center gap-1 truncate font-semibold text-indigo-600 hover:underline"><Link2 className="h-4 w-4 shrink-0" />{'Mở Google Sheet'}</a></td><td className="px-4 py-3 text-center"><button disabled={!canImport||busy} onClick={()=>handleSyncSheet(sheet)} className="inline-flex min-w-[142px] items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${syncingSheetId===sheet.id?'animate-spin':''}`}/>{syncingSheetId===sheet.id?'Đang nhập dữ liệu':'Nhập dữ liệu'}</button></td><td className="px-4 py-3 text-center"><button disabled={!canImport||busy} onClick={()=>handleExportSheet(sheet)} className="inline-flex min-w-[142px] items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"><UploadCloud className={`h-4 w-4 ${exportingSheetId===sheet.id?'animate-pulse':''}`}/>{exportingSheetId===sheet.id?'Đang xuất dữ liệu':'Xuất dữ liệu'}</button></td><td className="px-4 py-3 text-right">{canImport&&<span className="inline-flex gap-1"><button disabled={busy} onClick={()=>handleEditSheet(sheet)} className="rounded p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-50" title={'Chỉnh sửa'}><Pencil className="h-4 w-4"/></button><button disabled={busy} onClick={()=>handleDeleteSheet(sheet.id)} className="rounded p-1.5 text-rose-600 hover:bg-rose-50 disabled:opacity-50" title={'Xóa'}><Trash2 className="h-4 w-4"/></button></span>}</td></tr>})}
+            {activeSheetSources.map(sheet => { const linkedSession=sessions.find(item=>item.id===sheet.sessionId); const busy=syncingSheetId===sheet.id||exportingSheetId===sheet.id; return <tr key={sheet.id} className="hover:bg-slate-50/50"><td className="px-4 py-3"><b className="block text-[#001e40]">{linkedSession?.code} · {linkedSession?.time}</b><span className="mt-1 block text-xs text-slate-500">{linkedSession?.name}{sheet.sheetTab ? ` · ${sheet.sheetTab}` : ''}</span></td><td className="px-4 py-3"><a href={sheet.url} target="_blank" rel="noreferrer" className="inline-flex max-w-[360px] items-center gap-1 truncate font-semibold text-indigo-600 hover:underline"><Link2 className="h-4 w-4 shrink-0" />{'Mở Google Sheet'}</a></td><td className="px-4 py-3 text-center"><button disabled={!canImport||busy} onClick={()=>handleSyncSheet(sheet)} className="inline-flex min-w-[156px] items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${syncingSheetId===sheet.id?'animate-spin':''}`}/>{syncingSheetId===sheet.id?'Đang kiểm tra':'Kiểm tra & nhập'}</button></td><td className="px-4 py-3 text-center"><button disabled={!canImport||busy} onClick={()=>handleExportSheet(sheet)} className="inline-flex min-w-[142px] items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"><UploadCloud className={`h-4 w-4 ${exportingSheetId===sheet.id?'animate-pulse':''}`}/>{exportingSheetId===sheet.id?'Đang xuất dữ liệu':'Xuất dữ liệu'}</button></td><td className="px-4 py-3 text-right">{canImport&&<span className="inline-flex gap-1"><button disabled={busy} onClick={()=>handleEditSheet(sheet)} className="rounded p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-50" title={'Chỉnh sửa'}><Pencil className="h-4 w-4"/></button><button disabled={busy} onClick={()=>handleDeleteSheet(sheet.id)} className="rounded p-1.5 text-rose-600 hover:bg-rose-50 disabled:opacity-50" title={'Xóa'}><Trash2 className="h-4 w-4"/></button></span>}</td></tr>})}
           </tbody></table></div>
         )}
       </section>
@@ -602,6 +635,65 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
       )}
 
       {/* ── Import thủ công ───────────────────────────────────────── */}
+      {sheetPreview && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-3 sm:p-6" role="dialog" aria-modal="true" aria-label="Xem trước dữ liệu Google Sheets">
+          <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
+              <div>
+                <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-indigo-600">Chưa thay đổi dữ liệu hệ thống</p>
+                <h3 className="mt-1 text-xl font-extrabold text-slate-950">Kiểm tra trước khi nhập Google Sheets</h3>
+                <p className="mt-1 text-sm text-slate-600">{sheetPreview.source.name || 'Google Sheets'}{sheetPreview.source.sheetTab ? ` · Tab ${sheetPreview.source.sheetTab}` : ''} → {sheetPreview.targetSession.code} · {sheetPreview.targetSession.name}</p>
+              </div>
+              <button type="button" onClick={() => setSheetPreview(null)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50">Đóng</button>
+            </div>
+            <div className="overflow-y-auto px-5 py-5 sm:px-6">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                {[
+                  ['Tổng hồ sơ', sheetPreview.summary.total, 'bg-slate-50 text-slate-900'],
+                  ['Tạo mới', sheetPreview.summary.new, 'bg-blue-50 text-blue-800'],
+                  ['Đã nhận diện', sheetPreview.summary.matched, 'bg-indigo-50 text-indigo-800'],
+                  ['Có thay đổi', sheetPreview.summary.changed, 'bg-amber-50 text-amber-800'],
+                  ['Không đổi', sheetPreview.summary.unchanged, 'bg-emerald-50 text-emerald-800'],
+                  ['Cần đối chiếu', sheetPreview.summary.conflicts, 'bg-rose-50 text-rose-800'],
+                ].map(([label, value, tone]) => <div key={String(label)} className={`rounded-xl border border-current/10 p-3 ${tone}`}><p className="text-xs font-bold">{label}</p><p className="mt-1 text-2xl font-extrabold">{value}</p></div>)}
+              </div>
+
+              {sheetPreview.warnings.length > 0 && <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><b>Cần lưu ý:</b><ul className="mt-1 list-disc space-y-1 pl-5">{sheetPreview.warnings.map(item => <li key={item}>{item}</li>)}</ul></div>}
+
+              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 p-4">
+                  <h4 className="font-extrabold text-slate-900">Schema đã nhận diện</h4>
+                  <p className="mt-1 text-xs text-slate-500">{sheetPreview.mapping.mapped.length}/{sheetPreview.mapping.headerCount} cột được ánh xạ vào hệ thống.</p>
+                  <div className="mt-3 flex max-h-36 flex-wrap content-start gap-2 overflow-y-auto">{sheetPreview.mapping.mapped.map(item => <span key={`${item.field}-${item.index}`} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700"><b>{item.column}</b> → {item.field}</span>)}</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 p-4">
+                  <h4 className="font-extrabold text-slate-900">Các nhóm vòng thi</h4>
+                  <div className="mt-3 flex flex-wrap gap-2">{sheetPreview.mapping.roundGroups.length ? sheetPreview.mapping.roundGroups.map(item => <span key={item} className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700">{item}</span>) : <span className="text-sm text-slate-500">Không có dữ liệu vòng thi.</span>}</div>
+                  <p className="mt-4 text-xs leading-5 text-slate-500">Ô trống trong Sheet không xóa dữ liệu cũ. Hồ sơ không xuất hiện trong Sheet cũng không bị xóa khỏi hệ thống.</p>
+                </div>
+              </div>
+
+              <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200">
+                <table className="min-w-[880px] w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-3 py-3">Dòng</th><th className="px-3 py-3">Trạng thái</th><th className="px-3 py-3">Thí sinh</th><th className="px-3 py-3">Mã đối chiếu</th><th className="px-3 py-3">Trường / lớp</th><th className="px-3 py-3">Vòng có dữ liệu</th></tr></thead>
+                  <tbody className="divide-y divide-slate-100">{sheetPreview.records.slice(0, 12).map((row, index) => {
+                    const preview = row._preview;
+                    const statusLabel = { new: 'Tạo mới', changed: 'Có thay đổi', unchanged: 'Không đổi', conflict: 'Cần đối chiếu' }[preview?.status || 'new'];
+                    const statusTone = { new: 'bg-blue-50 text-blue-700', changed: 'bg-amber-50 text-amber-700', unchanged: 'bg-emerald-50 text-emerald-700', conflict: 'bg-rose-50 text-rose-700' }[preview?.status || 'new'];
+                    return <tr key={`${preview?.sourceRow || index}-${row.name}`}><td className="px-3 py-3">{preview?.sourceRow || index + 1}</td><td className="px-3 py-3"><span className={`rounded-full px-2 py-1 text-xs font-bold ${statusTone}`}>{statusLabel}</span></td><td className="px-3 py-3"><b>{row.name}</b><div className="text-xs text-slate-500">{formatBirthDate(row.birthDate)} · {row.phone || row.email || 'Chưa có thông tin liên hệ'}</div></td><td className="px-3 py-3">{preview?.matchedCode || row.code || 'Tự sinh'}</td><td className="px-3 py-3">{row.school || '—'}{row.className ? ` · ${row.className}` : ''}</td><td className="px-3 py-3">{row.examHistory?.map(item => item.round).join(', ') || '—'}</td></tr>;
+                  })}</tbody>
+                </table>
+              </div>
+              {sheetPreview.records.length > 12 && <p className="mt-2 text-xs text-slate-500">Đang hiển thị 12/{sheetPreview.records.length} hồ sơ. Toàn bộ hồ sơ sẽ có trong bước đối chiếu tiếp theo.</p>}
+            </div>
+            <div className="flex flex-col-reverse gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
+              <button type="button" onClick={() => setSheetPreview(null)} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-100">Hủy</button>
+              <button type="button" onClick={acceptSheetPreview} className="rounded-lg bg-[#0057d9] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#0047b3]">Tiếp tục đối chiếu {sheetPreview.summary.total} hồ sơ</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-5 lg:grid-cols-2">
         {/* Upload file */}
         <section className="ft-surface">
@@ -631,13 +723,14 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
               </p>
             </div>
           </div>
-          <div className="mt-5 flex gap-2">
-            <input value={sourceUrl} onChange={e => setSourceUrl(e.target.value)}
-              placeholder="https://docs.google.com/spreadsheets/d/..."
-              className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
+          <div className="mt-5 grid gap-2 sm:grid-cols-[minmax(0,1fr)_180px_auto]">
+            <input value={sourceUrl} onChange={e => setSourceUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/..."
+              className="min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
+            <input value={sourceSheetTab} onChange={e => setSourceSheetTab(e.target.value)} placeholder="Tên tab (nếu cần)"
+              className="min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
             <button disabled={!canImport || loading} onClick={loadSheet}
-              className="rounded-lg border border-[#003366] px-4 text-sm font-bold text-[#003366] hover:bg-slate-50 disabled:opacity-50 transition-colors whitespace-nowrap">
-              Đồng bộ & Import
+              className="rounded-lg border border-[#003366] px-4 py-2 text-sm font-bold text-[#003366] hover:bg-slate-50 disabled:opacity-50 transition-colors whitespace-nowrap">
+              Kiểm tra dữ liệu
             </button>
           </div>
         </section>
@@ -712,23 +805,41 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
               Nhập {rows.length} hồ sơ
             </button>
           </div>
+          <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-sm font-extrabold text-slate-900">Cách cập nhật hồ sơ đã có</p>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <label className={`cursor-pointer rounded-xl border p-3 ${updateMode === 'fill-empty' ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white'}`}>
+                <input type="radio" name="update-mode" className="mr-2" checked={updateMode === 'fill-empty'} onChange={() => setUpdateMode('fill-empty')} />
+                <b>Chỉ bổ sung ô còn trống (an toàn)</b>
+                <span className="mt-1 block pl-5 text-xs text-slate-600">Giữ thông tin đang có; chỉ điền dữ liệu còn thiếu và liên kết vào kỳ ISO.</span>
+              </label>
+              <label className={`cursor-pointer rounded-xl border p-3 ${updateMode === 'replace-nonempty' ? 'border-amber-500 bg-amber-50' : 'border-slate-200 bg-white'}`}>
+                <input type="radio" name="update-mode" className="mr-2" checked={updateMode === 'replace-nonempty'} onChange={() => setUpdateMode('replace-nonempty')} />
+                <b>Cập nhật theo giá trị trong Sheet</b>
+                <span className="mt-1 block pl-5 text-xs text-slate-600">Giá trị có nội dung trong Sheet thay thế giá trị cũ; ô trống vẫn không xóa dữ liệu.</span>
+              </label>
+            </div>
+            <p className="mt-3 text-xs font-semibold text-slate-600">Hệ thống không xóa hồ sơ chỉ vì hồ sơ đó không xuất hiện trong Sheet.</p>
+          </div>
           <div className="overflow-x-auto">
-            <table className="ft-table min-w-[8400px]">
+            <table className="ft-table min-w-[1180px]">
               <thead>
-                <tr>{previewGroups.map(group => <th key={group.label} colSpan={group.columns.length}>{group.label}</th>)}</tr>
-                <tr>{previewGroups.flatMap(group => group.columns).map((label, index) => <th key={`${label}-${index}`}>{label}</th>)}</tr>
+                <tr><th>STT</th><th>Trạng thái</th><th>Hồ sơ thí sinh</th><th>Liên hệ / định danh</th><th>Trường / lớp</th><th>Đăng ký</th><th>Dữ liệu các vòng thi</th><th>Tổng hợp</th></tr>
               </thead>
               <tbody>
                 {sample.map(row => {
-                  const round = (number: number) => row.examHistory?.find(item => normalise(item.round) === `vong ${number}`);
-                  const values = [
-                    String(rowIndexForPreview(row)), row.code || 'Tự sinh khi nhập', row.name, formatBirthDate(row.birthDate), row.identity, row.nationality, row.parent, row.phone, row.email, row.city, row.ward, row.address, row.school, row.className, row.grade,
-                    row.subject, row.category, row.registrationMethod, row.teamName, row.examLanguage, row.generalNote,
-                    ...[1, 2, 3].flatMap(number => roundPreviewFields.map(field => round(number)?.[field] || '—')),
-                    row.highestRound, row.achievement, row.certificateLink, row.updated,
-                  ];
+                  const preview = row._preview;
+                  const statusLabel = preview ? { new: 'Tạo mới', changed: 'Có thay đổi', unchanged: 'Không đổi', conflict: 'Cần đối chiếu' }[preview.status] : 'Từ tệp';
+                  const statusTone = preview ? { new: 'bg-blue-50 text-blue-700', changed: 'bg-amber-50 text-amber-700', unchanged: 'bg-emerald-50 text-emerald-700', conflict: 'bg-rose-50 text-rose-700' }[preview.status] : 'bg-slate-100 text-slate-700';
                   return <tr key={`${row.code || 'new'}-${row.name}`}>
-                    {values.map((value, index) => <td key={index}>{index === 2 ? <b>{value || '—'}</b> : value || '—'}</td>)}
+                    <td>{rowIndexForPreview(row)}</td>
+                    <td><span className={`whitespace-nowrap rounded-full px-2 py-1 text-xs font-bold ${statusTone}`}>{statusLabel}</span>{preview?.matchedCode && <div className="mt-1 text-xs text-slate-500">Khớp {preview.matchedCode}</div>}</td>
+                    <td><b>{row.name}</b><div className="mt-1 text-xs text-slate-500">{row.code || 'Tự sinh mã'} · {formatBirthDate(row.birthDate) || 'Chưa có ngày sinh'} · {row.nationality || '—'}</div><div className="mt-1 text-xs text-slate-500">PH: {row.parent || '—'}</div></td>
+                    <td><div>CCCD: {row.identity || '—'}</div><div className="mt-1 text-xs text-slate-500">{row.phone || '—'} · {row.email || '—'}</div><div className="mt-1 text-xs text-slate-500">{row.city || '—'}{row.ward ? ` · ${row.ward}` : ''}</div></td>
+                    <td><b>{row.school || '—'}</b><div className="mt-1 text-xs text-slate-500">{row.className || '—'} · Khối {row.grade || '—'}</div></td>
+                    <td>{row.subject || '—'}<div className="mt-1 text-xs text-slate-500">{row.category || '—'} · {row.registrationMethod || '—'}</div><div className="mt-1 text-xs text-slate-500">{row.examLanguage || '—'}{row.teamName ? ` · ${row.teamName}` : ''}</div></td>
+                    <td><div className="space-y-2">{row.examHistory?.length ? row.examHistory.map((round, index) => <div key={`${round.round}-${index}`} className="rounded-lg bg-slate-50 p-2"><b className="text-xs text-[#003366]">{round.round}</b><div className="mt-1 text-xs text-slate-600">{[round.date, round.time, round.sbd && `SBD ${round.sbd}`, round.mode, round.score && `Điểm ${round.score}`, round.result].filter(Boolean).join(' · ') || 'Có thông tin điều kiện tham gia'}</div></div>) : '—'}</div></td>
+                    <td>{row.highestRound || '—'}<div className="mt-1 text-xs text-slate-500">{row.achievement || '—'}</div>{row.certificateLink && <a className="mt-1 block text-xs font-semibold text-indigo-600" href={row.certificateLink} target="_blank" rel="noreferrer">Chứng nhận</a>}</td>
                   </tr>;
                 })}
               </tbody>

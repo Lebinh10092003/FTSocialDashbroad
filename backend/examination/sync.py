@@ -1,10 +1,12 @@
 import io
 import csv
+import hashlib
 import re
 import requests
 import datetime
 import uuid
 import unicodedata
+import urllib.parse
 from django.utils import timezone
 from .models import Candidate, CandidateParticipation, RoundResult, ExamSession, Competition, ExaminationSheet, LogNote
 from authentication.models import SystemConfig
@@ -192,7 +194,7 @@ def resolve_column_indices(header):
             idx['code'] = i
         elif 'timestamp' not in idx and ('thoigian' in nh or 'timestamp' in nh):
             idx['timestamp'] = i
-        elif 'stt' not in idx and (nh == 'stt' or nh.startswith('sott')):
+        elif 'stt' not in idx and (nh == 'stt' or nh.startswith('sott') or nh.endswith('stt')):
             idx['stt'] = i
         elif 'name' not in idx and ('hovantenthisinh' in nh or 'hovaten' in nh or 'thisinh' in nh or nh == 'ten'):
             idx['name'] = i
@@ -289,14 +291,39 @@ ROUND_HISTORY_FIELD_MAP = {
 def merged_headers(grid, header_index):
     group_row = grid[header_index - 1] if header_index > 0 else []
     current_group = ''
+    inline_round_group = ''
     headers = []
     for index, label in enumerate(grid[header_index]):
         group = clean_txt(group_row[index]) if index < len(group_row) else ''
         if group:
             current_group = group
         title = clean_txt(label)
+        normalized_title = normalise_str(title)
+        if any(normalized_title.startswith(f'vong{number}') for number in (1, 2, 3)):
+            inline_round_group = round_group_from_header(title)
+        elif normalized_title.startswith('tonghop'):
+            inline_round_group = ''
+        if inline_round_group and title and not any(normalized_title.startswith(f'vong{number}') for number in (1, 2, 3)):
+            title = f"{inline_round_group}: {title}"
         headers.append(f"{current_group}: {title}" if current_group and title else title)
     return headers
+
+
+def round_group_from_header(header):
+    raw = clean_txt(header)
+    if ':' in raw:
+        return raw.split(':', 1)[0].strip()
+    field_labels = (
+        'Điều kiện tham gia', 'Số báo danh (SBD)', 'Số báo danh', 'Ngày thi', 'Giờ/Ca thi',
+        'Hình thức thi', 'Địa điểm/Phòng thi', 'Link thi', 'Tài khoản/Mã truy cập',
+        'Mật khẩu', 'Trạng thái dự thi', 'Điểm', 'Tỷ lệ điểm', 'Xếp hạng',
+        'Kết quả/Giải thưởng', 'Ghi chú/Sự cố',
+    )
+    for label in field_labels:
+        match = re.search(rf'\s+{re.escape(label)}\s*$', raw, flags=re.IGNORECASE)
+        if match:
+            return raw[:match.start()].strip()
+    return raw
 
 
 def history_from_sheet_row(headers, row):
@@ -321,12 +348,15 @@ def history_from_sheet_row(headers, row):
     for number in (1, 2, 3):
         prefix = f"vong{number}"
         values = {}
+        source_group = ''
         for index, header in enumerate(headers):
             if index >= len(row):
                 continue
             normalized = normalise_str(header)
             if not normalized.startswith(prefix):
                 continue
+            if not source_group:
+                source_group = round_group_from_header(header)
             value = clean_txt(row[index])
             if not value:
                 continue
@@ -342,9 +372,166 @@ def history_from_sheet_row(headers, row):
                     values[key] = value
                     break
         if values:
-            values['round'] = 'V' + chr(242) + 'ng ' + str(number)
+            detailed_name = source_group
+            parts = re.split(r'\s*[–—-]\s*', source_group, maxsplit=1)
+            if len(parts) == 2 and normalise_str(parts[0]).startswith(f'vong{number}'):
+                detailed_name = parts[1].strip()
+            elif normalise_str(source_group) == f'vong{number}':
+                detailed_name = ''
+            values['round'] = detailed_name or ('V' + chr(242) + 'ng ' + str(number))
             rounds.append(values)
     return rounds
+
+
+def sync_candidate_payload(candidate):
+    """Return the same record shape accepted by the reviewed import endpoint."""
+    return {
+        'code': candidate.get('code', ''), 'name': candidate.get('name', ''),
+        'birthDate': candidate.get('birth_date', ''), 'identity': candidate.get('identity', ''),
+        'email': candidate.get('email', ''), 'phone': candidate.get('phone', ''),
+        'school': candidate.get('school', ''), 'className': candidate.get('class_name', ''),
+        'city': candidate.get('city', ''), 'ward': candidate.get('ward', ''),
+        'nationality': candidate.get('nationality', ''), 'grade': candidate.get('grade', ''),
+        'address': candidate.get('address', ''), 'contests': candidate.get('contests', ''),
+        'achievement': candidate.get('achievement', ''), 'highestRound': candidate.get('highest_round', ''),
+        'parent': candidate.get('parent', ''), 'updated': candidate.get('updated', ''),
+        'subject': candidate.get('registration', {}).get('subject', ''),
+        'category': candidate.get('registration', {}).get('category', ''),
+        'registrationMethod': candidate.get('registration', {}).get('registrationMethod', ''),
+        'registrationUnit': candidate.get('registration', {}).get('registrationUnit', ''),
+        'teamName': candidate.get('registration', {}).get('teamName', ''),
+        'examLanguage': candidate.get('registration', {}).get('examLanguage', ''),
+        'generalNote': candidate.get('registration', {}).get('generalNote', ''),
+        'certificateLink': candidate.get('registration', {}).get('certificateLink', ''),
+        'examHistory': candidate.get('exam_history', []),
+    }
+
+
+def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url, sheet_tab='', source_row_offset=1):
+    existing = list(Candidate.objects.all())
+    created = matched = conflicts = changed = unchanged = 0
+    rows = []
+    profile_fields = (
+        ('name', 'name'), ('birth_date', 'birth_date'), ('identity', 'identity'), ('email', 'email'),
+        ('phone', 'phone'), ('school', 'school'), ('class_name', 'class_name'), ('city', 'city'),
+        ('ward', 'ward'), ('nationality', 'nationality'), ('grade', 'grade'), ('address', 'address'),
+        ('achievement', 'achievement'), ('highest_round', 'highest_round'), ('parent', 'parent'),
+    )
+    for source_index, item in enumerate(incoming, start=source_row_offset):
+        assessments = []
+        for candidate in existing:
+            assessment = candidate_match_assessment({
+                'name': candidate.name, 'birth_date': candidate.birth_date, 'identity': candidate.identity,
+                'email': candidate.email, 'phone': candidate.phone, 'school': candidate.school,
+                'class_name': candidate.class_name, 'city': candidate.city, 'ward': candidate.ward,
+                'address': candidate.address,
+            }, item)
+            if assessment:
+                assessments.append((candidate, assessment))
+        confirmed = [(candidate, assessment) for candidate, assessment in assessments if assessment['status'] == 'confirmed']
+        same_code = next((candidate for candidate in existing if item.get('code') and candidate.code.upper() == item['code'].upper()), None)
+        base = confirmed[0][0] if len(confirmed) == 1 else same_code
+        possible = [(candidate, assessment) for candidate, assessment in assessments if assessment['status'] == 'possible']
+        changed_fields = []
+        if base:
+            matched += 1
+            for model_field, incoming_field in profile_fields:
+                incoming_value = clean_txt(item.get(incoming_field))
+                if incoming_value and clean_txt(getattr(base, model_field)) != incoming_value:
+                    changed_fields.append(model_field)
+            participation = CandidateParticipation.objects.filter(candidate=base, session_id=session_id).prefetch_related('round_results').first() if session_id else None
+            if not participation:
+                changed_fields.append('session')
+            else:
+                registration_fields = {
+                    'subject': 'subject', 'category': 'category', 'registrationMethod': 'registration_method',
+                    'registrationUnit': 'registration_unit', 'teamName': 'team_name', 'examLanguage': 'exam_language',
+                    'generalNote': 'general_note', 'certificateLink': 'certificate_link',
+                }
+                for incoming_field, model_field in registration_fields.items():
+                    incoming_value = clean_txt((item.get('registration') or {}).get(incoming_field))
+                    if incoming_value and clean_txt(getattr(participation, model_field)) != incoming_value:
+                        changed_fields.append(f'registration.{incoming_field}')
+                existing_rounds = list(participation.round_results.all())
+                for history_index, history_item in enumerate(item.get('exam_history') or []):
+                    incoming_round = clean_txt(history_item.get('round'))
+                    existing_round = next((round_item for round_item in existing_rounds if clean_txt(round_item.round_name).casefold() == incoming_round.casefold()), None)
+                    if not existing_round and history_index < len(existing_rounds):
+                        existing_round = existing_rounds[history_index]
+                    if not existing_round:
+                        changed_fields.append(f'round.{incoming_round}')
+                        continue
+                    for payload_field, model_field in ROUND_HISTORY_FIELD_MAP.items():
+                        incoming_value = clean_txt(history_item.get(payload_field))
+                        if payload_field == 'date' and incoming_value:
+                            incoming_value = parse_dob(incoming_value) or incoming_value
+                        if incoming_value and clean_txt(getattr(existing_round, model_field)) != incoming_value:
+                            changed_fields.append(f'round.{incoming_round}.{payload_field}')
+            if changed_fields:
+                changed += 1
+            else:
+                unchanged += 1
+        is_conflict = len(confirmed) > 1 or (not base and possible)
+        if is_conflict:
+            conflicts += 1
+            if base:
+                matched -= 1
+                if changed_fields:
+                    changed -= 1
+                else:
+                    unchanged -= 1
+        elif not base:
+            created += 1
+        payload = sync_candidate_payload(item)
+        payload['_preview'] = {
+            'sourceRow': source_index,
+            'status': 'conflict' if is_conflict else ('new' if not base else ('changed' if changed_fields else 'unchanged')),
+            'matchedCode': base.code if base else '',
+            'changedFields': changed_fields,
+        }
+        rows.append(payload)
+
+    mapped = []
+    used_indices = set()
+    for field, index in columns.items():
+        if isinstance(index, int) and 0 <= index < len(headers):
+            mapped.append({'field': field, 'column': headers[index], 'index': index + 1})
+            used_indices.add(index)
+    for index, header in enumerate(headers):
+        normalized = normalise_str(header)
+        if index not in used_indices and any(normalized.startswith(f'vong{number}') for number in (1, 2, 3)):
+            mapped.append({'field': 'examHistory', 'column': header, 'index': index + 1})
+            used_indices.add(index)
+    round_groups = []
+    for header in headers:
+        group = round_group_from_header(header)
+        if normalise_str(group).startswith('vong') and group not in round_groups:
+            round_groups.append(group)
+    warnings = []
+    if 'name' not in columns:
+        warnings.append('Không nhận diện được cột Họ và tên thí sinh.')
+    if not any(field in columns for field in ('cccd', 'email', 'phone')):
+        warnings.append('Không có CCCD, email hoặc số điện thoại; việc đối chiếu hồ sơ trùng sẽ kém chính xác.')
+    if conflicts:
+        warnings.append(f'Có {conflicts} hồ sơ cần người dùng xác nhận trước khi nhập.')
+    return {
+        'success': True,
+        'records': rows,
+        'summary': {
+            'total': len(rows), 'new': created, 'matched': matched, 'changed': changed,
+            'unchanged': unchanged, 'conflicts': conflicts,
+        },
+        'mapping': {
+            'headerCount': len(headers), 'mapped': mapped,
+            'unmapped': [header for index, header in enumerate(headers) if header and index not in used_indices],
+            'roundGroups': round_groups,
+        },
+        'warnings': warnings,
+        'source': {
+            'url': source_url, 'sheetTab': sheet_tab,
+            'fingerprint': hashlib.sha256(raw.encode('utf-8')).hexdigest(),
+        },
+    }
 
 
 def upsert_participation_history(candidate, session_id, history, source='', registration=None):
@@ -565,7 +752,10 @@ def export_session_to_google_sheet(sheet, google_access_token=None):
     }
 
 
-def get_google_sheet_csv_urls(spreadsheet_url):
+def get_google_sheet_csv_urls(spreadsheet_url, sheet_tab=''):
+    parsed_source = urllib.parse.urlparse(clean_txt(spreadsheet_url))
+    if parsed_source.scheme != 'https' or parsed_source.hostname != 'docs.google.com' or not parsed_source.path.startswith('/spreadsheets/'):
+        return []
     urls = []
     if '/d/e/' in spreadsheet_url:
         pub_url = spreadsheet_url
@@ -585,17 +775,18 @@ def get_google_sheet_csv_urls(spreadsheet_url):
     if sheet_id and sheet_id != 'e':
         gid_match = re.search(r'[?&#]gid=([0-9]+)', spreadsheet_url)
         gid_param = f"&gid={gid_match.group(1)}" if gid_match else ''
-        
-        urls.append(f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv{gid_param}")
-        urls.append(f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv{gid_param}")
-        urls.append(f"https://docs.google.com/spreadsheets/d/{sheet_id}/pub?output=csv{gid_param}")
-        
-    if not urls and (spreadsheet_url.startswith('http://') or spreadsheet_url.startswith('https://')):
-        urls.append(spreadsheet_url)
+
+        if clean_txt(sheet_tab):
+            encoded_tab = urllib.parse.quote(clean_txt(sheet_tab), safe='')
+            urls.append(f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={encoded_tab}")
+        else:
+            urls.append(f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv{gid_param}")
+            urls.append(f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv{gid_param}")
+            urls.append(f"https://docs.google.com/spreadsheets/d/{sheet_id}/pub?output=csv{gid_param}")
         
     return urls
 
-def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None):
+def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None, preview=False, sheet_tab=''):
     def update_state(data):
         if sheet_doc_id:
             try:
@@ -609,7 +800,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
                 pass
 
     try:
-        candidate_urls = get_google_sheet_csv_urls(spreadsheet_url)
+        candidate_urls = get_google_sheet_csv_urls(spreadsheet_url, sheet_tab)
         if not candidate_urls:
             raise Exception('Đường dẫn Google Sheets không hợp lệ.')
             
@@ -617,7 +808,6 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
         last_error = None
         
         for csv_url in candidate_urls:
-            print(f"[ExamSync] Downloading CSV: {csv_url}")
             try:
                 res = requests.get(csv_url, headers={
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -627,6 +817,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
                     raise Exception('Sheet chưa mở quyền truy cập công khai. Vui lòng chia sẻ công khai.')
                 res.raise_for_status()
                 
+                res.encoding = 'utf-8'
                 trimmed = res.text.strip()
                 if 'accounts.google.com' in res.url or 'ServiceLogin' in res.url or trimmed.startswith('<!DOCTYPE html') or trimmed.startswith('<html'):
                     raise Exception('Sheet yêu cầu đăng nhập Google (Chưa mở quyền công khai).')
@@ -652,7 +843,13 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
         if len(grid) < 2:
             raise Exception('Không tìm thấy dữ liệu trong tệp (cần ít nhất 1 dòng tiêu đề + 1 dòng dữ liệu).')
             
-        header_index = next((index for index, row in enumerate(grid) if any('hovaten' in normalise_str(cell) or 'thisinh' in normalise_str(cell) for cell in row)), 0)
+        header_candidates = []
+        for index in range(min(len(grid), 20)):
+            candidate_header = merged_headers(grid, index)
+            candidate_columns = resolve_column_indices(candidate_header)
+            if 'name' in candidate_columns:
+                header_candidates.append((len(candidate_columns), index))
+        header_index = max(header_candidates, default=(0, 0))[1]
         header_row = merged_headers(grid, header_index)
         col = resolve_column_indices(header_row)
         
@@ -694,8 +891,17 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
                 'exam_history': history_from_sheet_row(header_row, row),
             }
             incoming.append(cand)
+            if len(incoming) > 1000:
+                raise Exception('Mỗi lần chỉ được xử lý tối đa 1.000 hồ sơ. Hãy chia tab nguồn thành nhiều đợt nhỏ hơn.')
         if not incoming:
-            update_state({'status': 'success', 'error': None})
+            if preview:
+                result = build_sheet_preview([], header_row, col, raw, session_id, spreadsheet_url, sheet_tab, header_index + 2)
+                result['sessionId'] = session_id or ''
+                result['timestamp'] = ts_vn
+                result['warnings'].append('Không có hồ sơ hợp lệ nào trong tab đã chọn.')
+                return result
+            if not preview:
+                update_state({'status': 'success', 'error': None})
             return {
                 'success': True,
                 'message': 'Không có hồ sơ hợp lệ nào trong tệp.',
@@ -704,6 +910,12 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
                 'total': 0,
                 'timestamp': ts_vn
             }
+
+        if preview:
+            result = build_sheet_preview(incoming, header_row, col, raw, session_id, spreadsheet_url, sheet_tab, header_index + 2)
+            result['sessionId'] = session_id or ''
+            result['timestamp'] = ts_vn
+            return result
             
         # Perform Sync
         existing = list(Candidate.objects.all())
@@ -795,8 +1007,8 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
         }
     except Exception as e:
         msg = str(e)
-        print(f"[ExamSync] Sync Error: {msg}")
-        update_state({'status': 'failed', 'error': msg})
+        if not preview:
+            update_state({'status': 'failed', 'error': msg})
         return {
             'success': False,
             'message': f"Lỗi: {msg}",
@@ -806,7 +1018,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
             'timestamp': ts_vn
         }
 
-def sync_examination_from_google_sheet(spreadsheet_url=None, session_id=None, sheet_doc_id=None):
+def sync_examination_from_google_sheet(spreadsheet_url=None, session_id=None, sheet_doc_id=None, sheet_tab=''):
     ts_vn = datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
     
     # helper to update system config state
@@ -821,7 +1033,7 @@ def sync_examination_from_google_sheet(spreadsheet_url=None, session_id=None, sh
             pass
 
     if spreadsheet_url:
-        result = sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id, session_id)
+        result = sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id, session_id, sheet_tab=sheet_tab)
         update_global_state({
             'status': 'success' if result['success'] else 'failed',
             'lastSyncDate': ts_vn.split(' ')[0],
@@ -869,7 +1081,7 @@ def sync_examination_from_google_sheet(spreadsheet_url=None, session_id=None, sh
             sheet.status = 'running'
             sheet.save()
             
-            res = sync_single_sheet(sheet.url, ts_vn, sheet.id, sheet.session_id or None)
+            res = sync_single_sheet(sheet.url, ts_vn, sheet.id, sheet.session_id or None, sheet_tab=sheet.sheet_tab)
             if res['success']:
                 total_created += res['created']
                 total_updated += res['updated']

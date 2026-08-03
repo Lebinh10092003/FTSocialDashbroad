@@ -27,7 +27,8 @@ from .sync import (
     next_code,
     parse_dob,
     format_person_name,
-    export_session_to_google_sheet
+    export_session_to_google_sheet,
+    sync_single_sheet,
 )
 
 
@@ -475,7 +476,7 @@ def ensure_examination_seed():
                 'sort_key': f"{cand_data['name'].lower()}_{cand_data['identity'] or cand_data['id']}"
             }
         )
-def merge_exam_history(existing, incoming, session_id='', source=''):
+def merge_exam_history(existing, incoming, session_id='', source='', update_mode='replace-nonempty'):
     rows = [item for item in (existing or []) if isinstance(item, dict)]
     index = {}
     for position, item in enumerate(rows):
@@ -492,7 +493,12 @@ def merge_exam_history(existing, incoming, session_id='', source=''):
             clean['source'] = source
         key = (clean.get('sessionId', ''), clean.get('round', ''), clean.get('sbd', ''))
         if key in index:
-            rows[index[key]].update(clean)
+            if update_mode == 'fill-empty':
+                for field, value in clean.items():
+                    if not str(rows[index[key]].get(field) or '').strip():
+                        rows[index[key]][field] = value
+            else:
+                rows[index[key]].update(clean)
         else:
             index[key] = len(rows)
             rows.append(clean)
@@ -517,7 +523,7 @@ ROUND_FIELD_MAP = {
 }
 
 
-def upsert_participation_history(candidate, session_id, history, source='', registration=None):
+def upsert_participation_history(candidate, session_id, history, source='', registration=None, update_mode='replace-nonempty'):
     """Store a source tab as one session and each populated round independently."""
     if not session_id:
         return None
@@ -541,11 +547,19 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
     }
     for payload_field, model_field in registration_fields.items():
         value = str(registration.get(payload_field) or '').strip()
-        if value:
+        if value and (update_mode != 'fill-empty' or not str(getattr(participation, model_field) or '').strip()):
             setattr(participation, model_field, value)
             updates.append(model_field)
     if registration:
-        participation.registration_data = {str(key): value for key, value in registration.items() if value not in (None, '')}
+        incoming_registration = {str(key): value for key, value in registration.items() if value not in (None, '')}
+        if update_mode == 'fill-empty':
+            merged_registration = dict(participation.registration_data or {})
+            for key, value in incoming_registration.items():
+                if not str(merged_registration.get(key) or '').strip():
+                    merged_registration[key] = value
+            participation.registration_data = merged_registration
+        else:
+            participation.registration_data = incoming_registration
         updates.append('registration_data')
     if updates:
         participation.save(update_fields=list(set(updates)) + ['updated_at'])
@@ -582,7 +596,7 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
             if not values.get('round_id'):
                 values['round_id'] = existing_result.round_id
             for model_field in ROUND_FIELD_MAP.values():
-                if not values.get(model_field):
+                if not values.get(model_field) or (update_mode == 'fill-empty' and str(getattr(existing_result, model_field) or '').strip()):
                     values[model_field] = getattr(existing_result, model_field)
             for field_name, value in values.items():
                 setattr(existing_result, field_name, value)
@@ -1916,6 +1930,7 @@ def sheets_sync(request):
     data = request.data or {}
     url = data.get('url', '').strip()
     sheet_id = data.get('id')
+    sheet_tab = str(data.get('sheetTab') or '').strip()
     
     target_url = url or None
     session_id = str(data.get('sessionId') or '').strip() or None
@@ -1924,19 +1939,70 @@ def sheets_sync(request):
             sheet = ExaminationSheet.objects.get(id=sheet_id)
             target_url = sheet.url
             session_id = sheet.session_id or session_id
+            sheet_tab = sheet.sheet_tab or sheet_tab
         except ExaminationSheet.DoesNotExist:
             return Response({'error': 'Không tìm thấy nguồn dữ liệu.'}, status=status.HTTP_404_NOT_FOUND)
 
     if target_url and not session_id:
         return Response({'error': 'Nguồn dữ liệu chưa được gắn với kỳ tổ chức.'}, status=status.HTTP_400_BAD_REQUEST)
             
-    result = sync_examination_from_google_sheet(target_url, session_id, sheet_id)
+    result = sync_examination_from_google_sheet(target_url, session_id, sheet_id, sheet_tab)
     if not result['success']:
         return Response({'error': result['message']}, status=status.HTTP_400_BAD_REQUEST)
     sync_content = f"Đồng bộ dữ liệu từ Google Sheet: {result.get('message') or result.get('status') or 'đã hoàn tất'}."
     if session_id:
         append_audit(f'session-{session_id}', sync_content, request, system=True)
         append_competition_scope_audit(session_id, sync_content, request, system=True)
+    return Response(result)
+
+
+@api_view(['POST'])
+@permission_classes([IsManagerOrAdmin])
+def sheet_import_preview(request):
+    """Read and analyse a Google Sheet without changing examination data."""
+    data = request.data or {}
+    sheet_id = str(data.get('id') or '').strip()
+    source_url = str(data.get('url') or '').strip()
+    session_id = str(data.get('sessionId') or '').strip()
+    sheet_tab = str(data.get('sheetTab') or '').strip()
+    source_name = 'Google Sheets'
+
+    if sheet_id:
+        try:
+            sheet = ExaminationSheet.objects.get(id=sheet_id)
+        except ExaminationSheet.DoesNotExist:
+            return Response({'error': 'Không tìm thấy nguồn dữ liệu.'}, status=status.HTTP_404_NOT_FOUND)
+        source_url = sheet.url
+        session_id = sheet.session_id or session_id
+        sheet_tab = sheet.sheet_tab or sheet_tab
+        source_name = sheet.name
+
+    if not source_url:
+        return Response({'error': 'Hãy nhập liên kết Google Sheets.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not session_id:
+        return Response({'error': 'Hãy chọn kỳ tổ chức nhận dữ liệu.'}, status=status.HTTP_400_BAD_REQUEST)
+    session = ExamSession.objects.filter(id=session_id).first()
+    if not session:
+        return Response({'error': 'Không tìm thấy kỳ tổ chức đã chọn.'}, status=status.HTTP_404_NOT_FOUND)
+
+    timestamp = timezone.now().strftime('%d/%m/%Y %H:%M:%S')
+    result = sync_single_sheet(
+        source_url,
+        timestamp,
+        sheet_doc_id=None,
+        session_id=session_id,
+        preview=True,
+        sheet_tab=sheet_tab,
+    )
+    if not result.get('success'):
+        return Response({'error': result.get('message') or 'Không thể đọc Google Sheets.'}, status=status.HTTP_400_BAD_REQUEST)
+    result['source']['name'] = source_name
+    result['targetSession'] = {
+        'id': session.id,
+        'code': session.code,
+        'name': session.name,
+        'time': session.time,
+    }
     return Response(result)
 
 @api_view(['GET'])
@@ -2029,6 +2095,9 @@ def import_candidates(request):
             confirmed_matches = {}
         source = data.get('source', '')
         session_id = str(data.get('sessionId') or '').strip()
+        update_mode = str(data.get('updateMode') or 'replace-nonempty').strip()
+        if update_mode not in {'fill-empty', 'replace-nonempty'}:
+            return Response({'error': 'Chính sách cập nhật dữ liệu không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
         
         if not input_records:
             return Response({'error': 'Không có hồ sơ để nhập.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2139,21 +2208,14 @@ def import_candidates(request):
                 }
                 previous_session_ids = list(base.session_ids or [])
                 already_in_target_session = session_id in previous_session_ids or CandidateParticipation.objects.filter(candidate=base, session_id=session_id).exists()
-                base.name = rec_cand['name']
-                if rec_cand['school']: base.school = rec_cand['school']
-                if rec_cand['class_name']: base.class_name = rec_cand['class_name']
-                if rec_cand['city']: base.city = rec_cand['city']
-                if rec_cand['ward']: base.ward = rec_cand['ward']
-                if rec_cand['nationality']: base.nationality = rec_cand['nationality']
-                if rec_cand['grade']: base.grade = rec_cand['grade']
-                if rec_cand['achievement']: base.achievement = rec_cand['achievement']
-                if rec_cand['highest_round']: base.highest_round = rec_cand['highest_round']
-                if rec_cand['email']: base.email = rec_cand['email']
-                if rec_cand['parent']: base.parent = rec_cand['parent']
-                if rec_cand['phone']: base.phone = rec_cand['phone']
-                if rec_cand['identity']: base.identity = rec_cand['identity']
-                if rec_cand['address']: base.address = rec_cand['address']
-                if should_replace_birth_date(base.birth_date, rec_cand['birth_date']): base.birth_date = rec_cand['birth_date']
+                should_write = lambda current, incoming: bool(incoming) and (update_mode == 'replace-nonempty' or not str(current or '').strip())
+                if should_write(base.name, rec_cand['name']): base.name = rec_cand['name']
+                for model_field in ('school', 'class_name', 'city', 'ward', 'nationality', 'grade', 'achievement', 'highest_round', 'email', 'parent', 'phone', 'identity', 'address'):
+                    incoming_value = rec_cand[model_field]
+                    if should_write(getattr(base, model_field), incoming_value):
+                        setattr(base, model_field, incoming_value)
+                if rec_cand['birth_date'] and (update_mode == 'replace-nonempty' and should_replace_birth_date(base.birth_date, rec_cand['birth_date']) or update_mode == 'fill-empty' and not base.birth_date):
+                    base.birth_date = rec_cand['birth_date']
 
                 base.contests = merge_contest_codes(base.contests, rec_cand['contests'])
                 if session_id:
@@ -2161,10 +2223,10 @@ def import_candidates(request):
                     if session_id not in s_ids:
                         s_ids.append(session_id)
                     base.session_ids = s_ids
-                base.exam_history = merge_exam_history(base.exam_history, rec_cand['exam_history'], session_id, source)
+                base.exam_history = merge_exam_history(base.exam_history, rec_cand['exam_history'], session_id, source, update_mode)
                 base.updated = ts_vn
                 base.save()
-                upsert_participation_history(base, session_id, rec_cand['exam_history'], source, rec_cand['registration'])
+                upsert_participation_history(base, session_id, rec_cand['exam_history'], source, rec_cand['registration'], update_mode)
 
                 after_values = {
                     field: getattr(base, field)
@@ -2215,11 +2277,11 @@ def import_candidates(request):
                     address=rec_cand['address'],
                     birth_date=rec_cand['birth_date'],
                     session_ids=s_ids,
-                    exam_history=merge_exam_history([], rec_cand['exam_history'], session_id, source),
+                    exam_history=merge_exam_history([], rec_cand['exam_history'], session_id, source, update_mode),
                     updated=ts_vn,
                     sort_key=f"{rec_cand['name'].lower()}_{rec_cand['identity'] or code}"
                 )
-                upsert_participation_history(new_c, session_id, rec_cand['exam_history'], source, rec_cand['registration'])
+                upsert_participation_history(new_c, session_id, rec_cand['exam_history'], source, rec_cand['registration'], update_mode)
                 existing.append(new_c)
                 existing_codes_set.add(code)
                 created += 1
@@ -2228,7 +2290,8 @@ def import_candidates(request):
         sync_session_candidate_totals()
         source_label = str(source or 'nguồn nhập dữ liệu').strip()
         existing_summary = f'; trong đó {linked_existing} hồ sơ đã có được bổ sung vào kỳ tổ chức này' if linked_existing else ''
-        import_summary = f'Hệ thống nhập dữ liệu từ {source_label}: thêm {created} thí sinh, cập nhật {updated} thí sinh{existing_summary}.'
+        policy_label = 'chỉ bổ sung trường còn trống' if update_mode == 'fill-empty' else 'cập nhật theo giá trị có nội dung trong nguồn'
+        import_summary = f'Hệ thống nhập dữ liệu từ {source_label}: thêm {created} thí sinh, cập nhật {updated} thí sinh{existing_summary}; chính sách: {policy_label}. Không xóa dữ liệu do ô nguồn trống.'
         append_audit(f'session-{session_id}', import_summary, request, system=True)
         append_competition_scope_audit(target_session, import_summary, request, system=True)
         return Response({'created': created, 'updated': updated, 'linkedExisting': linked_existing, 'items': items_returned})

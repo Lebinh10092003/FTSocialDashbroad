@@ -43,6 +43,7 @@ urlpatterns = [
     path('examination/sheet-publication', views.sheet_publication_config, name='sheet_publication_config'),
     path('examination/sheet-publication/sync', views.sheet_publication_sync, name='sheet_publication_sync'),
     path('examination/sheets', views.sheets_list, name='sheets_list'),
+    path('examination/sheets/preview', views.sheet_import_preview, name='sheet_import_preview'),
     path('examination/sheets/<str:pk>', views.sheet_detail, name='sheet_detail'),
     path('examination/sheets/<str:pk>/export', views.sheet_export, name='sheet_export'),
     path('examination/sync/google-sheet', views.sheets_sync, name='sheets_sync'),
