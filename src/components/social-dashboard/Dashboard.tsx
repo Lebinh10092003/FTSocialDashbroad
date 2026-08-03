@@ -39,6 +39,7 @@ interface DashboardProps {
   idToken: string;
   googleAccessToken: string | null;
   channels: Channel[];
+  onOpenConfig?: () => void;
 }
 
 type TrendMetric = 'views' | 'engagement' | 'postsCount' | 'engagementRate' | 'followers';
@@ -172,7 +173,7 @@ const getPresetRange = (preset: Exclude<DatePreset, 'custom'>) => {
   return { startDate: shiftDateStr(end, -offsets[preset]), endDate: end };
 };
 
-export default function Dashboard({ idToken, googleAccessToken, channels }: DashboardProps) {
+export default function Dashboard({ idToken, googleAccessToken, channels, onOpenConfig }: DashboardProps) {
   const [platformFilter, setPlatformFilter] = useState('all');
   const [channelFilter, setChannelFilter] = useState('all');
   const [startDate, setStartDate] = useState(getPastDateStr(6));
@@ -570,7 +571,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
         )}
       </section>
 
-      {!!data?.errors?.length && <div className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900"><AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-rose-600" /><div><b className="block">Đồng bộ Facebook đang thất bại</b><p className="mt-1">Có {data.errors.length} kênh chưa cập nhật được. Hệ thống vẫn giữ dữ liệu cũ; hãy mở Cấu hình hệ thống để kiểm tra hoặc nạp lại token Facebook.</p></div></div>}
+      {!!data?.errors?.length && <div className="flex flex-col gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900 sm:flex-row sm:items-start"><AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-rose-600" /><div className="flex-1"><b className="block">Đồng bộ Facebook đang thất bại</b><p className="mt-1">Có {data.errors.length} kênh chưa cập nhật được. Dữ liệu cũ vẫn được giữ. Vào cấu hình để quét lại toàn bộ trang theo token đã lưu; chỉ cần nạp token mới nếu Facebook vẫn từ chối quyền.</p></div>{onOpenConfig && <button type="button" onClick={onOpenConfig} className="shrink-0 rounded-lg border border-rose-300 bg-white px-3 py-2 text-xs font-extrabold text-rose-800 transition hover:bg-rose-100">Mở xử lý token</button>}</div>}
       {syncMessage && <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg text-xs text-emerald-800"><span className="w-2 h-2 rounded-full bg-emerald-500" />{syncMessage}</div>}
 
       {loading ? (

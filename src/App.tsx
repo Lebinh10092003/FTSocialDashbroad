@@ -702,7 +702,7 @@ export default function App() {
           <div className="max-w-[1600px] mx-auto">
             <Suspense fallback={<div className="grid min-h-[60vh] place-items-center text-sm font-semibold text-slate-500">Đang tải mô-đun...</div>}>
               {activeTab === 'dashboard' && (
-                <Dashboard idToken={idToken || ''} googleAccessToken={googleAccessToken} channels={channels} />
+                <Dashboard idToken={idToken || ''} googleAccessToken={googleAccessToken} channels={channels} onOpenConfig={() => setActiveTab('config')} />
               )}
               {activeTab === 'media' && <MediaSummary idToken={idToken || ''} channels={channels} />}
               {activeTab === 'posts' && <Posts idToken={idToken || ''} channels={channels} />}

@@ -29,6 +29,16 @@ function getDefaultSinceDate(): string {
   return date.toISOString().slice(0, 10);
 }
 
+function readableSyncMessage(log: ApiLog): string {
+  const message = String(log.errorMessage || '');
+  const facebookUnauthorized = log.platform === 'facebook'
+    && (/\b401\b/i.test(message) || /unauthorized/i.test(message) || /oauth/i.test(message));
+  if (facebookUnauthorized) {
+    return 'Facebook từ chối quyền truy cập. Token của Trang đã hết hạn hoặc không còn quyền; vào Cấu hình hệ thống để quét lại các trang được cấp quyền. Nếu vẫn lỗi, nạp User Access Token mới. Dữ liệu cũ vẫn được giữ.';
+  }
+  return message || 'Chưa có thông điệp chi tiết.';
+}
+
 export default function Sync({ idToken, googleAccessToken, channels, userRole, onRefreshChannels, onConnectGoogle }: SyncProps) {
   const [since, setSince] = useState(getDefaultSinceDate);
   const [until, setUntil] = useState('');
@@ -403,6 +413,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
               <tbody className="divide-y divide-slate-100 text-xs font-mono">
                 {syncHistory.map((log) => {
                   const chan = channels.find(c => c.id === log.channelId);
+                  const readableMessage = readableSyncMessage(log);
                   return (
                     <tr key={log.logId} className="hover:bg-slate-50/50">
                       <td className="p-4 text-slate-500 font-sans whitespace-nowrap">
@@ -432,7 +443,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
                       <td className="p-4 text-center text-slate-600 font-medium">{log.recordsReceived}</td>
                       <td className="p-4 text-center text-slate-600 font-medium">{log.recordsInserted}</td>
                       <td className="p-4 text-center text-slate-600 font-medium">{log.recordsUpdated}</td>
-                      <td className="p-4 font-sans text-slate-500 truncate" title={log.errorMessage || ''}>
+                      <td className="p-4 font-sans text-slate-500 truncate" title={readableMessage}>
                         {log.status === 'success' ? (
                           <span className="text-slate-400 italic">Đồng bộ hoàn hảo</span>
                         ) : log.status === 'running' ? (
@@ -442,9 +453,9 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
                         ) : log.status === 'cancelled' ? (
                           <span className="text-slate-500 font-medium">Đã hủy theo yêu cầu quản trị.</span>
                         ) : log.status === 'deferred' ? (
-                          <span className="text-amber-700 font-medium">{log.errorMessage}</span>
+                          <span className="text-amber-700 font-medium">{readableMessage}</span>
                         ) : (
-                          <span className="text-red-500 font-medium">{log.errorMessage}</span>
+                          <span className="text-red-500 font-medium">{readableMessage}</span>
                         )}
                       </td>
                     </tr>
