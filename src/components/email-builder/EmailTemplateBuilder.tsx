@@ -7,7 +7,8 @@ import {
   HelpCircle,
   FileText,
   AlertTriangle,
-  Play
+  Play,
+  Code2
 } from 'lucide-react';
 
 import { BlockType, EmailBlock, EmailSettings, EmailTemplate, EmailVariable } from '../../types/emailBuilder';
@@ -39,6 +40,7 @@ import EmailSettingsComponent from './EmailSettings';
 import EmailPreview from './EmailPreview';
 import VariablePicker from './VariablePicker';
 import EmailBuilderHeader from './EmailBuilderHeader';
+import EmailHtmlImportDialog from './EmailHtmlImportDialog';
 import AccountMenu from '../AccountMenu';
 import { EmailBuilderDialogProvider, useEmailBuilderDialog } from './EmailBuilderDialog';
 
@@ -76,6 +78,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
   
   const [variables, setVariables] = useState<EmailVariable[]>([]);
   const [showPreview, setShowPreview] = useState(false);
+  const [showHtmlImport, setShowHtmlImport] = useState(false);
   const [showVarPicker, setShowVarPicker] = useState(false);
   const [insertedVar, setInsertedVar] = useState<{ blockId: string; varName: string } | null>(null);
   const canvasRef = useRef<EmailCanvasHandle>(null);
@@ -568,6 +571,17 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     }
   };
 
+  const handleImportPastedHtml = async (templateName: string, source: string): Promise<string | null> => {
+    try {
+      const imported = createEmailTemplateFromHtml(source, templateName);
+      handleImportTemplate(imported);
+      showToast('Đã tạo mẫu từ mã HTML được dán.');
+      return null;
+    } catch (error: any) {
+      return error?.message || 'Không thể đọc mã HTML.';
+    }
+  };
+
   const prepareActiveTemplateForDelivery = async () => {
     const current = templatesRef.current.find(template => template.id === activeTemplateId) || activeTemplate;
     if (!current) return null;
@@ -693,7 +707,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center justify-end gap-2.5">
             <button
               onClick={handleRestoreDefaults}
               className="px-4 py-2 text-xs font-bold text-slate-650 hover:text-slate-800 hover:bg-slate-100/60 border border-slate-200 rounded-xl cursor-pointer transition-all"
@@ -717,8 +731,12 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
                 }}
                 className="hidden"
               />
-              Nhập JSON / HTML
+              Tải tệp mẫu
             </label>
+
+            <button type="button" onClick={() => setShowHtmlImport(true)} className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-bold text-blue-700 transition-all hover:bg-blue-100">
+              <Code2 className="h-3.5 w-3.5" />Dán mã HTML
+            </button>
 
 
 
@@ -866,6 +884,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
             </div>
           )}
         </main>
+        {showHtmlImport && <EmailHtmlImportDialog onClose={() => setShowHtmlImport(false)} onImport={handleImportPastedHtml} />}
       </div>
     );
   }
@@ -907,6 +926,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
         onDeleteTemplate={handleDeleteTemplate}
         onRestoreDefaults={handleRestoreDefaults}
         onImportFile={handleImportFile}
+        onPasteHtmlClick={() => setShowHtmlImport(true)}
         onPreviewClick={handlePreviewEmail}
         onBackToWorkspace={handleBackToList}
         onCopyEmail={handleCopyEmail}
@@ -1070,6 +1090,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
           onClose={() => setShowPreview(false)}
         />
       )}
+      {showHtmlImport && <EmailHtmlImportDialog onClose={() => setShowHtmlImport(false)} onImport={handleImportPastedHtml} />}
 
       {showVarPicker && (
         <VariablePicker

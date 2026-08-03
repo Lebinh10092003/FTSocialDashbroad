@@ -8,6 +8,7 @@ import {
   Redo2,
   Download, 
   Upload, 
+  Code2,
   Trash2, 
   Eye, 
   Check,  Edit2
@@ -26,6 +27,7 @@ interface EmailBuilderHeaderProps {
   onDeleteTemplate: () => void;
   onRestoreDefaults: () => void;
   onImportFile: (file: File) => Promise<void>;
+  onPasteHtmlClick: () => void;
   onPreviewClick: () => void;
   onBackToWorkspace: () => void;
   onAccountClick: () => void;
@@ -53,6 +55,7 @@ export default function EmailBuilderHeader({
   onDeleteTemplate,
   onRestoreDefaults,
   onImportFile,
+  onPasteHtmlClick,
   onPreviewClick,
   onBackToWorkspace,
   onAccountClick,
@@ -199,6 +202,15 @@ export default function EmailBuilderHeader({
           onChange={handleFileChange}
           className="hidden"
         />
+
+        <button
+          onClick={onPasteHtmlClick}
+          title="Dán mã HTML để tạo mẫu"
+          className="p-2 hover:bg-blue-50 border border-slate-200/50 hover:border-blue-200 rounded-xl text-slate-550 hover:text-blue-700 transition-all cursor-pointer flex items-center justify-center bg-white shadow-sm"
+          disabled={isGuest}
+        >
+          <Code2 className="w-3.5 h-3.5" />
+        </button>
 
         <button
           onClick={async () => { if (await dialog.confirm('Bạn muốn khôi phục tất cả các mẫu mặc định ban đầu của FermatTech? Các sửa đổi hiện tại sẽ bị xóa.', { title: 'Khôi phục mẫu mặc định', confirmText: 'Khôi phục', danger: true })) onRestoreDefaults(); }}
