@@ -3,6 +3,7 @@ import { inlineCustomCss, sanitizeCustomHtml, sanitizeHtml } from './emailSaniti
 import { getVariablesInText, detectVariableWarnings, replaceVariables } from './emailVariables';
 import { getEmailLayoutColumnWidths, getLayoutSlotIndex, normalizeEmailLayout } from './emailLayout';
 import { renderEmailIconDataUri } from './emailIcon';
+import { emailIconRasterKey } from './emailIconDelivery';
 
 interface GeneratedEmail {
   subject: string;
@@ -224,9 +225,13 @@ export function generateEmailHtml(
         const gap = Math.max(0, Math.min(80, Number(content.gap) || 10));
         const align = content.align || 'left';
         const verticalAlign = content.verticalAlign || 'middle';
+        const iconName = content.iconName || 'CircleCheck';
+        const iconColor = content.iconColor || '#1473D1';
+        const currentRasterKey = emailIconRasterKey(iconName, iconColor);
+        const preparedPng = content.iconRasterKey === currentRasterKey ? content.iconPngUrl || '' : '';
         const iconUrl = content.iconSource === 'upload'
           ? content.iconUrl || ''
-          : renderEmailIconDataUri(content.iconName || 'CircleCheck', content.iconColor || '#1473D1', iconSize);
+          : preparedPng || renderEmailIconDataUri(iconName, iconColor, iconSize);
         const text = rep(content.text || '');
         checkImageUrl(iconUrl, 'Icon minh họa');
         const iconCell = iconUrl

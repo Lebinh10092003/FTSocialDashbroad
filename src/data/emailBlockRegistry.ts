@@ -1,5 +1,6 @@
 import { BlockCategory, BlockType, EmailBlock, EmailBlockDefinition } from '../types/emailBuilder';
 import { createLayoutColumn } from '../lib/emailLayout';
+import { FERMATTECH_EMAIL_LOGO_URL } from '../lib/emailTemplateFactory';
 
 const V = (a = 'Style 1', b = 'Style 2') => [{ value: 'style-1', label: a }, { value: 'style-2', label: b }];
 const CTA = { text: 'Tìm hiểu thêm', link: 'https://www.fermat.vn', bg: '#0F3A72', color: '#ffffff' };
@@ -7,7 +8,7 @@ const block = (id: BlockType, category: BlockCategory, label: string, icon: stri
 
 /** Single source of truth: add a definition here instead of changing core builder logic. */
 export const EMAIL_BLOCK_REGISTRY: Record<BlockType, EmailBlockDefinition> = {
-  logo: block('logo','brand','Logo','PenTool',{url:'https://fermat.vn/UploadFile/Images/2025/8/18/Hinh_anh_638911101534359159.png',alt:'Logo',width:120,align:'center',link:'https://www.fermat.vn'},'Logo nhận diện'),
+  logo: block('logo','brand','Logo','PenTool',{url:FERMATTECH_EMAIL_LOGO_URL,alt:'FermatTech',width:120,align:'center',link:'https://www.fermat.vn'},'Logo nhận diện'),
   heading: block('heading','content','Tiêu đề','Heading',{text:'',level:'h2',fontSize:20,color:'#0F3A72',bold:true,align:'left'},'Tiêu đề chính hoặc phụ'),
   paragraph: block('paragraph','content','Đoạn văn','Type',{html:'',align:'left'},'Nội dung văn bản'),
   image: block('image','media','Ảnh / Banner','Image',{url:'',alt:'Banner hình ảnh',width:600,height:'',aspectLocked:true,naturalRatio:null,align:'center',borderRadius:8,link:''},'Ảnh HTTPS hoặc banner nổi bật'),

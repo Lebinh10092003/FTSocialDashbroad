@@ -25,7 +25,7 @@ interface EmailBuilderHeaderProps {
   onDuplicateTemplate: () => void;
   onDeleteTemplate: () => void;
   onRestoreDefaults: () => void;
-  onImportTemplate: (imported: EmailTemplate) => void;
+  onImportFile: (file: File) => Promise<void>;
   onPreviewClick: () => void;
   onBackToWorkspace: () => void;
   onAccountClick: () => void;
@@ -52,7 +52,7 @@ export default function EmailBuilderHeader({
   onDuplicateTemplate,
   onDeleteTemplate,
   onRestoreDefaults,
-  onImportTemplate,
+  onImportFile,
   onPreviewClick,
   onBackToWorkspace,
   onAccountClick,
@@ -80,34 +80,15 @@ export default function EmailBuilderHeader({
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const parsed = JSON.parse(event.target?.result as string);
-        if (!parsed.name || !Array.isArray(parsed.blocks) || !parsed.settings) {
-          void dialog.alert('File JSON không đúng định dạng Email Template!', 'Không thể nhập mẫu');
-          return;
-        }
-        
-        // standard imports
-        const importedTemplate: EmailTemplate = {
-          ...parsed,
-          id: `imported-${Date.now()}`,
-          lastUpdated: Date.now()
-        };
-        onImportTemplate(importedTemplate);
-        void dialog.alert('Nhập mẫu email thành công!', 'Nhập mẫu hoàn tất');
-      } catch (error) {
-        void dialog.alert('Lỗi đọc file JSON: ' + error, 'Không thể nhập mẫu');
-      }
-    };
-    reader.readAsText(file);
-    // clear input value
-    if (e.target) e.target.value = '';
+    try {
+      await onImportFile(file);
+    } finally {
+      input.value = '';
+    }
   };
 
   const handleRenameSubmit = (e: React.FormEvent) => {
@@ -187,7 +168,6 @@ export default function EmailBuilderHeader({
 
       {/* Right section: utility operations + COPY CTA */}
       <div className="flex items-center gap-2 flex-wrap sm:justify-end">
-        <AccountMenu userName={userName} userRole={userRole} photoURL={photoURL} isGuest={isGuest} onAccountClick={onAccountClick} onLogout={onLogout} variant="header"/>
         {/* Template admin controls */}
         <button
           onClick={onDuplicateTemplate}
@@ -207,7 +187,7 @@ export default function EmailBuilderHeader({
 
         <button
           onClick={handleImportClick}
-          title="Nhập file JSON"
+          title="Nhập mẫu từ file JSON hoặc HTML"
           className="p-2 hover:bg-slate-50 border border-slate-200/50 hover:border-slate-350/50 rounded-xl text-slate-550 transition-all cursor-pointer flex items-center justify-center bg-white shadow-sm"
          disabled={isGuest}>
           <Upload className="w-3.5 h-3.5" />
@@ -215,7 +195,7 @@ export default function EmailBuilderHeader({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".json"
+          accept=".json,.html,.htm,application/json,text/html"
           onChange={handleFileChange}
           className="hidden"
         />
@@ -272,6 +252,7 @@ export default function EmailBuilderHeader({
           {copySuccess ? <Check className="w-3.5 h-3.5 animate-pulse" /> : <Save className="w-3.5 h-3.5" />}
           Copy nội dung Email
         </button>
+        <AccountMenu userName={userName} userRole={userRole} photoURL={photoURL} isGuest={isGuest} onAccountClick={onAccountClick} onLogout={onLogout} variant="avatar"/>
       </div>
 
     </header>

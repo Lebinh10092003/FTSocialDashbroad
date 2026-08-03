@@ -158,17 +158,36 @@ export function sanitizeHtml(html: string): string {
   return container.innerHTML;
 }
 
+const sanitizeImportedInlineStyle = (style: string): string => style
+  .split(';')
+  .map(declaration => declaration.trim())
+  .filter(declaration => {
+    const separator = declaration.indexOf(':');
+    if (separator <= 0) return false;
+    const property = declaration.slice(0, separator).trim().toLowerCase();
+    const value = declaration.slice(separator + 1).trim().toLowerCase();
+    return !property.startsWith('--')
+      && !/expression\s*\(|behavior\s*:|-moz-binding|@import|javascript:|vbscript:/i.test(`${property}:${value}`);
+  })
+  .join('; ');
+
 /** Sanitizes Custom HTML while preserving email-safe tables and inline/style CSS. */
 export function sanitizeCustomHtml(html: string): string {
   if (typeof window === 'undefined') return html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\son\w+\s*=\s*(['"]).*?\1/gi, '');
   const doc = new DOMParser().parseFromString(html || '', 'text/html');
-  doc.querySelectorAll('script, iframe, object, embed, link, form, input, video, audio').forEach(node => node.remove());
+  doc.querySelectorAll('script, style, iframe, object, embed, link, form, input, video, audio').forEach(node => node.remove());
   doc.querySelectorAll('*').forEach(el => {
     [...el.attributes].forEach(attr => {
       const name = attr.name.toLowerCase(); const value = attr.value.trim().toLowerCase();
       if (name.startsWith('on') || (name === 'src' && value.startsWith('javascript:')) || (name === 'href' && value.startsWith('javascript:'))) el.removeAttribute(attr.name);
     });
     const htmlElement = el as HTMLElement;
+    const inlineStyle = el.getAttribute('style');
+    if (inlineStyle) {
+      const cleanedStyle = sanitizeImportedInlineStyle(inlineStyle);
+      if (cleanedStyle) el.setAttribute('style', cleanedStyle);
+      else el.removeAttribute('style');
+    }
     if (el.tagName.toLowerCase() === 'table') {
       htmlElement.style.maxWidth = '100%';
       if (!el.parentElement?.closest('table')) {

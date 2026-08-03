@@ -29,6 +29,8 @@ import {
 import { DEFAULT_EMAIL_VARIABLES } from '../../data/defaultEmailVariables';
 import { generateEmailHtml } from '../../lib/emailHtmlGenerator';
 import { copyEmailToClipboard, copyTextToClipboard } from '../../lib/emailClipboard';
+import { createBlankEmailTemplate, createEmailTemplateFromHtml, isHtmlEmailFile } from '../../lib/emailTemplateFactory';
+import { prepareEmailIconsForDelivery } from '../../lib/emailIconDelivery';
 
 import BlockLibrary from './BlockLibrary';
 import EmailCanvas, { EmailCanvasHandle, EmailSelectionFormat } from './EmailCanvas';
@@ -546,12 +548,43 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     handleEditTemplate(cleanImported.id);
   };
 
+  const handleImportFile = async (file: File) => {
+    try {
+      const contents = await file.text();
+      if (isHtmlEmailFile(file, contents)) {
+        const imported = createEmailTemplateFromHtml(contents, file.name);
+        handleImportTemplate(imported);
+        showToast('Đã nhập mẫu từ tệp HTML.');
+        return;
+      }
+      const parsed = JSON.parse(contents);
+      if (!parsed?.name || !Array.isArray(parsed.blocks) || !parsed.settings) {
+        throw new Error('File JSON không đúng định dạng mẫu email.');
+      }
+      handleImportTemplate(parsed as EmailTemplate);
+      showToast('Đã nhập mẫu từ tệp JSON.');
+    } catch (error: any) {
+      await dialog.alert(error?.message || 'Không thể đọc tệp mẫu email.', 'Không thể nhập mẫu');
+    }
+  };
+
+  const prepareActiveTemplateForDelivery = async () => {
+    const current = templatesRef.current.find(template => template.id === activeTemplateId) || activeTemplate;
+    if (!current) return null;
+    const prepared = await prepareEmailIconsForDelivery(current);
+    if (prepared !== current) {
+      updateTemplatesList(templatesRef.current.map(template => template.id === prepared.id ? prepared : template));
+    }
+    return prepared;
+  };
+
   // 7. Copying to Clipboard
   const handleCopyEmail = async () => {
     if (!activeTemplate) return;
     const changed = canvasRef.current?.flushPendingChanges();
     if (changed) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-    const templateToCopy = templatesRef.current.find(template => template.id === activeTemplateId) || activeTemplate;
+    const templateToCopy = await prepareActiveTemplateForDelivery();
+    if (!templateToCopy) return;
     const { copyHtml, plainText } = generateEmailHtml(templateToCopy, variables, false);
     const success = await copyEmailToClipboard(copyHtml, plainText, templateToCopy.settings.maxWidth);
     if (success) {
@@ -561,6 +594,13 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     } else {
       await dialog.alert('Không thể sao chép tự động. Vui lòng mở chế độ xem trước, quét chọn văn bản để sao chép.', 'Không thể sao chép');
     }
+  };
+
+  const handlePreviewEmail = async () => {
+    const changed = canvasRef.current?.flushPendingChanges();
+    if (changed) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    await prepareActiveTemplateForDelivery();
+    setShowPreview(true);
   };
 
   const handleCopySubject = async () => {
@@ -593,64 +633,8 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
   const handleCreateTemplate = async () => {
     const name = await dialog.prompt('Nhập tên mẫu email mới:', { title: 'Tạo mẫu email', confirmText: 'Tạo mẫu', placeholder: 'Tên mẫu email' });
     if (name && name.trim()) {
-      const newId = `template-${Date.now()}`;
-      const newTemplate: EmailTemplate = {
-        id: newId,
-        name: name.trim(),
-        subject: `[Tiêu đề] ${name.trim()}`,
-        settings: {
-          maxWidth: 650,
-          externalBg: '#f8fafc',
-          contentBg: '#ffffff',
-          fontFamily: 'Roboto, "Helvetica Neue", Arial, sans-serif',
-          textColor: '#1e293b',
-          contentPadding: 24,
-          borderRadius: 16,
-          linkColor: '#1473d1',
-          btnDefaultBg: '#1473d1',
-          btnDefaultTextColor: '#ffffff'
-        },
-        blocks: [
-          {
-            id: `logo-${Date.now()}`,
-            type: 'logo',
-            content: {
-              url: 'https://fermat.vn/UploadFile/Images/2025/8/18/Hinh_anh_638911101534359159.png',
-              alt: 'Logo',
-              width: 120,
-              align: 'center',
-              link: 'https://www.fermat.vn'
-            },
-            styles: { marginTop: 10, marginBottom: 10 },
-            visible: true
-          },
-          {
-            id: `heading-${Date.now()}`,
-            type: 'heading',
-            content: {
-              text: name.trim(),
-              level: 'h2',
-              fontSize: 20,
-              color: '#0f3a72',
-              bold: true,
-              align: 'left'
-            },
-            styles: { marginTop: 15, marginBottom: 10 },
-            visible: true
-          },
-          {
-            id: `para-${Date.now()}`,
-            type: 'paragraph',
-            content: {
-              html: '<p>Kính gửi Quý phụ huynh...</p>',
-              align: 'left'
-            },
-            styles: { marginTop: 10, marginBottom: 10 },
-            visible: true
-          }
-        ],
-        lastUpdated: Date.now()
-      };
+      const newTemplate = createBlankEmailTemplate(name.trim());
+      const newId = newTemplate.id;
       const newList = [...templates, newTemplate];
       updateTemplatesList(newList);
       handleEditTemplate(newId);
@@ -717,32 +701,23 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
               Khôi phục mẫu gốc
             </button>
 
-            <label className="px-4 py-2 text-xs font-bold text-slate-650 hover:text-slate-850 hover:bg-slate-100/60 border border-slate-200 rounded-xl cursor-pointer transition-all flex items-center gap-1.5">
+            <label className="px-4 py-2 text-xs font-bold text-slate-650 hover:text-slate-850 hover:bg-slate-100/60 border border-slate-200 rounded-xl cursor-pointer transition-all flex items-center gap-1.5" title="Nhập mẫu từ tệp JSON hoặc HTML">
               <input
                 type="file"
-                accept=".json"
-                onChange={e => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    const reader = new FileReader();
-                    reader.onload = async (event) => {
-                      try {
-                        const parsed = JSON.parse(event.target?.result as string);
-                        if (parsed.id && parsed.name && parsed.blocks) {
-                          handleImportTemplate(parsed);
-                        } else {
-                          await dialog.alert('Định dạng file JSON không hợp lệ.', 'Không thể nhập mẫu');
-                        }
-                      } catch (err) {
-                        await dialog.alert('Lỗi đọc file JSON.', 'Không thể nhập mẫu');
-                      }
-                    };
-                    reader.readAsText(file);
+                accept=".json,.html,.htm,application/json,text/html"
+                onChange={async e => {
+                  const input = e.currentTarget;
+                  const file = input.files?.[0];
+                  if (!file) return;
+                  try {
+                    await handleImportFile(file);
+                  } finally {
+                    input.value = '';
                   }
                 }}
                 className="hidden"
               />
-              Nhập JSON
+              Nhập JSON / HTML
             </label>
 
 
@@ -753,13 +728,13 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
             >
               Tạo mẫu mới
             </button>
-            <AccountMenu userName={userName} userRole={userRole} photoURL={photoURL} isGuest={isGuest} onAccountClick={onAccountClick} onLogout={onLogout} variant="header"/>
             <button
               onClick={onBackToWorkspace}
               className="px-4 py-2 text-xs font-bold text-slate-650 bg-slate-100 hover:bg-slate-200/80 rounded-xl cursor-pointer transition-all border border-slate-200"
             >
               Quay lại Workspace
             </button>
+            <AccountMenu userName={userName} userRole={userRole} photoURL={photoURL} isGuest={isGuest} onAccountClick={onAccountClick} onLogout={onLogout} variant="avatar"/>
           </div>
         </header>
 
@@ -931,8 +906,8 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
         onDuplicateTemplate={handleDuplicateTemplate}
         onDeleteTemplate={handleDeleteTemplate}
         onRestoreDefaults={handleRestoreDefaults}
-        onImportTemplate={handleImportTemplate}
-        onPreviewClick={() => { const changed = canvasRef.current?.flushPendingChanges(); if (changed) requestAnimationFrame(() => setShowPreview(true)); else setShowPreview(true); }}
+        onImportFile={handleImportFile}
+        onPreviewClick={handlePreviewEmail}
         onBackToWorkspace={handleBackToList}
         onCopyEmail={handleCopyEmail}
         onCopySubject={handleCopySubject}
@@ -961,8 +936,9 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
             
             {/* Subject field editor */}
             <div className="flex shrink-0 items-center gap-3 border-b border-slate-200/80 bg-white px-5 py-3">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider shrink-0">Dòng tiêu đề:</label>
+              <label htmlFor="email-subject" className="text-xs font-bold text-slate-500 uppercase tracking-wider shrink-0">Tiêu đề email:</label>
               <input
+                id="email-subject"
                 type="text"
                 placeholder="Nhập tiêu đề email..."
                 value={activeTemplate.subject}

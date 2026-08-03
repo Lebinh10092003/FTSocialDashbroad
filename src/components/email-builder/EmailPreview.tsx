@@ -63,6 +63,7 @@ export default function EmailPreview({
 
             <button
               onClick={onClose}
+              aria-label="Đóng bản xem trước"
               className="p-2 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-700 transition-all cursor-pointer"
             >
               <X className="w-5 h-5" />
