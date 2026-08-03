@@ -250,6 +250,7 @@ class TrainingAssessment(models.Model):
     question_bank_url = models.URLField(blank=True)
     output_sheet_url = models.URLField(blank=True)
     drive_folder_id = models.CharField(max_length=255, blank=True)
+    storage_config = models.JSONField(default=dict, blank=True)
     audience_group = models.CharField(max_length=255, blank=True)
     participants = models.JSONField(default=list, blank=True)
     max_people_per_variant = models.PositiveIntegerField(default=8)

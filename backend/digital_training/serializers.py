@@ -1,3 +1,6 @@
+from decimal import Decimal, InvalidOperation
+import re
+
 from django.db.models import Max, Sum
 from django.utils import timezone
 from rest_framework import serializers
@@ -71,7 +74,7 @@ class TrainingPartnerSerializer(serializers.ModelSerializer):
 
     def validate_training_contents(self, value):
         if not isinstance(value, list):
-            raise serializers.ValidationError("Noi dung tap huan phai la danh sach.")
+            raise serializers.ValidationError("Nội dung tập huấn phải là danh sách.")
         return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
 
     def _sync_registered_sessions(self, partner):
@@ -210,7 +213,7 @@ class TrainingClassSerializer(serializers.ModelSerializer):
 
     def validate_training_contents(self, value):
         if not isinstance(value, list):
-            raise serializers.ValidationError("Noi dung tap huan phai la danh sach.")
+            raise serializers.ValidationError("Nội dung tập huấn phải là danh sách.")
         return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
 
 
@@ -238,7 +241,7 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
 
     def validate_contents(self, value):
         if not isinstance(value, list):
-            raise serializers.ValidationError("Noi dung tap huan phai la danh sach.")
+            raise serializers.ValidationError("Nội dung tập huấn phải là danh sách.")
         return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
 
     def _mark_past_session_completed(self, validated_data):
@@ -363,7 +366,7 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
             "attempt_limit", "status", "public_slug", "questions", "variants",
             "generation_mode", "generation_config",
             "source_type", "source_name", "question_bank_url", "output_sheet_url",
-            "drive_folder_id", "audience_group", "participants", "participant_count",
+            "drive_folder_id", "storage_config", "audience_group", "participants", "participant_count",
             "max_people_per_variant", "sync_status", "sync_error", "sync_counts",
             "created_by", "attempts_count", "submitted_count", "average_score",
             "variant_distribution", "created_at", "updated_at",
@@ -421,17 +424,17 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
 
     def validate_max_people_per_variant(self, value):
         if value < 1 or value > 100:
-            raise serializers.ValidationError("So nguoi toi da tren mot ma de phai tu 1 den 100.")
+            raise serializers.ValidationError("Số người tối đa trên một mã đề phải từ 1 đến 100.")
         return value
 
     def validate_participants(self, value):
         if not isinstance(value, list):
-            raise serializers.ValidationError("Danh sach nguoi tham gia khong hop le.")
+            raise serializers.ValidationError("Danh sách người tham gia không hợp lệ.")
         result = []
         seen = set()
         for index, item in enumerate(value, start=1):
             if not isinstance(item, dict):
-                raise serializers.ValidationError(f"Dong nguoi tham gia {index} khong hop le.")
+                raise serializers.ValidationError(f"Dòng người tham gia {index} không hợp lệ.")
             participant = {
                 "code": str(item.get("code") or "").strip(),
                 "name": str(item.get("name") or "").strip(),
@@ -443,24 +446,60 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
             }
             identity = participant["code"].casefold() or participant["email"].casefold() or participant["phone"]
             if not participant["name"] or not identity:
-                raise serializers.ValidationError(f"Dong {index} can co ho ten va ma/email/so dien thoai.")
+                raise serializers.ValidationError(f"Dòng {index} cần có họ tên và mã/email/số điện thoại.")
             if identity in seen:
-                raise serializers.ValidationError(f"Dong {index} bi trung nguoi tham gia.")
+                raise serializers.ValidationError(f"Dòng {index} bị trùng người tham gia.")
             seen.add(identity)
             result.append(participant)
         return result
 
+    def validate_storage_config(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Cấu hình lưu trữ không hợp lệ.")
+        participant_template = str(value.get("participant_folder_template") or "{participant_code} - {respondent_name}")
+        allowed = {"{participant_code}", "{respondent_name}", "{email}", "{phone}", "{variant}"}
+        tokens = {"{" + item + "}" for item in re.findall(r"\{([^{}]+)\}", participant_template)}
+        if not tokens.issubset(allowed):
+            raise serializers.ValidationError("Mẫu tên thư mục người làm chứa biến không được hỗ trợ.")
+        return {
+            "create_customer_folder": bool(value.get("create_customer_folder", True)),
+            "create_participant_folder": bool(value.get("create_participant_folder", True)),
+            "customer_folder_name": str(value.get("customer_folder_name") or "").strip()[:180],
+            "participant_folder_template": participant_template[:240],
+        }
+
     def validate_questions(self, value):
         if not isinstance(value, list):
             raise serializers.ValidationError("Danh sách câu hỏi không hợp lệ.")
+        seen_ids = set()
         for index, question in enumerate(value, start=1):
             if not isinstance(question, dict) or not str(question.get("text") or "").strip():
                 raise serializers.ValidationError(f"Câu {index} chưa có nội dung.")
+            question_id = str(question.get("id") or "").strip()
+            if not question_id:
+                raise serializers.ValidationError(f"Câu {index} chưa có mã định danh.")
+            if question_id in seen_ids:
+                raise serializers.ValidationError(f"Câu {index} bị trùng mã định danh “{question_id}”.")
+            seen_ids.add(question_id)
             if question.get("type") not in {
                 "single_choice", "multiple_choice", "short_answer", "matching",
                 "ordering", "practical_submission", "file_upload",
             }:
                 raise serializers.ValidationError(f"Câu {index} có loại câu chưa được hỗ trợ.")
+            try:
+                points = Decimal(str(question.get("points", 0)))
+            except (InvalidOperation, TypeError, ValueError):
+                raise serializers.ValidationError(f"Điểm của câu {index} không hợp lệ.")
+            if points < 0 or points > 1000:
+                raise serializers.ValidationError(f"Điểm của câu {index} phải từ 0 đến 1.000.")
+            options = question.get("options") or []
+            if question.get("type") in {"single_choice", "multiple_choice", "matching", "ordering"} and len(options) < 2:
+                raise serializers.ValidationError(f"Câu {index} cần ít nhất 2 phương án.")
+            correct = question.get("correct_answers") or []
+            if question.get("type") == "single_choice" and len(correct) != 1:
+                raise serializers.ValidationError(f"Câu {index} phải có đúng 1 đáp án đúng.")
+            if question.get("type") == "multiple_choice" and not correct:
+                raise serializers.ValidationError(f"Câu {index} cần ít nhất 1 đáp án đúng.")
         return value
 
     def validate(self, attrs):

@@ -366,6 +366,70 @@ class TrainingAssessmentTests(TestCase):
         self.assertEqual(response.data["status"], "submitted")
         self.assertEqual(float(response.data["score"]), 1)
 
+    def test_server_rejects_submission_with_required_questions_unanswered(self):
+        start = self.client.post(
+            f"/api/training-assessments/{self.assessment.public_slug}/start",
+            {"respondent_name": "Nguyễn A", "email": "missing@example.test"},
+            format="json",
+        )
+        response = self.client.patch(
+            f"/api/training-assessment-attempts/{start.data['access_token']}",
+            {"submit": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("câu bắt buộc", response.data["error"])
+
+    def test_required_matching_question_must_have_every_pair(self):
+        self.assessment.questions = [{
+            "id": "match-1",
+            "variant": "Đề 1",
+            "order": 1,
+            "type": "matching",
+            "text": "Ghép đủ hai cặp",
+            "options": [
+                {"key": "1", "text": "Trái 1", "match_text": "Phải A"},
+                {"key": "2", "text": "Trái 2", "match_text": "Phải B"},
+            ],
+            "correct_answers": ["1-A", "2-B"],
+            "points": 2,
+            "required": True,
+        }]
+        self.assessment.save(update_fields=["questions", "updated_at"])
+        start = self.client.post(
+            f"/api/training-assessments/{self.assessment.public_slug}/start",
+            {"respondent_name": "Nguyễn Ghép", "email": "matching@example.test"},
+            format="json",
+        )
+        response = self.client.patch(
+            f"/api/training-assessment-attempts/{start.data['access_token']}",
+            {"answers": {"match-1": {"1": "A"}}, "submit": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("câu bắt buộc", response.data["error"])
+
+    def test_expired_attempt_returns_timed_out_payload_instead_of_save_error(self):
+        start = self.client.post(
+            f"/api/training-assessments/{self.assessment.public_slug}/start",
+            {"respondent_name": "Nguyễn Hết Giờ", "email": "expired@example.test"},
+            format="json",
+        )
+        attempt = self.assessment.attempts.get(access_token=start.data["access_token"])
+        attempt.expires_at = timezone.now() - timedelta(seconds=1)
+        attempt.save(update_fields=["expires_at", "updated_at"])
+
+        response = self.client.patch(
+            f"/api/training-assessment-attempts/{start.data['access_token']}",
+            {"answers": {}, "submit": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], "timed_out")
+
     def test_participant_list_assigns_fixed_variant_and_resumes_active_attempt(self):
         assigned_variant = self.assessment.questions[2]['variant']
         self.assessment.participants = [{
@@ -393,6 +457,89 @@ class TrainingAssessmentTests(TestCase):
         self.assertEqual(first.data['variant'], assigned_variant)
         self.assertEqual(second.status_code, 200, second.data)
         self.assertEqual(second.data["access_token"], first.data["access_token"])
+
+    def test_open_assessment_resumes_across_browsers_only_for_exact_identity(self):
+        first = self.client.post(
+            f"/api/training-assessments/{self.assessment.public_slug}/start",
+            {
+                "respondent_name": "  Nguyễn   Văn A ",
+                "email": "Learner@Example.Test",
+                "phone": "090-123-4567",
+            },
+            format="json",
+        )
+        resumed = self.client.post(
+            f"/api/training-assessments/{self.assessment.public_slug}/start",
+            {
+                "respondent_name": "nguyễn văn a",
+                "email": "learner@example.test",
+                "phone": "090 123 4567",
+            },
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(resumed.status_code, 200, resumed.data)
+        self.assertTrue(resumed.data["resumed"])
+        self.assertEqual(resumed.data["access_token"], first.data["access_token"])
+
+        mismatch = self.client.post(
+            f"/api/training-assessments/{self.assessment.public_slug}/start",
+            {
+                "respondent_name": "Tên Không Khớp",
+                "email": "learner@example.test",
+                "phone": "0901234567",
+            },
+            format="json",
+        )
+        self.assertEqual(mismatch.status_code, 400, mismatch.data)
+        self.assertIn("chưa khớp", mismatch.data["error"])
+
+    def test_reset_requires_exact_identity_and_clears_current_attempt(self):
+        first = self.client.post(
+            f"/api/training-assessments/{self.assessment.public_slug}/start",
+            {
+                "respondent_name": "Nguyễn Văn A",
+                "email": "learner@example.test",
+                "phone": "0901234567",
+            },
+            format="json",
+        )
+        question_id = first.data["questions"][0]["id"]
+        self.client.patch(
+            f"/api/training-assessment-attempts/{first.data['access_token']}",
+            {"answers": {question_id: "B"}},
+            format="json",
+        )
+        reset = self.client.post(
+            f"/api/training-assessments/{self.assessment.public_slug}/start",
+            {
+                "respondent_name": "Nguyễn Văn A",
+                "email": "learner@example.test",
+                "phone": "090-123-4567",
+                "reset": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(reset.status_code, 200, reset.data)
+        self.assertTrue(reset.data["reset_performed"])
+        self.assertEqual(reset.data["answers"], {})
+        self.assertEqual(reset.data["access_token"], first.data["access_token"])
+
+    def test_storage_config_rejects_unknown_folder_template_variables(self):
+        serializer = TrainingAssessmentSerializer(
+            instance=self.assessment,
+            data={
+                "storage_config": {
+                    "participant_folder_template": "{respondent_name}-{secret}",
+                },
+            },
+            partial=True,
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("storage_config", serializer.errors)
 
     def test_autosave_accepts_structured_answers_and_progress(self):
         start = self.client.post(
@@ -426,7 +573,7 @@ class TrainingAssessmentTests(TestCase):
             "option 4", "option 5", "answer", "answer image", "points",
         ])
         sheet.append([1, "Topic A", "Theory", "multiple choice", "Medium", "Choose values", "", "One", "Two", "Three", "", "", "1;3", "", 2])
-        sheet.append([2, "Topic B", "Theory", "matching", "Hard", "Match values", "", "Left 1", "Left 2", "", "", "", "1-B;2-A", "", 2])
+        sheet.append([2, "Topic B", "Theory", "matching", "Hard", "Match values", "", "Left 1 | Right 1", "Left 2 | Right 2", "", "", "", "1-B;2-A", "", 2])
         sheet.append([3, "Topic C", "Theory", "ordering", "Hard", "Order values", "", "Step 1", "Step 2", "Step 3", "", "", "2-1-3", "", 2])
         sheet.append([4, "Practice", "Practice", "link upload", "Hard", "Submit product", "", "", "", "", "", "", "Manual", "", 6])
         buffer = io.BytesIO()
@@ -439,6 +586,8 @@ class TrainingAssessmentTests(TestCase):
             "multiple_choice", "matching", "ordering", "practical_submission",
         ])
         self.assertEqual(result["questions"][0]["correct_answers"], ["1", "3"])
+        self.assertEqual(result["questions"][1]["options"][0]["text"], "Left 1")
+        self.assertEqual(result["questions"][1]["options"][0]["match_text"], "Right 1")
         self.assertEqual(result["questions"][0]["audience_group"], "THPT")
         self.assertTrue(all(item["question_code"] for item in result["questions"]))
 

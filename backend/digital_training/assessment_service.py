@@ -73,7 +73,9 @@ def _question_type(value):
         return "matching"
     if normalized in {"sapxepthutu", "ordering", "sorting", "reorder"}:
         return "ordering"
-    if normalized in {"taianh", "uploadanh", "fileupload", "upload", "thuchanh", "ganlinktaianh", "diendapanganlink", "ganlink", "linkupload"}:
+    if normalized in {"fileupload", "uploadtep", "noptep", "tailen"}:
+        return "file_upload"
+    if normalized in {"taianh", "uploadanh", "upload", "thuchanh", "ganlinktaianh", "diendapanganlink", "ganlink", "linkupload"}:
         return "practical_submission"
     return normalized
 
@@ -162,6 +164,15 @@ def parse_assessment_workbook(content, source_name=""):
                 option_text = str(value(f"option_{position}") or "").strip()
                 if option_text:
                     options.append({"key": str(position), "text": option_text})
+            if question_type == "matching":
+                for option in options:
+                    pair = re.split(r"\s*(?:=>|→|\|)\s*", option["text"], maxsplit=1)
+                    if len(pair) == 2 and all(pair):
+                        option["text"], option["match_text"] = pair
+                if options and not all(option.get("match_text") for option in options):
+                    warnings.append(
+                        f"{sheet.title}!{row_number}: nên nhập mỗi cặp ghép theo dạng “vế trái | vế phải” để người làm thấy đủ nội dung."
+                    )
             correct_raw = str(value("correct") or "").strip()
             correct = []
             if question_type in {"single_choice", "multiple_choice"}:
@@ -301,7 +312,7 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
         try:
             count = int(rule.get("count") or 0)
         except (TypeError, ValueError):
-            raise ValueError("So cau trong co cau de phai la so nguyen.")
+            raise ValueError("Số câu trong cơ cấu đề phải là số nguyên.")
         if count <= 0:
             continue
         structured_rules.append({
@@ -310,7 +321,7 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
             "count": count,
         })
     if structured_rules and sum(rule["count"] for rule in structured_rules) != questions_per_variant:
-        raise ValueError("Tong so cau trong co cau chu de/do kho phai bang so cau moi ma de.")
+        raise ValueError("Tổng số câu trong cơ cấu chủ đề/độ khó phải bằng số câu mỗi mã đề.")
     for rule in structured_rules:
         available = [question for question in unique_questions if (
             not rule["category"] or str(question.get("category") or "").strip().casefold() == rule["category"]
@@ -318,7 +329,7 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
             not rule["difficulty"] or str(question.get("difficulty") or "").strip().casefold() == rule["difficulty"]
         )]
         if len(available) < rule["count"]:
-            raise ValueError("Ngan hang khong du cau cho mot dong co cau chu de/do kho.")
+            raise ValueError("Ngân hàng không đủ câu cho một dòng cơ cấu chủ đề/độ khó.")
 
     seed = int(seed) if seed not in (None, "") else secrets.randbits(63)
     rng = random.Random(seed)
@@ -367,7 +378,7 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
                 rng.shuffle(ranked)
                 ranked.sort(key=lambda question: usage[str(question["id"])])
                 if len(ranked) < rule["count"]:
-                    raise ValueError("Cac dong co cau dang chong lan va khong du cau hoi khong trung trong mot ma de.")
+                    raise ValueError("Các dòng cơ cấu đang chồng lấn và không đủ câu hỏi không trùng trong một mã đề.")
                 for question in ranked[:rule["count"]]:
                     selected.append(question)
                     selected_ids.add(str(question["id"]))
@@ -523,10 +534,41 @@ def _safe_sheet_title(value):
     return title[:100] or "Sheet"
 
 
-def upload_assessment_file_to_drive(uploaded, folder_id):
+def _safe_drive_name(value, fallback="Thư mục"):
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "-", str(value or "").strip())
+    name = re.sub(r"\s+", " ", name).strip(" .-")
+    return name[:180] or fallback
+
+
+def _drive_child_folder(service, parent_id, name):
+    safe_name = _safe_drive_name(name)
+    query_name = safe_name.replace(chr(39), chr(92) + chr(39))
+    result = service.files().list(
+        q=f"'{parent_id}' in parents and name = '{query_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+        fields="files(id,name)",
+        pageSize=1,
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+    ).execute()
+    existing = result.get("files", [])
+    if existing:
+        return existing[0]["id"]
+    created = service.files().create(
+        body={
+            "name": safe_name,
+            "parents": [parent_id],
+            "mimeType": "application/vnd.google-apps.folder",
+        },
+        fields="id",
+        supportsAllDrives=True,
+    ).execute()
+    return created["id"]
+
+
+def upload_assessment_file_to_drive(uploaded, assessment, attempt, question_id=""):
     raw = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
     if not raw:
-        raise ValueError("Chua cau hinh GOOGLE_SERVICE_ACCOUNT_JSON de tai tep len Google Drive.")
+        raise ValueError("Chưa cấu hình GOOGLE_SERVICE_ACCOUNT_JSON để tải tệp lên Google Drive.")
     info = json.loads(raw)
     info["private_key"] = str(info.get("private_key") or "").replace("\\n", "\n")
     credentials = service_account.Credentials.from_service_account_info(
@@ -534,6 +576,27 @@ def upload_assessment_file_to_drive(uploaded, folder_id):
         scopes=["https://www.googleapis.com/auth/drive.file"],
     )
     service = build("drive", "v3", credentials=credentials, cache_discovery=False)
+    folder_id = assessment.drive_folder_id
+    config = assessment.storage_config or {}
+    if config.get("create_customer_folder", True):
+        customer_name = config.get("customer_folder_name") or (
+            assessment.partner.name if assessment.partner else assessment.title
+        )
+        folder_id = _drive_child_folder(service, folder_id, customer_name)
+    if config.get("create_participant_folder", True):
+        template = str(config.get("participant_folder_template") or "{participant_code} - {respondent_name}")
+        values = {
+            "participant_code": attempt.participant_code,
+            "respondent_name": attempt.respondent_name,
+            "email": attempt.email,
+            "phone": attempt.phone,
+            "variant": attempt.variant,
+        }
+        try:
+            participant_name = template.format(**values)
+        except (KeyError, ValueError):
+            participant_name = f"{attempt.participant_code} - {attempt.respondent_name}"
+        folder_id = _drive_child_folder(service, folder_id, participant_name)
     uploaded.seek(0)
     media = MediaIoBaseUpload(
         io.BytesIO(uploaded.read()),
@@ -541,7 +604,7 @@ def upload_assessment_file_to_drive(uploaded, folder_id):
         resumable=False,
     )
     result = service.files().create(
-        body={"name": uploaded.name, "parents": [folder_id]},
+        body={"name": _safe_drive_name(f"{question_id} - {uploaded.name}", uploaded.name), "parents": [folder_id]},
         media_body=media,
         fields="id,webViewLink",
         supportsAllDrives=True,
@@ -573,7 +636,7 @@ def _assessment_output_layout(assessment):
 def prepare_assessment_google_sheet(assessment):
     spreadsheet_id = extract_spreadsheet_id(assessment.output_sheet_url)
     if not spreadsheet_id:
-        raise ValueError("Chua cau hinh Google Sheet dau ra hop le cho dot kiem tra.")
+        raise ValueError("Chưa cấu hình Google Sheet đầu ra hợp lệ cho đợt kiểm tra.")
     service = build_sheets_service(None, {})
     layout = _assessment_output_layout(assessment)
     metadata = service.spreadsheets().get(
@@ -612,7 +675,7 @@ def prepare_assessment_google_sheet(assessment):
         code = str(item.get("participant_code") or "").strip().casefold()
         if code:
             attempt_statuses[code] = item.get("status") or ""
-    status_names = {"in_progress": "Dang lam", "submitted": "Da nop", "timed_out": "Het gio"}
+    status_names = {"in_progress": "Đang làm", "submitted": "Đã nộp", "timed_out": "Hết giờ"}
     participant_values = [["M\u00e3 ng\u01b0\u1eddi l\u00e0m", "H\u1ecd t\u00ean", "Email", "S\u1ed1 \u0111i\u1ec7n tho\u1ea1i", "Nh\u00f3m", "M\u00e3 \u0111\u1ec1", "Tr\u1ea1ng th\u00e1i"]]
     participant_values.extend([
         [item.get("code", ""), item.get("name", ""), item.get("email", ""), item.get("phone", ""), item.get("group", ""), item.get("variant", ""), status_names.get(attempt_statuses.get(str(item.get("code") or "").strip().casefold(), ""), "Ch\u01b0a l\u00e0m")]
@@ -670,7 +733,7 @@ def append_assessment_deletion_log(attempt, actor, mode, note=""):
         insertDataOption="INSERT_ROWS",
         body={"values": [[
             str(attempt.access_token), attempt.variant, mode, actor, "Admin/System",
-            "Hop le", "Da xoa", note,
+            "Hợp lệ", "Đã xóa", note,
         ]]},
     ).execute()
 
@@ -695,8 +758,8 @@ def sync_attempt_to_google_sheet(attempt):
         attempt.variant, attempt.status, *answer_values, float(attempt.auto_graded_points or 0),
         float(attempt.practical_score or 0) if attempt.practical_score is not None else "",
         float(attempt.score or 0), "\n".join(product_links), "\n".join(product_file_ids),
-        "Can cham" if attempt.manual_grading_required else "Da cham",
-        "Da ghi", attempt.submitted_at.isoformat() if attempt.submitted_at else "",
+        "Cần chấm" if attempt.manual_grading_required else "Đã chấm",
+        "Đã ghi", attempt.submitted_at.isoformat() if attempt.submitted_at else "",
         attempt.purge_after.isoformat() if attempt.purge_after else "",
     ]
     sheet_title = layout["answer_sheets"][attempt.variant]
