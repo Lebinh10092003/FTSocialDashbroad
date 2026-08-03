@@ -8,10 +8,49 @@ from django.utils import timezone
 
 from social.models import Channel
 from .models import Department, SystemConfig, UserProfile
-from .views import SENSITIVE_CONFIG_KEYS, _bootstrap_admin, _get_config, _normalise_token_rows, _sync_channels
+from .views import (
+    SENSITIVE_CONFIG_KEYS,
+    _bootstrap_admin,
+    _get_config,
+    _normalise_token_rows,
+    _sync_channels,
+    _sync_environment_scan_token,
+)
 
 
 class TokenLifecycleTests(TestCase):
+    def test_environment_token_never_overwrites_admin_saved_token(self):
+        now = timezone.now()
+        data = {
+            "facebookScanTokens": [{
+                "id": "facebook-scan-current",
+                "accessToken": "admin-saved-token",
+                "issuedAt": now.isoformat(),
+                "expiresAt": (now + timedelta(days=10)).isoformat(),
+                "validationStatus": "valid",
+                "pageIds": [],
+                "pageNames": [],
+            }],
+        }
+
+        with patch.dict("os.environ", {"CURRENT_FACEBOOK_ACCESS_TOKEN": "stale-deployment-token"}, clear=False):
+            self.assertFalse(_sync_environment_scan_token(data, now))
+
+        scan = data["facebookScanTokens"][0]
+        self.assertEqual(scan["accessToken"], "admin-saved-token")
+        self.assertEqual(scan["validationStatus"], "valid")
+
+    def test_environment_token_seeds_an_empty_configuration(self):
+        now = timezone.now()
+        data = {"facebookScanTokens": []}
+
+        with patch.dict("os.environ", {"CURRENT_FACEBOOK_ACCESS_TOKEN": "bootstrap-token"}, clear=False):
+            self.assertTrue(_sync_environment_scan_token(data, now))
+
+        scan = data["facebookScanTokens"][0]
+        self.assertEqual(scan["accessToken"], "bootstrap-token")
+        self.assertEqual(scan["validationStatus"], "unknown")
+
     def test_pages_inherit_their_source_token_expiry_independently(self):
         now = timezone.now()
         scans = [

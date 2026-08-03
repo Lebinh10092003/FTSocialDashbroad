@@ -1,8 +1,10 @@
 import datetime
+import json
 from datetime import timedelta
 from io import BytesIO, StringIO
 from unittest.mock import Mock, patch
 
+import requests
 from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
@@ -12,9 +14,94 @@ from .models import ApiLog, Channel, DailySnapshot, FollowerSnapshot, Post
 from .providers import FacebookProvider
 from .sync import SyncEngine
 from .views import _start_background_sync
+from authentication.models import SystemConfig
 
 
 class FacebookPaginationTests(TestCase):
+    @patch("social.providers.fetch_with_retry")
+    def test_invalid_page_token_is_refreshed_from_saved_scan_token(self, fetch):
+        now = timezone.now()
+        SystemConfig.objects.create(
+            key="main",
+            data={
+                "metaPageTokensJson": json.dumps({"page-1": "expired-page-token"}),
+                "detailedTokensList": [{
+                    "id": "facebook-page-1",
+                    "platform": "facebook",
+                    "pageId": "page-1",
+                    "pageName": "Page 1",
+                    "accessToken": "expired-page-token",
+                    "sourceTokenId": "scan-1",
+                }],
+                "facebookScanTokens": [{
+                    "id": "scan-1",
+                    "platform": "facebook",
+                    "label": "Token qu?t Facebook",
+                    "accessToken": "valid-scan-token",
+                    "issuedAt": now.isoformat(),
+                    "expiresAt": (now + timedelta(days=42)).isoformat(),
+                    "pageIds": ["page-1"],
+                    "pageNames": ["Page 1"],
+                }],
+            },
+        )
+        unauthorized = requests.HTTPError("Unauthorized")
+        unauthorized.response = Mock(status_code=401)
+        fetch.side_effect = [
+            unauthorized,
+            {"data": [{"id": "page-1", "name": "Page 1", "access_token": "fresh-page-token"}]},
+            {"id": "page-1", "name": "Page 1"},
+        ]
+
+        provider = FacebookProvider()
+        self.assertTrue(provider.validate_credentials("channel-1", "page-1"))
+
+        data = SystemConfig.objects.get(key="main").data
+        self.assertEqual(json.loads(data["metaPageTokensJson"])["page-1"], "fresh-page-token")
+        self.assertEqual(data["detailedTokensList"][0]["accessToken"], "fresh-page-token")
+        self.assertEqual(data["facebookScanTokens"][0]["validationStatus"], "valid")
+        self.assertEqual(data["facebookScanTokens"][0]["label"], "Token quét Facebook")
+
+    @patch("social.providers.fetch_with_retry")
+    def test_invalid_scan_token_is_reported_instead_of_using_fake_expiry(self, fetch):
+        now = timezone.now()
+        SystemConfig.objects.create(
+            key="main",
+            data={
+                "metaPageTokensJson": json.dumps({"page-1": "expired-page-token"}),
+                "detailedTokensList": [{
+                    "id": "facebook-page-1",
+                    "platform": "facebook",
+                    "pageId": "page-1",
+                    "pageName": "Page 1",
+                    "accessToken": "expired-page-token",
+                    "sourceTokenId": "scan-1",
+                }],
+                "facebookScanTokens": [{
+                    "id": "scan-1",
+                    "platform": "facebook",
+                    "label": "Token quét Facebook",
+                    "accessToken": "expired-scan-token",
+                    "issuedAt": now.isoformat(),
+                    "expiresAt": (now + timedelta(days=42)).isoformat(),
+                    "pageIds": ["page-1"],
+                    "pageNames": ["Page 1"],
+                }],
+            },
+        )
+        page_error = requests.HTTPError("Unauthorized")
+        page_error.response = Mock(status_code=401)
+        scan_error = requests.HTTPError("Unauthorized")
+        scan_error.response = Mock(status_code=401)
+        fetch.side_effect = [page_error, scan_error]
+
+        provider = FacebookProvider()
+        self.assertFalse(provider.validate_credentials("channel-1", "page-1"))
+
+        scan = SystemConfig.objects.get(key="main").data["facebookScanTokens"][0]
+        self.assertEqual(scan["validationStatus"], "invalid")
+        self.assertIn("nạp lại", scan["lastValidationError"])
+
     @patch("social.providers.fetch_with_retry")
     def test_list_posts_follows_cursor_pagination(self, fetch):
         fetch.side_effect = [

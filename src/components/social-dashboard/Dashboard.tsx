@@ -558,13 +558,14 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
           {syncingSelectedPeriod ? 'Đang đồng bộ...' : 'Đồng bộ lại'}
         </button>
         {data?.lastSync && (
-          <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg text-xs text-emerald-800">
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            Cập nhật lúc <strong>{new Date(data.lastSync).toLocaleString('vi-VN')}</strong>
+          <div className={'inline-flex items-center gap-2 border px-3 py-1.5 rounded-lg text-xs ' + ((data.errors || []).length ? 'bg-rose-50 border-rose-200 text-rose-800' : 'bg-emerald-50 border-emerald-100 text-emerald-800')}>
+            <span className={'w-2 h-2 rounded-full ' + ((data.errors || []).length ? 'bg-rose-500' : 'bg-emerald-500')} />
+            {(data.errors || []).length ? 'Dữ liệu gần nhất lúc' : 'Cập nhật lúc'} <strong>{new Date(data.lastSync).toLocaleString('vi-VN')}</strong>
           </div>
         )}
       </section>
 
+      {!!data?.errors?.length && <div className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900"><AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-rose-600" /><div><b className="block">Đồng bộ Facebook đang thất bại</b><p className="mt-1">Có {data.errors.length} kênh chưa cập nhật được. Hệ thống vẫn giữ dữ liệu cũ; hãy mở Cấu hình hệ thống để kiểm tra hoặc nạp lại token Facebook.</p></div></div>}
       {syncMessage && <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg text-xs text-emerald-800"><span className="w-2 h-2 rounded-full bg-emerald-500" />{syncMessage}</div>}
 
       {loading ? (
@@ -582,6 +583,7 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
         <div className="p-16 text-center bg-white border border-slate-200 rounded-3xl">
           <Layers className="w-14 h-14 text-slate-300 mx-auto mb-4" />
           <h3 className="text-lg font-extrabold text-slate-800">Chưa có bài đăng trong khoảng thời gian này</h3>
+          {!!data?.errors?.length && <p className="mx-auto mt-2 max-w-2xl text-sm text-rose-700">Kết quả có thể thiếu vì lần đồng bộ mới nhất đang thất bại. Dữ liệu cũ không bị xóa.</p>}
         </div>
       ) : (
         <>

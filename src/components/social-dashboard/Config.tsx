@@ -27,6 +27,9 @@ interface FacebookScanToken {
   expiresAt?: string;
   pageIds: string[];
   pageNames: string[];
+  validationStatus?: 'unknown' | 'valid' | 'invalid' | 'error';
+  lastValidatedAt?: string;
+  lastValidationError?: string;
 }
 
 const FERMAT_PRESETS = [
@@ -169,6 +172,29 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
     if (days !== null && days <= 1) return 'text-red-600';
     if (days !== null && days <= 5) return 'text-amber-600';
     return 'text-slate-600';
+  };
+  const scanTokenLabel = (token: FacebookScanToken) => (
+    !token.label || token.label.includes('?') || token.label.toLowerCase().startsWith('token qu')
+      ? (token.id === 'facebook-scan-current' ? 'Token quét Facebook (hiện tại)' : 'Token quét Facebook')
+      : token.label
+  );
+  const scanTokenStatus = (token: FacebookScanToken) => {
+    if (token.validationStatus === 'invalid') return {
+      className: 'text-rose-700',
+      text: 'Facebook đã từ chối token — cần nạp token mới',
+    };
+    if (token.validationStatus === 'error') return {
+      className: 'text-amber-700',
+      text: 'Chưa kiểm tra được token do lỗi kết nối',
+    };
+    if (token.validationStatus === 'valid') return {
+      className: 'text-emerald-700',
+      text: 'Đã xác minh với Facebook · mốc dự kiến ' + tokenExpiryLabel(token.expiresAt).toLowerCase(),
+    };
+    return {
+      className: 'text-slate-600',
+      text: 'Chưa xác minh với Facebook · mốc dự kiến ' + tokenExpiryLabel(token.expiresAt).toLowerCase(),
+    };
   };
 
   const fetchUsers = async () => {
@@ -1111,8 +1137,8 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
 
           {facebookScanTokens.length > 0 && <section className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
             <h3 className="text-sm font-extrabold text-slate-800">Token quét Facebook đã lưu</h3>
-            <p className="mt-1 text-xs text-slate-500">Mỗi token có mốc hết hạn riêng; các trang nạp từ cùng token sẽ dùng chung mốc này.</p>
-            <div className="mt-3 grid gap-2 md:grid-cols-2">{facebookScanTokens.map(token => <div key={token.id} className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs"><b className="block text-slate-700">{token.label}</b><span className={tokenExpiryClass(token.expiresAt)}>{token.pageNames.length} trang · {tokenExpiryLabel(token.expiresAt)}</span></div>)}</div>
+            <p className="mt-1 text-xs text-slate-500">Ngày hết hạn chỉ là mốc dự kiến. Trạng thái xác minh với Facebook mới quyết định token còn sử dụng được hay không.</p>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">{facebookScanTokens.map(token => { const status = scanTokenStatus(token); return <div key={token.id} className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs"><b className="block text-slate-700">{scanTokenLabel(token)}</b><span className={status.className}>{token.pageNames.length} trang · {status.text}</span>{token.lastValidationError && token.validationStatus !== 'valid' && <span className="mt-1 block text-[11px] text-rose-600">{token.lastValidationError}</span>}</div>; })}</div>
           </section>}
         </div>
 

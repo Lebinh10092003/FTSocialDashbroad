@@ -208,6 +208,12 @@ class SyncEngine:
             if cls.is_channel_cancelled(request_id, channel_id):
                 raise SyncCancelled()
 
+            if not provider.validate_credentials(channel.id, channel.external_id):
+                raise RuntimeError(
+                    getattr(provider, "last_validation_error", "")
+                    or "Thông tin xác thực của kênh không còn hợp lệ."
+                )
+
             followers = provider.get_followers(channel.id, channel.external_id)
             raw_follower_insights = getattr(provider, "get_follower_insights", lambda *_args, **_kwargs: [])(
                 channel.id,

@@ -248,59 +248,56 @@ def _normalise_scan_tokens(rows, previous_rows, now):
         if not token_id or not access_token:
             continue
         issued_at, expires_at = _token_dates(previous_by_id.get(token_id), access_token, now)
+        previous = previous_by_id.get(token_id) or {}
+        token_changed = str(previous.get("accessToken") or "") != access_token
         page_names = [str(value).strip() for value in item.get("pageNames", []) if str(value).strip()]
         page_ids = [str(value).strip() for value in item.get("pageIds", []) if str(value).strip()]
+        label = str(item.get("label") or "").strip()
+        if not label or "?" in label or label.lower().startswith("token qu"):
+            label = "Token quét Facebook (hiện tại)" if token_id == "facebook-scan-current" else "Token quét Facebook"
         item.update({
             "id": token_id,
             "platform": "facebook",
-            "label": str(item.get("label") or "Token quét Facebook").strip(),
+            "label": label,
             "accessToken": access_token,
             "issuedAt": issued_at,
             "expiresAt": expires_at,
             "pageIds": page_ids,
             "pageNames": page_names,
         })
+        if token_changed:
+            item["validationStatus"] = "unknown"
+            item.pop("lastValidatedAt", None)
+            item.pop("lastValidationError", None)
         normalised.append(item)
     return normalised
 
 
 def _sync_environment_scan_token(data: dict, now) -> bool:
-    """Import the configured current token; a changed token gets 60 days."""
+    """Seed the environment token only when the database has no scan token.
+
+    An environment secret is a deployment bootstrap value, not an authority
+    that may silently replace a token saved later by an administrator.
+    """
     access_token = str(os.getenv("CURRENT_FACEBOOK_ACCESS_TOKEN", "") or "").strip()
     if not access_token:
         return False
     rows = [item for item in data.get("facebookScanTokens", []) if isinstance(item, dict)]
-    current_index = next((index for index, item in enumerate(rows) if str(item.get("id") or "") == "facebook-scan-current"), None)
-    matching_index = next((index for index, item in enumerate(rows) if str(item.get("accessToken") or "") == access_token), None)
-    index = matching_index if matching_index is not None else current_index
-    if index is None:
-        rows.append({
-            "id": "facebook-scan-current", "platform": "facebook", "label": "Token quét Facebook",
-            "accessToken": access_token, "issuedAt": now.isoformat(),
-            "expiresAt": (now + timedelta(days=TOKEN_LIFETIME_DAYS)).isoformat(),
-            "pageIds": [], "pageNames": [],
-        })
-        data["facebookScanTokens"] = rows
-        return True
-    current = dict(rows[index])
-    token_changed = str(current.get("accessToken") or "") != access_token
-    current.update({"id": str(current.get("id") or "facebook-scan-current"), "platform": "facebook", "label": str(current.get("label") or "Token quét Facebook")})
-    if token_changed or not current.get("issuedAt") or not current.get("expiresAt"):
-        current.update({"accessToken": access_token, "issuedAt": now.isoformat(), "expiresAt": (now + timedelta(days=TOKEN_LIFETIME_DAYS)).isoformat()})
-    else:
-        current["accessToken"] = access_token
-        try:
-            issued_at = timezone.datetime.fromisoformat(str(current["issuedAt"]).replace("Z", "+00:00"))
-            expected_expiry = (issued_at + timedelta(days=TOKEN_LIFETIME_DAYS)).isoformat()
-            if current.get("expiresAt") != expected_expiry:
-                current["expiresAt"] = expected_expiry
-        except (TypeError, ValueError, KeyError):
-            current.update({"issuedAt": now.isoformat(), "expiresAt": (now + timedelta(days=TOKEN_LIFETIME_DAYS)).isoformat()})
-    rows[index] = current
-    if rows != data.get("facebookScanTokens", []):
-        data["facebookScanTokens"] = rows
-        return True
-    return changed
+    if any(str(item.get("accessToken") or "").strip() for item in rows):
+        return False
+    rows.append({
+        "id": "facebook-scan-current",
+        "platform": "facebook",
+        "label": "Token quét Facebook (hiện tại)",
+        "accessToken": access_token,
+        "issuedAt": now.isoformat(),
+        "expiresAt": (now + timedelta(days=TOKEN_LIFETIME_DAYS)).isoformat(),
+        "validationStatus": "unknown",
+        "pageIds": [],
+        "pageNames": [],
+    })
+    data["facebookScanTokens"] = rows
+    return True
 
 def _days_remaining(expires_at: str, now) -> tuple[int, object] | None:
     try:

@@ -83,6 +83,7 @@ class FacebookProvider:
     def __init__(self):
         config = SystemConfig.objects.filter(key='main').first()
         self.api_version = 'v25.0'
+        self.last_validation_error = ""
         if config and config.data:
             self.api_version = config.data.get('metaGraphApiVersion', 'v25.0')
 
@@ -98,10 +99,166 @@ class FacebookProvider:
                         return token
                 except Exception:
                     pass
-        return os.getenv("CURRENT_FACEBOOK_ACCESS_TOKEN", "").strip() or "fb_mock_token_for_page"
+        return os.getenv("CURRENT_FACEBOOK_ACCESS_TOKEN", "").strip()
+
+    @staticmethod
+    def _status_code(error):
+        response = getattr(error, "response", None)
+        return getattr(response, "status_code", None)
+
+    @staticmethod
+    def _clean_scan_label(item):
+        label = str(item.get("label") or "").strip()
+        if not label or "?" in label or label.lower().startswith("token qu"):
+            return "Token quét Facebook (hiện tại)" if item.get("id") == "facebook-scan-current" else "Token quét Facebook"
+        return label
+
+    def _scan_context(self, external_id):
+        config = SystemConfig.objects.filter(key="main").first()
+        if not config or not config.data:
+            return config, {}, None
+        data = dict(config.data)
+        rows = [dict(item) for item in data.get("detailedTokensList", []) if isinstance(item, dict)]
+        scans = [dict(item) for item in data.get("facebookScanTokens", []) if isinstance(item, dict)]
+        page_row = next((item for item in rows if str(item.get("pageId") or "") == str(external_id)), None)
+        source_id = str((page_row or {}).get("sourceTokenId") or "")
+        scan = next((item for item in scans if str(item.get("id") or "") == source_id), None)
+        if scan is None:
+            scan = next((
+                item for item in scans
+                if str(external_id) in {str(value) for value in item.get("pageIds", [])}
+            ), None)
+        if scan is None and len(scans) == 1:
+            scan = scans[0]
+        return config, data, scan
+
+    def _mark_scan_validation(self, external_id, status, message=""):
+        config, data, selected = self._scan_context(external_id)
+        if not config or selected is None:
+            return
+        scans = [dict(item) for item in data.get("facebookScanTokens", []) if isinstance(item, dict)]
+        now = timezone.now().isoformat()
+        for item in scans:
+            if str(item.get("id") or "") != str(selected.get("id") or ""):
+                continue
+            item["label"] = self._clean_scan_label(item)
+            item["validationStatus"] = status
+            item["lastValidatedAt"] = now
+            if message:
+                item["lastValidationError"] = message
+            else:
+                item.pop("lastValidationError", None)
+        data["facebookScanTokens"] = scans
+        config.data = data
+        config.save(update_fields=["data"])
+
+    def _refresh_page_tokens(self, external_id):
+        config, data, scan = self._scan_context(external_id)
+        if not config or not scan:
+            self.last_validation_error = "Không tìm thấy token quét Facebook dùng để làm mới quyền truy cập."
+            return None
+        scan_token = str(scan.get("accessToken") or "").strip()
+        if not scan_token:
+            self.last_validation_error = "Token quét Facebook đang trống."
+            return None
+        if scan.get("validationStatus") == "invalid":
+            try:
+                checked_at = datetime.datetime.fromisoformat(str(scan.get("lastValidatedAt") or "").replace("Z", "+00:00"))
+                if timezone.now() - checked_at < datetime.timedelta(minutes=10):
+                    self.last_validation_error = str(scan.get("lastValidationError") or "Token Facebook không còn hợp lệ.")
+                    return None
+            except (TypeError, ValueError):
+                pass
+        try:
+            payload = fetch_with_retry(
+                f"https://graph.facebook.com/{self.api_version}/me/accounts",
+                headers={"Authorization": f"Bearer {scan_token}"},
+                params={"fields": "id,name,access_token", "limit": 100},
+            )
+        except requests.RequestException as error:
+            invalid = self._status_code(error) in {400, 401, 403}
+            self.last_validation_error = (
+                "Facebook đã từ chối token quét. Vui lòng nạp lại User Access Token hợp lệ trong Cấu hình hệ thống."
+                if invalid else "Không thể kết nối Facebook để làm mới token."
+            )
+            self._mark_scan_validation(external_id, "invalid" if invalid else "error", self.last_validation_error)
+            return None
+
+        page_tokens = {
+            str(item.get("id") or ""): str(item.get("access_token") or "").strip()
+            for item in payload.get("data", [])
+            if item.get("id") and item.get("access_token")
+        }
+        refreshed = page_tokens.get(str(external_id))
+        if not refreshed:
+            self.last_validation_error = "Token quét không còn quyền quản trị trang Facebook này."
+            self._mark_scan_validation(external_id, "invalid", self.last_validation_error)
+            return None
+
+        rows = [dict(item) for item in data.get("detailedTokensList", []) if isinstance(item, dict)]
+        meta_tokens = {}
+        try:
+            meta_tokens = json.loads(data.get("metaPageTokensJson") or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            meta_tokens = {}
+        if not isinstance(meta_tokens, dict):
+            meta_tokens = {}
+        for item in rows:
+            page_id = str(item.get("pageId") or "")
+            if page_id in page_tokens:
+                item["accessToken"] = page_tokens[page_id]
+                meta_tokens[page_id] = page_tokens[page_id]
+        scans = [dict(item) for item in data.get("facebookScanTokens", []) if isinstance(item, dict)]
+        for item in scans:
+            if str(item.get("id") or "") == str(scan.get("id") or ""):
+                item["label"] = self._clean_scan_label(item)
+                item["validationStatus"] = "valid"
+                item["lastValidatedAt"] = timezone.now().isoformat()
+                item.pop("lastValidationError", None)
+        data["detailedTokensList"] = rows
+        data["facebookScanTokens"] = scans
+        data["metaPageTokensJson"] = json.dumps(meta_tokens, ensure_ascii=False)
+        config.data = data
+        config.save(update_fields=["data"])
+        return refreshed
 
     def validate_credentials(self, channel_id, external_id):
-        return True
+        token = self.get_token(external_id)
+        if not token:
+            refreshed = self._refresh_page_tokens(external_id)
+            if not refreshed:
+                self.last_validation_error = self.last_validation_error or "Chưa cấu hình token Facebook cho trang này."
+                return False
+            token = refreshed
+        url = f"https://graph.facebook.com/{self.api_version}/{external_id}"
+        try:
+            fetch_with_retry(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                params={"fields": "id,name"},
+            )
+            self._mark_scan_validation(external_id, "valid")
+            return True
+        except requests.RequestException as error:
+            if self._status_code(error) in {400, 401, 403}:
+                refreshed = self._refresh_page_tokens(external_id)
+                if refreshed:
+                    try:
+                        fetch_with_retry(
+                            url,
+                            headers={"Authorization": f"Bearer {refreshed}"},
+                            params={"fields": "id,name"},
+                        )
+                        self._mark_scan_validation(external_id, "valid")
+                        return True
+                    except requests.RequestException:
+                        pass
+            self.last_validation_error = self.last_validation_error or (
+                "Facebook đã từ chối token của trang. Vui lòng nạp lại token trong Cấu hình hệ thống."
+            )
+            self._mark_scan_validation(external_id, "invalid", self.last_validation_error)
+            return False
+
 
     def get_followers(self, channel_id, external_id):
         token = self.get_token(external_id)
