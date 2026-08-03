@@ -103,6 +103,62 @@ class FacebookPaginationTests(TestCase):
         self.assertIn("nạp lại", scan["lastValidationError"])
 
     @patch("social.providers.fetch_with_retry")
+    def test_rescan_saved_token_discovers_new_pages_and_refreshes_existing_tokens(self, fetch):
+        now = timezone.now()
+        SystemConfig.objects.create(
+            key="main",
+            data={
+                "metaPageTokensJson": json.dumps({"page-1": "old-page-token"}),
+                "detailedTokensList": [{
+                    "id": "facebook-page-1",
+                    "platform": "facebook",
+                    "pageId": "page-1",
+                    "pageName": "Old page name",
+                    "accessToken": "old-page-token",
+                    "sourceTokenId": "scan-1",
+                }],
+                "facebookScanTokens": [{
+                    "id": "scan-1",
+                    "platform": "facebook",
+                    "label": "Saved token",
+                    "accessToken": "valid-scan-token",
+                    "issuedAt": now.isoformat(),
+                    "expiresAt": (now + timedelta(days=42)).isoformat(),
+                    "pageIds": ["page-1"],
+                    "pageNames": ["Old page name"],
+                }],
+            },
+        )
+        fetch.side_effect = [
+            {
+                "data": [{"id": "page-1", "name": "Page 1", "access_token": "fresh-page-token"}],
+                "paging": {"cursors": {"after": "next-page"}},
+            },
+            {
+                "data": [{"id": "page-2", "name": "Page 2", "access_token": "new-page-token"}],
+                "paging": {"cursors": {}},
+            },
+        ]
+
+        result = FacebookProvider().rescan_saved_token("scan-1")
+
+        self.assertEqual(result["addedPageIds"], ["page-2"])
+        self.assertEqual([page["id"] for page in result["pages"]], ["page-1", "page-2"])
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(fetch.call_args_list[1].kwargs["params"]["after"], "next-page")
+        self.assertNotIn("access_token", fetch.call_args_list[0].kwargs["params"])
+        data = SystemConfig.objects.get(key="main").data
+        rows = {row["pageId"]: row for row in data["detailedTokensList"]}
+        self.assertEqual(rows["page-1"]["accessToken"], "fresh-page-token")
+        self.assertEqual(rows["page-2"]["sourceTokenId"], "scan-1")
+        self.assertEqual(data["facebookScanTokens"][0]["pageIds"], ["page-1", "page-2"])
+        self.assertEqual(data["facebookScanTokens"][0]["validationStatus"], "valid")
+        self.assertEqual(
+            json.loads(data["metaPageTokensJson"]),
+            {"page-1": "fresh-page-token", "page-2": "new-page-token"},
+        )
+
+    @patch("social.providers.fetch_with_retry")
     def test_list_posts_follows_cursor_pagination(self, fetch):
         fetch.side_effect = [
             {

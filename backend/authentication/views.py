@@ -962,6 +962,44 @@ def system_config_view(request):
         "newChannelSyncQueued": len(new_channel_ids),
     })
 
+@api_view(["POST"])
+@permission_classes([IsAdmin])
+def refresh_facebook_scan_token(request, token_id):
+    from social.models import Channel
+    from social.providers import FacebookProvider
+    from social.views import _start_background_sync
+
+    try:
+        result = FacebookProvider().rescan_saved_token(token_id)
+    except ValueError as error:
+        return Response({"error": str(error)}, status=status.HTTP_400_BAD_REQUEST)
+
+    _sync_channels(result["detailedTokensList"])
+    page_ids = [item["id"] for item in result["pages"]]
+    channel_ids = list(
+        Channel.objects.filter(platform="facebook", external_id__in=page_ids, status="active")
+        .values_list("id", flat=True)
+    )
+    request_id = ""
+    if channel_ids:
+        request_id = _start_background_sync(
+            recent_days=1,
+            history_days=396,
+            channel_ids=channel_ids,
+        )
+    return Response({
+        "success": True,
+        "message": "Đã quét lại các Trang được cấp quyền và xếp lịch đồng bộ.",
+        "pageCount": len(result["pages"]),
+        "addedPageCount": len(result["addedPageIds"]),
+        "addedPageIds": result["addedPageIds"],
+        "syncQueued": len(channel_ids),
+        "requestId": request_id,
+        "detailedTokensList": result["detailedTokensList"],
+        "facebookScanTokens": result["facebookScanTokens"],
+        "metaPageTokensJson": result["metaPageTokensJson"],
+    })
+
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAdmin])

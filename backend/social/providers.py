@@ -152,6 +152,139 @@ class FacebookProvider:
         config.data = data
         config.save(update_fields=["data"])
 
+    def rescan_saved_token(self, scan_token_id):
+        """Discover every Page currently granted to one saved user token."""
+        config = SystemConfig.objects.filter(key="main").first()
+        if not config or not config.data:
+            raise ValueError("Chưa có cấu hình token Facebook.")
+        data = dict(config.data)
+        scans = [dict(item) for item in data.get("facebookScanTokens", []) if isinstance(item, dict)]
+        scan = next((item for item in scans if str(item.get("id") or "") == str(scan_token_id)), None)
+        if not scan:
+            raise ValueError("Không tìm thấy token Facebook đã lưu.")
+        scan_token = str(scan.get("accessToken") or "").strip()
+        if not scan_token:
+            raise ValueError("Token Facebook đã lưu đang trống.")
+
+        try:
+            raw_pages = []
+            after = None
+            for _ in range(20):
+                params = {"fields": "id,name,access_token", "limit": 100}
+                if after:
+                    params["after"] = after
+                payload = fetch_with_retry(
+                    f"https://graph.facebook.com/{self.api_version}/me/accounts",
+                    headers={"Authorization": f"Bearer {scan_token}"},
+                    params=params,
+                )
+                raw_pages.extend(payload.get("data", []))
+                next_after = (
+                    payload.get("paging", {})
+                    .get("cursors", {})
+                    .get("after")
+                )
+                if not next_after or next_after == after:
+                    break
+                after = next_after
+        except requests.RequestException as error:
+            invalid = self._status_code(error) in {400, 401, 403}
+            message = (
+                "Facebook đã từ chối token quét. Vui lòng nạp User Access Token mới."
+                if invalid else "Không thể kết nối Facebook để quét lại danh sách trang."
+            )
+            for item in scans:
+                if str(item.get("id") or "") == str(scan_token_id):
+                    item["label"] = self._clean_scan_label(item)
+                    item["validationStatus"] = "invalid" if invalid else "error"
+                    item["lastValidatedAt"] = timezone.now().isoformat()
+                    item["lastValidationError"] = message
+            data["facebookScanTokens"] = scans
+            config.data = data
+            config.save(update_fields=["data"])
+            raise ValueError(message) from error
+
+        pages = [
+            {
+                "id": str(item.get("id") or "").strip(),
+                "name": str(item.get("name") or "").strip(),
+                "accessToken": str(item.get("access_token") or "").strip(),
+            }
+            for item in raw_pages
+            if item.get("id") and item.get("access_token")
+        ]
+        if not pages:
+            message = "Token còn hợp lệ nhưng chưa được cấp quyền quản trị Trang Facebook nào."
+            for item in scans:
+                if str(item.get("id") or "") == str(scan_token_id):
+                    item["validationStatus"] = "invalid"
+                    item["lastValidatedAt"] = timezone.now().isoformat()
+                    item["lastValidationError"] = message
+            data["facebookScanTokens"] = scans
+            config.data = data
+            config.save(update_fields=["data"])
+            raise ValueError(message)
+
+        rows = [dict(item) for item in data.get("detailedTokensList", []) if isinstance(item, dict)]
+        rows_by_page = {
+            str(item.get("pageId") or ""): index
+            for index, item in enumerate(rows)
+            if item.get("platform") == "facebook" and item.get("pageId")
+        }
+        added_page_ids = []
+        issued_at = str(scan.get("issuedAt") or timezone.now().isoformat())
+        expires_at = str(scan.get("expiresAt") or "")
+        for page in pages:
+            row = {
+                "id": f"facebook-{page['id']}",
+                "platform": "facebook",
+                "pageId": page["id"],
+                "pageName": page["name"] or f"Trang Facebook {page['id']}",
+                "accessToken": page["accessToken"],
+                "sourceTokenId": str(scan_token_id),
+                "issuedAt": issued_at,
+                "expiresAt": expires_at,
+            }
+            existing_index = rows_by_page.get(page["id"])
+            if existing_index is None:
+                rows.append(row)
+                rows_by_page[page["id"]] = len(rows) - 1
+                added_page_ids.append(page["id"])
+            else:
+                rows[existing_index] = {**rows[existing_index], **row}
+
+        try:
+            meta_tokens = json.loads(data.get("metaPageTokensJson") or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            meta_tokens = {}
+        if not isinstance(meta_tokens, dict):
+            meta_tokens = {}
+        for page in pages:
+            meta_tokens[page["id"]] = page["accessToken"]
+        for item in scans:
+            if str(item.get("id") or "") != str(scan_token_id):
+                continue
+            item["label"] = self._clean_scan_label(item)
+            item["pageIds"] = [page["id"] for page in pages]
+            item["pageNames"] = [page["name"] or page["id"] for page in pages]
+            item["validationStatus"] = "valid"
+            item["lastValidatedAt"] = timezone.now().isoformat()
+            item.pop("lastValidationError", None)
+
+        data["detailedTokensList"] = rows
+        data["facebookScanTokens"] = scans
+        data["metaPageTokensJson"] = json.dumps(meta_tokens, ensure_ascii=False)
+        data["updatedAt"] = timezone.now().isoformat()
+        config.data = data
+        config.save(update_fields=["data"])
+        return {
+            "pages": [{"id": page["id"], "name": page["name"]} for page in pages],
+            "addedPageIds": added_page_ids,
+            "detailedTokensList": rows,
+            "facebookScanTokens": scans,
+            "metaPageTokensJson": data["metaPageTokensJson"],
+        }
+
     def _refresh_page_tokens(self, external_id):
         config, data, scan = self._scan_context(external_id)
         if not config or not scan:

@@ -22,6 +22,7 @@ urlpatterns = [
     path("admin/create-user", views.admin_create_user, name="admin_create_user"),
     path("admin/delete-user", views.admin_delete_user, name="admin_delete_user"),
     path("admin/config", views.system_config_view, name="admin_config"),
+    path("admin/config/facebook-scan-tokens/<str:token_id>/refresh", views.refresh_facebook_scan_token, name="refresh_facebook_scan_token"),
     path("admin/token-notifications", views.token_notifications, name="token_notifications"),
     path("system-config", views.system_config_view, name="system_config"),
     path("setup/sheets", views.setup_sheets, name="setup_sheets"),

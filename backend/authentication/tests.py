@@ -161,6 +161,53 @@ class AccountAdministrationTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertFalse(UserProfile.objects.filter(email="blocked-admin@example.com").exists())
+
+    @patch("social.views._start_background_sync", return_value="background_test")
+    @patch("social.providers.FacebookProvider.rescan_saved_token")
+    def test_admin_can_refresh_saved_facebook_token_and_queue_discovered_pages(self, rescan, start_sync):
+        token = self._token_for("facebook-owner@example.com", "ADMIN")
+        rescan.return_value = {
+            "pages": [
+                {"id": "page-1", "name": "Page 1"},
+                {"id": "page-2", "name": "Page 2"},
+            ],
+            "addedPageIds": ["page-2"],
+            "detailedTokensList": [
+                {"id": "facebook-page-1", "platform": "facebook", "pageId": "page-1", "pageName": "Page 1", "accessToken": "token-1"},
+                {"id": "facebook-page-2", "platform": "facebook", "pageId": "page-2", "pageName": "Page 2", "accessToken": "token-2"},
+            ],
+            "facebookScanTokens": [{"id": "scan-1", "pageIds": ["page-1", "page-2"]}],
+            "metaPageTokensJson": "{}",
+        }
+
+        response = self.client.post(
+            "/api/admin/config/facebook-scan-tokens/scan-1/refresh",
+            {},
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["addedPageCount"], 1)
+        self.assertEqual(response.json()["syncQueued"], 2)
+        self.assertEqual(Channel.objects.filter(platform="facebook", status="active").count(), 2)
+        rescan.assert_called_once_with("scan-1")
+        start_sync.assert_called_once()
+
+    @patch("social.providers.FacebookProvider.rescan_saved_token")
+    def test_manager_cannot_refresh_saved_facebook_token(self, rescan):
+        token = self._token_for("facebook-manager@example.com", "MANAGER")
+
+        response = self.client.post(
+            "/api/admin/config/facebook-scan-tokens/scan-1/refresh",
+            {},
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        rescan.assert_not_called()
+
 class PersistentLoginTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(

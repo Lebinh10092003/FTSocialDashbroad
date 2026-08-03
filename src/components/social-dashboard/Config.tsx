@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { appDialog } from '../AppDialog';
 import { 
   Settings, FileSpreadsheet, Lock, Users, AlertCircle, CheckCircle2, Shield, Plus, Trash2, Eye, ShieldAlert, KeyRound, ExternalLink, Edit3, EyeOff, FileCode, HelpCircle,
-  Check, Layers, Search, Sparkles, Copy
+  Check, Layers, Search, Sparkles, Copy, RefreshCw
 } from 'lucide-react';
 import { Channel, SystemConfig, UserProfile, UserRole } from '../../types';
 import ConfirmModal from '../ConfirmModal';
@@ -107,6 +107,7 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
   }, []);
   const [fbUserToken, setFbUserToken] = useState('');
   const [scanningFb, setScanningFb] = useState(false);
+  const [refreshingScanTokenId, setRefreshingScanTokenId] = useState<string | null>(null);
   const [scannedPages, setScannedPages] = useState<{ id: string; name: string; access_token: string; checked: boolean }[]>([]);
   const [scanError, setScanError] = useState('');
 
@@ -445,6 +446,42 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
       setScanError(err.message || 'Lỗi kết nối Facebook.');
     } finally {
       setScanningFb(false);
+    }
+  };
+
+  const handleRefreshSavedScanToken = async (token: FacebookScanToken) => {
+    if (refreshingScanTokenId) return;
+    setRefreshingScanTokenId(token.id);
+    try {
+      const res = await fetch('/api/admin/config/facebook-scan-tokens/' + encodeURIComponent(token.id) + '/refresh', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + idToken
+        }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Không thể quét lại các Trang Facebook được cấp quyền.');
+      }
+      setTokensList(Array.isArray(data.detailedTokensList) ? data.detailedTokensList : tokensList);
+      setFacebookScanTokens(Array.isArray(data.facebookScanTokens) ? data.facebookScanTokens : facebookScanTokens);
+      if (typeof data.metaPageTokensJson === 'string') setMetaPageTokensJson(data.metaPageTokensJson);
+      await onChannelsChanged?.();
+      const addedText = data.addedPageCount > 0
+        ? 'Đã phát hiện và thêm ' + data.addedPageCount + ' Trang mới.'
+        : 'Không có Trang mới; token của các Trang hiện có đã được làm mới.';
+      void appDialog.alert(
+        'Đã quét ' + (data.pageCount || 0) + ' Trang được cấp quyền. ' + addedText + ' Hệ thống đã xếp lịch đồng bộ dữ liệu.',
+        { title: 'Đã cập nhật quyền Facebook', tone: 'success' }
+      );
+    } catch (error) {
+      void appDialog.alert(
+        error instanceof Error ? error.message : 'Không thể quét lại các Trang Facebook được cấp quyền.',
+        { title: 'Quét lại quyền thất bại', tone: 'danger' }
+      );
+    } finally {
+      setRefreshingScanTokenId(null);
     }
   };
 
@@ -1138,7 +1175,24 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
           {facebookScanTokens.length > 0 && <section className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
             <h3 className="text-sm font-extrabold text-slate-800">Token quét Facebook đã lưu</h3>
             <p className="mt-1 text-xs text-slate-500">Ngày hết hạn chỉ là mốc dự kiến. Trạng thái xác minh với Facebook mới quyết định token còn sử dụng được hay không.</p>
-            <div className="mt-3 grid gap-2 md:grid-cols-2">{facebookScanTokens.map(token => { const status = scanTokenStatus(token); return <div key={token.id} className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs"><b className="block text-slate-700">{scanTokenLabel(token)}</b><span className={status.className}>{token.pageNames.length} trang · {status.text}</span>{token.lastValidationError && token.validationStatus !== 'valid' && <span className="mt-1 block text-[11px] text-rose-600">{token.lastValidationError}</span>}</div>; })}</div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">{facebookScanTokens.map(token => {
+              const status = scanTokenStatus(token);
+              const refreshing = refreshingScanTokenId === token.id;
+              return <div key={token.id} className="rounded-xl border border-blue-100 bg-white px-3 py-3 text-xs">
+                <b className="block text-slate-700">{scanTokenLabel(token)}</b>
+                <span className={status.className}>{token.pageNames.length} trang · {status.text}</span>
+                {token.lastValidationError && token.validationStatus !== 'valid' && <span className="mt-1 block text-[11px] text-rose-600">{token.lastValidationError}</span>}
+                <button
+                  type="button"
+                  disabled={Boolean(refreshingScanTokenId)}
+                  onClick={() => void handleRefreshSavedScanToken(token)}
+                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 font-bold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <RefreshCw className={'h-3.5 w-3.5 ' + (refreshing ? 'animate-spin' : '')} />
+                  {refreshing ? 'Đang quét quyền...' : 'Quét lại các trang được cấp quyền'}
+                </button>
+              </div>;
+            })}</div>
           </section>}
         </div>
 
