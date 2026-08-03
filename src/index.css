@@ -636,6 +636,61 @@ a { color: inherit; text-decoration: none; }
   backdrop-filter: blur(16px);
 }
 .ft-module-content { max-width: 1800px; }
+
+/* Examination overview: keep primary controls above the metrics and use the
+   reclaimed vertical space for the two information-heavy panels below. */
+.ft-overview-header + section {
+  padding: 1rem;
+}
+.ft-overview-header + section > div:first-child {
+  display: none;
+}
+.ft-overview-header + section > div:nth-child(2) {
+  margin-top: 0;
+  gap: .75rem;
+}
+.ft-overview-header + section > div:nth-child(2) > button {
+  display: flex;
+  min-height: 5rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: .75rem 1rem;
+}
+.ft-overview-header + section > div:nth-child(2) > button > div {
+  justify-content: flex-start;
+  gap: .75rem;
+}
+.ft-overview-header + section > div:nth-child(2) > button > div svg {
+  order: -1;
+}
+.ft-overview-header + section > div:nth-child(2) > button > p {
+  margin-top: 0;
+  font-size: 1.875rem;
+  line-height: 1;
+}
+
+@media (min-width: 1280px) {
+  .ft-overview-header + section + div > section {
+    min-height: 600px;
+  }
+  .ft-overview-header + section + div > section:first-child > div:last-child {
+    height: 30rem;
+  }
+  .ft-overview-header + section + div > section:first-child > div:last-child > div {
+    height: 27rem;
+  }
+  .ft-overview-header + section + div > section:last-child {
+    display: flex;
+    flex-direction: column;
+  }
+  .ft-overview-header + section + div > section:last-child > div:nth-child(2) {
+    max-height: 456px;
+    flex: 1;
+  }
+  .ft-overview-header + section + div > section:last-child > div:last-child {
+    margin-top: auto;
+  }
+}
 .ft-page-header {
   border: 1px solid #d9eaf8;
   border-radius: var(--ft-radius-2xl);
