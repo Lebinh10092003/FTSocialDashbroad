@@ -113,6 +113,15 @@ export default function ExamRoomAllocationDialog({ sessionId, round, candidateCo
     setRooms(current => current.map(room => room.id === id ? { ...room, [field]: value } : room));
   };
 
+  const setRoomCount = (nextCount: number) => {
+    const targetCount = Math.min(200, Math.max(1, Math.trunc(nextCount) || 1));
+    setRooms(current => {
+      if (targetCount === current.length) return current;
+      if (targetCount < current.length) return current.slice(0, targetCount);
+      return [...current, ...Array.from({ length: targetCount - current.length }, () => newRoom())];
+    });
+  };
+
   const copyFirstLocation = () => {
     const location = rooms[0]?.location.trim();
     if (!location) {
@@ -245,6 +254,7 @@ export default function ExamRoomAllocationDialog({ sessionId, round, candidateCo
                 <p className="mt-1 text-xs leading-5 text-slate-500">Xếp đủ phòng theo thứ tự, không phòng nào vượt sức chứa đã đặt.</p>
               </button>
             </div>
+            {strategy === 'BALANCED' && <label className="mt-3 block max-w-xs"><span className="mb-1 block text-sm font-bold">Số phòng cần tạo</span><input type="number" min={1} max={200} value={rooms.length} onChange={event => setRoomCount(Number(event.target.value))} className="w-full rounded-lg border border-slate-300 px-3 py-2.5"/><span className="mt-1 block text-xs text-slate-500">Hệ thống sẽ tạo đủ dòng phòng ở bên dưới và chia lệch tối đa 1 thí sinh/phòng.</span></label>}
             {strategy === 'CAPACITY' && <label className="mt-3 block max-w-xs"><span className="mb-1 block text-sm font-bold">Số thí sinh tối đa mỗi phòng</span><input type="number" min={1} max={10000} value={maxCandidates} onChange={event => setMaxCandidates(Math.max(0, Number(event.target.value) || 0))} className="w-full rounded-lg border border-slate-300 px-3 py-2.5"/><span className="mt-1 block text-xs text-slate-500">Tổng sức chứa hiện tại: {capacity?.toLocaleString('vi-VN')} chỗ.</span></label>}
           </fieldset>
 
