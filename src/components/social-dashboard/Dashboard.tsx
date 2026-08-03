@@ -354,9 +354,10 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
       const logs = await response.json().catch(() => []);
       if (!Array.isArray(logs) || logs.length === 0) continue;
       if (logs.some(log => log.status === 'queued' || log.status === 'running')) continue;
-      const failedLog = logs.find(log => log.status !== 'success');
+      const failedLog = logs.find(log => log.status !== 'success' && log.status !== 'deferred');
       if (failedLog) throw new Error(failedLog.errorMessage || 'Một kênh chưa đồng bộ thành công.');
-      return;
+      if (logs.some(log => log.status === 'deferred')) return false;
+      return true;
     }
     throw new Error('Đồng bộ đang mất nhiều thời gian hơn dự kiến. Báo cáo sẽ tự cập nhật khi hoàn tất.');
   };
@@ -373,9 +374,13 @@ export default function Dashboard({ idToken, googleAccessToken, channels }: Dash
       }
       if (!body.requestId) throw new Error('Không nhận được mã theo dõi đồng bộ.');
       setSyncMessage('Đang đồng bộ phần dữ liệu phát sinh từ lần cập nhật gần nhất...');
-      await waitForBackgroundSync(body.requestId);
+      const completed = await waitForBackgroundSync(body.requestId);
       await Promise.all([fetchDashboardData(), fetchFollowerTrend()]);
-      setSyncMessage('Đã cập nhật báo cáo với dữ liệu mới nhất.');
+      setSyncMessage(
+        completed
+          ? 'Đã cập nhật báo cáo với dữ liệu mới nhất.'
+          : 'Đã lưu phần dữ liệu an toàn trong hạn mức Meta; phần còn lại sẽ tự tiếp tục ở lượt sau.'
+      );
     } catch (syncError: any) { setError(syncError.message || 'Không thể đồng bộ dữ liệu.'); }
     finally { setSyncingSelectedPeriod(false); }
   };

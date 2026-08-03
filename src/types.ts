@@ -11,7 +11,9 @@ export interface Channel {
   createdAt: string;
   updatedAt: string;
   lastSyncAt?: string;
-  lastSyncStatus?: 'success' | 'failed' | 'cancelled';
+  lastDataSyncUntil?: string;
+  initialSyncCompletedAt?: string;
+  lastSyncStatus?: 'success' | 'failed' | 'cancelled' | 'deferred';
   totalPosts?: number;
   followersCount?: number;
 }
@@ -67,7 +69,7 @@ export interface ApiLog {
   platform: string;
   action: string;
   channelId?: string;
-  status: 'queued' | 'running' | 'success' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'success' | 'failed' | 'cancelled' | 'deferred';
   recordsReceived: number;
   recordsInserted: number;
   recordsUpdated: number;

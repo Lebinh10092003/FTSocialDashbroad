@@ -53,7 +53,9 @@ def channels_list(request):
                 "createdAt": c.created_at.isoformat(),
                 "updatedAt": c.updated_at.isoformat(),
                 "lastSyncAt": c.last_sync_at.isoformat() if c.last_sync_at else None,
+                "lastDataSyncUntil": c.last_data_sync_until.isoformat() if c.last_data_sync_until else None,
                 "lastSyncStatus": c.last_sync_status,
+                "initialSyncCompletedAt": c.initial_sync_completed_at.isoformat() if c.initial_sync_completed_at else None,
                 "followersCount": c.followers_count,
                 "totalPosts": post_counts.get(c.id, 0)
             })
@@ -137,6 +139,9 @@ def channel_test_connection(request, channel_id):
         valid = provider.validate_credentials(channel.id, channel.external_id)
         return Response({"success": valid})
     except Exception as e:
+        from .providers import FacebookRateLimitDeferred
+        if isinstance(e, FacebookRateLimitDeferred):
+            return Response({"error": str(e), "deferred": True}, status=status.HTTP_429_TOO_MANY_REQUESTS)
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
@@ -152,6 +157,16 @@ def channel_sync(request, channel_id):
     if channel.initial_sync_completed_at is None:
         since = None
         until = None
+
+    active_request_id = _active_background_request()
+    if active_request_id:
+        return Response({
+            "success": True,
+            "queued": False,
+            "alreadyRunning": True,
+            "requestId": active_request_id,
+            "message": "Đang có một lượt đồng bộ chạy. Hệ thống không mở tiến trình Facebook thứ hai để tránh tăng đột biến lượng API call.",
+        }, status=status.HTTP_202_ACCEPTED)
 
     request_id = _start_background_sync(
         recent_days=1,
@@ -931,6 +946,19 @@ def dashboard_view(request):
         'errors': errors
     })
 
+def _active_background_request():
+    running_since = timezone.now() - datetime.timedelta(hours=6)
+    active = (
+        ApiLog.objects.filter(
+            status__in=["queued", "running"],
+            started_at__gte=running_since,
+        )
+        .order_by("started_at")
+        .first()
+    )
+    return str(active.request_id or "") if active else ""
+
+
 def _start_background_sync(recent_days=1, history_days=396, channel_ids=None, since=None, until=None):
     """Queue the requested active channels, then run a cancellable detached sync."""
     recent_days = max(1, min(int(recent_days), 30))
@@ -984,15 +1012,13 @@ def sync_all(request):
     """POST /api/sync/all - Sync all active channels."""
     try:
         if request.data.get("background"):
-            running_since = timezone.now() - datetime.timedelta(hours=6)
-            if ApiLog.objects.filter(
-                status__in=["queued", "running"],
-                started_at__gte=running_since,
-            ).exists():
+            active_request_id = _active_background_request()
+            if active_request_id:
                 return Response({
                     "success": True,
                     "queued": True,
                     "alreadyRunning": True,
+                    "requestId": active_request_id,
                     "message": "Đang có một lần đồng bộ chạy ngầm. Dữ liệu sẽ tự cập nhật khi hoàn tất.",
                 }, status=status.HTTP_202_ACCEPTED)
 
@@ -1062,6 +1088,30 @@ def sync_cancel(request):
         "requestIds": request_ids,
         "message": "Đã gửi yêu cầu hủy đồng bộ. Kênh đang xử lý sẽ dừng sau tác vụ API hiện tại.",
     })
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def facebook_api_usage(request):
+    from .providers import FACEBOOK_USAGE_FIELDS, _numeric_values, get_facebook_api_state
+
+    state = get_facebook_api_state()
+    values = _numeric_values(state.get("usage", {}), FACEBOOK_USAGE_FIELDS)
+    cooldown_until = str(state.get("cooldownUntil") or "")
+    cooldown_active = False
+    if cooldown_until:
+        try:
+            parsed = datetime.datetime.fromisoformat(cooldown_until.replace("Z", "+00:00"))
+            if timezone.is_naive(parsed):
+                parsed = timezone.make_aware(parsed, datetime.timezone.utc)
+            cooldown_active = parsed > timezone.now()
+        except (TypeError, ValueError):
+            pass
+    return Response({
+        **state,
+        "maxUsage": int(max(values, default=0)),
+        "cooldownActive": cooldown_active,
+    })
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -1184,4 +1234,3 @@ def posts_list(request):
         })
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-

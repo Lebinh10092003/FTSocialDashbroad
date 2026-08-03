@@ -471,8 +471,11 @@ export default function Config({ idToken, googleAccessToken, userRole, onConnect
       const addedText = data.addedPageCount > 0
         ? 'Đã phát hiện và thêm ' + data.addedPageCount + ' Trang mới.'
         : 'Không có Trang mới; token của các Trang hiện có đã được làm mới.';
+      const syncText = data.alreadyRunning
+        ? 'Đang có lượt đồng bộ khác; hệ thống không mở thêm tiến trình và sẽ nạp kênh mới ở lượt an toàn tiếp theo.'
+        : 'Hệ thống đã xếp lịch đồng bộ dữ liệu.';
       void appDialog.alert(
-        'Đã quét ' + (data.pageCount || 0) + ' Trang được cấp quyền. ' + addedText + ' Hệ thống đã xếp lịch đồng bộ dữ liệu.',
+        'Đã quét ' + (data.pageCount || 0) + ' Trang được cấp quyền. ' + addedText + ' ' + syncText,
         { title: 'Đã cập nhật quyền Facebook', tone: 'success' }
       );
     } catch (error) {

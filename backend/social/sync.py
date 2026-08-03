@@ -5,7 +5,12 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 
 from .models import ApiLog, Channel, DailySnapshot, FollowerSnapshot, Post
-from .providers import FacebookProvider, MockProvider, ZaloOAProvider
+from .providers import (
+    FacebookProvider,
+    FacebookRateLimitDeferred,
+    MockProvider,
+    ZaloOAProvider,
+)
 
 
 DEFAULT_SYNC_DAYS = 396
@@ -13,6 +18,10 @@ DEFAULT_SYNC_DAYS = 396
 
 class SyncCancelled(Exception):
     """Raised when an administrator cancels a queued background sync."""
+
+
+class SyncDeferred(Exception):
+    """A safe partial result that must continue in a later run."""
 
 
 class SyncEngine:
@@ -315,17 +324,61 @@ class SyncEngine:
                     post_keys_by_external_id[tracked_post.external_post_id] = tracked_post.post_key
                     metric_targets.append({"id": tracked_post.external_post_id})
 
+            # Persist independently completed phases before the metric backfill.
+            # If the call budget pauses later, follower history is not downloaded again.
+            channel.followers_count = followers
+            if follower_since and timezone.now() - follower_since >= datetime.timedelta(days=30):
+                channel.follower_history_loaded_at = timezone.now()
+            channel.total_posts = Post.objects.filter(
+                channel_id=channel.id,
+                is_deleted=False,
+            ).count()
+            channel.save(
+                update_fields=[
+                    "followers_count",
+                    "total_posts",
+                    "follower_history_loaded_at",
+                ]
+            )
+
             snapshots_saved = 0
+            metrics_deferred = 0
             if metric_targets:
-                metric_post_keys = {
-                    post_keys_by_external_id[item["id"]]
+                target_by_post_key = {
+                    post_keys_by_external_id[item["id"]]: item
                     for item in metric_targets
+                    if item.get("id") in post_keys_by_external_id
+                }
+                metric_post_keys = set(target_by_post_key)
+                existing_snapshots = DailySnapshot.objects.filter(
+                    post_key__in=metric_post_keys,
+                )
+                if channel.initial_sync_completed_at is not None:
+                    existing_snapshots = existing_snapshots.filter(snapshot_date=snapshot_date)
+                completed_post_keys = set(
+                    existing_snapshots.values_list("post_key", flat=True)
+                )
+                pending_metric_targets = [
+                    target_by_post_key[post_key]
+                    for post_key in metric_post_keys
+                    if post_key not in completed_post_keys
+                ]
+                metric_limit = getattr(provider, "metric_batch_limit", None)
+                selected_metric_targets = (
+                    pending_metric_targets[:metric_limit]
+                    if metric_limit and len(pending_metric_targets) > metric_limit
+                    else pending_metric_targets
+                )
+                metrics_deferred = len(pending_metric_targets) - len(selected_metric_targets)
+                selected_metric_post_keys = {
+                    post_keys_by_external_id[item["id"]]
+                    for item in selected_metric_targets
                     if item.get("id") in post_keys_by_external_id
                 }
                 metrics = provider.get_post_metrics(
                     channel.id,
                     channel.external_id,
-                    metric_targets,
+                    selected_metric_targets,
                 )
                 for raw_metric in metrics:
                     external_id = raw_metric.get("id")
@@ -343,11 +396,16 @@ class SyncEngine:
                 # Verify the actual database rows, not merely the API response.
                 snapshots_saved = DailySnapshot.objects.filter(
                     snapshot_date=snapshot_date,
-                    post_key__in=metric_post_keys,
+                    post_key__in=selected_metric_post_keys,
                 ).count()
-                if snapshots_saved != len(metric_post_keys):
+                if snapshots_saved != len(selected_metric_post_keys):
                     raise RuntimeError(
-                        f"Thiếu dữ liệu chỉ số trên máy chủ: {snapshots_saved}/{len(metric_post_keys)} bài."
+                        f"Thiếu dữ liệu chỉ số trên máy chủ: {snapshots_saved}/{len(selected_metric_post_keys)} bài."
+                    )
+                if metrics_deferred:
+                    raise SyncDeferred(
+                        f"Đã lưu an toàn {snapshots_saved} bài trong đợt này; "
+                        f"còn {metrics_deferred} bài sẽ tiếp tục ở lượt sau để bảo vệ hạn mức Meta."
                     )
 
             channel.followers_count = followers
@@ -359,12 +417,14 @@ class SyncEngine:
                 channel_id=channel.id,
                 is_deleted=False,
             ).count()
+            channel.last_data_sync_until = until
             channel.last_sync_at = timezone.now()
             channel.last_sync_status = "success"
             channel.save(
                 update_fields=[
                     "followers_count",
                     "total_posts",
+                    "last_data_sync_until",
                     "last_sync_at",
                     "last_sync_status",
                     "follower_history_loaded_at",
@@ -393,6 +453,44 @@ class SyncEngine:
                 f"lưu {snapshots_saved} snapshot ngày.",
             )
 
+        except SyncDeferred as exc:
+            channel.last_sync_status = "deferred"
+            channel.save(update_fields=["last_sync_status"])
+            api_log.status = "deferred"
+            api_log.error_code = "RATE_SAFE_BACKFILL"
+            api_log.error_message = str(exc)
+            api_log.records_inserted = inserted
+            api_log.records_updated = updated
+            api_log.ended_at = timezone.now()
+            api_log.save(
+                update_fields=[
+                    "status",
+                    "error_code",
+                    "error_message",
+                    "records_received",
+                    "records_inserted",
+                    "records_updated",
+                    "ended_at",
+                ]
+            )
+            return True, str(exc)
+        except FacebookRateLimitDeferred as exc:
+            channel.last_sync_status = "deferred"
+            channel.save(update_fields=["last_sync_status"])
+            api_log.status = "deferred"
+            api_log.error_code = "FACEBOOK_RATE_LIMIT_DEFERRED"
+            api_log.error_message = str(exc)
+            api_log.ended_at = timezone.now()
+            api_log.save(
+                update_fields=[
+                    "status",
+                    "error_code",
+                    "error_message",
+                    "ended_at",
+                    "records_received",
+                ]
+            )
+            return True, str(exc)
         except SyncCancelled:
             cls.mark_log_cancelled(api_log)
             channel.last_sync_status = "cancelled"

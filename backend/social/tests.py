@@ -11,7 +11,7 @@ from django.utils import timezone
 from openpyxl import load_workbook
 
 from .models import ApiLog, Channel, DailySnapshot, FollowerSnapshot, Post
-from .providers import FacebookProvider
+from .providers import FacebookProvider, FacebookRateLimitDeferred, fetch_with_retry
 from .sync import SyncEngine
 from .views import _start_background_sync
 from authentication.models import SystemConfig
@@ -227,6 +227,61 @@ class FacebookPaginationTests(TestCase):
         self.assertNotIn("post_impressions", requested)
         self.assertNotIn("post_clicks", requested)
 
+    @patch("social.providers.fetch_with_retry")
+    def test_post_metrics_reuse_engagement_embedded_in_post_list(self, fetch):
+        fetch.return_value = {
+            "data": [
+                {"name": "post_media_view", "period": "lifetime", "values": [{"value": 30}]},
+                {"name": "post_total_media_view_unique", "period": "lifetime", "values": [{"value": 20}]},
+            ]
+        }
+        provider = FacebookProvider()
+        with patch.object(provider, "get_token", return_value="test-token"):
+            metrics = provider.get_post_metrics(
+                "channel",
+                "page",
+                [{"id": "post", "_reactions": 5, "_comments": 3, "_shares": 2}],
+            )
+
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(metrics[0]["reactions"], 5)
+        self.assertEqual(metrics[0]["comments"], 3)
+        self.assertEqual(metrics[0]["shares"], 2)
+
+    @patch("social.providers.requests.get")
+    def test_usage_header_starts_cooldown_before_meta_reaches_one_hundred_percent(self, get):
+        response = Mock(status_code=200)
+        response.headers = {"X-App-Usage": json.dumps({"call_count": 86, "total_time": 20, "total_cputime": 10})}
+        response.json.return_value = {"data": []}
+        response.raise_for_status.return_value = None
+        get.return_value = response
+
+        with patch("social.providers._facebook_calls_this_process", 0), patch("social.providers._facebook_last_usage_max", 0):
+            self.assertEqual(fetch_with_retry("https://graph.facebook.com/v25.0/page"), {"data": []})
+            with self.assertRaises(FacebookRateLimitDeferred):
+                fetch_with_retry("https://graph.facebook.com/v25.0/page")
+
+        self.assertEqual(get.call_count, 1)
+        state = SystemConfig.objects.get(key="facebook_api_state").data
+        self.assertIn("cooldownUntil", state)
+        self.assertEqual(state["usage"]["app"]["call_count"], 86)
+
+    @patch("social.providers.requests.get")
+    def test_meta_rate_limit_error_is_not_retried_aggressively(self, get):
+        response = Mock(status_code=400)
+        response.headers = {"Retry-After": "1200"}
+        response.json.return_value = {"error": {"code": 4, "message": "Application request limit reached"}}
+        get.return_value = response
+
+        with patch("social.providers._facebook_calls_this_process", 0), patch("social.providers._facebook_last_usage_max", 0):
+            with self.assertRaises(FacebookRateLimitDeferred):
+                fetch_with_retry("https://graph.facebook.com/v25.0/page", retries=3)
+
+        self.assertEqual(get.call_count, 1)
+        state = SystemConfig.objects.get(key="facebook_api_state").data
+        self.assertIn("cooldownUntil", state)
+        self.assertIn("4", state["reason"])
+
 
     @patch("social.providers.fetch_with_retry")
     def test_follower_insights_fetches_each_metric_separately(self, fetch):
@@ -341,6 +396,54 @@ class SyncQueueTests(TestCase):
         self.assertEqual(provider.get_follower_insights.call_args.kwargs['since'], history_since)
         self.assertEqual(provider.list_posts.call_args.kwargs['since'], recent_since)
 
+    def test_large_metric_backfill_is_saved_in_resumable_safe_batches(self):
+        now = timezone.now()
+        provider = FacebookProvider()
+        provider.metric_batch_limit = 2
+        provider.validate_credentials = Mock(return_value=True)
+        provider.get_followers = Mock(return_value=10)
+        provider.get_follower_insights = Mock(return_value=[])
+        provider.list_posts = Mock(return_value=[
+            {"id": "post-1", "created_time": now.isoformat(), "post_type": "status"},
+            {"id": "post-2", "created_time": now.isoformat(), "post_type": "status"},
+            {"id": "post-3", "created_time": now.isoformat(), "post_type": "status"},
+        ])
+        provider.get_post_metrics = Mock(side_effect=lambda _channel, _page, posts: [
+            {
+                "id": post["id"],
+                "reactions": 1,
+                "comments": 1,
+                "shares": 0,
+                "views": 10,
+                "reach": 8,
+                "impressions": 10,
+                "clicks": 0,
+            }
+            for post in posts
+        ])
+
+        with patch.object(SyncEngine, "get_provider", return_value=provider):
+            first_success, _ = SyncEngine.sync_channel(self.channel.id)
+            self.channel.refresh_from_db()
+            self.assertTrue(first_success)
+            self.assertEqual(self.channel.last_sync_status, "deferred")
+            self.assertIsNone(self.channel.initial_sync_completed_at)
+            self.assertIsNone(self.channel.last_data_sync_until)
+            self.assertEqual(DailySnapshot.objects.filter(channel_id=self.channel.id).count(), 2)
+
+            second_success, _ = SyncEngine.sync_channel(self.channel.id)
+
+        self.channel.refresh_from_db()
+        self.assertTrue(second_success)
+        self.assertEqual(self.channel.last_sync_status, "success")
+        self.assertIsNotNone(self.channel.initial_sync_completed_at)
+        self.assertIsNotNone(self.channel.last_data_sync_until)
+        self.assertEqual(DailySnapshot.objects.filter(channel_id=self.channel.id).count(), 3)
+        self.assertEqual(
+            [len(call.args[2]) for call in provider.get_post_metrics.call_args_list],
+            [2, 1],
+        )
+
     def test_cancelled_queue_stops_before_calling_the_provider(self):
         queued_log = SyncEngine.queue_channels([self.channel], 'cancel_request')[self.channel.id]
         queued_log.status = 'cancelled'
@@ -357,6 +460,23 @@ class SyncQueueTests(TestCase):
         self.assertFalse(success)
         self.assertIn('hủy', message)
         provider.get_followers.assert_not_called()
+
+    def test_rate_limit_pause_does_not_advance_channel_cursor(self):
+        provider = Mock()
+        provider.validate_credentials.side_effect = FacebookRateLimitDeferred("Tạm hoãn an toàn")
+
+        with patch.object(SyncEngine, "get_provider", return_value=provider):
+            success, message = SyncEngine.sync_channel(self.channel.id)
+
+        self.channel.refresh_from_db()
+        log = ApiLog.objects.get(channel_id=self.channel.id)
+        self.assertTrue(success)
+        self.assertIn("Tạm hoãn", message)
+        self.assertEqual(self.channel.last_sync_status, "deferred")
+        self.assertIsNone(self.channel.last_sync_at)
+        self.assertIsNone(self.channel.last_data_sync_until)
+        self.assertEqual(log.status, "deferred")
+        self.assertEqual(log.error_code, "FACEBOOK_RATE_LIMIT_DEFERRED")
 
     @patch.object(SyncEngine, 'sync_channel')
     def test_sync_all_creates_queue_for_every_channel_before_processing(self, sync_channel):
@@ -475,7 +595,8 @@ class DailySyncCommandTests(TestCase):
     def test_later_runs_refresh_only_the_new_day(self, sync_channel):
         now = timezone.now()
         self.channel.initial_sync_completed_at = now
-        self.channel.save(update_fields=["initial_sync_completed_at"])
+        self.channel.follower_history_loaded_at = now
+        self.channel.save(update_fields=["initial_sync_completed_at", "follower_history_loaded_at"])
         sync_channel.return_value = (True, "ok")
 
         call_command("sync_social_daily", stdout=StringIO())
@@ -492,14 +613,37 @@ class DailySyncCommandTests(TestCase):
         last_sync = timezone.now() - timedelta(hours=7, minutes=15)
         self.channel.initial_sync_completed_at = last_sync - timedelta(days=365)
         self.channel.last_sync_at = last_sync
-        self.channel.save(update_fields=["initial_sync_completed_at", "last_sync_at"])
+        self.channel.follower_history_loaded_at = last_sync
+        self.channel.save(update_fields=["initial_sync_completed_at", "last_sync_at", "follower_history_loaded_at"])
         sync_channel.return_value = (True, "ok")
 
         call_command("sync_social_daily", stdout=StringIO())
 
         kwargs = sync_channel.call_args.kwargs
-        self.assertTrue(timedelta(hours=7) < timezone.now() - kwargs["since"] < timedelta(hours=7, minutes=30))
+        self.assertTrue(timedelta(hours=31) < timezone.now() - kwargs["since"] < timedelta(hours=31, minutes=30))
         self.assertEqual(kwargs["snapshot_existing_since"], kwargs["since"])
+        self.assertEqual(kwargs["follower_since"], kwargs["since"])
+
+    @patch("social.management.commands.sync_social_daily.SyncEngine.sync_channel")
+    def test_incremental_cursor_uses_last_covered_window_with_overlap(self, sync_channel):
+        now = timezone.now()
+        covered_until = now - timedelta(hours=5)
+        self.channel.initial_sync_completed_at = now - timedelta(days=365)
+        self.channel.follower_history_loaded_at = now - timedelta(days=365)
+        self.channel.last_data_sync_until = covered_until
+        self.channel.last_sync_at = now - timedelta(hours=1)
+        self.channel.save(update_fields=[
+            "initial_sync_completed_at",
+            "follower_history_loaded_at",
+            "last_data_sync_until",
+            "last_sync_at",
+        ])
+        sync_channel.return_value = (True, "ok")
+
+        call_command("sync_social_daily", stdout=StringIO())
+
+        kwargs = sync_channel.call_args.kwargs
+        self.assertEqual(kwargs["since"], covered_until - timedelta(days=1))
         self.assertEqual(kwargs["follower_since"], kwargs["since"])
 
 

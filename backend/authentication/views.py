@@ -966,11 +966,13 @@ def system_config_view(request):
 @permission_classes([IsAdmin])
 def refresh_facebook_scan_token(request, token_id):
     from social.models import Channel
-    from social.providers import FacebookProvider
-    from social.views import _start_background_sync
+    from social.providers import FacebookProvider, FacebookRateLimitDeferred
+    from social.views import _active_background_request, _start_background_sync
 
     try:
         result = FacebookProvider().rescan_saved_token(token_id)
+    except FacebookRateLimitDeferred as error:
+        return Response({"error": str(error), "deferred": True}, status=status.HTTP_429_TOO_MANY_REQUESTS)
     except ValueError as error:
         return Response({"error": str(error)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -981,7 +983,11 @@ def refresh_facebook_scan_token(request, token_id):
         .values_list("id", flat=True)
     )
     request_id = ""
-    if channel_ids:
+    active_request_id = _active_background_request()
+    already_running = bool(active_request_id)
+    if active_request_id:
+        request_id = active_request_id
+    elif channel_ids:
         request_id = _start_background_sync(
             recent_days=1,
             history_days=396,
@@ -989,11 +995,17 @@ def refresh_facebook_scan_token(request, token_id):
         )
     return Response({
         "success": True,
-        "message": "Đã quét lại các Trang được cấp quyền và xếp lịch đồng bộ.",
+        "message": (
+            "Đã quét lại quyền. Một lượt đồng bộ khác đang chạy nên hệ thống không mở thêm tiến trình; "
+            "các kênh mới sẽ được nạp ở lượt an toàn tiếp theo."
+            if already_running
+            else "Đã quét lại các Trang được cấp quyền và xếp lịch đồng bộ."
+        ),
         "pageCount": len(result["pages"]),
         "addedPageCount": len(result["addedPageIds"]),
         "addedPageIds": result["addedPageIds"],
-        "syncQueued": len(channel_ids),
+        "syncQueued": 0 if already_running else len(channel_ids),
+        "alreadyRunning": already_running,
         "requestId": request_id,
         "detailedTokensList": result["detailedTokensList"],
         "facebookScanTokens": result["facebookScanTokens"],

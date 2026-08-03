@@ -78,15 +78,26 @@ class Command(BaseCommand):
         for channel in active_channels:
             needs_initial_sync = force_history or channel.initial_sync_completed_at is None
             fallback_recent_since = now - datetime.timedelta(days=recent_days)
+            overlap = datetime.timedelta(days=1)
 
             # The first run fills the reporting history once. Every following
-            # run begins at this channel's own successful sync marker, exactly
-            # like follower history: only data created since that marker is
-            # requested and snapshotted. The fallback keeps legacy channels
-            # safe when they have an initial marker but no recorded sync time.
-            incremental_since = channel.last_sync_at or fallback_recent_since
+            # run begins at the end of its last fully covered query window,
+            # with a one-day overlap. The overlap closes the gap for posts
+            # created while the previous sync was still running or delivered
+            # late by Meta; database upserts make the overlap idempotent.
+            coverage_cursor = channel.last_data_sync_until or channel.last_sync_at
+            incremental_since = (
+                coverage_cursor - overlap
+                if coverage_cursor
+                else fallback_recent_since
+            )
             since = manual_since or (history_since if needs_initial_sync else incremental_since)
             until = manual_until or now
+            follower_since = manual_since or (
+                history_since
+                if channel.follower_history_loaded_at is None
+                else incremental_since
+            )
 
             # Re-read metrics only for posts in this incremental window. This
             # prevents the 06:00 job and the dashboard button from repeatedly
@@ -98,7 +109,7 @@ class Command(BaseCommand):
                 request_id=request_id,
                 since=since,
                 until=until,
-                follower_since=since,
+                follower_since=follower_since,
                 snapshot_existing_since=snapshot_existing_since,
                 queued_log=queued_logs[channel.id],
             )

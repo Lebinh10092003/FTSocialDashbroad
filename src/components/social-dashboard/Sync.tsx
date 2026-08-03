@@ -14,6 +14,15 @@ interface SyncProps {
   onConnectGoogle?: () => Promise<boolean>;
 }
 
+interface FacebookApiUsage {
+  maxUsage: number;
+  processCalls: number;
+  lastResponseAt?: string;
+  cooldownUntil?: string;
+  cooldownActive: boolean;
+  reason?: string;
+}
+
 function getDefaultSinceDate(): string {
   const date = new Date();
   date.setDate(date.getDate() - 1);
@@ -24,6 +33,7 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
   const [since, setSince] = useState(getDefaultSinceDate);
   const [until, setUntil] = useState('');
   const [syncHistory, setSyncHistory] = useState<ApiLog[]>([]);
+  const [facebookUsage, setFacebookUsage] = useState<FacebookApiUsage | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [channelSyncStates, setChannelSyncStates] = useState<Record<string, ApiLog['status']>>({});
   const [selectedChannelIds, setSelectedChannelIds] = useState<Set<string>>(() => new Set());
@@ -73,15 +83,18 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
   const fetchSyncHistory = async (silent = false) => {
     if (!silent) setLoadingHistory(true);
     try {
-      const res = await fetch('/api/sync/history', {
-        headers: {
-          'Authorization': 'Bearer ' + idToken,
-        },
-      });
+      const headers = { 'Authorization': 'Bearer ' + idToken };
+      const [res, usageRes] = await Promise.all([
+        fetch('/api/sync/history', { headers }),
+        fetch('/api/sync/facebook-usage', { headers }),
+      ]);
       if (res.ok) {
         const data: ApiLog[] = await res.json();
         setSyncHistory(data || []);
         applySyncStatesFromHistory(data || []);
+      }
+      if (usageRes.ok) {
+        setFacebookUsage(await usageRes.json());
       }
     } catch (error) {
       console.error('Không thể tải lịch sử đồng bộ:', error);
@@ -235,6 +248,37 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
         )}
       </div>
 
+      {facebookUsage && (
+        <div className={'rounded-2xl border p-4 text-xs ' + (
+          facebookUsage.cooldownActive
+            ? 'border-amber-300 bg-amber-50 text-amber-900'
+            : facebookUsage.maxUsage >= 70
+              ? 'border-amber-200 bg-amber-50/70 text-amber-900'
+              : 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
+        )}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="flex items-center gap-2 font-extrabold">
+              <ShieldAlert className="h-4 w-4" />
+              Bảo vệ hạn mức Facebook API
+            </span>
+            <span className="font-bold">
+              Mức sử dụng cao nhất: {facebookUsage.maxUsage || 0}% · {facebookUsage.processCalls || 0} call trong tiến trình gần nhất
+            </span>
+          </div>
+          <p className="mt-2 leading-relaxed">
+            {facebookUsage.cooldownActive
+              ? 'Hệ thống đang tạm hoãn call để tránh Meta giới hạn hoặc thu hồi quyền. Dữ liệu đã lưu không bị xóa và con trỏ đồng bộ chưa dịch chuyển.'
+              : 'Hệ thống tự giảm tốc từ 70%, tạm dừng từ 85% và chia lịch sử thành nhiều đợt an toàn.'}
+          </p>
+          {facebookUsage.cooldownActive && facebookUsage.cooldownUntil && (
+            <p className="mt-1 font-semibold">
+              Dự kiến thử lại sau: {new Date(facebookUsage.cooldownUntil).toLocaleString('vi-VN')}
+              {facebookUsage.reason ? ' · ' + facebookUsage.reason : ''}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Google Sheets warning removed, as database sync does not require Google login */}
 
       {/* Date filters and controls for manual syncing */}
@@ -377,10 +421,12 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
                                 ? 'bg-amber-50 text-amber-700'
                                 : log.status === 'cancelled'
                                   ? 'bg-slate-100 text-slate-600'
+                                  : log.status === 'deferred'
+                                    ? 'bg-amber-100 text-amber-800'
                                   : 'bg-red-50 text-red-700'
                         )}>
                           {(log.status === 'queued' || log.status === 'running') && <RefreshCw className="w-3 h-3 animate-spin" />}
-                          {log.status === 'success' ? 'Thành công' : log.status === 'running' ? 'Đang chạy' : log.status === 'queued' ? 'Đang chờ' : log.status === 'cancelled' ? 'Đã hủy' : 'Thất bại'}
+                          {log.status === 'success' ? 'Thành công' : log.status === 'running' ? 'Đang chạy' : log.status === 'queued' ? 'Đang chờ' : log.status === 'cancelled' ? 'Đã hủy' : log.status === 'deferred' ? 'Tạm hoãn an toàn' : 'Thất bại'}
                         </span>
                       </td>
                       <td className="p-4 text-center text-slate-600 font-medium">{log.recordsReceived}</td>
@@ -395,6 +441,8 @@ export default function Sync({ idToken, googleAccessToken, channels, userRole, o
                           <span className="text-amber-600 font-medium">Đang chờ đến lượt...</span>
                         ) : log.status === 'cancelled' ? (
                           <span className="text-slate-500 font-medium">Đã hủy theo yêu cầu quản trị.</span>
+                        ) : log.status === 'deferred' ? (
+                          <span className="text-amber-700 font-medium">{log.errorMessage}</span>
                         ) : (
                           <span className="text-red-500 font-medium">{log.errorMessage}</span>
                         )}

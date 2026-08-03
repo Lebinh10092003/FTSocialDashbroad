@@ -10,6 +10,178 @@ from authentication.models import SystemConfig
 
 logger = logging.getLogger(__name__)
 
+FACEBOOK_RATE_LIMIT_ERROR_CODES = {4, 17, 32, 613, 80001}
+FACEBOOK_USAGE_FIELDS = {
+    "call_count",
+    "call_volume",
+    "total_cputime",
+    "cpu_time",
+    "total_time",
+}
+_facebook_calls_this_process = 0
+_facebook_last_usage_max = 0
+
+
+class FacebookRateLimitDeferred(RuntimeError):
+    """Stop the current sync without advancing its data cursor."""
+
+
+def _json_header(headers, name):
+    raw = str((headers or {}).get(name) or "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, (dict, list)) else {}
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+
+
+def _numeric_values(value, keys):
+    values = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in keys:
+                try:
+                    values.append(float(item))
+                except (TypeError, ValueError):
+                    pass
+            values.extend(_numeric_values(item, keys))
+    elif isinstance(value, list):
+        for item in value:
+            values.extend(_numeric_values(item, keys))
+    return values
+
+
+def _save_facebook_api_state(usage=None, cooldown_until=None, reason=""):
+    global _facebook_last_usage_max
+    try:
+        config, _ = SystemConfig.objects.get_or_create(key="facebook_api_state")
+        state = dict(config.data or {})
+        if usage:
+            state["usage"] = usage
+            values = _numeric_values(usage, FACEBOOK_USAGE_FIELDS)
+            _facebook_last_usage_max = int(max(values, default=0))
+        state["processCalls"] = _facebook_calls_this_process
+        state["lastResponseAt"] = timezone.now().isoformat()
+        if cooldown_until:
+            state["cooldownUntil"] = cooldown_until.isoformat()
+        elif reason == "clear":
+            state.pop("cooldownUntil", None)
+        if reason and reason != "clear":
+            state["reason"] = reason
+        elif reason == "clear":
+            state.pop("reason", None)
+        config.data = state
+        config.save(update_fields=["data"])
+    except Exception as error:
+        logger.warning("Could not persist Facebook API usage state: %s", error)
+
+
+def get_facebook_api_state():
+    config = SystemConfig.objects.filter(key="facebook_api_state").first()
+    state = dict(config.data or {}) if config else {}
+    state.setdefault("usage", {})
+    state.setdefault("processCalls", 0)
+    return state
+
+
+def _parse_cooldown(value):
+    try:
+        parsed = datetime.datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed, datetime.timezone.utc)
+        return parsed
+    except (TypeError, ValueError):
+        return None
+
+
+def _before_facebook_request():
+    global _facebook_calls_this_process
+    state = get_facebook_api_state()
+    cooldown_until = _parse_cooldown(state.get("cooldownUntil"))
+    if cooldown_until and cooldown_until > timezone.now():
+        raise FacebookRateLimitDeferred(
+            "Đồng bộ Facebook đang tạm hoãn để bảo vệ hạn mức API; "
+            f"hệ thống sẽ thử lại sau {timezone.localtime(cooldown_until).strftime('%H:%M %d/%m/%Y')}."
+        )
+
+    max_calls = max(20, int(os.getenv("FACEBOOK_API_MAX_CALLS_PER_RUN", "150")))
+    if _facebook_calls_this_process >= max_calls:
+        cooldown_until = timezone.now() + datetime.timedelta(minutes=15)
+        _save_facebook_api_state(
+            cooldown_until=cooldown_until,
+            reason="Đã dùng hết ngân sách call an toàn của lượt đồng bộ.",
+        )
+        raise FacebookRateLimitDeferred(
+            "Đã đạt ngân sách call an toàn của lượt này. Dữ liệu đã lưu được giữ nguyên "
+            "và phần còn lại sẽ tiếp tục ở lượt sau."
+        )
+
+    if _facebook_last_usage_max >= 70:
+        time.sleep(max(0.25, float(os.getenv("FACEBOOK_API_SOFT_DELAY_SECONDS", "1.0"))))
+    _facebook_calls_this_process += 1
+
+
+def _facebook_error_code(response):
+    try:
+        payload = response.json()
+        return int((payload.get("error") or {}).get("code"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def _record_facebook_response(response):
+    usage = {
+        "app": _json_header(response.headers, "X-App-Usage"),
+        "page": _json_header(response.headers, "X-Page-Usage"),
+        "business": _json_header(response.headers, "X-Business-Use-Case-Usage"),
+    }
+    usage = {key: value for key, value in usage.items() if value}
+    values = _numeric_values(usage, FACEBOOK_USAGE_FIELDS)
+    maximum = int(max(values, default=0))
+    if usage:
+        cooldown_until = None
+        reason = ""
+        if maximum >= 95:
+            cooldown_until = timezone.now() + datetime.timedelta(hours=1)
+            reason = "Meta báo mức sử dụng API từ 95%; tạm dừng một giờ."
+        elif maximum >= 85:
+            cooldown_until = timezone.now() + datetime.timedelta(minutes=15)
+            reason = "Meta báo mức sử dụng API từ 85%; tạm dừng để hạ tải."
+        _save_facebook_api_state(
+            usage=usage,
+            cooldown_until=cooldown_until,
+            reason=reason or "clear",
+        )
+
+
+def _defer_for_rate_limit(response, error_code):
+    retry_after = 0
+    try:
+        retry_after = int(response.headers.get("Retry-After") or 0)
+    except (TypeError, ValueError):
+        retry_after = 0
+    business = _json_header(response.headers, "X-Business-Use-Case-Usage")
+    estimated_minutes = max(
+        _numeric_values(business, {"estimated_time_to_regain_access"}),
+        default=0,
+    )
+    cooldown_seconds = max(retry_after, int(estimated_minutes * 60), 15 * 60)
+    cooldown_seconds = min(cooldown_seconds, 6 * 60 * 60)
+    cooldown_until = timezone.now() + datetime.timedelta(seconds=cooldown_seconds)
+    reason = f"Meta rate limit (mã {error_code or response.status_code})."
+    _save_facebook_api_state(
+        usage={"business": business} if business else None,
+        cooldown_until=cooldown_until,
+        reason=reason,
+    )
+    raise FacebookRateLimitDeferred(
+        "Meta đang giới hạn tần suất API. Hệ thống đã dừng an toàn, không dịch chuyển "
+        f"mốc đồng bộ và sẽ thử lại sau {timezone.localtime(cooldown_until).strftime('%H:%M %d/%m/%Y')}."
+    )
+
+
 class SocialPostRaw:
     def __init__(self, id, message=None, created_time=None, permalink_url=None, post_type=None, image_url=None):
         self.id = id
@@ -55,20 +227,25 @@ def fetch_with_retry(url, headers=None, params=None, method='GET', data=None, re
     for i in range(retries + 1):
         status_code = None
         try:
+            is_facebook = "graph.facebook.com" in str(url).lower()
+            if is_facebook:
+                _before_facebook_request()
             if method.upper() == 'POST':
                 res = requests.post(url, headers=headers, json=data, params=params, timeout=10)
             else:
                 res = requests.get(url, headers=headers, params=params, timeout=10)
             
             status_code = res.status_code
-            if status_code == 429:
-                if i < retries:
-                    time.sleep(delay)
-                    delay *= 2
-                    continue
+            if is_facebook:
+                _record_facebook_response(res)
+                error_code = _facebook_error_code(res)
+                if status_code == 429 or error_code in FACEBOOK_RATE_LIMIT_ERROR_CODES:
+                    _defer_for_rate_limit(res, error_code)
             
             res.raise_for_status()
             return res.json()
+        except FacebookRateLimitDeferred:
+            raise
         except Exception as e:
             # Không thử lại đối với các lỗi cố định từ phía client (sai token, hết hạn, không tìm thấy)
             if status_code in [400, 401, 403, 404]:
@@ -83,6 +260,10 @@ class FacebookProvider:
     def __init__(self):
         config = SystemConfig.objects.filter(key='main').first()
         self.api_version = 'v25.0'
+        self.metric_batch_limit = max(
+            5,
+            int(os.getenv("FACEBOOK_METRIC_POSTS_PER_CHANNEL", "40")),
+        )
         self.last_validation_error = ""
         if config and config.data:
             self.api_version = config.data.get('metaGraphApiVersion', 'v25.0')
@@ -516,7 +697,8 @@ class FacebookProvider:
         params = {
             "fields": (
                 "id,message,created_time,permalink_url,full_picture,"
-                "attachments{media_type,url,media{image{src}}}"
+                "attachments{media_type,url,media{image{src}}},"
+                "reactions.limit(0).summary(true),comments.limit(0).summary(true),shares"
             ),
             "limit": 100,
         }
@@ -573,6 +755,9 @@ class FacebookProvider:
                         "permalink_url": item.get("permalink_url"),
                         "post_type": post_type,
                         "image_url": image_url,
+                        "_reactions": item.get("reactions", {}).get("summary", {}).get("total_count", 0),
+                        "_comments": item.get("comments", {}).get("summary", {}).get("total_count", 0),
+                        "_shares": item.get("shares", {}).get("count", 0),
                     }
                 )
 
@@ -620,16 +805,23 @@ class FacebookProvider:
                 elif name == "post_clicks_by_type_unique":
                     clicks = sum(value.values()) if isinstance(value, dict) else value
 
-            detail_url = f"https://graph.facebook.com/{self.api_version}/{post_id}"
-            detail = fetch_with_retry(
-                detail_url,
-                headers=headers,
-                params={"fields": "reactions.summary(true),comments.summary(true),shares"},
+            has_embedded_engagement = all(
+                key in post for key in ("_reactions", "_comments", "_shares")
             )
-
-            reactions = detail.get("reactions", {}).get("summary", {}).get("total_count", 0)
-            comments = detail.get("comments", {}).get("summary", {}).get("total_count", 0)
-            shares = detail.get("shares", {}).get("count", 0)
+            if has_embedded_engagement:
+                reactions = int(post.get("_reactions") or 0)
+                comments = int(post.get("_comments") or 0)
+                shares = int(post.get("_shares") or 0)
+            else:
+                detail_url = f"https://graph.facebook.com/{self.api_version}/{post_id}"
+                detail = fetch_with_retry(
+                    detail_url,
+                    headers=headers,
+                    params={"fields": "reactions.summary(true),comments.summary(true),shares"},
+                )
+                reactions = detail.get("reactions", {}).get("summary", {}).get("total_count", 0)
+                comments = detail.get("comments", {}).get("summary", {}).get("total_count", 0)
+                shares = detail.get("shares", {}).get("count", 0)
 
             result.append(
                 {

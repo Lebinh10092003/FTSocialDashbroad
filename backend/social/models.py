@@ -10,6 +10,9 @@ class Channel(models.Model):
     created_at = models.DateTimeField()
     updated_at = models.DateTimeField()
     last_sync_at = models.DateTimeField(null=True, blank=True)
+    # End of the last fully covered API query window. This is separate from
+    # last_sync_at so posts created while a long sync is running are not skipped.
+    last_data_sync_until = models.DateTimeField(null=True, blank=True)
     last_sync_status = models.CharField(max_length=50, null=True, blank=True)
     follower_history_loaded_at = models.DateTimeField(null=True, blank=True)
     # A channel is not ready for the cheap daily refresh until posts, post
