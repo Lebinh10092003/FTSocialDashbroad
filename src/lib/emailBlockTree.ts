@@ -115,3 +115,15 @@ export const duplicateEmailBlock = (blocks: EmailBlock[], id: string, suffix = S
   list.splice(list.findIndex(block => block.id === id) + 1, 0, clone);
   return { blocks: next, cloneId: clone.id };
 };
+
+/** Counts every editable block, including Section children and layout-cell slots. */
+export function countEmailBlocks(blocks: EmailBlock[] = []): number {
+  return blocks.reduce((total, block) => {
+    const sectionChildren = countEmailBlocks(block.children || []);
+    const layoutChildren = (block.columns || []).reduce(
+      (columnTotal, slot) => columnTotal + countEmailBlocks(slot),
+      0,
+    );
+    return total + 1 + sectionChildren + layoutChildren;
+  }, 0);
+}

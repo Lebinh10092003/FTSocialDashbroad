@@ -20,7 +20,14 @@ export default function EmailSettingsComponent({
   };
 
   const fonts = [
-    { value: 'Roboto, "Helvetica Neue", Arial, sans-serif', label: 'Roboto' }
+    { value: 'Roboto, "Helvetica Neue", Arial, sans-serif', label: 'Roboto' },
+    { value: 'Arial, Helvetica, sans-serif', label: 'Arial' },
+    { value: 'Verdana, Geneva, sans-serif', label: 'Verdana' },
+    { value: 'Tahoma, Arial, sans-serif', label: 'Tahoma' },
+    { value: '"Trebuchet MS", Arial, sans-serif', label: 'Trebuchet MS' },
+    { value: 'Georgia, "Times New Roman", serif', label: 'Georgia' },
+    { value: '"Times New Roman", Times, serif', label: 'Times New Roman' },
+    { value: '"Courier New", Courier, monospace', label: 'Courier New' }
   ];
 
   return (

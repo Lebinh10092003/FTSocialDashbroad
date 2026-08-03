@@ -16,6 +16,7 @@ const meaningful = (value: string | null | undefined) => Boolean(String(value ||
 export interface EmailHtmlBlockImportResult {
   blocks: EmailBlock[];
   customBlockCount: number;
+  usedEmailContainer: boolean;
 }
 
 export function importHtmlToEmailBlocks(html: string, seed = Date.now()): EmailHtmlBlockImportResult {
@@ -59,6 +60,10 @@ export function importHtmlToEmailBlocks(html: string, seed = Date.now()): EmailH
       fontSize: clamp(px(inheritedStyle(source, 'fontSize'), 15), 9, 72),
       lineHeight: clamp(Number.parseFloat(inheritedStyle(source, 'lineHeight')) || 1.6, 1, 3),
       color: textColor(source),
+      fontWeight: inheritedStyle(source, 'fontWeight') || 'normal',
+      fontStyle: inheritedStyle(source, 'fontStyle') || 'normal',
+      letterSpacing: clamp(px(inheritedStyle(source, 'letterSpacing'), 0), -4, 20),
+      textTransform: inheritedStyle(source, 'textTransform') || 'none',
     },
     styles: blockStyles(source),
     visible: true,
@@ -260,6 +265,8 @@ export function importHtmlToEmailBlocks(html: string, seed = Date.now()): EmailH
       borderColor: element.style.borderColor || '#e2e8f0',
       borderWidth: clamp(px(element.style.borderWidth || element.style.border, 0), 0, 12),
       borderRadius: clamp(px(element.style.borderRadius, 0), 0, 80),
+      boxShadow: element.style.boxShadow || '',
+      overflow: element.style.overflow === 'hidden' ? 'hidden' : 'visible',
     },
     styles: blockStyles(element, 0),
     visible: true,
@@ -306,8 +313,21 @@ export function importHtmlToEmailBlocks(html: string, seed = Date.now()): EmailH
       if (tag !== 'body' && tag !== 'tr' && hasContainerPresentation(element) && children.length) return [sectionBlock(element, children)];
       return children;
     }
-    return meaningful(element.textContent) ? [paragraphBlock(element.outerHTML, element)] : [customBlock(element)];
+    // The block itself already stores the container's typography. Keeping the
+    // outer element here duplicates those styles and makes email-client output
+    // diverge from the React canvas, especially for inherited text colours.
+    return meaningful(element.textContent) ? [paragraphBlock(element.innerHTML, element)] : [customBlock(element)];
   }
 
-  return { blocks: parseChildren(documentNode.body), customBlockCount };
+  const fixedWidthTables = Array.from(documentNode.body.querySelectorAll('table')).filter(table => {
+    const explicitWidth = table.getAttribute('width') || table.style.width || table.style.maxWidth;
+    const numericWidth = px(explicitWidth, 0);
+    return numericWidth >= 320 && numericWidth <= 1200 && !/%/.test(explicitWidth || '');
+  });
+  // Full email documents commonly use a 100%-wide centring table around one
+  // fixed-width content table. Import the content table only; its visual shell
+  // becomes EmailSettings instead of a stack of non-editable wrapper Sections.
+  const emailContainer = fixedWidthTables.find(table => meaningful(table.textContent) || table.querySelector('img')) || null;
+  const blocks = emailContainer ? tableBlocks(emailContainer, 0) : parseChildren(documentNode.body);
+  return { blocks, customBlockCount, usedEmailContainer: Boolean(emailContainer) };
 }

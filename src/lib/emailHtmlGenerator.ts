@@ -180,7 +180,7 @@ export function generateEmailHtml(
         const text = content.text || '';
         const level = content.level || 'h2';
         const fontSize = content.fontSize || 20;
-        const color = content.color || '#0f3a72';
+        const color = content.color || inheritedTextColor || textColor;
         const bold = content.bold !== false;
         const align = content.align || 'left';
         const renderedText = preserveRichTextLineBreaks(rep(sanitizeHtml(content.html || escapePlainTextHtml(text))));
@@ -204,6 +204,10 @@ export function generateEmailHtml(
         const align = content.align || 'left';
         const fontSize = content.fontSize || 15;
         const lineHeight = content.lineHeight || 1.6;
+        const fontWeight = content.fontWeight || 'normal';
+        const fontStyle = content.fontStyle || 'normal';
+        const letterSpacing = Number(content.letterSpacing) || 0;
+        const textTransform = content.textTransform || 'none';
         const sanitized = sanitizeHtml(rawHtml);
         const replaced = preserveRichTextLineBreaks(rep(sanitized));
 
@@ -211,7 +215,7 @@ export function generateEmailHtml(
 <!-- Paragraph Block -->
 <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
-    <td align="${align}" style="padding: 0; font-family: ${fontFamily}; color: ${blockTextColor}; font-size: ${fontSize}px; line-height: ${lineHeight}; text-align: ${align}; word-break: break-word;">
+    <td align="${align}" style="padding: 0; font-family: ${fontFamily}; color: ${blockTextColor}; font-size: ${fontSize}px; line-height: ${lineHeight}; font-weight: ${fontWeight}; font-style: ${fontStyle}; letter-spacing: ${letterSpacing}px; text-transform: ${textTransform}; text-align: ${align}; word-break: break-word;">
       ${replaced}
     </td>
   </tr>
@@ -512,7 +516,7 @@ export function generateEmailHtml(
         const titleHtml = title ? '<strong style="display:block;color:' + (content.color || '#0F3A72') + '">' + title + '</strong>' : '';
         const bodyHtml = body ? '<div style="margin-top:' + (title ? 6 : 0) + 'px;line-height:1.5">' + body + '</div>' : '';
         const borderWidth = content.borderWidth ?? 1;
-        return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td style="padding:' + (content.padding ?? 24) + 'px;background:' + (content.bg || '#f8fafc') + ';border:' + borderWidth + 'px solid ' + (content.borderColor || '#e2e8f0') + ';border-radius:' + (content.borderRadius || 0) + 'px;font-family:' + fontFamily + ';color:' + (content.color || blockTextColor) + '">' + titleHtml + bodyHtml + children + '</td></tr></table>';
+        return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td bgcolor="' + (content.bg || '#f8fafc') + '" style="padding:' + (content.padding ?? 24) + 'px;background-color:' + (content.bg || '#f8fafc') + ';border:' + borderWidth + 'px solid ' + (content.borderColor || '#e2e8f0') + ';border-radius:' + (content.borderRadius || 0) + 'px;box-shadow:' + (content.boxShadow || 'none') + ';overflow:' + (content.overflow || 'visible') + ';font-family:' + fontFamily + ';color:' + (content.color || blockTextColor) + '">' + titleHtml + bodyHtml + children + '</td></tr></table>';
       }
       case 'image-text': case 'testimonial': case 'callout': case 'gallery': case 'video': case 'feature-list': case 'product-card': case 'product-grid': case 'pricing-table': case 'header': case 'footer': case 'merge-tag': {
         const title = rep(content.heading || content.title || content.name || content.company || content.author || '');
@@ -565,7 +569,7 @@ export function generateEmailHtml(
   <table role="presentation" class="ft-email-root" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; table-layout: fixed; border-collapse: collapse; background-color: ${settings.externalBg || '#f1f5f9'};">
     <tr>
       <td align="center" style="padding: 0;">
-        <table role="presentation" class="ft-email-content" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
+        <table role="presentation" class="ft-email-content" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: separate; border-spacing: 0; border-radius: ${settings.borderRadius || 0}px; overflow: hidden; box-shadow: 0 4px 18px rgba(19,50,92,0.09); font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
           <tr>
             <td class="ft-email-content-cell" width="100%" style="width: 100%; max-width: 100%; box-sizing: border-box; padding: ${settings.contentPadding}px;">
               ${blockHtmls}
@@ -614,6 +618,9 @@ export function generateEmailHtml(
       background-color: ${settings.contentBg};
       font-family: ${fontFamily};
       color: ${textColor};
+      border-radius: ${settings.borderRadius || 0}px;
+      overflow: hidden;
+      box-shadow: 0 4px 18px rgba(19,50,92,0.09);
     }
     @media only screen and (max-width: 480px) {
       body { padding: 0; }
@@ -624,7 +631,7 @@ export function generateEmailHtml(
 </head>
 <body>
   <div class="ft-email-preview-wrapper">
-    <table role="presentation" class="ft-email-content ft-email-preview-card" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
+    <table role="presentation" class="ft-email-content ft-email-preview-card" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: separate; border-spacing: 0; border-radius: ${settings.borderRadius || 0}px; overflow: hidden; box-shadow: 0 4px 18px rgba(19,50,92,0.09); font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
       <tr>
         <td class="ft-email-content-cell" width="100%" style="width: 100%; max-width: 100%; box-sizing: border-box; padding: ${settings.contentPadding}px;">
           ${blockHtmls}
@@ -639,7 +646,7 @@ export function generateEmailHtml(
   const fallbackCopyHtml = `<table role="presentation" class="ft-email-root" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; table-layout: fixed; border-collapse: collapse; background-color: #ffffff;">
   <tr>
     <td align="center" style="padding: 0;">
-      <table role="presentation" class="ft-email-content" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: collapse; font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
+      <table role="presentation" class="ft-email-content" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: separate; border-spacing: 0; border-radius: ${settings.borderRadius || 0}px; overflow: hidden; box-shadow: 0 4px 18px rgba(19,50,92,0.09); font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
         <tr>
           <td class="ft-email-content-cell" width="100%" style="width: 100%; max-width: 100%; box-sizing: border-box; padding: ${settings.contentPadding}px;">
             ${blockHtmls}
@@ -660,7 +667,7 @@ export function generateEmailHtml(
   plainTextLines.push(`TIÊU ĐỀ: ${processedSubject}`);
   plainTextLines.push(`===================================`);
 
-  template.blocks.forEach((block: EmailBlock) => {
+  const appendPlainTextBlocks = (blocks: EmailBlock[]) => blocks.forEach((block: EmailBlock) => {
     if (!block.visible) return;
     const content = block.content;
     const rep = (val: string) => replaceVariables(val, variables, useMock);
@@ -706,10 +713,25 @@ export function generateEmailHtml(
         if (links) plainTextLines.push(`\nKết nối: ${links}`);
         break;
       }
+      case 'data-table':
+        (content.rows || []).forEach((row: string[]) => plainTextLines.push(row.map(cell => rep(cell)).join(' | ')));
+        break;
+      case 'section':
+        if (content.heading) plainTextLines.push(rep(content.heading));
+        if (content.body) plainTextLines.push(rep(content.body));
+        break;
+      case 'custom-html': {
+        const text = (content.html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (text) plainTextLines.push(rep(text));
+        break;
+      }
       default:
         break;
     }
+    appendPlainTextBlocks(block.children || []);
+    (block.columns || []).forEach(slot => appendPlainTextBlocks(slot));
   });
+  appendPlainTextBlocks(template.blocks);
 
   const plainText = plainTextLines.join('\n');
 

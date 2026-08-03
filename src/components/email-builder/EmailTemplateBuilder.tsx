@@ -38,6 +38,7 @@ import EmailCanvas, { EmailCanvasHandle, EmailSelectionFormat } from './EmailCan
 import BlockSettings from './BlockSettings';
 import EmailSettingsComponent from './EmailSettings';
 import EmailPreview from './EmailPreview';
+import { countEmailBlocks } from '../../lib/emailBlockTree';
 import VariablePicker from './VariablePicker';
 import EmailBuilderHeader from './EmailBuilderHeader';
 import EmailHtmlImportDialog from './EmailHtmlImportDialog';
@@ -61,10 +62,6 @@ function sortEmailTemplates(templates: EmailTemplate[]): EmailTemplate[] {
     if (aIsSystem !== bIsSystem) return aIsSystem ? -1 : 1;
     return Number(b.lastUpdated || 0) - Number(a.lastUpdated || 0);
   });
-}
-
-function countEmailBlocks(blocks: EmailBlock[]): number {
-  return blocks.reduce((total, block) => total + 1 + countEmailBlocks(block.children || []) + (block.columns || []).reduce((columnTotal, slot) => columnTotal + countEmailBlocks(slot), 0), 0);
 }
 
 export default function EmailTemplateBuilder(props: EmailTemplateBuilderProps) {
@@ -825,7 +822,9 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
                     </div>
 
                     <div className="pt-4 border-t border-slate-100 flex items-center justify-between mt-4">
-                      <span className="text-[10px] text-slate-450 font-extrabold">{tpl.blocks.length} khối nội dung</span>
+                      <span className="text-[10px] text-slate-450 font-extrabold">
+                        {countEmailBlocks(tpl.blocks)} khối nội dung
+                      </span>
                       
                       <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
                         <button

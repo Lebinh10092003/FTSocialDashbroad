@@ -20,6 +20,37 @@ export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
 const safeTemplateName = (value: string) => value.trim() || 'Mẫu email chưa đặt tên';
 const fileNameWithoutExtension = (fileName: string) => fileName.replace(/\.(?:html?|json)$/i, '').trim();
 
+const cssPx = (value: string | null | undefined, fallback = 0) => {
+  const match = String(value || '').match(/\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : fallback;
+};
+
+function inferImportedEmailSettings(documentNode: Document): Partial<EmailSettings> {
+  const body = documentNode.body;
+  const candidates = Array.from(body.querySelectorAll('table')).filter(table => {
+    const width = table.getAttribute('width') || table.style.width || table.style.maxWidth;
+    const numericWidth = cssPx(width, 0);
+    return numericWidth >= 320 && numericWidth <= 1200 && !/%/.test(width || '');
+  });
+  const contentTable = candidates.find(table => table.textContent?.trim() || table.querySelector('img')) as HTMLElement | undefined;
+  const maxWidth = contentTable
+    ? cssPx(contentTable.style.maxWidth || contentTable.getAttribute('width') || contentTable.style.width, DEFAULT_EMAIL_SETTINGS.maxWidth)
+    : DEFAULT_EMAIL_SETTINGS.maxWidth;
+  const bodyBg = body.style.backgroundColor || body.getAttribute('bgcolor') || DEFAULT_EMAIL_SETTINGS.externalBg;
+  const contentBg = contentTable?.style.backgroundColor || contentTable?.getAttribute('bgcolor') || DEFAULT_EMAIL_SETTINGS.contentBg;
+
+  return {
+    maxWidth: Math.max(320, Math.min(1200, maxWidth)),
+    externalBg: bodyBg,
+    contentBg,
+    fontFamily: body.style.fontFamily || DEFAULT_EMAIL_SETTINGS.fontFamily,
+    textColor: body.style.color || DEFAULT_EMAIL_SETTINGS.textColor,
+    borderRadius: Math.max(0, Math.min(80, cssPx(contentTable?.style.borderRadius, DEFAULT_EMAIL_SETTINGS.borderRadius))),
+    // Imported full-email tables already carry their own cell padding.
+    contentPadding: contentTable ? 0 : DEFAULT_EMAIL_SETTINGS.contentPadding,
+  };
+}
+
 export function createBlankEmailTemplate(name: string, timestamp = Date.now()): EmailTemplate {
   return {
     id: `template-${timestamp}`,
@@ -100,7 +131,7 @@ export function createEmailTemplateFromHtml(source: string, fileName: string, ti
     id: `imported-html-${timestamp}`,
     name: safeTemplateName(fileNameWithoutExtension(fileName)),
     subject,
-    settings: { ...DEFAULT_EMAIL_SETTINGS },
+    settings: { ...DEFAULT_EMAIL_SETTINGS, ...inferImportedEmailSettings(documentNode) },
     blocks,
     lastUpdated: timestamp,
   };
