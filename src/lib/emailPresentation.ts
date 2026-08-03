@@ -1,3 +1,5 @@
+import { EmailBlock, EmailLayoutCell, EmailSettings } from '../types/emailBuilder';
+
 const parseCssColor = (value: string): [number, number, number] | null => {
   const normalized = String(value || '').trim().toLowerCase();
   const hex = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i)?.[1];
@@ -65,3 +67,91 @@ export const resolveEmailLineHeight = (value: unknown, version?: unknown, fallba
   if (!version && numeric >= 2.95) return fallback;
   return Math.max(1, Math.min(3, numeric));
 };
+
+export interface EmailBlockPresentation {
+  marginTop: number;
+  marginBottom: number;
+  textColor: string;
+  backgroundColor: string;
+  align: string;
+  fontSize: number;
+  lineHeight: number;
+  fontWeight: string | number;
+  fontStyle: string;
+  letterSpacing: number;
+  textTransform: string;
+  padding: number;
+  borderColor: string;
+  borderWidth: number;
+  borderRadius: number;
+  boxShadow: string;
+  overflow: string;
+  tableCellPadding: number;
+  tableFontSize: number;
+  tableLineHeight: number;
+  tableHeaderBackground: string;
+}
+
+/** Canonical visual values consumed by both the interactive canvas and email HTML. */
+export const getEmailBlockPresentation = (
+  block: EmailBlock,
+  settings: EmailSettings,
+  inheritedTextColor?: string,
+): EmailBlockPresentation => {
+  const content = block.content || {};
+  const styles = block.styles || {};
+  const defaultTextColor = settings.textColor || '#1e293b';
+  const backgroundColor = content.bg || (block.type === 'section' ? '#f8fafc' : settings.contentBg || '#ffffff');
+  const sectionTextColor = resolveEmailContainerTextColor(backgroundColor, content.color, inheritedTextColor, defaultTextColor);
+  const textColor = block.type === 'section'
+    ? sectionTextColor
+    : String(content.color || inheritedTextColor || (block.type === 'heading' ? '#0F3A72' : defaultTextColor));
+
+  return {
+    marginTop: Number(styles.marginTop ?? (block.type === 'divider' ? 0 : 10)),
+    marginBottom: Number(styles.marginBottom ?? (block.type === 'divider' ? 0 : 10)),
+    textColor,
+    backgroundColor,
+    align: content.align || 'left',
+    fontSize: Number(content.fontSize || (block.type === 'heading' ? 20 : block.type === 'data-table' ? 13 : 15)),
+    lineHeight: block.type === 'heading' ? 1.3 : resolveEmailLineHeight(content.lineHeight, content.lineHeightVersion),
+    fontWeight: block.type === 'heading' ? (content.bold === false ? 400 : 700) : (content.fontWeight || 'normal'),
+    fontStyle: content.fontStyle || 'normal',
+    letterSpacing: Number(content.letterSpacing) || 0,
+    textTransform: content.textTransform || 'none',
+    padding: Number(content.padding ?? 24),
+    borderColor: content.borderColor || '#e2e8f0',
+    borderWidth: Number(content.borderWidth ?? 1),
+    borderRadius: Number(content.borderRadius ?? 0),
+    boxShadow: content.boxShadow || 'none',
+    overflow: content.overflow || 'visible',
+    tableCellPadding: 10,
+    tableFontSize: 13,
+    tableLineHeight: 1.4,
+    tableHeaderBackground: '#f1f5f9',
+  };
+};
+
+export interface EmailLayoutCellPresentation {
+  backgroundColor: string;
+  textColor: string;
+  padding: number;
+  borderColor: string;
+  borderWidth: number;
+  borderRadius: number;
+  verticalAlign: string;
+}
+
+export const getEmailLayoutCellPresentation = (
+  cell: EmailLayoutCell,
+  settings: EmailSettings,
+  inheritedTextColor?: string,
+): EmailLayoutCellPresentation => ({
+  backgroundColor: cell.background || '#ffffff',
+  textColor: resolveEmailContainerTextColor(cell.background || '#ffffff', cell.color, inheritedTextColor, settings.textColor || '#1e293b'),
+  padding: Number(cell.padding) || 0,
+  borderColor: cell.borderColor || '#e2e8f0',
+  borderWidth: Number(cell.borderWidth) || 0,
+  borderRadius: Number(cell.borderRadius) || 0,
+  verticalAlign: cell.verticalAlign || 'top',
+});

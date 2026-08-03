@@ -4,7 +4,7 @@ import { getVariablesInText, detectVariableWarnings, replaceVariables } from './
 import { getEmailLayoutColumnWidths, getLayoutSlotIndex, normalizeEmailLayout } from './emailLayout';
 import { renderEmailIconDataUri } from './emailIcon';
 import { emailIconRasterKey } from './emailIconDelivery';
-import { isDarkEmailColor, resolveEmailContainerTextColor, resolveEmailLineHeight } from './emailPresentation';
+import { getEmailBlockPresentation, getEmailLayoutCellPresentation, isDarkEmailColor } from './emailPresentation';
 
 interface GeneratedEmail {
   subject: string;
@@ -52,7 +52,12 @@ export function generateEmailHtml(
   const allVars: string[] = [];
   
   const settings = template.settings;
-  const fontFamily = settings.fontFamily || 'Roboto, "Helvetica Neue", Arial, sans-serif';
+  // Inline email styles are quoted HTML attributes. Double quotes inside a
+  // configured font stack would terminate the style attribute and discard all
+  // following declarations (color, size, line-height, etc.).
+  const fontFamily = String(settings.fontFamily || 'Roboto, "Helvetica Neue", Arial, sans-serif')
+    .replace(/"/g, "'")
+    .replace(/[<>]/g, '');
   const textColor = settings.textColor || '#1e293b';
   const linkColor = settings.linkColor || '#1473d1';
   
@@ -104,10 +109,11 @@ export function generateEmailHtml(
     if (!block.visible) return '';
 
     const content = block.content;
-    const blockTextColor = content.color || inheritedTextColor || textColor;
     const styles = block.styles;
-    const marginTop = styles.marginTop ?? (block.type === 'divider' ? 0 : 10);
-    const marginBottom = styles.marginBottom ?? (block.type === 'divider' ? 0 : 10);
+    const presentation = getEmailBlockPresentation(block, settings, inheritedTextColor);
+    const blockTextColor = presentation.textColor;
+    const marginTop = presentation.marginTop;
+    const marginBottom = presentation.marginBottom;
     const fillHeightAttribute = fillHeight ? ' height="100%"' : '';
     const fillHeightStyle = fillHeight ? ' height: 100%;' : '';
 
@@ -180,18 +186,14 @@ export function generateEmailHtml(
       case 'heading': {
         const text = content.text || '';
         const level = content.level || 'h2';
-        const fontSize = content.fontSize || 20;
-        const color = content.color || inheritedTextColor || textColor;
-        const bold = content.bold !== false;
-        const align = content.align || 'left';
         const renderedText = preserveRichTextLineBreaks(rep(sanitizeHtml(content.html || escapePlainTextHtml(text))));
 
         return `
 <!-- Heading Block -->
-<table role="presentation" class="ft-email-block ft-email-heading" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
+<table role="presentation" class="ft-email-block ft-email-heading" data-ft-block-id="${block.id}" data-ft-block-type="heading" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
-    <td align="${align}" style="padding: 0; text-align: ${align};">
-      <${level} style="margin: 0; padding: 0; font-family: ${fontFamily}; color: ${color}; font-size: ${fontSize}px; line-height: 1.3; font-weight: ${bold ? 'bold' : 'normal'}; text-align: ${align};">
+    <td align="${presentation.align}" style="padding: 0; text-align: ${presentation.align};">
+      <${level} style="margin: 0; padding: 0; font-family: ${fontFamily}; color: ${presentation.textColor}; font-size: ${presentation.fontSize}px; line-height: ${presentation.lineHeight}; font-weight: ${presentation.fontWeight}; text-align: ${presentation.align};">
         ${renderedText}
       </${level}>
     </td>
@@ -202,21 +204,14 @@ export function generateEmailHtml(
 
       case 'paragraph': {
         const rawHtml = content.html || '';
-        const align = content.align || 'left';
-        const fontSize = content.fontSize || 15;
-        const lineHeight = resolveEmailLineHeight(content.lineHeight, content.lineHeightVersion);
-        const fontWeight = content.fontWeight || 'normal';
-        const fontStyle = content.fontStyle || 'normal';
-        const letterSpacing = Number(content.letterSpacing) || 0;
-        const textTransform = content.textTransform || 'none';
         const sanitized = sanitizeHtml(rawHtml);
         const replaced = preserveRichTextLineBreaks(rep(sanitized));
 
         return `
 <!-- Paragraph Block -->
-<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
+<table role="presentation" class="ft-email-block ft-email-paragraph" data-ft-block-id="${block.id}" data-ft-block-type="paragraph" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
-    <td align="${align}" style="padding: 0; font-family: ${fontFamily}; color: ${blockTextColor}; font-size: ${fontSize}px; line-height: ${lineHeight}; font-weight: ${fontWeight}; font-style: ${fontStyle}; letter-spacing: ${letterSpacing}px; text-transform: ${textTransform}; text-align: ${align}; word-break: break-word;">
+    <td align="${presentation.align}" style="padding: 0; font-family: ${fontFamily}; color: ${presentation.textColor}; font-size: ${presentation.fontSize}px; line-height: ${presentation.lineHeight}; font-weight: ${presentation.fontWeight}; font-style: ${presentation.fontStyle}; letter-spacing: ${presentation.letterSpacing}px; text-transform: ${presentation.textTransform}; text-align: ${presentation.align}; word-break: break-word;">
       ${replaced}
     </td>
   </tr>
@@ -467,13 +462,14 @@ export function generateEmailHtml(
           const slotIndex = getLayoutSlotIndex(layout, columnIndex, cellIndex);
           const slotBlocks = slots[slotIndex] || [];
           const shouldFill = slotBlocks.length === 1 && ['heading', 'paragraph', 'highlight-box', 'signature'].includes(slotBlocks[0].type);
-          const inner = slotBlocks.map(child => renderBlock(child, cell.color || blockTextColor, shouldFill)).join('') || '&nbsp;';
+          const cellPresentation = getEmailLayoutCellPresentation(cell, settings, blockTextColor);
+          const inner = slotBlocks.map(child => renderBlock(child, cellPresentation.textColor, shouldFill)).join('') || '&nbsp;';
           const width = nested ? 100 : columnWidths[columnIndex] / availableWidth * 100;
           const height = Math.max(rowHeight, requestedHeight(cell));
           const heightAttribute = height > 0 ? ` height="${Math.round(height)}"` : '';
           const heightStyle = height > 0 ? `height:${Math.round(height)}px;min-height:${Math.round(height)}px;` : '';
           const spacer = !nested && columnIndex < layout.length - 1 ? `<td aria-hidden="true" width="${horizontalGap}" style="width:${horizontalGap}px;min-width:${horizontalGap}px;font-size:1px;line-height:1px;padding:0;">&nbsp;</td>` : '';
-          return `<td class="ft-email-layout-cell" width="${width.toFixed(2)}%"${heightAttribute} valign="${cell.verticalAlign}" bgcolor="${cell.background}" style="width:${width.toFixed(2)}%;${heightStyle}box-sizing:border-box;padding:${cell.padding}px;background-color:${cell.background};color:${cell.color || blockTextColor};border:${cell.borderWidth}px solid ${cell.borderColor};border-radius:${cell.borderRadius}px;vertical-align:${cell.verticalAlign};font-family:${fontFamily};overflow:visible;">${inner}</td>${spacer}`;
+          return `<td class="ft-email-layout-cell" width="${width.toFixed(2)}%"${heightAttribute} valign="${cellPresentation.verticalAlign}" bgcolor="${cellPresentation.backgroundColor}" style="width:${width.toFixed(2)}%;${heightStyle}box-sizing:border-box;padding:${cellPresentation.padding}px;background-color:${cellPresentation.backgroundColor};color:${cellPresentation.textColor};border:${cellPresentation.borderWidth}px solid ${cellPresentation.borderColor};border-radius:${cellPresentation.borderRadius}px;vertical-align:${cellPresentation.verticalAlign};font-family:${fontFamily};overflow:visible;">${inner}</td>${spacer}`;
         };
 
         if (equalRowCount) {
@@ -485,7 +481,7 @@ export function generateEmailHtml(
             const gap = rowIndex < rowCount - 1 ? `<tr height="${verticalGap}"><td colspan="${layout.length * 2 - 1}" height="${verticalGap}" style="height:${verticalGap}px;font-size:1px;line-height:1px;padding:0;">&nbsp;</td></tr>` : '';
             return row + gap;
           }).join('');
-          return `<table role="presentation" class="ft-email-block ft-email-layout" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;">${rows}</table>`;
+          return `<table role="presentation" class="ft-email-block ft-email-layout" data-ft-block-id="${block.id}" data-ft-block-type="columns" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;">${rows}</table>`;
         }
 
         const targetHeight = Math.max(0, ...layout.map(column => column.cells.reduce((total, cell) => total + requestedHeight(cell), 0) + Math.max(0, column.cells.length - 1) * verticalGap));
@@ -501,26 +497,23 @@ export function generateEmailHtml(
           const spacer = columnIndex < layout.length - 1 ? `<td aria-hidden="true" width="${horizontalGap}" style="width:${horizontalGap}px;min-width:${horizontalGap}px;font-size:1px;line-height:1px;padding:0;">&nbsp;</td>` : '';
           return `<td width="${width.toFixed(2)}%" valign="top" style="width:${width.toFixed(2)}%;padding:0;vertical-align:top;"><table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;">${rows}</table></td>${spacer}`;
         }).join('');
-        return `<table role="presentation" class="ft-email-block ft-email-layout" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr>${columnCells}</tr></table>`;
+        return `<table role="presentation" class="ft-email-block ft-email-layout" data-ft-block-id="${block.id}" data-ft-block-type="columns" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr>${columnCells}</tr></table>`;
       }      case 'data-table': {
         const rows: string[][] = Array.isArray(content.rows) ? content.rows : [];
         const heading = content.heading ? `<div style="margin:0 0 10px;font-family:${fontFamily};font-size:18px;line-height:1.3;font-weight:bold;color:#0F3A72;">${rep(content.heading)}</div>` : '';
         const tableRows = rows.map((row, rowIndex) => `<tr>${row.map(cell => rowIndex === 0
-          ? `<th align="left" style="padding:10px;border:1px solid #cbd5e1;background:#f1f5f9;font-family:${fontFamily};font-size:13px;line-height:1.4;font-weight:bold;color:${blockTextColor};">${rep(cell)}</th>`
-          : `<td align="left" style="padding:10px;border:1px solid #cbd5e1;font-family:${fontFamily};font-size:13px;line-height:1.4;color:${blockTextColor};">${rep(cell)}</td>`).join('')}</tr>`).join('');
-        return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr><td style="padding:0;">${heading}<table role="table" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;table-layout:fixed;">${tableRows}</table></td></tr></table>`;
+          ? `<th align="left" style="padding:${presentation.tableCellPadding}px;border:1px solid ${presentation.borderColor};background:${presentation.tableHeaderBackground};font-family:${fontFamily};font-size:${presentation.tableFontSize}px;line-height:${presentation.tableLineHeight};font-weight:bold;color:${presentation.textColor};">${rep(cell)}</th>`
+          : `<td align="left" style="padding:${presentation.tableCellPadding}px;border:1px solid ${presentation.borderColor};font-family:${fontFamily};font-size:${presentation.tableFontSize}px;line-height:${presentation.tableLineHeight};color:${presentation.textColor};">${rep(cell)}</td>`).join('')}</tr>`).join('');
+        return `<table role="presentation" class="ft-email-block ft-email-data-table" data-ft-block-id="${block.id}" data-ft-block-type="data-table" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr><td style="padding:0;">${heading}<table role="table" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;table-layout:fixed;">${tableRows}</table></td></tr></table>`;
       }
       case 'section': {
         const title = rep(content.heading || '');
         const body = rep(content.body || '');
-        const sectionBackground = content.bg || '#f8fafc';
-        const sectionTextColor = resolveEmailContainerTextColor(sectionBackground, content.color, inheritedTextColor, textColor);
-        const children = (block.children || []).map(child => renderBlock(child, sectionTextColor)).join('');
-        const titleColor = content.color || (isDarkEmailColor(sectionBackground) ? '#ffffff' : '#0F3A72');
+        const children = (block.children || []).map(child => renderBlock(child, presentation.textColor)).join('');
+        const titleColor = content.color || (isDarkEmailColor(presentation.backgroundColor) ? '#ffffff' : '#0F3A72');
         const titleHtml = title ? '<strong style="display:block;color:' + titleColor + '">' + title + '</strong>' : '';
         const bodyHtml = body ? '<div style="margin-top:' + (title ? 6 : 0) + 'px;line-height:1.5">' + body + '</div>' : '';
-        const borderWidth = content.borderWidth ?? 1;
-        return '<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td bgcolor="' + sectionBackground + '" style="padding:' + (content.padding ?? 24) + 'px;background-color:' + sectionBackground + ';border:' + borderWidth + 'px solid ' + (content.borderColor || '#e2e8f0') + ';border-radius:' + (content.borderRadius || 0) + 'px;box-shadow:' + (content.boxShadow || 'none') + ';overflow:' + (content.overflow || 'visible') + ';font-family:' + fontFamily + ';color:' + sectionTextColor + '">' + titleHtml + bodyHtml + children + '</td></tr></table>';
+        return '<table role="presentation" class="ft-email-block ft-email-section" data-ft-block-id="' + block.id + '" data-ft-block-type="section" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;margin-top:' + marginTop + 'px;margin-bottom:' + marginBottom + 'px"><tr><td bgcolor="' + presentation.backgroundColor + '" style="padding:' + presentation.padding + 'px;background-color:' + presentation.backgroundColor + ';border:' + presentation.borderWidth + 'px solid ' + presentation.borderColor + ';border-radius:' + presentation.borderRadius + 'px;box-shadow:' + presentation.boxShadow + ';overflow:' + presentation.overflow + ';font-family:' + fontFamily + ';color:' + presentation.textColor + '">' + titleHtml + bodyHtml + children + '</td></tr></table>';
       }
       case 'image-text': case 'testimonial': case 'callout': case 'gallery': case 'video': case 'feature-list': case 'product-card': case 'product-grid': case 'pricing-table': case 'header': case 'footer': case 'merge-tag': {
         const title = rep(content.heading || content.title || content.name || content.company || content.author || '');

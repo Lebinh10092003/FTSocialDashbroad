@@ -10,7 +10,8 @@
                     "preview":  "vite preview",
                     "clean":  "node -e \"require(\u0027fs\u0027).rmSync(\u0027dist\u0027,{recursive:true,force:true})\"",
                     "check:dialogs":  "node scripts/check-native-dialogs.mjs",
-                    "lint":  "npm run check:dialogs && tsc --noEmit"
+                    "check:email-renderers":  "node scripts/check-email-render-contracts.mjs",
+                    "lint":  "npm run check:dialogs && npm run check:email-renderers && tsc --noEmit"
                 },
     "dependencies":  {
                          "@google/genai":  "^2.4.0",
