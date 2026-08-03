@@ -1,6 +1,7 @@
 from authentication.models import UserProfile
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 from unittest.mock import MagicMock, patch
@@ -817,6 +818,76 @@ class SessionOutputSheetTests(TestCase):
         self.assertEqual(output.sheet_tab, 'SCO - IEO')
 
 
+class ExaminationSheetAutomationTests(TestCase):
+    def setUp(self):
+        self.session = ExamSession.objects.create(
+            id='sheet-auto-session', competition_id='iso', code='ISO', name='ISO automatic sheets',
+            parent='ISO', organizer='SCO', time='2026', sort_key='sheet-auto-session',
+        )
+
+    @patch('examination.sheet_scheduler.sync_single_sheet')
+    def test_registration_schedule_only_imports_enabled_input_sheets(self, sync_sheet):
+        sync_sheet.return_value = {'success': True, 'created': 2, 'updated': 3, 'total': 5}
+        source = ExaminationSheet.objects.create(
+            id='registration-auto', name='Sheet đầu vào', url='https://docs.google.com/spreadsheets/d/input',
+            session_id=self.session.id, stage='registration-source', automation_enabled=True,
+            created_at=timezone.now(), updated_at=timezone.now(),
+        )
+        ExaminationSheet.objects.create(
+            id='output-auto-off', name='Sheet tổng hợp', url='https://docs.google.com/spreadsheets/d/output',
+            session_id=self.session.id, stage='session-output', automation_enabled=True,
+            created_at=timezone.now(), updated_at=timezone.now(),
+        )
+
+        from .sheet_scheduler import run_registration_imports
+        result = run_registration_imports()
+
+        self.assertEqual(result['success'], 1)
+        sync_sheet.assert_called_once()
+        self.assertEqual(sync_sheet.call_args.args[2], source.id)
+        source.refresh_from_db()
+        self.assertIsNotNone(source.last_import_at)
+
+    @patch('examination.sheet_scheduler.export_session_to_google_sheet')
+    @patch('examination.sheet_scheduler.output_sheet_has_unreviewed_changes')
+    def test_output_schedule_exports_only_when_sheet_has_no_pending_edit(self, changed, export_sheet):
+        changed.return_value = (False, 'same')
+        export_sheet.return_value = {'success': True, 'exported': 5, 'fingerprint': 'new-fingerprint'}
+        output = ExaminationSheet.objects.create(
+            id='output-auto', name='Sheet tổng hợp', url='https://docs.google.com/spreadsheets/d/output',
+            session_id=self.session.id, stage='session-output', automation_enabled=True,
+            last_content_fingerprint='old-fingerprint', created_at=timezone.now(), updated_at=timezone.now(),
+        )
+
+        from .sheet_scheduler import run_output_exports
+        result = run_output_exports()
+
+        self.assertEqual(result['success'], 1)
+        export_sheet.assert_called_once_with(output)
+        output.refresh_from_db()
+        self.assertEqual(output.last_content_fingerprint, 'new-fingerprint')
+        self.assertFalse(output.pending_manual_import)
+
+    @patch('examination.sheet_scheduler.export_session_to_google_sheet')
+    @patch('examination.sheet_scheduler.output_sheet_has_unreviewed_changes')
+    def test_output_schedule_blocks_export_when_people_edited_sheet(self, changed, export_sheet):
+        changed.return_value = (True, 'changed')
+        output = ExaminationSheet.objects.create(
+            id='output-edited', name='Sheet tổng hợp', url='https://docs.google.com/spreadsheets/d/output',
+            session_id=self.session.id, stage='session-output', automation_enabled=True,
+            last_content_fingerprint='old-fingerprint', created_at=timezone.now(), updated_at=timezone.now(),
+        )
+
+        from .sheet_scheduler import run_output_exports
+        result = run_output_exports()
+
+        self.assertEqual(result['blocked'], 1)
+        export_sheet.assert_not_called()
+        output.refresh_from_db()
+        self.assertTrue(output.pending_manual_import)
+        self.assertEqual(output.status, 'attention')
+
+
 class SheetCandidateImportPreviewTests(TestCase):
     def setUp(self):
         self.user = UserProfile.objects.create(email='iso-import-admin@example.com', name='ISO Import Admin', role='ADMIN')
@@ -900,6 +971,67 @@ class SheetCandidateImportPreviewTests(TestCase):
         candidate = Candidate.objects.get(code='FT-ISO-002')
         self.assertEqual(candidate.school, 'Trường mới')
         self.assertEqual(candidate.email, 'keep@example.com')
+
+    @patch('examination.views.remote_sheet_fingerprint')
+    def test_output_import_rejects_a_preview_that_became_stale(self, fingerprint):
+        fingerprint.return_value = 'newer-sheet-version'
+        output = ExaminationSheet.objects.create(
+            id='iso-output-stale', name='Sheet tổng hợp ISO',
+            url='https://docs.google.com/spreadsheets/d/output',
+            session_id=self.session.id, stage='session-output', pending_manual_import=True,
+            created_at=timezone.now(), updated_at=timezone.now(),
+        )
+
+        response = self.client.post('/api/examination/import/candidates', {
+            'sessionId': self.session.id,
+            'sheetId': output.id,
+            'sourceFingerprint': 'previewed-sheet-version',
+            'source': 'Sheet tổng hợp ISO',
+            'records': [{'name': 'Nguyễn An'}],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(Candidate.objects.count(), 0)
+        self.assertIn('xem trước lại', response.data['error'].lower())
+
+    @patch('examination.views.remote_sheet_fingerprint')
+    def test_manual_output_import_clears_pending_edit_after_current_preview(self, fingerprint):
+        fingerprint.return_value = 'current-sheet-version'
+        output = ExaminationSheet.objects.create(
+            id='iso-output-current', name='Sheet tổng hợp ISO',
+            url='https://docs.google.com/spreadsheets/d/output',
+            session_id=self.session.id, stage='session-output', pending_manual_import=True,
+            created_at=timezone.now(), updated_at=timezone.now(),
+        )
+
+        response = self.client.post('/api/examination/import/candidates', {
+            'sessionId': self.session.id,
+            'sheetId': output.id,
+            'sourceFingerprint': 'current-sheet-version',
+            'source': 'Sheet tổng hợp ISO',
+            'records': [{'name': 'Nguyễn An', 'email': 'an@example.com'}],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        output.refresh_from_db()
+        self.assertFalse(output.pending_manual_import)
+        self.assertEqual(output.last_content_fingerprint, 'current-sheet-version')
+        self.assertEqual(Candidate.objects.get().email, 'an@example.com')
+
+    def test_legacy_direct_sync_cannot_import_an_output_sheet(self):
+        output = ExaminationSheet.objects.create(
+            id='iso-output-direct-sync', name='Sheet tổng hợp ISO',
+            url='https://docs.google.com/spreadsheets/d/output',
+            session_id=self.session.id, stage='session-output',
+            created_at=timezone.now(), updated_at=timezone.now(),
+        )
+
+        response = self.client.post('/api/examination/sync/google-sheet', {
+            'id': output.id,
+        }, format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('xác nhận thủ công', response.data['error'])
 
     @patch('examination.sync.requests.get')
     def test_empty_sheet_returns_a_safe_zero_record_preview(self, mock_get):

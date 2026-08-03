@@ -20,7 +20,7 @@ type Props = {
 };
 
 interface SyncState {
-  status?: 'success' | 'failed' | 'running' | 'idle';
+  status?: 'success' | 'failed' | 'running' | 'attention' | 'idle';
   lastSyncTime?: string;
   lastSyncDate?: string;
   created?: number;
@@ -59,6 +59,13 @@ interface SheetSource {
   sessionId?: string;
   sheetTab?: string;
   stage?: string;
+  automationEnabled?: boolean;
+  automationStartDate?: string;
+  automationEndDate?: string;
+  lastImportAt?: string | null;
+  lastExportAt?: string | null;
+  pendingManualImport?: boolean;
+  lastError?: string;
 }
 
 type PreviewStatus = 'new' | 'changed' | 'unchanged' | 'conflict';
@@ -73,7 +80,7 @@ type SheetImportPreview = {
   summary: { total: number; new: number; matched: number; changed: number; unchanged: number; conflicts: number };
   mapping: { headerCount: number; mapped: { field: string; column: string; index: number }[]; unmapped: string[]; roundGroups: string[] };
   warnings: string[];
-  source: { name?: string; url: string; sheetTab?: string; fingerprint: string };
+  source: { id?: string; name?: string; url: string; sheetTab?: string; fingerprint: string; stage?: string };
   targetSession: { id: string; code: string; name: string; time?: string };
 };
 
@@ -179,6 +186,14 @@ function rowsFromSheet(sheet: XLSX.WorkSheet): ImportRow[] {
 }
 
 const sessionOptionLabel = (session: ExaminationSession) => sessionDisplayName(session);
+const sheetKind = (sheet: SheetSource) => sheet.stage === 'session-output' ? 'output' : 'input';
+const sheetKindLabel = (sheet: SheetSource) => sheetKind(sheet) === 'output' ? 'Sheet tổng hợp' : 'Sheet đầu vào';
+const sheetScheduleLabel = (sheet: SheetSource) => {
+  if (!sheet.automationEnabled) return 'Tự động: Tắt';
+  const hours = sheetKind(sheet) === 'output' ? '11:00, 16:00' : '10:00, 15:00';
+  const window = [sheet.automationStartDate, sheet.automationEndDate].filter(Boolean).map(value => value!.split('-').reverse().join('/')).join(' – ');
+  return `${hours}${window ? ` · ${window}` : ''}`;
+};
 const DEFAULT_SYNC_URL =
   'https://docs.google.com/spreadsheets/d/1kqztN_iCeZ9uR1mO7gz9j1TcUt8ZmCdpEv0TagTf4VA/edit?usp=sharing';
 
@@ -218,7 +233,12 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
   const [newSheetSessionId, setNewSheetSessionId] = useState('');
   const [newSheetTab, setNewSheetTab] = useState('');
-  const [newSheetStage, setNewSheetStage] = useState('Toàn bộ kỳ tổ chức');
+  const [newSheetStage, setNewSheetStage] = useState('registration-source');
+  const [newSheetAutomationEnabled, setNewSheetAutomationEnabled] = useState(false);
+  const [newSheetAutomationStart, setNewSheetAutomationStart] = useState('');
+  const [newSheetAutomationEnd, setNewSheetAutomationEnd] = useState('');
+  const [importSheetId, setImportSheetId] = useState('');
+  const [importSourceFingerprint, setImportSourceFingerprint] = useState('');
   const [publication, setPublication] = useState<Publication | null>(null);
   const [publicationUrl, setPublicationUrl] = useState('');
   const defaultAcademicYear = (() => { const now = new Date(); const start = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1; return `${start}-${start + 1}`; })();
@@ -351,6 +371,8 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     setSource(sourceName);
     setUpdateMode('replace-nonempty');
     setSheetPreview(null);
+    setImportSheetId('');
+    setImportSourceFingerprint('');
     void checkDuplicateCandidates(parsed);
     setMessage(
       parsed.length
@@ -373,7 +395,9 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     setTargetSessionId(sheetPreview.sessionId);
     setRows(sheetPreview.records || []);
     setSource(`${sheetPreview.source.name || 'Google Sheets'}${sheetPreview.source.sheetTab ? ` · ${sheetPreview.source.sheetTab}` : ''}`);
-    setUpdateMode('fill-empty');
+    setUpdateMode('replace-nonempty');
+    setImportSheetId(sheetPreview.source.id || '');
+    setImportSourceFingerprint(sheetPreview.source.fingerprint || '');
     setConfirmedMatches({});
     void checkDuplicateCandidates(sheetPreview.records || []);
     setMessage(`Đã chuẩn bị ${sheetPreview.summary.total} hồ sơ. Hãy đối chiếu hồ sơ trùng và chọn chính sách cập nhật trước khi nhập.`);
@@ -409,16 +433,17 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     try {
       const res = await fetch('/api/examination/import/candidates', {
         method: 'POST', headers: authHeaders,
-        body: JSON.stringify({ records: rows, source, sessionId: resolvedSessionId, confirmedMatches, updateMode }),
+        body: JSON.stringify({ records: rows, source, sessionId: resolvedSessionId, confirmedMatches, updateMode, sheetId: importSheetId, sourceFingerprint: importSourceFingerprint }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Không thể nhập dữ liệu.');
       const importedItems = body.items || [];
       onImported(importedItems);
+      await loadSheets();
       const linkedExisting = Number(body.linkedExisting || 0);
       const importedCount = importedItems.length || Number(body.created || 0) + Number(body.updated || 0);
       duplicateCheckRef.current += 1;
-      setRows([]); setDuplicates([]); setCheckingDuplicates(false); setConfirmedMatches({}); setSource('');
+      setRows([]); setDuplicates([]); setCheckingDuplicates(false); setConfirmedMatches({}); setSource(''); setImportSheetId(''); setImportSourceFingerprint('');
       if (inputRef.current) inputRef.current.value = '';
       setMessage(`✅ Đã nhập ${importedCount} hồ sơ: ${body.created} mới, ${body.updated} cập nhật từ ${source}.${linkedExisting ? ` ${linkedExisting} hồ sơ đã có được bổ sung vào kỳ tổ chức này.` : ''}`);
     } catch (err: any) { setMessage(err.message || 'Không thể nhập dữ liệu.'); }
@@ -441,7 +466,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
       const res = await fetch(url, {
         method,
         headers: authHeaders,
-        body: JSON.stringify({ name: newSheetName.trim(), url: newSheetUrl.trim(), sessionId: newSheetSessionId, sheetTab: newSheetTab.trim(), stage: newSheetStage }),
+        body: JSON.stringify({ name: newSheetName.trim(), url: newSheetUrl.trim(), sessionId: newSheetSessionId, sheetTab: newSheetTab.trim(), stage: newSheetStage, automationEnabled: newSheetAutomationEnabled, automationStartDate: newSheetAutomationStart, automationEndDate: newSheetAutomationEnd }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Có lỗi xảy ra.');
@@ -449,6 +474,9 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
       await loadSheets();
       setNewSheetName('');
       setNewSheetUrl('');
+      setNewSheetAutomationEnabled(false);
+      setNewSheetAutomationStart('');
+      setNewSheetAutomationEnd('');
       setEditingSheetId(null);
       setShowAddModal(false);
       setMessage(editingSheetId ? '✅ Cập nhật nguồn dữ liệu thành công.' : '✅ Thêm nguồn dữ liệu mới thành công.');
@@ -465,7 +493,10 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     setNewSheetUrl(sheet.url);
     setNewSheetSessionId(sheet.sessionId || '');
     setNewSheetTab(sheet.sheetTab || '');
-    setNewSheetStage(sheet.stage || 'Toàn bộ kỳ tổ chức');
+    setNewSheetStage(sheet.stage === 'session-output' ? 'session-output' : 'registration-source');
+    setNewSheetAutomationEnabled(Boolean(sheet.automationEnabled));
+    setNewSheetAutomationStart(sheet.automationStartDate || '');
+    setNewSheetAutomationEnd(sheet.automationEndDate || '');
     setShowAddModal(true);
   };
 
@@ -562,7 +593,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
       </section>
 
       <section className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5 shadow-sm">
-        <div className="max-w-3xl"><h2 className="flex items-center gap-2 text-xl font-bold text-emerald-950"><FileSpreadsheet className="h-5 w-5 text-emerald-700"/>Google Sheets theo từng kỳ tổ chức</h2><p className="mt-1 text-sm text-emerald-900/80">Mỗi kỳ có hai liên kết độc lập: Sheet đăng ký là nguồn nhập dữ liệu, còn Google Sheet output là nơi xuất dữ liệu của riêng kỳ đó. Thiết lập hai link tại phần “Thay đổi thông tin” của kỳ tổ chức.</p></div>
+        <div className="max-w-4xl"><h2 className="flex items-center gap-2 text-xl font-bold text-emerald-950"><FileSpreadsheet className="h-5 w-5 text-emerald-700"/>Luồng Google Sheets của kỳ tổ chức</h2><p className="mt-1 text-sm text-emerald-900/80">Sheet đầu vào chỉ nhập thí sinh. Sheet tổng hợp cho phép nhập bản chỉnh sửa thủ công và xuất dữ liệu từ hệ thống.</p></div>
       </section>      {!canImport && (
         <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           Chỉ quản lý hoặc quản trị viên mới có thể nhập dữ liệu.
@@ -574,13 +605,13 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="flex items-center gap-2 text-xl font-bold text-indigo-900"><Link2 className="h-5 w-5 text-indigo-600" />{'Google Sheets của các kỳ đang tổ chức'}</h2>
-            <p className="mt-1 text-xs text-indigo-700">{'Mỗi hàng là tab dữ liệu của một kỳ tổ chức. Nhập để đồng bộ Sheet vào hệ thống; Xuất để ghi dữ liệu hệ thống ra Sheet.'}</p>
+            <p className="mt-1 text-xs text-indigo-700">Đầu vào tự nhập lúc 10:00 và 15:00; tổng hợp tự xuất lúc 11:00 và 16:00 khi đã bật lịch.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={loadSheets} disabled={loadingSheets || syncingSheetId !== null || exportingSheetId !== null} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-[#001e40] hover:bg-slate-50 disabled:opacity-50">
               <RefreshCw className={`h-3.5 w-3.5 ${loadingSheets ? 'animate-spin' : ''}`} />{'Tải lại'}
             </button>
-            {canImport && <button onClick={() => { setEditingSheetId(null); setNewSheetName(''); setNewSheetUrl(''); setNewSheetSessionId(targetSessionId || sessionId || ''); setNewSheetTab(''); setNewSheetStage('Toàn bộ kỳ tổ chức'); setShowAddModal(true); }} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700">
+            {canImport && <button onClick={() => { setEditingSheetId(null); setNewSheetName(''); setNewSheetUrl(''); setNewSheetSessionId(targetSessionId || sessionId || ''); setNewSheetTab(''); setNewSheetStage('registration-source'); setNewSheetAutomationEnabled(false); setNewSheetAutomationStart(''); setNewSheetAutomationEnd(''); setShowAddModal(true); }} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700">
               <Plus className="h-4 w-4" />{'Thêm liên kết Sheet'}
             </button>}
           </div>
@@ -589,8 +620,8 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
         {loadingSheets && sheets.length === 0 ? <div className="flex justify-center py-8"><LoaderCircle className="h-8 w-8 animate-spin text-indigo-600" /></div> : activeSheetSources.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">{'Chưa có liên kết Sheet cho kỳ đang tổ chức. Các kỳ đã kết thúc được ẩn khỏi bảng này.'}</div>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-100"><table className="min-w-full divide-y divide-slate-100 text-sm"><thead className="bg-slate-50 text-slate-500"><tr><th className="px-4 py-3 text-left">{'Kỳ tổ chức'}</th><th className="px-4 py-3 text-left">Google Sheet</th><th className="px-4 py-3 text-center">{'Nhập dữ liệu'}</th><th className="px-4 py-3 text-center">{'Xuất dữ liệu'}</th><th className="px-4 py-3 text-right"></th></tr></thead><tbody className="divide-y divide-slate-100 bg-white">
-            {activeSheetSources.map(sheet => { const linkedSession=sessions.find(item=>item.id===sheet.sessionId); const busy=syncingSheetId===sheet.id||exportingSheetId===sheet.id; return <tr key={sheet.id} className="hover:bg-slate-50/50"><td className="px-4 py-3"><b className="block text-[#001e40]">{linkedSession?.code} · {linkedSession?.time}</b><span className="mt-1 block text-xs text-slate-500">{linkedSession?.name}{sheet.sheetTab ? ` · ${sheet.sheetTab}` : ''}</span></td><td className="px-4 py-3"><a href={sheet.url} target="_blank" rel="noreferrer" className="inline-flex max-w-[360px] items-center gap-1 truncate font-semibold text-indigo-600 hover:underline"><Link2 className="h-4 w-4 shrink-0" />{'Mở Google Sheet'}</a></td><td className="px-4 py-3 text-center"><button disabled={!canImport||busy} onClick={()=>handleSyncSheet(sheet)} className="inline-flex min-w-[156px] items-center justify-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${syncingSheetId===sheet.id?'animate-spin':''}`}/>{syncingSheetId===sheet.id?'Đang kiểm tra':'Kiểm tra & nhập'}</button></td><td className="px-4 py-3 text-center"><button disabled={!canImport||busy} onClick={()=>handleExportSheet(sheet)} className="inline-flex min-w-[142px] items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"><UploadCloud className={`h-4 w-4 ${exportingSheetId===sheet.id?'animate-pulse':''}`}/>{exportingSheetId===sheet.id?'Đang xuất dữ liệu':'Xuất dữ liệu'}</button></td><td className="px-4 py-3 text-right">{canImport&&<span className="inline-flex gap-1"><button disabled={busy} onClick={()=>handleEditSheet(sheet)} className="rounded p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-50" title={'Chỉnh sửa'}><Pencil className="h-4 w-4"/></button><button disabled={busy} onClick={()=>handleDeleteSheet(sheet.id)} className="rounded p-1.5 text-rose-600 hover:bg-rose-50 disabled:opacity-50" title={'Xóa'}><Trash2 className="h-4 w-4"/></button></span>}</td></tr>})}
+          <div className="overflow-x-auto rounded-xl border border-slate-100"><table className="min-w-[1120px] w-full divide-y divide-slate-100 text-sm"><thead className="bg-slate-50 text-slate-500"><tr><th className="px-4 py-3 text-left">Kỳ tổ chức</th><th className="px-4 py-3 text-left">Nguồn dữ liệu</th><th className="px-4 py-3 text-left">Lịch tự động</th><th className="px-4 py-3 text-center">Nhập vào hệ thống</th><th className="px-4 py-3 text-center">Xuất ra Sheet</th><th className="px-4 py-3 text-right"></th></tr></thead><tbody className="divide-y divide-slate-100 bg-white">
+            {activeSheetSources.map(sheet => { const linkedSession=sessions.find(item=>item.id===sheet.sessionId); const busy=syncingSheetId===sheet.id||exportingSheetId===sheet.id; const output=sheetKind(sheet)==='output'; return <tr key={sheet.id} className={sheet.pendingManualImport?'bg-amber-50/70':'hover:bg-slate-50/50'}><td className="px-4 py-3"><b className="block text-[#001e40]">{linkedSession?.code} · {linkedSession?.time}</b><span className="mt-1 block text-xs text-slate-500">{linkedSession?.name}</span></td><td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${output?'bg-emerald-50 text-emerald-700':'bg-sky-50 text-sky-700'}`}>{sheetKindLabel(sheet)}</span><a href={sheet.url} target="_blank" rel="noreferrer" className="mt-2 flex max-w-[300px] items-center gap-1 truncate font-semibold text-indigo-600 hover:underline"><Link2 className="h-4 w-4 shrink-0" />{sheet.sheetTab||'Mở Google Sheet'}</a>{sheet.pendingManualImport&&<span className="mt-2 block text-xs font-bold text-amber-700">Có chỉnh sửa đang chờ nhập</span>}</td><td className="px-4 py-3"><b className={sheet.automationEnabled?'text-emerald-700':'text-slate-500'}>{sheetScheduleLabel(sheet)}</b>{sheet.lastError&&<span className="mt-1 block max-w-[250px] text-xs text-rose-600">{sheet.lastError}</span>}</td><td className="px-4 py-3 text-center"><button disabled={!canImport||busy} onClick={()=>handleSyncSheet(sheet)} className={`inline-flex min-w-[164px] items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-50 ${output?'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100':'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}><RefreshCw className={`h-4 w-4 ${syncingSheetId===sheet.id?'animate-spin':''}`}/>{syncingSheetId===sheet.id?'Đang kiểm tra':output?'Nhập bản chỉnh sửa':'Xem trước & nhập'}</button></td><td className="px-4 py-3 text-center">{output?<button disabled={!canImport||busy||sheet.pendingManualImport} title={sheet.pendingManualImport?'Nhập bản chỉnh sửa trước khi xuất':''} onClick={()=>handleExportSheet(sheet)} className="inline-flex min-w-[142px] items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"><UploadCloud className={`h-4 w-4 ${exportingSheetId===sheet.id?'animate-pulse':''}`}/>{exportingSheetId===sheet.id?'Đang xuất':'Xuất ngay'}</button>:<span className="text-xs text-slate-400">Không xuất</span>}</td><td className="px-4 py-3 text-right">{canImport&&<span className="inline-flex gap-1"><button disabled={busy} onClick={()=>handleEditSheet(sheet)} className="rounded p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-50" title="Cấu hình"><Pencil className="h-4 w-4"/></button><button disabled={busy} onClick={()=>handleDeleteSheet(sheet.id)} className="rounded p-1.5 text-rose-600 hover:bg-rose-50 disabled:opacity-50" title="Xóa"><Trash2 className="h-4 w-4"/></button></span>}</td></tr>})}
           </tbody></table></div>
         )}
       </section>
@@ -618,7 +649,15 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
                   placeholder="https://docs.google.com/spreadsheets/d/..."
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100" />
               </label>
-              <div className="grid gap-3 sm:grid-cols-2"><label><span className="mb-1 block text-sm font-bold text-slate-700">Kỳ tổ chức</span><select value={newSheetSessionId} onChange={event => setNewSheetSessionId(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"><option value="">Chưa gán kỳ</option>{selectableSessions.map(item => <option key={item.id} value={item.id}>{sessionOptionLabel(item)}</option>)}</select></label><label><span className="mb-1 block text-sm font-bold text-slate-700">Phạm vi tab</span><select value={newSheetStage} onChange={event => setNewSheetStage(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"><option>Toàn bộ kỳ tổ chức</option><option>Bổ sung dữ liệu</option></select></label><label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold text-slate-700">Tên tab / sheet nhỏ</span><input value={newSheetTab} onChange={event => setNewSheetTab(event.target.value)} placeholder="Ví dụ: Dữ liệu thí sinh, Vòng quốc gia" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"/></label></div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label><span className="mb-1 block text-sm font-bold text-slate-700">Kỳ tổ chức</span><select value={newSheetSessionId} onChange={event => setNewSheetSessionId(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"><option value="">Chưa gán kỳ</option>{selectableSessions.map(item => <option key={item.id} value={item.id}>{sessionOptionLabel(item)}</option>)}</select></label>
+                <label><span className="mb-1 block text-sm font-bold text-slate-700">Loại Sheet</span><select value={newSheetStage} onChange={event => setNewSheetStage(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"><option value="registration-source">Sheet đầu vào</option><option value="session-output">Sheet tổng hợp</option></select></label>
+                <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold text-slate-700">Tên tab</span><input value={newSheetTab} onChange={event => setNewSheetTab(event.target.value)} placeholder="Ví dụ: Danh sách thí sinh" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"/></label>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <label className="flex items-start gap-3"><input type="checkbox" checked={newSheetAutomationEnabled} onChange={event => setNewSheetAutomationEnabled(event.target.checked)} className="mt-1 h-4 w-4"/><span><b className="block text-sm text-slate-800">Bật lịch tự động</b><small className="text-slate-500">{newSheetStage==='session-output'?'Xuất lúc 11:00 và 16:00':'Nhập lúc 10:00 và 15:00'}</small></span></label>
+                {newSheetAutomationEnabled&&<div className="mt-3 grid gap-3 sm:grid-cols-2"><label><span className="mb-1 block text-xs font-bold text-slate-600">Từ ngày</span><input type="date" value={newSheetAutomationStart} onChange={event=>setNewSheetAutomationStart(event.target.value)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"/></label><label><span className="mb-1 block text-xs font-bold text-slate-600">Đến ngày</span><input type="date" value={newSheetAutomationEnd} onChange={event=>setNewSheetAutomationEnd(event.target.value)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"/></label></div>}
+              </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setShowAddModal(false)}
                   className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 transition-colors">

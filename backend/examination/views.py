@@ -15,6 +15,7 @@ from .models import Competition, ExamSession, Candidate, CandidateParticipation,
 from authentication.models import SystemConfig, UserProfile
 from authentication.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, IsManagerOrAdmin, IsAdmin
 from .sheet_publication import academic_year_for_date, publication_payload, session_academic_year, session_tab_name, sync_publication
+from .sheet_scheduler import output_sheet_has_unreviewed_changes
 
 from .sync import (
     sync_session_candidate_totals,
@@ -28,6 +29,7 @@ from .sync import (
     parse_dob,
     format_person_name,
     export_session_to_google_sheet,
+    remote_sheet_fingerprint,
     sync_single_sheet,
 )
 
@@ -695,6 +697,38 @@ def ensure_registration_sheet_source(session, created_by=None):
         stage='registration-source', created_at=timezone.now(), updated_at=timezone.now(),
         created_by=created_by or None,
     )
+
+
+def serialize_examination_sheet(sheet):
+    return {
+        'id': sheet.id,
+        'name': sheet.name,
+        'url': sheet.url,
+        'status': sheet.status,
+        'sessionId': sheet.session_id,
+        'sheetTab': sheet.sheet_tab,
+        'stage': sheet.stage,
+        'automationEnabled': sheet.automation_enabled,
+        'automationStartDate': sheet.automation_start_date.isoformat() if sheet.automation_start_date else '',
+        'automationEndDate': sheet.automation_end_date.isoformat() if sheet.automation_end_date else '',
+        'lastImportAt': sheet.last_import_at.isoformat() if sheet.last_import_at else None,
+        'lastExportAt': sheet.last_export_at.isoformat() if sheet.last_export_at else None,
+        'pendingManualImport': sheet.pending_manual_import,
+        'lastError': sheet.last_error,
+        'createdAt': sheet.created_at.isoformat(),
+        'updatedAt': sheet.updated_at.isoformat(),
+        'createdBy': sheet.created_by,
+    }
+
+
+def parse_optional_date(value, label):
+    value = str(value or '').strip()
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, '%Y-%m-%d').date()
+    except ValueError as exc:
+        raise ValueError(f'{label} không hợp lệ.') from exc
 
 def serialize_competition(comp):
     return {
@@ -1769,20 +1803,7 @@ def sheet_publication_sync(request):
 def sheets_list(request):
     if request.method == 'GET':
         sheets = ExaminationSheet.objects.all().order_by('-created_at')
-        result = []
-        for s in sheets:
-            result.append({
-                'id': s.id,
-                'name': s.name,
-                'url': s.url,
-                'status': s.status,
-                'sessionId': s.session_id,
-                'sheetTab': s.sheet_tab,
-                'stage': s.stage,
-                'createdAt': s.created_at.isoformat(),
-                'updatedAt': s.updated_at.isoformat(),
-                'createdBy': s.created_by
-            })
+        result = [serialize_examination_sheet(sheet) for sheet in sheets]
             
         if not result:
             return Response([])
@@ -1797,12 +1818,31 @@ def sheets_list(request):
         name = data.get('name', '').strip()
         url = data.get('url', '').strip()
         session_id = str(data.get('sessionId') or '').strip()
+        stage = str(data.get('stage') or '').strip()
         
         if not name or not url:
             return Response({'error': 'Tên nguồn và đường dẫn Google Sheets là bắt buộc.'}, status=status.HTTP_400_BAD_REQUEST)
             
         if not session_id or not ExamSession.objects.filter(id=session_id).exists():
             return Response({'error': 'Mỗi tab nguồn phải được gắn với một kỳ tổ chức hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if stage not in {'registration-source', 'session-output'}:
+            return Response({'error': 'Chọn Sheet đầu vào hoặc Sheet tổng hợp.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if ExaminationSheet.objects.filter(session_id=session_id, stage=stage).exists():
+            label = 'Sheet tổng hợp' if stage == 'session-output' else 'Sheet đầu vào'
+            return Response(
+                {'error': f'Kỳ tổ chức này đã có {label}. Hãy chỉnh sửa liên kết hiện tại.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        try:
+            automation_start = parse_optional_date(data.get('automationStartDate'), 'Ngày bắt đầu tự động')
+            automation_end = parse_optional_date(data.get('automationEndDate'), 'Ngày kết thúc tự động')
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if automation_start and automation_end and automation_start > automation_end:
+            return Response({'error': 'Ngày kết thúc tự động phải từ ngày bắt đầu trở đi.'}, status=status.HTTP_400_BAD_REQUEST)
 
         sheet = ExaminationSheet.objects.create(
             id=f"sheet-{uuid.uuid4().hex[:10]}",
@@ -1811,7 +1851,10 @@ def sheets_list(request):
             status='idle',
             session_id=session_id,
             sheet_tab=data.get('sheetTab', '').strip(),
-            stage=data.get('stage', '').strip(),
+            stage=stage,
+            automation_enabled=bool(data.get('automationEnabled', False)),
+            automation_start_date=automation_start,
+            automation_end_date=automation_end,
             created_at=timezone.now(),
             updated_at=timezone.now(),
             created_by=request.user.email if hasattr(request.user, 'email') else None
@@ -1819,18 +1862,7 @@ def sheets_list(request):
         sheet_content = f'Tạo nguồn Google Sheet {sheet.name} cho kỳ tổ chức {sheet.session_id}.'
         append_audit(f'session-{sheet.session_id}', sheet_content, request)
         append_competition_scope_audit(sheet.session_id, sheet_content, request)
-        return Response({
-            'id': sheet.id,
-            'name': sheet.name,
-            'url': sheet.url,
-            'status': sheet.status,
-            'sessionId': sheet.session_id,
-            'sheetTab': sheet.sheet_tab,
-            'stage': sheet.stage,
-            'createdAt': sheet.created_at.isoformat(),
-            'updatedAt': sheet.updated_at.isoformat(),
-            'createdBy': sheet.created_by
-        }, status=status.HTTP_201_CREATED)
+        return Response(serialize_examination_sheet(sheet), status=status.HTTP_201_CREATED)
 
 @api_view(['PUT', 'DELETE'])
 @permission_classes([IsManagerOrAdmin])
@@ -1841,7 +1873,7 @@ def sheet_detail(request, pk):
         return Response({'error': 'Không tìm thấy nguồn sheets.'}, status=status.HTTP_404_NOT_FOUND)
         
     if request.method == 'PUT':
-        before = {'name': sheet.name, 'url': sheet.url, 'sessionId': sheet.session_id, 'sheetTab': sheet.sheet_tab, 'stage': sheet.stage}
+        before = {'name': sheet.name, 'url': sheet.url, 'sessionId': sheet.session_id, 'sheetTab': sheet.sheet_tab, 'stage': sheet.stage, 'automationEnabled': sheet.automation_enabled, 'automationStartDate': str(sheet.automation_start_date or ''), 'automationEndDate': str(sheet.automation_end_date or '')}
         data = request.data or {}
         if 'name' in data and data['name'].strip():
             sheet.name = data['name'].strip()
@@ -1855,12 +1887,33 @@ def sheet_detail(request, pk):
         if 'sheetTab' in data:
             sheet.sheet_tab = str(data.get('sheetTab') or '').strip()
         if 'stage' in data:
-            sheet.stage = str(data.get('stage') or '').strip()
+            requested_stage = str(data.get('stage') or '').strip()
+            if requested_stage not in {'registration-source', 'session-output'}:
+                return Response({'error': 'Chọn Sheet đầu vào hoặc Sheet tổng hợp.'}, status=status.HTTP_400_BAD_REQUEST)
+            sheet.stage = requested_stage
+        if 'automationEnabled' in data:
+            sheet.automation_enabled = bool(data.get('automationEnabled'))
+        try:
+            if 'automationStartDate' in data:
+                sheet.automation_start_date = parse_optional_date(data.get('automationStartDate'), 'Ngày bắt đầu tự động')
+            if 'automationEndDate' in data:
+                sheet.automation_end_date = parse_optional_date(data.get('automationEndDate'), 'Ngày kết thúc tự động')
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if sheet.automation_start_date and sheet.automation_end_date and sheet.automation_start_date > sheet.automation_end_date:
+            return Response({'error': 'Ngày kết thúc tự động phải từ ngày bắt đầu trở đi.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if ExaminationSheet.objects.filter(session_id=sheet.session_id, stage=sheet.stage).exclude(id=sheet.id).exists():
+            label = 'Sheet tổng hợp' if sheet.stage == 'session-output' else 'Sheet đầu vào'
+            return Response(
+                {'error': f'Kỳ tổ chức này đã có {label}. Hãy chỉnh sửa liên kết hiện tại.'},
+                status=status.HTTP_409_CONFLICT,
+            )
             
         sheet.updated_at = timezone.now()
         sheet.save()
-        after = {'name': sheet.name, 'url': sheet.url, 'sessionId': sheet.session_id, 'sheetTab': sheet.sheet_tab, 'stage': sheet.stage}
-        sheet_changes = audit_values(before, after, {'name':'Tên nguồn Google Sheet', 'url':'Đường dẫn Google Sheet', 'sessionId':'Kỳ tổ chức', 'sheetTab':'Tên tab', 'stage':'Giai đoạn dữ liệu'})
+        after = {'name': sheet.name, 'url': sheet.url, 'sessionId': sheet.session_id, 'sheetTab': sheet.sheet_tab, 'stage': sheet.stage, 'automationEnabled': sheet.automation_enabled, 'automationStartDate': str(sheet.automation_start_date or ''), 'automationEndDate': str(sheet.automation_end_date or '')}
+        sheet_changes = audit_values(before, after, {'name':'Tên nguồn Google Sheet', 'url':'Đường dẫn Google Sheet', 'sessionId':'Kỳ tổ chức', 'sheetTab':'Tên tab', 'stage':'Loại Sheet', 'automationEnabled':'Tự động', 'automationStartDate':'Ngày bắt đầu tự động', 'automationEndDate':'Ngày kết thúc tự động'})
         if sheet_changes:
             sheet_content = 'Cập nhật nguồn Google Sheet: ' + sheet_changes
             append_audit(f'session-{sheet.session_id}', sheet_content, request)
@@ -1869,18 +1922,7 @@ def sheet_detail(request, pk):
                 moved_content = f'Nguồn Google Sheet {sheet.name} đã được chuyển sang kỳ tổ chức {sheet.session_id}.'
                 append_audit(f"session-{before['sessionId']}", moved_content, request)
                 append_competition_scope_audit(before['sessionId'], moved_content, request)
-        return Response({
-            'id': sheet.id,
-            'name': sheet.name,
-            'url': sheet.url,
-            'status': sheet.status,
-            'sessionId': sheet.session_id,
-            'sheetTab': sheet.sheet_tab,
-            'stage': sheet.stage,
-            'createdAt': sheet.created_at.isoformat(),
-            'updatedAt': sheet.updated_at.isoformat(),
-            'createdBy': sheet.created_by
-        })
+        return Response(serialize_examination_sheet(sheet))
         
     elif request.method == 'DELETE':
         if getattr(request, 'user_role', 'EMPLOYEE') != 'ADMIN':
@@ -1900,6 +1942,28 @@ def sheet_export(request, pk):
         return Response({'error': 'Không tìm thấy nguồn dữ liệu.'}, status=status.HTTP_404_NOT_FOUND)
     if not sheet.session_id:
         return Response({'error': 'Nguồn dữ liệu chưa được gắn với kỳ tổ chức.'}, status=status.HTTP_400_BAD_REQUEST)
+    if sheet.stage != 'session-output':
+        return Response({'error': 'Sheet đầu vào chỉ dùng để nhập dữ liệu.'}, status=status.HTTP_400_BAD_REQUEST)
+    if sheet.pending_manual_import:
+        return Response({
+            'error': 'Hãy nhập bản chỉnh sửa trên Sheet tổng hợp trước khi xuất.',
+            'pendingManualImport': True,
+        }, status=status.HTTP_409_CONFLICT)
+
+    try:
+        changed, _ = output_sheet_has_unreviewed_changes(sheet, getattr(request, 'google_access_token', None))
+    except Exception as exc:
+        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    if changed:
+        sheet.pending_manual_import = True
+        sheet.status = 'attention'
+        sheet.last_error = 'Sheet tổng hợp có chỉnh sửa chưa được nhập vào hệ thống.'
+        sheet.updated_at = timezone.now()
+        sheet.save(update_fields=['pending_manual_import', 'status', 'last_error', 'updated_at'])
+        return Response({
+            'error': 'Sheet tổng hợp có chỉnh sửa. Hãy bấm “Nhập bản chỉnh sửa” trước khi xuất để tránh mất dữ liệu.',
+            'pendingManualImport': True,
+        }, status=status.HTTP_409_CONFLICT)
 
     sheet.status = 'running'
     sheet.updated_at = timezone.now()
@@ -1908,16 +1972,21 @@ def sheet_export(request, pk):
         result = export_session_to_google_sheet(sheet, getattr(request, 'google_access_token', None))
     except Exception as exc:
         sheet.status = 'failed'
+        sheet.last_error = str(exc)
         sheet.updated_at = timezone.now()
-        sheet.save(update_fields=['status', 'updated_at'])
+        sheet.save(update_fields=['status', 'last_error', 'updated_at'])
         failure_content = f'Xuất dữ liệu sang Google Sheet {sheet.name} thất bại: {exc}.'
         append_audit(f'session-{sheet.session_id}', failure_content, request, system=True)
         append_competition_scope_audit(sheet.session_id, failure_content, request, system=True)
         return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
     sheet.status = 'success'
+    sheet.last_export_at = timezone.now()
+    sheet.last_content_fingerprint = str(result.get('fingerprint') or '')
+    sheet.pending_manual_import = False
+    sheet.last_error = ''
     sheet.updated_at = timezone.now()
-    sheet.save(update_fields=['status', 'updated_at'])
+    sheet.save(update_fields=['status', 'last_export_at', 'last_content_fingerprint', 'pending_manual_import', 'last_error', 'updated_at'])
     export_content = f'Xuất dữ liệu sang Google Sheet {sheet.name} thành công.'
     append_audit(f'session-{sheet.session_id}', export_content, request, system=True)
     append_competition_scope_audit(sheet.session_id, export_content, request, system=True)
@@ -1937,6 +2006,11 @@ def sheets_sync(request):
     if sheet_id:
         try:
             sheet = ExaminationSheet.objects.get(id=sheet_id)
+            if sheet.stage != 'registration-source':
+                return Response(
+                    {'error': 'Sheet tổng hợp chỉ được nhập qua bước xem trước và xác nhận thủ công.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             target_url = sheet.url
             session_id = sheet.session_id or session_id
             sheet_tab = sheet.sheet_tab or sheet_tab
@@ -1966,6 +2040,7 @@ def sheet_import_preview(request):
     session_id = str(data.get('sessionId') or '').strip()
     sheet_tab = str(data.get('sheetTab') or '').strip()
     source_name = 'Google Sheets'
+    source_stage = ''
 
     if sheet_id:
         try:
@@ -1976,6 +2051,7 @@ def sheet_import_preview(request):
         session_id = sheet.session_id or session_id
         sheet_tab = sheet.sheet_tab or sheet_tab
         source_name = sheet.name
+        source_stage = sheet.stage
 
     if not source_url:
         return Response({'error': 'Hãy nhập liên kết Google Sheets.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1997,6 +2073,13 @@ def sheet_import_preview(request):
     if not result.get('success'):
         return Response({'error': result.get('message') or 'Không thể đọc Google Sheets.'}, status=status.HTTP_400_BAD_REQUEST)
     result['source']['name'] = source_name
+    result['source']['id'] = sheet_id
+    result['source']['stage'] = source_stage
+    if source_stage == 'session-output':
+        try:
+            result['source']['fingerprint'] = remote_sheet_fingerprint(sheet, getattr(request, 'google_access_token', None))
+        except Exception as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     result['targetSession'] = {
         'id': session.id,
         'code': session.code,
@@ -2095,6 +2178,8 @@ def import_candidates(request):
             confirmed_matches = {}
         source = data.get('source', '')
         session_id = str(data.get('sessionId') or '').strip()
+        source_sheet_id = str(data.get('sheetId') or '').strip()
+        source_fingerprint = str(data.get('sourceFingerprint') or '').strip()
         update_mode = str(data.get('updateMode') or 'replace-nonempty').strip()
         if update_mode not in {'fill-empty', 'replace-nonempty'}:
             return Response({'error': 'Chính sách cập nhật dữ liệu không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2109,6 +2194,30 @@ def import_candidates(request):
             target_session = ExamSession.objects.get(id=session_id)
         except ExamSession.DoesNotExist:
             return Response({'error': 'Không tìm thấy kỳ tổ chức đã chọn.'}, status=status.HTTP_404_NOT_FOUND)
+
+        source_sheet = None
+        if source_sheet_id:
+            source_sheet = ExaminationSheet.objects.filter(id=source_sheet_id, session_id=session_id).first()
+            if not source_sheet:
+                return Response({'error': 'Nguồn Google Sheet không thuộc kỳ tổ chức đã chọn.'}, status=status.HTTP_400_BAD_REQUEST)
+            if source_sheet.stage == 'session-output':
+                if not source_fingerprint:
+                    return Response(
+                        {'error': 'Hãy xem trước lại Sheet tổng hợp trước khi nhập.'},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                try:
+                    current_fingerprint = remote_sheet_fingerprint(
+                        source_sheet,
+                        getattr(request, 'google_access_token', None),
+                    )
+                except Exception as exc:
+                    return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+                if current_fingerprint != source_fingerprint:
+                    return Response(
+                        {'error': 'Sheet tổng hợp vừa có thay đổi. Hãy xem trước lại để nhập đúng bản mới nhất.'},
+                        status=status.HTTP_409_CONFLICT,
+                    )
 
         if len(input_records) > 1000:
             return Response({'error': 'Mỗi lần chỉ được nhập tối đa 1.000 hồ sơ.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2294,6 +2403,14 @@ def import_candidates(request):
         import_summary = f'Hệ thống nhập dữ liệu từ {source_label}: thêm {created} thí sinh, cập nhật {updated} thí sinh{existing_summary}; chính sách: {policy_label}. Không xóa dữ liệu do ô nguồn trống.'
         append_audit(f'session-{session_id}', import_summary, request, system=True)
         append_competition_scope_audit(target_session, import_summary, request, system=True)
+        if source_sheet:
+            source_sheet.last_import_at = timezone.now()
+            source_sheet.last_content_fingerprint = source_fingerprint or source_sheet.last_content_fingerprint
+            source_sheet.pending_manual_import = False
+            source_sheet.status = 'success'
+            source_sheet.last_error = ''
+            source_sheet.updated_at = timezone.now()
+            source_sheet.save(update_fields=['last_import_at', 'last_content_fingerprint', 'pending_manual_import', 'status', 'last_error', 'updated_at'])
         return Response({'created': created, 'updated': updated, 'linkedExisting': linked_existing, 'items': items_returned})
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

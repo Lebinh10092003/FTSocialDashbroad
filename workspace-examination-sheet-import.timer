@@ -1,0 +1,11 @@
+[Unit]
+Description=Import examination registration Sheets at 10:00 and 15:00
+
+[Timer]
+OnCalendar=*-*-* 10:00:00 Asia/Ho_Chi_Minh
+OnCalendar=*-*-* 15:00:00 Asia/Ho_Chi_Minh
+Persistent=true
+Unit=workspace-examination-sheet-import.service
+
+[Install]
+WantedBy=timers.target

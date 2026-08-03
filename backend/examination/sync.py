@@ -1,6 +1,7 @@
 import io
 import csv
 import hashlib
+import json
 import re
 import requests
 import datetime
@@ -701,6 +702,41 @@ def _sheet_range_title(title):
     return "'" + title.replace("'", "''") + "'"
 
 
+def sheet_values_fingerprint(values):
+    """Stable fingerprint used to detect edits made in an output Sheet."""
+    payload = json.dumps(values or [], ensure_ascii=False, separators=(',', ':'))
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+
+def remote_sheet_fingerprint(sheet, google_access_token=None):
+    spreadsheet_id = extract_spreadsheet_id(sheet.url)
+    if not spreadsheet_id:
+        raise ValueError('Liên kết Google Sheets không hợp lệ.')
+    session = ExamSession.objects.filter(id=sheet.session_id).first()
+    if not session:
+        raise ValueError('Không tìm thấy kỳ tổ chức được gắn với Google Sheets.')
+    config = SystemConfig.objects.filter(key='main').first()
+    config_data = config.data if config else {}
+    saved_token = config.last_google_access_token if config else None
+    service = build_sheets_service(google_access_token or saved_token, config_data or {})
+    tab_name = clean_txt(sheet.sheet_tab) or f'{session.code} {session.time}'
+    metadata = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields='sheets(properties(title))',
+    ).execute()
+    titles = {
+        item.get('properties', {}).get('title')
+        for item in metadata.get('sheets', [])
+    }
+    if tab_name not in titles:
+        return sheet_values_fingerprint([])
+    values = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=_sheet_range_title(tab_name),
+    ).execute().get('values', [])
+    return sheet_values_fingerprint(values)
+
+
 def export_session_to_google_sheet(sheet, google_access_token=None):
     session = ExamSession.objects.filter(id=sheet.session_id).first()
     if not session:
@@ -748,6 +784,7 @@ def export_session_to_google_sheet(sheet, google_access_token=None):
         'sessionId': session.id,
         'sheetTab': tab_name,
         'exported': max(0, len(values) - 1),
+        'fingerprint': sheet_values_fingerprint(values),
         'message': f'Đã xuất {max(0, len(values) - 1)} hồ sơ sang Google Sheets.',
     }
 
@@ -1049,7 +1086,9 @@ def sync_examination_from_google_sheet(spreadsheet_url=None, session_id=None, sh
         
     # Else sync all configured sheets
     try:
-        sheets = list(ExaminationSheet.objects.all())
+        # The global sync is an input operation. Output/summary Sheets are
+        # imported only through the explicit manual review flow.
+        sheets = list(ExaminationSheet.objects.filter(stage='registration-source'))
         if not sheets:
             return {
                 'success': False,
