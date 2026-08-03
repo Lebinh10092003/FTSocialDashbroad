@@ -38,9 +38,7 @@ const loadExaminationCache = () => {
       window.localStorage.removeItem(EXAMINATION_CACHE_KEY);
       return null;
     }
-    // Cache is only retained for diagnostics; the module must always revalidate
-    // its source of truth on entry so changed schedules never remain stale.
-    return null;
+    return record.payload || null;
   } catch { return null; }
 };
 const storeExaminationCache = (payload: unknown) => {
