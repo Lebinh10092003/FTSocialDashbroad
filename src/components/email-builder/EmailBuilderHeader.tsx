@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { 
   ArrowLeft, 
-  Save, 
+  Files,
   Copy, 
   RotateCcw, 
   Undo2,
@@ -102,12 +102,15 @@ export default function EmailBuilderHeader({
     setIsEditingName(false);
   };
 
+  const iconButtonClass = 'grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-30';
+  const secondaryButtonClass = 'inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 active:bg-slate-100';
+
   return (
-    <header className="bg-white border-b border-slate-200/80 px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 z-10 shadow-[0_1px_10px_rgba(0,0,0,0.01)] shrink-0">
+    <header className="z-10 grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 border-b border-slate-200/80 bg-white px-4 py-3 shadow-[0_1px_10px_rgba(0,0,0,0.01)] xl:grid-cols-[minmax(0,1fr)_auto_auto] xl:px-5">
       
       {/* Left section: back & active template dropdown/editor */}
-      <div className="flex items-center gap-4.5 min-w-0">
-        <img src="/logo.png" alt="Fermat" className="h-8 w-auto shrink-0 object-contain" />
+      <div className="col-start-1 row-start-1 flex min-w-0 items-center gap-3">
+        <img src="/logo.png" alt="Fermat" className="hidden h-8 w-auto shrink-0 object-contain sm:block" />
         <button
           onClick={onBackToWorkspace}
           className="flex items-center justify-center p-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200/60 transition-all cursor-pointer hover:text-slate-800"
@@ -120,7 +123,7 @@ export default function EmailBuilderHeader({
           <button type="button" onClick={onRedo} disabled={isGuest || !canRedo} title="Làm lại (Ctrl+Y hoặc Ctrl+Shift+Z)" className="rounded-lg p-1.5 text-slate-600 hover:bg-white hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-30"><Redo2 className="h-4 w-4" /></button>
         </div>
 
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             {isEditingName ? (
               <form onSubmit={handleRenameSubmit} className="flex items-center gap-1.5">
@@ -150,7 +153,7 @@ export default function EmailBuilderHeader({
                 </button>
               </div>
             )}
-            <span className="text-[9px] bg-emerald-50 text-emerald-700 font-extrabold px-1.5 py-0.5 rounded-full border border-emerald-250 uppercase tracking-wide">Tự động lưu</span>
+            <span className="hidden shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-emerald-700 sm:inline-flex">Tự động lưu</span>
           </div>
 
           {/* Quick template selector dropdown */}
@@ -159,7 +162,7 @@ export default function EmailBuilderHeader({
             <select
               value={template.id}
               onChange={e => onSelectTemplate(e.target.value)}
-              className="font-bold text-slate-700 outline-none bg-transparent hover:text-blue-650 cursor-pointer border border-transparent hover:border-slate-200 rounded-md px-1 py-0.5"
+              className="max-w-[210px] cursor-pointer truncate rounded-md border border-transparent bg-transparent px-1 py-0.5 font-bold text-slate-700 outline-none hover:border-slate-200 hover:text-blue-650 sm:max-w-[360px]"
             >
               {templatesList.map(t => (
                 <option key={t.id} value={t.id}>{t.name}</option>
@@ -170,20 +173,20 @@ export default function EmailBuilderHeader({
       </div>
 
       {/* Right section: utility operations + COPY CTA */}
-      <div className="flex items-center gap-2 flex-wrap sm:justify-end">
+      <div className="col-span-2 row-start-2 flex min-w-0 items-center justify-end gap-1.5 overflow-x-auto border-t border-slate-100 pt-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:col-span-1 xl:col-start-2 xl:row-start-1 xl:overflow-visible xl:border-t-0 xl:pt-0">
         {/* Template admin controls */}
         <button
           onClick={onDuplicateTemplate}
           title="Nhân bản mẫu này"
-          className="p-2 hover:bg-slate-50 border border-slate-200/50 hover:border-slate-350/50 rounded-xl text-slate-550 transition-all cursor-pointer flex items-center justify-center bg-white shadow-sm"
+          className={iconButtonClass}
          disabled={isGuest}>
-          <Copy className="w-3.5 h-3.5" />
+          <Files className="w-3.5 h-3.5" />
         </button>
 
         <button
           onClick={() => { if (!exportTemplateToJson(template)) void dialog.alert('Không thể xuất file JSON template.', 'Xuất mẫu thất bại'); }}
           title="Xuất file JSON"
-          className="p-2 hover:bg-slate-50 border border-slate-200/50 hover:border-slate-350/50 rounded-xl text-slate-550 transition-all cursor-pointer flex items-center justify-center bg-white shadow-sm"
+          className={iconButtonClass}
         >
           <Download className="w-3.5 h-3.5" />
         </button>
@@ -191,7 +194,7 @@ export default function EmailBuilderHeader({
         <button
           onClick={handleImportClick}
           title="Nhập mẫu từ file JSON hoặc HTML"
-          className="p-2 hover:bg-slate-50 border border-slate-200/50 hover:border-slate-350/50 rounded-xl text-slate-550 transition-all cursor-pointer flex items-center justify-center bg-white shadow-sm"
+          className={iconButtonClass}
          disabled={isGuest}>
           <Upload className="w-3.5 h-3.5" />
         </button>
@@ -206,7 +209,7 @@ export default function EmailBuilderHeader({
         <button
           onClick={onPasteHtmlClick}
           title="Dán mã HTML để tạo mẫu"
-          className="p-2 hover:bg-blue-50 border border-slate-200/50 hover:border-blue-200 rounded-xl text-slate-550 hover:text-blue-700 transition-all cursor-pointer flex items-center justify-center bg-white shadow-sm"
+          className={iconButtonClass}
           disabled={isGuest}
         >
           <Code2 className="w-3.5 h-3.5" />
@@ -216,7 +219,7 @@ export default function EmailBuilderHeader({
           onClick={async () => { if (await dialog.confirm('Bạn muốn khôi phục tất cả các mẫu mặc định ban đầu của FermatTech? Các sửa đổi hiện tại sẽ bị xóa.', { title: 'Khôi phục mẫu mặc định', confirmText: 'Khôi phục', danger: true })) onRestoreDefaults(); }}
           title="Khôi phục mẫu mặc định"
           disabled={isGuest}
-          className="p-2 hover:bg-slate-50 border border-slate-200/50 hover:border-slate-350/50 rounded-xl text-slate-550 transition-all cursor-pointer flex items-center justify-center bg-white shadow-sm"
+          className={iconButtonClass}
         >
           <RotateCcw className="w-3.5 h-3.5" />
         </button>
@@ -225,17 +228,18 @@ export default function EmailBuilderHeader({
           disabled={isGuest || templatesList.length <= 1}
           onClick={async () => { if (await dialog.confirm('Bạn chắc chắn muốn xóa mẫu này?', { title: 'Xóa mẫu email', confirmText: 'Xóa mẫu', danger: true })) onDeleteTemplate(); }}
           title="Xóa mẫu này"
-          className="p-2 hover:bg-rose-50 border border-slate-200/50 hover:border-rose-100 rounded-xl text-slate-500 hover:text-rose-600 transition-all cursor-pointer disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-500 flex items-center justify-center bg-white shadow-sm"
+          className={`${iconButtonClass} hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:hover:border-slate-200 disabled:hover:bg-white disabled:hover:text-slate-600`}
         >
           <Trash2 className="w-3.5 h-3.5" />
         </button>
 
-        <div className="w-[1px] h-6 bg-slate-200 mx-1"></div>
+        <div className="mx-1 h-6 w-px shrink-0 bg-slate-200"></div>
 
         {/* View / Copy operations */}
         <button
           onClick={onPreviewClick}
-          className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 font-extrabold text-xs rounded-xl border border-slate-200/60 transition-all cursor-pointer active:scale-[0.98]"
+          className={secondaryButtonClass}
+          title="Xem trước email"
         >
           <Eye className="w-3.5 h-3.5" />
           Xem trước
@@ -243,27 +247,32 @@ export default function EmailBuilderHeader({
 
         <button
           onClick={onCopySubject}
-          className={`flex items-center gap-1.5 px-3.5 py-2 font-extrabold text-xs rounded-xl transition-all cursor-pointer border border-transparent active:scale-[0.98] ${
+          className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border px-3 text-xs font-bold transition-colors ${
             copySubjectSuccess 
-              ? 'bg-emerald-500 text-white shadow-emerald-500/20 shadow-md' 
-              : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700'
+              ? 'border-emerald-600 bg-emerald-600 text-white'
+              : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700'
           }`}
+          title="Sao chép tiêu đề email"
         >
-          {copySubjectSuccess ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
-          Copy tiêu đề
+          {copySubjectSuccess ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+          Sao chép tiêu đề
         </button>
 
         <button
           onClick={onCopyEmail}
-          className={`flex items-center gap-1.5 px-4.5 py-2 font-extrabold text-xs rounded-xl transition-all cursor-pointer shadow-md active:scale-[0.98] border border-transparent ${
+          className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border px-3.5 text-xs font-bold text-white shadow-sm transition-colors ${
             copySuccess 
-              ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20' 
-              : 'bg-gradient-to-r from-blue-600 to-indigo-650 hover:from-blue-700 hover:to-indigo-700 text-white shadow-blue-500/25'
+              ? 'border-emerald-600 bg-emerald-600 hover:bg-emerald-700'
+              : 'border-blue-700 bg-blue-700 hover:border-blue-800 hover:bg-blue-800'
           }`}
+          title="Sao chép nội dung email"
         >
-          {copySuccess ? <Check className="w-3.5 h-3.5 animate-pulse" /> : <Save className="w-3.5 h-3.5" />}
-          Copy nội dung Email
+          {copySuccess ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+          Sao chép nội dung
         </button>
+      </div>
+
+      <div className="col-start-2 row-start-1 xl:col-start-3">
         <AccountMenu userName={userName} userRole={userRole} photoURL={photoURL} isGuest={isGuest} onAccountClick={onAccountClick} onLogout={onLogout} variant="avatar"/>
       </div>
 
