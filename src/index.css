@@ -673,11 +673,19 @@ a { color: inherit; text-decoration: none; }
   .ft-overview-header + section + div > section {
     min-height: 600px;
   }
+  .ft-overview-header + section + div > section:first-child {
+    display: flex;
+    flex-direction: column;
+  }
   .ft-overview-header + section + div > section:first-child > div:last-child {
-    height: 30rem;
+    height: auto;
+    min-height: 0;
+    flex: 1;
+    padding-bottom: .25rem;
   }
   .ft-overview-header + section + div > section:first-child > div:last-child > div {
-    height: 27rem;
+    height: calc(100% - 1rem);
+    min-height: 27rem;
   }
   .ft-overview-header + section + div > section:last-child {
     display: flex;
