@@ -2035,6 +2035,7 @@ export default function DigitalTraining({
         status: "planned",
         staff_name: "",
         notes: "",
+        lead: "",
       });
       setModal("other");
     };
