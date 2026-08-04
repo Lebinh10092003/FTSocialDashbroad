@@ -621,6 +621,7 @@ export default function App() {
             userName={user.displayName}
             userRole={userRole}
             photoURL={user.photoURL}
+            userEmail={user.email}
           />
         </Suspense>
         {loginModal}{profileModal}

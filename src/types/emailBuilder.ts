@@ -77,6 +77,12 @@ export interface EmailTemplate {
   blocks: EmailBlock[];
   settings: EmailSettings;
   lastUpdated: number;
+  /** Server-owned metadata used by sharing and deletion permissions. */
+  createdBy?: string;
+  updatedBy?: string;
+  ownerName?: string;
+  isPublished?: boolean;
+  publishedAt?: string | null;
 }
 
 export interface EmailVariable {

@@ -11,7 +11,7 @@ import {
   Code2,
   Trash2, 
   Eye, 
-  Check,  Edit2
+  Check, Edit2, Share2
 } from 'lucide-react';
 import { EmailTemplate } from '../../types/emailBuilder';
 import AccountMenu from '../AccountMenu';
@@ -25,6 +25,9 @@ interface EmailBuilderHeaderProps {
   onRenameTemplate: (name: string) => void;
   onDuplicateTemplate: () => void;
   onDeleteTemplate: () => void;
+  onPublishTemplate: () => void;
+  canDeleteTemplate: boolean;
+  canPublishTemplate: boolean;
   onRestoreDefaults: () => void;
   onImportFile: (file: File) => Promise<void>;
   onPasteHtmlClick: () => void;
@@ -53,6 +56,9 @@ export default function EmailBuilderHeader({
   onRenameTemplate,
   onDuplicateTemplate,
   onDeleteTemplate,
+  onPublishTemplate,
+  canDeleteTemplate,
+  canPublishTemplate,
   onRestoreDefaults,
   onImportFile,
   onPasteHtmlClick,
@@ -156,6 +162,9 @@ export default function EmailBuilderHeader({
             <span className="hidden shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-emerald-700 sm:inline-flex">Tự động lưu</span>
           </div>
 
+            {template.isPublished && (
+              <span title={`Mẫu chia sẻ · Chủ sở hữu: ${template.ownerName || template.createdBy || 'Bạn'}`} className="hidden shrink-0 rounded-full border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-violet-700 sm:inline-flex">Đã chia sẻ</span>
+            )}
           {/* Quick template selector dropdown */}
           <div className="mt-1.5 flex items-center gap-2 text-xs">
             <span className="text-slate-400 font-medium">Đang sửa:</span>
@@ -224,8 +233,18 @@ export default function EmailBuilderHeader({
           <RotateCcw className="w-3.5 h-3.5" />
         </button>
 
+        {!template.isPublished && (
+          <button
+            disabled={isGuest || !canPublishTemplate}
+            onClick={async () => { if (await dialog.confirm('Mọi nhân viên có thể xem và chỉnh sửa mẫu sau khi chia sẻ. Chỉ bạn vẫn có quyền xóa.', { title: 'Chia sẻ mẫu email', confirmText: 'Chia sẻ' })) onPublishTemplate(); }}
+            title={canPublishTemplate ? 'Chia sẻ mẫu với toàn bộ nhân viên' : 'Chỉ chủ sở hữu mới có thể chia sẻ mẫu'}
+            className={`${iconButtonClass} hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700`}
+          >
+            <Share2 className="w-3.5 h-3.5" />
+          </button>
+        )}
         <button
-          disabled={isGuest || templatesList.length <= 1}
+          disabled={isGuest || !canDeleteTemplate || templatesList.length <= 1}
           onClick={async () => { if (await dialog.confirm('Bạn chắc chắn muốn xóa mẫu này?', { title: 'Xóa mẫu email', confirmText: 'Xóa mẫu', danger: true })) onDeleteTemplate(); }}
           title="Xóa mẫu này"
           className={`${iconButtonClass} hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:hover:border-slate-200 disabled:hover:bg-white disabled:hover:text-slate-600`}

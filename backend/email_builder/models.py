@@ -9,6 +9,10 @@ class EmailTemplate(models.Model):
     last_updated = models.BigIntegerField()
     created_by = models.CharField(max_length=255)
     updated_by = models.CharField(max_length=255)
+    # Private drafts belong to their creator. A published template can be
+    # opened and edited by every authenticated workspace member.
+    is_published = models.BooleanField(default=False)
+    published_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

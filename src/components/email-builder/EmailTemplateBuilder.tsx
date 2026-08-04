@@ -22,7 +22,12 @@ import {
   restoreDefaultTemplates
 } from '../../lib/emailStorage';
 import {
+  createTemplateAsync,
+  deleteTemplateAsync,
   loadTemplatesAsync,
+  publishTemplateAsync,
+  saveTemplateAsync,
+  saveTemplateOrThrow,
   saveTemplatesAsync,
   loadUserPrefsAsync,
   saveUserPrefsAsync,
@@ -53,6 +58,7 @@ interface EmailTemplateBuilderProps {
   userName?: string | null;
   userRole?: string | null;
   photoURL?: string | null;
+  userEmail?: string | null;
 }
 
 function sortEmailTemplates(templates: EmailTemplate[]): EmailTemplate[] {
@@ -68,7 +74,7 @@ export default function EmailTemplateBuilder(props: EmailTemplateBuilderProps) {
   return <EmailBuilderDialogProvider><EmailTemplateBuilderContent {...props} /></EmailBuilderDialogProvider>;
 }
 
-function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogout, isGuest, userName, userRole, photoURL }: EmailTemplateBuilderProps) {
+function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogout, isGuest, userName, userRole, photoURL, userEmail }: EmailTemplateBuilderProps) {
   const dialog = useEmailBuilderDialog();
   // 1. Storage & State Management
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
@@ -222,6 +228,14 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
 
   // Helper: Find active template
   const activeTemplate = templates.find(t => t.id === activeTemplateId);
+  const isTemplateOwner = (template?: EmailTemplate) => {
+    if (!template || isGuest) return false;
+    if (!template.createdBy) return true;
+    return Boolean(userEmail) && template.createdBy.trim().toLowerCase() === userEmail.trim().toLowerCase();
+  };
+  const applyServerTemplate = (serverTemplate: EmailTemplate) => {
+    updateTemplatesList(templatesRef.current.map(template => template.id === serverTemplate.id ? serverTemplate : template));
+  };
 
   const getTemplateHistory = (templateId: string) => {
     if (!editorHistory.current[templateId]) editorHistory.current[templateId] = { past: [], future: [], lastCommitAt: 0, lastSignature: '' };
@@ -267,8 +281,12 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     history.lastCommitAt = now;
     history.lastSignature = signature;
     history.future = [];
-    const updated = currentTemplates.map(template => template.id === activeTemplateId ? { ...nextTemplate, lastUpdated: Date.now() } : template);
+    const updatedTemplate = { ...nextTemplate, lastUpdated: Date.now() };
+    const updated = currentTemplates.map(template => template.id === activeTemplateId ? updatedTemplate : template);
     updateTemplatesList(updated);
+    void saveTemplateAsync(updatedTemplate).then(serverTemplate => {
+      if (serverTemplate) applyServerTemplate(serverTemplate);
+    });
   };
 
   const handleUndo = () => {
@@ -281,7 +299,11 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     history.future.push(structuredClone(current));
     history.lastCommitAt = 0;
     history.lastSignature = '';
-    updateTemplatesList(currentTemplates.map(template => template.id === activeTemplateId ? { ...previous, lastUpdated: Date.now() } : template));
+    const restored = { ...previous, lastUpdated: Date.now() };
+    updateTemplatesList(currentTemplates.map(template => template.id === activeTemplateId ? restored : template));
+    void saveTemplateAsync(restored).then(serverTemplate => {
+      if (serverTemplate) applyServerTemplate(serverTemplate);
+    });
     setSelectedBlockId(selected => selected && findEmailBlock(previous.blocks, selected) ? selected : null);
     showToast('Đã hoàn tác thay đổi.');
   };
@@ -295,7 +317,11 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     history.past.push(structuredClone(current));
     history.lastCommitAt = 0;
     history.lastSignature = '';
-    updateTemplatesList(currentTemplates.map(template => template.id === activeTemplateId ? { ...next, lastUpdated: Date.now() } : template));
+    const restored = { ...next, lastUpdated: Date.now() };
+    updateTemplatesList(currentTemplates.map(template => template.id === activeTemplateId ? restored : template));
+    void saveTemplateAsync(restored).then(serverTemplate => {
+      if (serverTemplate) applyServerTemplate(serverTemplate);
+    });
     setSelectedBlockId(selected => selected && findEmailBlock(next.blocks, selected) ? selected : null);
     showToast('Đã làm lại thay đổi.');
   };
@@ -328,17 +354,19 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
   };
 
   const handleDuplicateTemplateInline = (tpl: EmailTemplate) => {
+    const { createdBy: _createdBy, updatedBy: _updatedBy, ownerName: _ownerName, isPublished: _isPublished, publishedAt: _publishedAt, ...copySource } = tpl;
     const clone: EmailTemplate = {
-      ...tpl,
+      ...copySource,
       id: `copy-${Date.now()}`,
       name: `Bản sao - ${tpl.name}`,
-      lastUpdated: Date.now()
+      lastUpdated: Date.now(),
     };
-    const newList = [...templates, clone];
-    updateTemplatesList(newList);
-    showToast('Đã nhân bản mẫu email.');
+    updateTemplatesList([...templates, clone]);
+    void createTemplateAsync(clone).then(serverTemplate => {
+      if (serverTemplate) applyServerTemplate(serverTemplate);
+    });
+    showToast('Đã nhân bản thành mẫu riêng của bạn.');
   };
-
   const activeBlock = selectedBlockId ? findEmailBlock(activeTemplate?.blocks || [], selectedBlockId) : undefined;
 
   const resizePanel = (side: 'left' | 'right', event: React.PointerEvent<HTMLDivElement>) => {
@@ -508,29 +536,49 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
 
   const handleDuplicateTemplate = () => {
     if (!activeTemplate) return;
+    const { createdBy: _createdBy, updatedBy: _updatedBy, ownerName: _ownerName, isPublished: _isPublished, publishedAt: _publishedAt, ...copySource } = activeTemplate;
     const clone: EmailTemplate = {
-      ...activeTemplate,
+      ...copySource,
       id: `copy-${Date.now()}`,
       name: `Bản sao - ${activeTemplate.name}`,
-      lastUpdated: Date.now()
+      lastUpdated: Date.now(),
     };
-    const newList = [...templates, clone];
-    updateTemplatesList(newList);
+    updateTemplatesList([...templates, clone]);
     setActiveTemplateIdState(clone.id);
     setActiveTemplateId(clone.id);
-    showToast('Đã nhân bản mẫu email.');
+    void createTemplateAsync(clone).then(serverTemplate => {
+      if (serverTemplate) applyServerTemplate(serverTemplate);
+    });
+    showToast('Đã nhân bản thành mẫu riêng của bạn.');
   };
 
-  const handleDeleteTemplate = () => {
-    if (templates.length <= 1) return;
-    const remaining = templates.filter(t => t.id !== activeTemplateId);
-    updateTemplatesList(remaining);
-    setActiveTemplateIdState(remaining[0].id);
-    setActiveTemplateId(remaining[0].id);
-    setSelectedBlockId(null);
-    showToast('Đã xóa mẫu email.');
+  const handleDeleteTemplate = async () => {
+    if (!activeTemplate || templates.length <= 1 || !isTemplateOwner(activeTemplate)) return;
+    try {
+      await deleteTemplateAsync(activeTemplate.id);
+      const remaining = templatesRef.current.filter(template => template.id !== activeTemplate.id);
+      updateTemplatesList(remaining);
+      setActiveTemplateIdState(remaining[0].id);
+      setActiveTemplateId(remaining[0].id);
+      setSelectedBlockId(null);
+      showToast('Đã xóa mẫu email.');
+    } catch (error: any) {
+      await dialog.alert(error?.message || 'Không thể xóa mẫu email.', 'Không thể xóa mẫu');
+    }
   };
 
+  const handlePublishTemplate = async () => {
+    if (!activeTemplate || !isTemplateOwner(activeTemplate) || activeTemplate.isPublished) return;
+    try {
+      canvasRef.current?.flushPendingChanges();
+      const saved = await saveTemplateOrThrow(activeTemplate);
+      const published = await publishTemplateAsync(saved.id);
+      applyServerTemplate(published);
+      showToast('Đã chia sẻ mẫu. Mọi nhân viên có thể xem và chỉnh sửa; chỉ bạn có thể xóa.');
+    } catch (error: any) {
+      await dialog.alert(error?.message || 'Không thể chia sẻ mẫu email.', 'Không thể chia sẻ mẫu');
+    }
+  };
   const handleRestoreDefaults = () => {
     const restored = restoreDefaultTemplates();
     templatesRef.current = restored;
@@ -542,16 +590,18 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
   };
 
   const handleImportTemplate = (imported: EmailTemplate) => {
+    const { createdBy: _createdBy, updatedBy: _updatedBy, ownerName: _ownerName, isPublished: _isPublished, publishedAt: _publishedAt, ...importSource } = imported;
     const cleanImported: EmailTemplate = {
-      ...imported,
+      ...importSource,
       id: `imported-${Date.now()}`,
-      lastUpdated: Date.now()
+      lastUpdated: Date.now(),
     };
-    const newList = [...templates, cleanImported];
-    updateTemplatesList(newList);
+    updateTemplatesList([...templates, cleanImported]);
+    void createTemplateAsync(cleanImported).then(serverTemplate => {
+      if (serverTemplate) applyServerTemplate(serverTemplate);
+    });
     handleEditTemplate(cleanImported.id);
   };
-
   const handleImportFile = async (file: File) => {
     try {
       const contents = await file.text();
@@ -653,6 +703,9 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
       const newId = newTemplate.id;
       const newList = [...templates, newTemplate];
       updateTemplatesList(newList);
+      void createTemplateAsync(newTemplate).then(serverTemplate => {
+        if (serverTemplate) applyServerTemplate(serverTemplate);
+      });
       handleEditTemplate(newId);
       showToast('Đã tạo mẫu email mới.');
     }
@@ -856,13 +909,17 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
                           </svg>
                         </button>
 
-                        {!isDefault && (
+                        {!isDefault && isTemplateOwner(tpl) && (
                           <button
                             onClick={async () => {
                               if (await dialog.confirm(`Bạn chắc chắn muốn xóa mẫu "${tpl.name}"?`, { title: 'Xóa mẫu email', confirmText: 'Xóa mẫu', danger: true })) {
-                                const remaining = templates.filter(t => t.id !== tpl.id);
-                                updateTemplatesList(remaining);
-                                showToast('Đã xóa mẫu email.');
+                                try {
+                                  await deleteTemplateAsync(tpl.id);
+                                  updateTemplatesList(templatesRef.current.filter(template => template.id !== tpl.id));
+                                  showToast('Đã xóa mẫu email.');
+                                } catch (error: any) {
+                                  await dialog.alert(error?.message || 'Không thể xóa mẫu email.', 'Không thể xóa mẫu');
+                                }
                               }
                             }}
                             title="Xóa mẫu"
@@ -928,6 +985,9 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
         onRenameTemplate={handleRenameTemplate}
         onDuplicateTemplate={handleDuplicateTemplate}
         onDeleteTemplate={handleDeleteTemplate}
+        onPublishTemplate={handlePublishTemplate}
+        canDeleteTemplate={isTemplateOwner(activeTemplate)}
+        canPublishTemplate={isTemplateOwner(activeTemplate) && !activeTemplate.isPublished}
         onRestoreDefaults={handleRestoreDefaults}
         onImportFile={handleImportFile}
         onPasteHtmlClick={() => setShowHtmlImport(true)}
