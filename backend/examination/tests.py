@@ -478,6 +478,26 @@ class ExamRoomAllocationTests(TestCase):
         self.assertEqual(exported[2][round_start + 6], 'https://exam.example.test/start')
 
 
+    def test_room_specific_exam_links_are_assigned_separately(self):
+        response = self.client.post(self.url, {
+            'commonName': 'Zoom',
+            'mode': 'ONLINE',
+            'allocationStrategy': 'CAPACITY',
+            'maxCandidates': 3,
+            'rooms': [
+                {'number': '01', 'link': 'https://meet.example.test/room-01', 'examLink': 'https://exam.example.test/start-a'},
+                {'number': '02', 'link': 'https://meet.example.test/room-02', 'examLink': 'https://exam.example.test/start-b'},
+            ],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        results = list(RoundResult.objects.order_by('participation__candidate__sort_key'))
+        self.assertEqual([result.link for result in results[:3]], ['https://exam.example.test/start-a'] * 3)
+        self.assertEqual([result.link for result in results[3:]], ['https://exam.example.test/start-b'] * 2)
+        self.assertEqual(
+            list(ExamRoom.objects.order_by('room_number').values_list('exam_link', flat=True)),
+            ['https://exam.example.test/start-a', 'https://exam.example.test/start-b'],
+        )
     def test_meet_and_facebook_links_without_protocol_are_normalized(self):
         response = self.client.post(self.url, {
             'commonName': 'Phòng trực tuyến',

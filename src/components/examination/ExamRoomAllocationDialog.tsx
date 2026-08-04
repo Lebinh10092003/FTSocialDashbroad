@@ -4,7 +4,7 @@ import type { Candidate, SessionRound } from './types';
 
 type AllocationStrategy = 'BALANCED' | 'CAPACITY';
 type ExamMode = 'IN_PERSON' | 'ONLINE';
-type RoomDraft = { id: string; number: string; location: string; link: string };
+type RoomDraft = { id: string; number: string; location: string; link: string; examLink: string };
 type SavedRoom = {
   id: string;
   commonName: string;
@@ -13,6 +13,7 @@ type SavedRoom = {
   mode: ExamMode;
   location: string;
   link: string;
+  examLink: string;
   allocationStrategy: AllocationStrategy;
   capacity?: number | null;
   assignedCount: number;
@@ -38,6 +39,7 @@ const newRoom = (): RoomDraft => ({
   number: '',
   location: '',
   link: '',
+  examLink: '',
 });
 
 const authHeaders = (idToken?: string | null) => ({
@@ -99,6 +101,7 @@ export default function ExamRoomAllocationDialog({ sessionId, round, candidateCo
           number: item.number,
           location: item.location,
           link: item.link,
+          examLink: item.examLink,
         })));
       } else {
         setCommonName('');
@@ -151,9 +154,13 @@ export default function ExamRoomAllocationDialog({ sessionId, round, candidateCo
       setError('Mỗi phòng trực tiếp cần có địa chỉ/số phòng.');
       return;
     }
-    const normalizedOnlineRooms = rooms.map(room => ({ ...room, link: normalizeOnlineLink(room.link) }));
+    const normalizedOnlineRooms = rooms.map(room => ({ ...room, link: normalizeOnlineLink(room.link), examLink: normalizeOnlineLink(room.examLink) }));
     if (mode === 'ONLINE' && normalizedOnlineRooms.some(room => !/^https?:\/\/\S+$/i.test(room.link))) {
       setError('Vui lòng nhập link hợp lệ. Link Google Meet/Facebook có thể dán không cần https://.');
+      return;
+    }
+    if (normalizedOnlineRooms.some(room => room.examLink && !/^https?:\/\/\S+$/i.test(room.examLink))) {
+      setError('Vui lòng nhập Link dự thi hợp lệ.');
       return;
     }
     if (strategy === 'CAPACITY' && maxCandidates <= 0) {
@@ -179,6 +186,7 @@ export default function ExamRoomAllocationDialog({ sessionId, round, candidateCo
             number: room.number.trim(),
             location: room.location.trim(),
             link: normalizeOnlineLink(room.link),
+            examLink: normalizeOnlineLink(room.examLink),
           })),
         }),
       });
@@ -273,11 +281,12 @@ export default function ExamRoomAllocationDialog({ sessionId, round, candidateCo
               </div>
             </div>
             <div className="space-y-3">
-              {rooms.map((room, index) => <article key={room.id} className="grid gap-3 rounded-xl border bg-slate-50 p-4 sm:grid-cols-[130px_minmax(0,1fr)_110px_auto] sm:items-end">
+              {rooms.map((room, index) => <article key={room.id} className="grid gap-3 rounded-xl border bg-slate-50 p-4 sm:grid-cols-[130px_minmax(0,1fr)_minmax(0,1fr)_110px_auto] sm:items-end">
                 <label><span className="mb-1 block text-xs font-bold text-slate-500">Số/mã phòng</span><input value={room.number} onChange={event => updateRoom(room.id, 'number', event.target.value)} maxLength={100} placeholder="101" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2"/></label>
                 {mode === 'IN_PERSON'
                   ? <label><span className="mb-1 block text-xs font-bold text-slate-500">Địa chỉ / vị trí / số phòng</span><input value={room.location} onChange={event => updateRoom(room.id, 'location', event.target.value)} placeholder="Tầng 2, số 10 Trần Phú, Hà Nội" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2"/></label>
-                  : <label><span className="mb-1 block text-xs font-bold text-slate-500">Link phòng trực tuyến</span><input type="url" value={room.link} onChange={event => updateRoom(room.id, 'link', event.target.value)} placeholder="meet.google.com/... hoặc facebook.com/..." className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2"/><span className="mt-1 block text-[11px] text-slate-500">Sẽ hiển thị cùng tên phòng trong Địa điểm/Phòng, không thay Link dự thi.</span></label>}
+                  : <label><span className="mb-1 block text-xs font-bold text-slate-500">Link phòng trực tuyến</span><input type="url" value={room.link} onChange={event => updateRoom(room.id, 'link', event.target.value)} placeholder="meet.google.com/... hoặc facebook.com/..." className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2"/><span className="mt-1 block text-[11px] text-slate-500">Sẽ hiển thị cùng tên phòng trong Địa điểm/Phòng.</span></label>}
+                <label><span className="mb-1 block text-xs font-bold text-slate-500">Link dự thi (nếu có)</span><input type="url" value={room.examLink} onChange={event => updateRoom(room.id, 'examLink', event.target.value)} placeholder="https://www.schoolconnectonline.com/..." className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2"/><span className="mt-1 block text-[11px] text-slate-500">Ghi riêng vào Link dự thi cho các thí sinh của phòng này.</span></label>
                 <div><span className="mb-1 block text-xs font-bold text-slate-500">Dự kiến</span><div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-extrabold text-[#001e40]">{roomCounts[index] || 0} thí sinh</div></div>
                 <button type="button" disabled={rooms.length === 1} onClick={() => setRooms(current => current.filter(item => item.id !== room.id))} className="inline-flex h-10 items-center justify-center rounded-lg border border-rose-200 px-3 text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-35" aria-label={`Xóa phòng ${index + 1}`}><Trash2 className="h-4 w-4"/></button>
               </article>)}

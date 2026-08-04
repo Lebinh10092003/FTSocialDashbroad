@@ -1416,6 +1416,7 @@ def _serialize_exam_room(room):
         'mode': room.mode,
         'location': room.location,
         'link': room.link,
+        'examLink': room.exam_link,
         'allocationStrategy': room.allocation_strategy,
         'capacity': room.capacity,
         'assignedCount': room.assignments.count(),
@@ -1488,6 +1489,7 @@ def exam_room_allocation(request, session_id, round_id):
         number = str(item.get('number') or '').strip()
         location = str(item.get('location') or '').strip()
         link = normalize_online_room_link(item.get('link'))
+        exam_link = normalize_online_room_link(item.get('examLink'))
         if not number:
             return Response({'error': f'Vui lòng nhập số hoặc mã cho phòng thứ {position + 1}.'}, status=status.HTTP_400_BAD_REQUEST)
         if len(number) > 100:
@@ -1502,11 +1504,16 @@ def exam_room_allocation(request, session_id, round_id):
             parsed_link = urllib.parse.urlparse(link)
             if parsed_link.scheme not in {'http', 'https'} or not parsed_link.netloc:
                 return Response({'error': f'Link của phòng "{number}" chưa hợp lệ. Có thể dán link Google Meet/Facebook không cần https://.'}, status=status.HTTP_400_BAD_REQUEST)
+        if exam_link:
+            parsed_exam_link = urllib.parse.urlparse(exam_link)
+            if parsed_exam_link.scheme not in {'http', 'https'} or not parsed_exam_link.netloc:
+                return Response({'error': f'Link dự thi của phòng "{number}" chưa hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
         cleaned_rooms.append({
             'number': number,
             'label': f'{common_name} {number}'.strip(),
             'location': location,
             'link': link if mode == ExamRoom.MODE_ONLINE else '',
+            'exam_link': exam_link,
             'position': position,
         })
 
@@ -1545,6 +1552,7 @@ def exam_room_allocation(request, session_id, round_id):
                 mode=mode,
                 location=item['location'],
                 link=item['link'],
+                exam_link=item['exam_link'],
                 allocation_strategy=strategy,
                 capacity=max_candidates,
                 position=item['position'],
@@ -1561,8 +1569,13 @@ def exam_room_allocation(request, session_id, round_id):
             result.room_name = room.label
             result.mode = 'Trực tiếp' if mode == ExamRoom.MODE_IN_PERSON else 'Trực tuyến'
             result.location = f'{room.label}:\n{room.link}' if mode == ExamRoom.MODE_ONLINE else ' · '.join(value for value in [room.label, room.location] if value)
-            # A room link identifies where the candidate sits; the exam link is a separate field and must be preserved.
-            result.save(update_fields=['exam_room', 'round_id', 'room_name', 'mode', 'location', 'updated_at'])
+            # A room link identifies where the candidate sits; an optional room exam link is assigned separately.
+            if room.exam_link:
+                result.link = room.exam_link
+            update_fields = ['exam_room', 'round_id', 'room_name', 'mode', 'location', 'updated_at']
+            if room.exam_link:
+                update_fields.append('link')
+            result.save(update_fields=update_fields)
 
     strategy_label = 'chia đều' if strategy == ExamRoom.STRATEGY_BALANCED else f'tối đa {max_candidates} thí sinh/phòng'
     audit_content = (

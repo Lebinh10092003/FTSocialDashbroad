@@ -120,6 +120,7 @@ class ExamRoom(models.Model):
     mode = models.CharField(max_length=20, choices=MODE_CHOICES)
     location = models.CharField(max_length=1000, blank=True, default='')
     link = models.CharField(max_length=2000, blank=True, default='')
+    exam_link = models.CharField(max_length=2000, blank=True, default='')
     allocation_strategy = models.CharField(max_length=20, choices=STRATEGY_CHOICES, default=STRATEGY_BALANCED)
     capacity = models.PositiveIntegerField(null=True, blank=True)
     position = models.PositiveIntegerField(default=0)
