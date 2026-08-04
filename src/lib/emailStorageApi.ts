@@ -180,6 +180,12 @@ export async function publishTemplateAsync(id: string): Promise<EmailTemplate> {
   return result.template;
 }
 
+export async function unpublishTemplateAsync(id: string): Promise<EmailTemplate> {
+  const result = await apiCallOrThrow<{ template: EmailTemplate }>('POST', `/email-templates/${id}/unpublish`);
+  replaceCachedTemplate(result.template);
+  return result.template;
+}
+
 export async function deleteTemplateAsync(id: string): Promise<void> {
   await apiCallOrThrow('DELETE', `/email-templates/${id}`);
   writeLocalCache(readLocalCache().filter(template => template.id !== id));

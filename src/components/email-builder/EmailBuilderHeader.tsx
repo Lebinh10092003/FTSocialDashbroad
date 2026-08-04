@@ -26,8 +26,9 @@ interface EmailBuilderHeaderProps {
   onDuplicateTemplate: () => void;
   onDeleteTemplate: () => void;
   onPublishTemplate: () => void;
+  onUnpublishTemplate: () => void;
   canDeleteTemplate: boolean;
-  canPublishTemplate: boolean;
+  canManageSharing: boolean;
   onRestoreDefaults: () => void;
   onImportFile: (file: File) => Promise<void>;
   onPasteHtmlClick: () => void;
@@ -57,8 +58,9 @@ export default function EmailBuilderHeader({
   onDuplicateTemplate,
   onDeleteTemplate,
   onPublishTemplate,
+  onUnpublishTemplate,
   canDeleteTemplate,
-  canPublishTemplate,
+  canManageSharing,
   onRestoreDefaults,
   onImportFile,
   onPasteHtmlClick,
@@ -233,15 +235,21 @@ export default function EmailBuilderHeader({
           <RotateCcw className="w-3.5 h-3.5" />
         </button>
 
-        {!template.isPublished && (
+        {canManageSharing && (
           <button
-            disabled={isGuest || !canPublishTemplate}
-            onClick={async () => { if (await dialog.confirm('Mọi nhân viên có thể xem và chỉnh sửa mẫu sau khi chia sẻ. Chỉ bạn vẫn có quyền xóa.', { title: 'Chia sẻ mẫu email', confirmText: 'Chia sẻ' })) onPublishTemplate(); }}
-            title={canPublishTemplate ? 'Chia sẻ mẫu với toàn bộ nhân viên' : 'Chỉ chủ sở hữu mới có thể chia sẻ mẫu'}
-            className={`${secondaryButtonClass} hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700`}
+            disabled={isGuest}
+            onClick={async () => {
+              if (template.isPublished) {
+                if (await dialog.confirm('Mẫu sẽ chỉ còn bạn xem và chỉnh sửa.', { title: 'Dừng chia sẻ mẫu email', confirmText: 'Dừng chia sẻ', danger: true })) onUnpublishTemplate();
+                return;
+              }
+              if (await dialog.confirm('Mọi nhân viên có thể xem và chỉnh sửa mẫu sau khi chia sẻ. Chỉ bạn vẫn có quyền xóa.', { title: 'Chia sẻ mẫu email', confirmText: 'Chia sẻ' })) onPublishTemplate();
+            }}
+            title={template.isPublished ? 'Dừng chia sẻ mẫu này' : 'Chia sẻ mẫu với toàn bộ nhân viên'}
+            className={`${secondaryButtonClass} ${template.isPublished ? 'hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700' : 'hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700'}`}
           >
             <Share2 className="w-3.5 h-3.5" />
-            <span className="hidden lg:inline">Chia sẻ mẫu</span>
+            <span className="hidden lg:inline">{template.isPublished ? 'Dừng chia sẻ' : 'Chia sẻ mẫu'}</span>
           </button>
         )}
         <button

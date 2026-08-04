@@ -25,6 +25,7 @@ import {
   deleteTemplateAsync,
   loadTemplatesAsync,
   publishTemplateAsync,
+  unpublishTemplateAsync,
   saveTemplateAsync,
   saveTemplateOrThrow,
   saveTemplatesAsync,
@@ -578,6 +579,17 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
       await dialog.alert(error?.message || 'Không thể chia sẻ mẫu email.', 'Không thể chia sẻ mẫu');
     }
   };
+  const handleUnpublishTemplate = async () => {
+    if (!activeTemplate || !isTemplateOwner(activeTemplate) || !activeTemplate.isPublished) return;
+    try {
+      const unpublished = await unpublishTemplateAsync(activeTemplate.id);
+      applyServerTemplate(unpublished);
+      showToast('Mẫu đã chuyển về riêng tư. Chỉ bạn có thể xem và chỉnh sửa.');
+    } catch (error: any) {
+      await dialog.alert(error?.message || 'Không thể dừng chia sẻ mẫu email.', 'Không thể dừng chia sẻ');
+    }
+  };
+
   const handleRestoreDefaults = () => {
     const restored = restoreDefaultTemplates();
     templatesRef.current = restored;
@@ -1007,8 +1019,9 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
         onDuplicateTemplate={handleDuplicateTemplate}
         onDeleteTemplate={handleDeleteTemplate}
         onPublishTemplate={handlePublishTemplate}
+        onUnpublishTemplate={handleUnpublishTemplate}
         canDeleteTemplate={isTemplateOwner(activeTemplate)}
-        canPublishTemplate={isTemplateOwner(activeTemplate) && !activeTemplate.isPublished}
+        canManageSharing={isTemplateOwner(activeTemplate)}
         onRestoreDefaults={handleRestoreDefaults}
         onImportFile={handleImportFile}
         onPasteHtmlClick={() => setShowHtmlImport(true)}

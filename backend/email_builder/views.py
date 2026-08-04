@@ -140,6 +140,23 @@ def email_template_publish(request, template_id):
         template.save(update_fields=['is_published', 'published_at', 'updated_by', 'updated_at'])
     return Response({'template': _template_payload(template)})
 
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def email_template_unpublish(request, template_id):
+    user_email = _user_email(request)
+    template = EmailTemplate.objects.filter(id=template_id).first()
+    if template is None:
+        return Response({'error': 'Không tìm thấy mẫu email.'}, status=status.HTTP_404_NOT_FOUND)
+    if not _is_owner(template, user_email):
+        return Response({'error': 'Chỉ chủ sở hữu mới có thể dừng chia sẻ mẫu email này.'}, status=status.HTTP_403_FORBIDDEN)
+    if template.is_published:
+        template.is_published = False
+        template.published_at = None
+        template.updated_by = user_email
+        template.save(update_fields=['is_published', 'published_at', 'updated_by', 'updated_at'])
+    return Response({'template': _template_payload(template)})
+
 @api_view(['GET', 'PUT'])
 @permission_classes([IsAuthenticated])
 def email_user_prefs(request):

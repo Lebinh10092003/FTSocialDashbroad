@@ -69,6 +69,19 @@ class EmailTemplateSharingTests(TestCase):
         )
         self.assertFalse(EmailTemplate.objects.filter(id='shared-template').exists())
 
+    def test_only_owner_can_stop_sharing(self):
+        self.owner_client.post('/api/email-templates', self.payload, format='json')
+        self.owner_client.post('/api/email-templates/shared-template/publish', format='json')
+
+        self.assertEqual(
+            self.editor_client.post('/api/email-templates/shared-template/unpublish', format='json').status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+        unpublished = self.owner_client.post('/api/email-templates/shared-template/unpublish', format='json')
+        self.assertEqual(unpublished.status_code, status.HTTP_200_OK)
+        self.assertFalse(unpublished.data['template']['isPublished'])
+        self.assertIsNone(unpublished.data['template']['publishedAt'])
+        self.assertEqual(self.editor_client.get('/api/email-templates').data, [])
     def test_template_list_requires_authenticated_workspace_member(self):
         response = APIClient().get('/api/email-templates')
         self.assertIn(response.status_code, {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN})
