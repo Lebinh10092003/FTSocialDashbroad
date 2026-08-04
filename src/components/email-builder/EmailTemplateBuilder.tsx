@@ -7,8 +7,7 @@ import {
   HelpCircle,
   FileText,
   AlertTriangle,
-  Play,
-  Code2
+  Play
 } from 'lucide-react';
 
 import { BlockType, EmailBlock, EmailSettings, EmailTemplate, EmailVariable } from '../../types/emailBuilder';
@@ -634,6 +633,30 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     }
   };
 
+  const handleApplyPastedHtmlToCurrentTemplate = async (source: string, mode: HtmlImportMode, placement: 'append' | 'replace'): Promise<string | null> => {
+    const current = templatesRef.current.find(template => template.id === activeTemplateId);
+    if (!current) return 'Không tìm thấy email đang chỉnh sửa.';
+    try {
+      canvasRef.current?.flushPendingChanges();
+      const imported = createEmailTemplateFromHtml(source, current.name, Date.now(), mode);
+      const replacing = placement === 'replace';
+      commitActiveTemplate({
+        ...current,
+        subject: replacing && imported.subject ? imported.subject : current.subject,
+        settings: replacing ? imported.settings : current.settings,
+        blocks: replacing ? imported.blocks : [...current.blocks, ...imported.blocks],
+      });
+      setSelectedBlockId(imported.blocks[0]?.id || null);
+      const count = countEmailBlocks(imported.blocks);
+      showToast(replacing
+        ? `Đã thay thế email hiện tại bằng ${count} khối từ HTML.`
+        : `Đã thêm ${count} khối từ HTML vào email hiện tại.`);
+      return null;
+    } catch (error: any) {
+      return error?.message || 'Không thể đọc mã HTML.';
+    }
+  };
+
   const prepareActiveTemplateForDelivery = async () => {
     const current = templatesRef.current.find(template => template.id === activeTemplateId) || activeTemplate;
     if (!current) return null;
@@ -696,20 +719,25 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     return () => window.removeEventListener('keydown', handleHistoryShortcut);
   }, [editorMode, activeTemplateId, templates]);
 
-  const handleCreateTemplate = async () => {
-    const name = await dialog.prompt('Nhập tên mẫu email mới:', { title: 'Tạo mẫu email', confirmText: 'Tạo mẫu', placeholder: 'Tên mẫu email' });
-    if (name && name.trim()) {
-      const newTemplate = createBlankEmailTemplate(name.trim());
+  const handleCreateBlankTemplate = async (name: string): Promise<string | null> => {
+    const cleanName = name.trim();
+    if (!cleanName) return 'Vui lòng nhập tên mẫu email.';
+    try {
+      const newTemplate = createBlankEmailTemplate(cleanName);
       const newId = newTemplate.id;
-      const newList = [...templates, newTemplate];
-      updateTemplatesList(newList);
+      updateTemplatesList([...templatesRef.current, newTemplate]);
       void createTemplateAsync(newTemplate).then(serverTemplate => {
         if (serverTemplate) applyServerTemplate(serverTemplate);
       });
       handleEditTemplate(newId);
       showToast('Đã tạo mẫu email mới.');
+      return null;
+    } catch (error: any) {
+      return error?.message || 'Không thể tạo mẫu email.';
     }
   };
+
+  const handleCreateTemplate = () => setShowHtmlImport(true);
 
   const filteredTemplates = templates.filter(t => 
     t.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -788,14 +816,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
               />
               Tải tệp mẫu
             </label>
-
-            <button type="button" onClick={() => setShowHtmlImport(true)} className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-bold text-blue-700 transition-all hover:bg-blue-100">
-              <Code2 className="h-3.5 w-3.5" />Dán mã HTML
-            </button>
-
-
-
-            <button
+<button
               onClick={handleCreateTemplate}
               className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer transition-all"
             >
@@ -945,7 +966,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
             </div>
           )}
         </main>
-        {showHtmlImport && <EmailHtmlImportDialog onClose={() => setShowHtmlImport(false)} onImport={handleImportPastedHtml} />}
+        {showHtmlImport && <EmailHtmlImportDialog context="create" onClose={() => setShowHtmlImport(false)} onCreateBlank={handleCreateBlankTemplate} onImport={handleImportPastedHtml} onApplyToCurrent={handleApplyPastedHtmlToCurrentTemplate} />}
       </div>
     );
   }
@@ -1154,7 +1175,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
           onClose={() => setShowPreview(false)}
         />
       )}
-      {showHtmlImport && <EmailHtmlImportDialog onClose={() => setShowHtmlImport(false)} onImport={handleImportPastedHtml} />}
+      {showHtmlImport && <EmailHtmlImportDialog context="edit" activeTemplateName={activeTemplate.name} onClose={() => setShowHtmlImport(false)} onCreateBlank={handleCreateBlankTemplate} onImport={handleImportPastedHtml} onApplyToCurrent={handleApplyPastedHtmlToCurrentTemplate} />}
 
       {showVarPicker && (
         <VariablePicker

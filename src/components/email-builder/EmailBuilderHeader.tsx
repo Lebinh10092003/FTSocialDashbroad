@@ -217,7 +217,7 @@ export default function EmailBuilderHeader({
 
         <button
           onClick={onPasteHtmlClick}
-          title="Dán mã HTML để tạo mẫu"
+          title="Dán mã HTML vào email hiện tại"
           className={iconButtonClass}
           disabled={isGuest}
         >
@@ -238,9 +238,10 @@ export default function EmailBuilderHeader({
             disabled={isGuest || !canPublishTemplate}
             onClick={async () => { if (await dialog.confirm('Mọi nhân viên có thể xem và chỉnh sửa mẫu sau khi chia sẻ. Chỉ bạn vẫn có quyền xóa.', { title: 'Chia sẻ mẫu email', confirmText: 'Chia sẻ' })) onPublishTemplate(); }}
             title={canPublishTemplate ? 'Chia sẻ mẫu với toàn bộ nhân viên' : 'Chỉ chủ sở hữu mới có thể chia sẻ mẫu'}
-            className={`${iconButtonClass} hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700`}
+            className={`${secondaryButtonClass} hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700`}
           >
             <Share2 className="w-3.5 h-3.5" />
+            <span className="hidden lg:inline">Chia sẻ mẫu</span>
           </button>
         )}
         <button
