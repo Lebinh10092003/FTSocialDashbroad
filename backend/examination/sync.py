@@ -472,16 +472,26 @@ def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url,
         same_code = next((candidate for candidate in existing if item.get('code') and candidate.code.upper() == item['code'].upper()), None)
         base = confirmed[0][0] if len(confirmed) == 1 else same_code
         possible = [(candidate, assessment) for candidate, assessment in assessments if assessment['status'] == 'possible']
+        # Source imports are non-destructive: only blank Fermat fields are filled.
+        # Preview exactly those writes, rather than reporting values that will be retained.
         changed_fields = []
+        changes = []
+
+        def add_fill_change(field, label, current, incoming_value):
+            current_value = clean_txt(current)
+            next_value = clean_txt(incoming_value)
+            if next_value and not current_value:
+                changed_fields.append(field)
+                changes.append({'field': field, 'label': label, 'current': current_value, 'next': next_value})
+
         if base:
             matched += 1
             for model_field, incoming_field in profile_fields:
                 incoming_value = clean_txt(item.get(incoming_field))
-                if incoming_value and clean_txt(getattr(base, model_field)) != incoming_value:
-                    changed_fields.append(model_field)
+                add_fill_change(model_field, model_field, getattr(base, model_field), incoming_value)
             participation = CandidateParticipation.objects.filter(candidate=base, session_id=session_id).prefetch_related('round_results').first() if session_id else None
             if not participation:
-                changed_fields.append('session')
+                add_fill_change('session', 'Kỳ tổ chức', '', 'Thêm vào kỳ tổ chức')
             else:
                 registration_fields = {
                     'subject': 'subject', 'category': 'category', 'registrationMethod': 'registration_method',
@@ -490,8 +500,7 @@ def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url,
                 }
                 for incoming_field, model_field in registration_fields.items():
                     incoming_value = clean_txt((item.get('registration') or {}).get(incoming_field))
-                    if incoming_value and clean_txt(getattr(participation, model_field)) != incoming_value:
-                        changed_fields.append(f'registration.{incoming_field}')
+                    add_fill_change(f'registration.{incoming_field}', incoming_field, getattr(participation, model_field), incoming_value)
                 existing_rounds = list(participation.round_results.all())
                 for history_index, history_item in enumerate(item.get('exam_history') or []):
                     incoming_round = clean_txt(history_item.get('round'))
@@ -499,14 +508,17 @@ def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url,
                     if not existing_round and history_index < len(existing_rounds):
                         existing_round = existing_rounds[history_index]
                     if not existing_round:
-                        changed_fields.append(f'round.{incoming_round}')
+                        add_fill_change(f'round.{incoming_round}', incoming_round or 'Vòng thi', '', 'Thêm dữ liệu vòng')
                         continue
                     for payload_field, model_field in ROUND_HISTORY_FIELD_MAP.items():
                         incoming_value = clean_txt(history_item.get(payload_field))
                         if payload_field == 'date' and incoming_value:
                             incoming_value = parse_dob(incoming_value) or incoming_value
-                        if incoming_value and clean_txt(getattr(existing_round, model_field)) != incoming_value:
-                            changed_fields.append(f'round.{incoming_round}.{payload_field}')
+                        add_fill_change(
+                            f'round.{incoming_round}.{payload_field}',
+                            f'{incoming_round or "V?ng thi"} · {payload_field}',
+                            getattr(existing_round, model_field), incoming_value,
+                        )
             if changed_fields:
                 changed += 1
             else:
@@ -528,6 +540,7 @@ def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url,
             'status': 'conflict' if is_conflict else ('new' if not base else ('changed' if changed_fields else 'unchanged')),
             'matchedCode': base.code if base else '',
             'changedFields': changed_fields,
+            'changes': changes,
         }
         rows.append(payload)
 
