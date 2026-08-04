@@ -1977,6 +1977,14 @@ def sheet_export(request, pk):
     except Exception as exc:
         return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
+    if preview.get('matchConflicts'):
+        return Response({
+            'error': 'Kh\u00f4ng th\u1ec3 ghi \u0111\u00e8: c\u00f3 th\u00ed sinh ch\u01b0a gh\u00e9p \u0111\u01b0\u1ee3c an to\u00e0n v\u1edbi d\u00f2ng tr\u00ean Sheet.',
+            'requiresConfirmation': True,
+            'requiresManualResolution': True,
+            'preview': preview,
+        }, status=status.HTTP_409_CONFLICT)
+
     confirm_overwrite = bool((request.data or {}).get('confirmOverwrite'))
     preview_fingerprint = str((request.data or {}).get('currentFingerprint') or '')
     needs_confirmation = preview['hasExistingData'] and preview['hasChanges']

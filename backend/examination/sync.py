@@ -734,18 +734,151 @@ def _output_sheet_target(sheet, service):
                 requested_title = clean_txt(sheet.sheet_tab)
                 if requested_title and tab.get('title') != requested_title:
                     raise ValueError(
-                        f'Link đang trỏ đến tab “{tab.get("title")}” (gid={gid}) nhưng tên tab đã khai báo là '
-                        f'“{requested_title}”. Hãy sửa tên tab hoặc dán đúng liên kết của tab cần xuất.'
+                        f'Link \u0111ang tr\u1ecf \u0111\u1ebfn tab \u201c{tab.get("title")}\u201d (gid={gid}) nh\u01b0ng t\u00ean tab \u0111\u00e3 khai b\u00e1o l\u00e0 '
+                        f'\u201c{requested_title}\u201d. H\u00e3y s\u1eeda t\u00ean tab ho\u1eb7c d\u00e1n \u0111\u00fang li\u00ean k\u1ebft c\u1ee7a tab c\u1ea7n xu\u1ea5t.'
                     )
                 return tab
-        raise ValueError('Liên kết Google Sheet có gid nhưng không tìm thấy tab tương ứng.')
+        raise ValueError('Li\u00ean k\u1ebft Google Sheet c\u00f3 gid nh\u01b0ng kh\u00f4ng t\u00ecm th\u1ea5y tab t\u01b0\u01a1ng \u1ee9ng.')
     requested_title = clean_txt(sheet.sheet_tab)
     if requested_title:
         for tab in tabs:
             if tab.get('title') == requested_title:
                 return tab
-        raise ValueError(f'Không tìm thấy tab “{requested_title}” trong Google Sheet đã liên kết.')
-    raise ValueError('Sheet tổng hợp chưa khai báo tab. Hãy chọn đúng tab cần xuất; hệ thống sẽ không tự tạo tab mới.')
+        raise ValueError(f'Kh\u00f4ng t\u00ecm th\u1ea5y tab \u201c{requested_title}\u201d trong Google Sheet \u0111\u00e3 li\u00ean k\u1ebft.')
+    raise ValueError('Sheet t\u1ed5ng h\u1ee3p ch\u01b0a khai b\u00e1o tab. H\u00e3y ch\u1ecdn \u0111\u00fang tab c\u1ea7n xu\u1ea5t; h\u1ec7 th\u1ed1ng s\u1ebd kh\u00f4ng t\u1ef1 t\u1ea1o tab m\u1edbi.')
+
+
+def _export_row_record(row):
+    """Return only identity fields needed to align a Sheet row with a candidate."""
+    def value(index):
+        return clean_txt(row[index]) if index < len(row) else ''
+    return {
+        'code': value(1),
+        'name': value(2),
+        'birth_date': parse_dob(value(3)) or value(3),
+        'identity': value(4),
+        'phone': value(7),
+        'email': value(8),
+    }
+
+
+def _export_row_match(sheet_row, candidate_row):
+    """Return a safe, deterministic row match without relying on sort order."""
+    sheet_record = _export_row_record(sheet_row)
+    candidate_record = _export_row_record(candidate_row)
+    sheet_code, candidate_code = clean_txt(sheet_record['code']).upper(), clean_txt(candidate_record['code']).upper()
+    if sheet_code and candidate_code:
+        if sheet_code == candidate_code:
+            return 100, 'm\u00e3 h\u1ed3 s\u01a1'
+        return None
+
+    name_matches = same_nonempty(sheet_record['name'], candidate_record['name'])
+    if not name_matches:
+        return None
+    sheet_birth = parse_dob(sheet_record['birth_date']) or clean_txt(sheet_record['birth_date'])
+    candidate_birth = parse_dob(candidate_record['birth_date']) or clean_txt(candidate_record['birth_date'])
+    if sheet_birth and candidate_birth and sheet_birth != candidate_birth:
+        return None
+    identity_matches = normalized_identity(sheet_record['identity']) and normalized_identity(sheet_record['identity']) == normalized_identity(candidate_record['identity'])
+    email_matches = normalized_email(sheet_record['email']) and normalized_email(sheet_record['email']) == normalized_email(candidate_record['email'])
+    phone_matches = normalized_phone(sheet_record['phone']) and normalized_phone(sheet_record['phone']) == normalized_phone(candidate_record['phone'])
+    if identity_matches:
+        return 95, 'h\u1ecd t\u00ean v\u00e0 CCCD/H\u1ed9 chi\u1ebfu'
+    if email_matches:
+        return 90, 'h\u1ecd t\u00ean v\u00e0 email'
+    if phone_matches:
+        return 88, 'h\u1ecd t\u00ean v\u00e0 s\u1ed1 \u0111i\u1ec7n tho\u1ea1i'
+    if sheet_birth and candidate_birth and sheet_birth == candidate_birth:
+        return 80, 'h\u1ecd t\u00ean v\u00e0 ng\u00e0y sinh'
+    return 50, 'h\u1ecd t\u00ean duy nh\u1ea5t'
+
+
+def _aligned_export_rows(current_rows, session_id):
+    """Align output to existing Sheet people; never use the Sheet row order as identity.
+
+    Row 1 is the group label and row 2 is the immutable column header. This
+    function receives data rows only (starting at row 3). Existing unmatched
+    Sheet rows are retained. System candidates that have no Sheet counterpart
+    are appended, while ambiguous matches block an overwrite.
+    """
+    proposed_rows = session_export_rows(session_id)[2:]
+    remaining = set(range(len(proposed_rows)))
+    aligned_rows = [list(row) for row in current_rows]
+    matched_rows = 0
+    appended_rows = 0
+    unmatched_sheet_rows = []
+    conflicts = []
+
+    for row_index, sheet_row in enumerate(current_rows):
+        if not any(clean_txt(value) for value in sheet_row):
+            continue
+        candidates = []
+        for candidate_index in remaining:
+            match = _export_row_match(sheet_row, proposed_rows[candidate_index])
+            if match:
+                score, reason = match
+                candidates.append((score, candidate_index, reason))
+        if not candidates:
+            unmatched_sheet_rows.append(row_index + 3)
+            continue
+        highest = max(score for score, _, _ in candidates)
+        best = [(candidate_index, reason) for score, candidate_index, reason in candidates if score == highest]
+        sheet_record = _export_row_record(sheet_row)
+        if len(best) != 1:
+            conflicts.append({
+                'row': row_index + 3,
+                'rowLabel': sheet_record['name'] or f'H\u00e0ng d\u1eef li\u1ec7u {row_index + 3}',
+                'reason': 'C\u00f3 nhi\u1ec1u th\u00ed sinh c\u00f9ng kh\u1edbp; c\u1ea7n m\u00e3 h\u1ed3 s\u01a1 ho\u1eb7c th\u00f4ng tin \u0111\u1ecbnh danh \u0111\u1ec3 ph\u00e2n bi\u1ec7t.',
+            })
+            continue
+        candidate_index, reason = best[0]
+        if highest == 50:
+            same_name_count = sum(1 for candidate_row in proposed_rows if same_nonempty(_export_row_record(sheet_row)['name'], _export_row_record(candidate_row)['name']))
+            if same_name_count != 1:
+                conflicts.append({
+                    'row': row_index + 3,
+                    'rowLabel': sheet_record['name'] or f'H\u00e0ng d\u1eef li\u1ec7u {row_index + 3}',
+                    'reason': 'Tr\u00f9ng h\u1ecd t\u00ean nh\u01b0ng thi\u1ebfu ng\u00e0y sinh ho\u1eb7c \u0111\u1ecbnh danh \u0111\u1ec3 gh\u00e9p an to\u00e0n.',
+                })
+                continue
+        replacement = list(proposed_rows[candidate_index])
+        # The Sheet owns its display order, so its STT stays with the existing row.
+        if sheet_row and clean_txt(sheet_row[0]):
+            replacement[0] = sheet_row[0]
+        aligned_rows[row_index] = replacement
+        remaining.remove(candidate_index)
+        matched_rows += 1
+
+    existing_stt = [int(clean_txt(row[0])) for row in current_rows if row and clean_txt(row[0]).isdigit()]
+    next_stt = max(existing_stt, default=0) + 1
+
+    # Do not append a possible duplicate. It is safer to pause and ask for a
+    # stable identifier than to create a second record for the same person.
+    for candidate_index in sorted(remaining):
+        candidate_row = proposed_rows[candidate_index]
+        candidate_record = _export_row_record(candidate_row)
+        possible_rows = [index + 3 for index, sheet_row in enumerate(current_rows) if same_nonempty(_export_row_record(sheet_row)['name'], candidate_record['name'])]
+        if possible_rows:
+            conflicts.append({
+                'row': possible_rows[0],
+                'rowLabel': candidate_record['name'] or f'H\u00e0ng d\u1eef li\u1ec7u {possible_rows[0]}',
+                'reason': 'C\u00f3 c\u00f9ng h\u1ecd t\u00ean tr\u00ean Sheet nh\u01b0ng kh\u00f4ng \u0111\u1ee7 th\u00f4ng tin \u0111\u1ec3 gh\u00e9p an to\u00e0n.',
+            })
+            continue
+        appended = list(candidate_row)
+        appended[0] = next_stt
+        next_stt += 1
+        aligned_rows.append(appended)
+        appended_rows += 1
+
+    return {
+        'values': aligned_rows,
+        'matchedRows': matched_rows,
+        'appendedRows': appended_rows,
+        'unmatchedSheetRows': unmatched_sheet_rows,
+        'matchConflicts': conflicts,
+        'systemRows': len(proposed_rows),
+    }
 
 
 def sheet_values_fingerprint(values):
@@ -755,13 +888,13 @@ def sheet_values_fingerprint(values):
 
 
 def output_sheet_export_preview(sheet, google_access_token=None, max_changes=250):
-    """Compare only rows 2 onward; row 1 is a user-owned group heading."""
+    """Compare data rows only; Sheet rows 1 and 2 are never overwritten."""
     session = ExamSession.objects.filter(id=sheet.session_id).first()
     if not session:
-        raise ValueError('Không tìm thấy kỳ tổ chức được gắn với nguồn Google Sheets.')
+        raise ValueError('Kh\u00f4ng t\u00ecm th\u1ea5y k\u1ef3 t\u1ed5 ch\u1ee9c \u0111\u01b0\u1ee3c g\u1eafn v\u1edbi ngu\u1ed3n Google Sheets.')
     spreadsheet_id = extract_spreadsheet_id(sheet.url)
     if not spreadsheet_id:
-        raise ValueError('Liên kết Google Sheets không hợp lệ.')
+        raise ValueError('Li\u00ean k\u1ebft Google Sheets kh\u00f4ng h\u1ee3p l\u1ec7.')
     config = SystemConfig.objects.filter(key='main').first()
     config_data = config.data if config else {}
     saved_token = config.last_google_access_token if config else None
@@ -770,21 +903,19 @@ def output_sheet_export_preview(sheet, google_access_token=None, max_changes=250
     tab_name = target.get('title')
     range_title = _sheet_range_title(tab_name)
     current = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id, range=f'{range_title}!A2:ZZ',
+        spreadsheetId=spreadsheet_id, range=f'{range_title}!A3:ZZ',
     ).execute().get('values', [])
-    proposed = session_export_rows(session.id)[1:]
+    alignment = _aligned_export_rows(current, session.id)
+    proposed = alignment['values']
     changes, changed_rows, changed_cells = [], set(), 0
-    headers = proposed[0] if proposed else []
     for row_index in range(max(len(current), len(proposed))):
         before_row = current[row_index] if row_index < len(current) else []
         after_row = proposed[row_index] if row_index < len(proposed) else []
-        sheet_row = row_index + 2
+        sheet_row = row_index + 3
         record_row = after_row or before_row
-        record_label = 'Hàng tiêu đề'
-        if row_index >= 1 and record_row:
-            profile_code = str(record_row[1]) if len(record_row) > 1 and record_row[1] else ''
-            candidate_name = str(record_row[2]) if len(record_row) > 2 and record_row[2] else ''
-            record_label = ' · '.join(item for item in [profile_code, candidate_name] if item) or f'Hàng dữ liệu {sheet_row}'
+        profile_code = str(record_row[1]) if len(record_row) > 1 and record_row[1] else ''
+        candidate_name = str(record_row[2]) if len(record_row) > 2 and record_row[2] else ''
+        record_label = ' \u00b7 '.join(item for item in [profile_code, candidate_name] if item) or f'H\u00e0ng d\u1eef li\u1ec7u {sheet_row}'
         for column_index in range(max(len(before_row), len(after_row))):
             before = str(before_row[column_index]) if column_index < len(before_row) else ''
             after = str(after_row[column_index]) if column_index < len(after_row) else ''
@@ -794,24 +925,23 @@ def output_sheet_export_preview(sheet, google_access_token=None, max_changes=250
             changed_rows.add(sheet_row)
             if len(changes) < max_changes:
                 column = _column_name(column_index)
-                field = str(headers[column_index]) if len(headers) > column_index and headers[column_index] else column
+                field = str(EXPORT_HEADERS[column_index]) if len(EXPORT_HEADERS) > column_index else column
                 changes.append({
                     'row': sheet_row,
                     'rowLabel': record_label,
                     'column': column,
-                    'field': field,
+                    'field': field or column,
                     'cell': f'{column}{sheet_row}',
                     'current': before,
                     'next': after,
                 })
     return {
-        'spreadsheetId': spreadsheet_id, 'sheetTab': tab_name, 'sheetId': str(target.get('sheetId', '')),
-        'currentFingerprint': sheet_values_fingerprint(current), 'proposedFingerprint': sheet_values_fingerprint(proposed),
+        'currentFingerprint': sheet_values_fingerprint(current), 'sheetTab': tab_name,
         'currentRows': len(current), 'proposedRows': len(proposed), 'changedCells': changed_cells,
         'changedRows': len(changed_rows), 'changes': changes, 'changesTruncated': changed_cells > len(changes),
         'hasExistingData': bool(current), 'hasChanges': bool(changed_cells),
+        **{key: alignment[key] for key in ('matchedRows', 'appendedRows', 'unmatchedSheetRows', 'matchConflicts', 'systemRows')},
     }
-
 
 def remote_sheet_fingerprint(sheet, google_access_token=None):
     spreadsheet_id = extract_spreadsheet_id(sheet.url)
@@ -827,7 +957,7 @@ def remote_sheet_fingerprint(sheet, google_access_token=None):
     tab_name = _output_sheet_target(sheet, service).get('title')
     values = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=f'{_sheet_range_title(tab_name)}!A2:ZZ',
+        range=f'{_sheet_range_title(tab_name)}!A3:ZZ',
     ).execute().get('values', [])
     return sheet_values_fingerprint(values)
 
@@ -846,26 +976,29 @@ def export_session_to_google_sheet(sheet, google_access_token=None):
     service = build_sheets_service(google_access_token or saved_token, config_data or {})
     tab_name = _output_sheet_target(sheet, service).get('title')
 
-    values = session_export_rows(session.id)[1:]
     range_title = _sheet_range_title(tab_name)
-    service.spreadsheets().values().clear(
+    current = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=f'{range_title}!A2:ZZ',
-        body={},
-    ).execute()
-    service.spreadsheets().values().update(
-        spreadsheetId=spreadsheet_id,
-        range=f'{range_title}!A2',
-        valueInputOption='RAW',
-        body={'values': values},
-    ).execute()
+        range=f'{range_title}!A3:ZZ',
+    ).execute().get('values', [])
+    alignment = _aligned_export_rows(current, session.id)
+    if alignment['matchConflicts']:
+        raise ValueError('Kh\u00f4ng th\u1ec3 xu\u1ea5t v\u00ec c\u00f3 th\u00ed sinh ch\u01b0a gh\u00e9p \u0111\u01b0\u1ee3c an to\u00e0n v\u1edbi d\u00f2ng tr\u00ean Sheet.')
+    values = alignment['values']
+    if values:
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f'{range_title}!A3',
+            valueInputOption='RAW',
+            body={'values': values},
+        ).execute()
     return {
         'success': True,
         'sessionId': session.id,
         'sheetTab': tab_name,
-        'exported': max(0, len(values) - 1),
+        'exported': alignment['matchedRows'] + alignment['appendedRows'],
         'fingerprint': sheet_values_fingerprint(values),
-        'message': f'Đã xuất {max(0, len(values) - 1)} hồ sơ sang Google Sheets.',
+        'message': '\u0110\u00e3 xu\u1ea5t {} h\u1ed3 s\u01a1 sang Google Sheets.'.format(alignment['matchedRows'] + alignment['appendedRows']),
     }
 
 
