@@ -767,9 +767,16 @@ def output_sheet_export_preview(sheet, google_access_token=None, max_changes=250
     ).execute().get('values', [])
     proposed = session_export_rows(session.id)
     changes, changed_rows, changed_cells = [], set(), 0
+    header_rows = [row for row in proposed[:2] if row]
     for row_index in range(max(len(current), len(proposed))):
         before_row = current[row_index] if row_index < len(current) else []
         after_row = proposed[row_index] if row_index < len(proposed) else []
+        record_row = after_row or before_row
+        record_label = 'Header row'
+        if row_index >= 2 and record_row:
+            profile_code = str(record_row[1]) if len(record_row) > 1 and record_row[1] else ''
+            candidate_name = str(record_row[2]) if len(record_row) > 2 and record_row[2] else ''
+            record_label = ' - '.join(item for item in [profile_code, candidate_name] if item) or f'Data row {row_index + 1}'
         for column_index in range(max(len(before_row), len(after_row))):
             before = str(before_row[column_index]) if column_index < len(before_row) else ''
             after = str(after_row[column_index]) if column_index < len(after_row) else ''
@@ -779,7 +786,19 @@ def output_sheet_export_preview(sheet, google_access_token=None, max_changes=250
             changed_rows.add(row_index + 1)
             if len(changes) < max_changes:
                 column = _column_name(column_index)
-                changes.append({'row': row_index + 1, 'column': column, 'cell': f'{column}{row_index + 1}', 'current': before, 'next': after})
+                field = next(
+                    (str(headers[column_index]) for headers in reversed(header_rows) if len(headers) > column_index and headers[column_index]),
+                    column,
+                )
+                changes.append({
+                    'row': row_index + 1,
+                    'rowLabel': record_label,
+                    'column': column,
+                    'field': field,
+                    'cell': f'{column}{row_index + 1}',
+                    'current': before,
+                    'next': after,
+                })
     return {
         'spreadsheetId': spreadsheet_id, 'sheetTab': tab_name, 'sheetId': str(target.get('sheetId', '')),
         'currentFingerprint': sheet_values_fingerprint(current), 'proposedFingerprint': sheet_values_fingerprint(proposed),
