@@ -43,6 +43,45 @@ const escapePlainTextHtml = (text = '') => text
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;');
 
+/** Turn pasted bare web addresses into safe, clickable links without changing existing anchors. */
+const autoLinkPlainUrls = (html: string, linkColor: string) => {
+  if (typeof DOMParser === 'undefined') return html;
+  const document = new DOMParser().parseFromString(html, 'text/html');
+  const textNodes: Text[] = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (node.parentElement?.closest('a')) continue;
+    if (/https?:\/\/[^\s<>"']+/i.test(node.textContent || '')) textNodes.push(node as Text);
+  }
+
+  textNodes.forEach(textNode => {
+    const source = textNode.textContent || '';
+    const fragment = document.createDocumentFragment();
+    const urlPattern = /https?:\/\/[^\s<>"']+/gi;
+    let cursor = 0;
+    let match: RegExpExecArray | null;
+    while ((match = urlPattern.exec(source))) {
+      const rawUrl = match[0];
+      const trailingPunctuation = rawUrl.match(/[.,;:!?]+$/)?.[0] || '';
+      const url = rawUrl.slice(0, rawUrl.length - trailingPunctuation.length);
+      fragment.append(source.slice(cursor, match.index));
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.style.color = linkColor;
+      link.style.textDecoration = 'underline';
+      link.textContent = url;
+      fragment.append(link);
+      if (trailingPunctuation) fragment.append(trailingPunctuation);
+      cursor = match.index + rawUrl.length;
+    }
+    fragment.append(source.slice(cursor));
+    textNode.parentNode?.replaceChild(fragment, textNode);
+  });
+  return document.body.innerHTML;
+};
 export function generateEmailHtml(
   template: EmailTemplate,
   variables: EmailVariable[],
@@ -205,7 +244,7 @@ export function generateEmailHtml(
       case 'paragraph': {
         const rawHtml = content.html || '';
         const sanitized = sanitizeHtml(rawHtml);
-        const replaced = preserveRichTextLineBreaks(rep(sanitized));
+        const replaced = autoLinkPlainUrls(preserveRichTextLineBreaks(rep(sanitized)), linkColor);
 
         return `
 <!-- Paragraph Block -->
