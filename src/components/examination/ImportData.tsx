@@ -591,42 +591,14 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
           <label className="block md:col-span-3"><span className="text-sm font-bold text-[#001e40]">Dữ liệu thuộc kỳ tổ chức</span><select value={targetSessionId} onChange={event => setTargetSessionId(event.target.value)} className="mt-2 w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"><option value="">Chọn kỳ tổ chức trước khi nhập</option>{selectableSessions.map(item => <option key={item.id} value={item.id}>{sessionOptionLabel(item)}</option>)}</select><p className="mt-2 text-xs text-slate-600">Hồ sơ trong file sẽ được bổ sung vào lịch sử của thí sinh, đồng thời liên kết với kỳ này.</p></label>
         </div>
       </section>
-
-      <section className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5 shadow-sm">
-        <div className="max-w-4xl"><h2 className="flex items-center gap-2 text-xl font-bold text-emerald-950"><FileSpreadsheet className="h-5 w-5 text-emerald-700"/>Luồng Google Sheets của kỳ tổ chức</h2><p className="mt-1 text-sm text-emerald-900/80">Sheet đầu vào chỉ nhập thí sinh. Sheet tổng hợp cho phép nhập bản chỉnh sửa thủ công và xuất dữ liệu từ hệ thống.</p></div>
-      </section>      {!canImport && (
+{!canImport && (
         <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           Chỉ quản lý hoặc quản trị viên mới có thể nhập dữ liệu.
         </div>
       )}
 
       {/* ── Quản lý các nguồn Google Sheets ──────────────────── */}
-      <section className="mb-5 rounded-2xl border border-indigo-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="flex items-center gap-2 text-xl font-bold text-indigo-900"><Link2 className="h-5 w-5 text-indigo-600" />{'Google Sheets của các kỳ đang tổ chức'}</h2>
-            <p className="mt-1 text-xs text-indigo-700">Đầu vào tự nhập lúc 10:00 và 15:00; tổng hợp tự xuất lúc 11:00 và 16:00 khi đã bật lịch.</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button onClick={loadSheets} disabled={loadingSheets || syncingSheetId !== null || exportingSheetId !== null} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-[#001e40] hover:bg-slate-50 disabled:opacity-50">
-              <RefreshCw className={`h-3.5 w-3.5 ${loadingSheets ? 'animate-spin' : ''}`} />{'Tải lại'}
-            </button>
-            {canImport && <button onClick={() => { setEditingSheetId(null); setNewSheetName(''); setNewSheetUrl(''); setNewSheetSessionId(targetSessionId || sessionId || ''); setNewSheetTab(''); setNewSheetStage('registration-source'); setNewSheetAutomationEnabled(false); setNewSheetAutomationStart(''); setNewSheetAutomationEnd(''); setShowAddModal(true); }} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700">
-              <Plus className="h-4 w-4" />{'Thêm liên kết Sheet'}
-            </button>}
-          </div>
-        </div>
-
-        {loadingSheets && sheets.length === 0 ? <div className="flex justify-center py-8"><LoaderCircle className="h-8 w-8 animate-spin text-indigo-600" /></div> : activeSheetSources.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">{'Chưa có liên kết Sheet cho kỳ đang tổ chức. Các kỳ đã kết thúc được ẩn khỏi bảng này.'}</div>
-        ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-100"><table className="min-w-[1120px] w-full divide-y divide-slate-100 text-sm"><thead className="bg-slate-50 text-slate-500"><tr><th className="px-4 py-3 text-left">Kỳ tổ chức</th><th className="px-4 py-3 text-left">Nguồn dữ liệu</th><th className="px-4 py-3 text-left">Lịch tự động</th><th className="px-4 py-3 text-center">Nhập vào hệ thống</th><th className="px-4 py-3 text-center">Xuất ra Sheet</th><th className="px-4 py-3 text-right"></th></tr></thead><tbody className="divide-y divide-slate-100 bg-white">
-            {activeSheetSources.map(sheet => { const linkedSession=sessions.find(item=>item.id===sheet.sessionId); const busy=syncingSheetId===sheet.id||exportingSheetId===sheet.id; const output=sheetKind(sheet)==='output'; return <tr key={sheet.id} className={sheet.pendingManualImport?'bg-amber-50/70':'hover:bg-slate-50/50'}><td className="px-4 py-3"><b className="block text-[#001e40]">{linkedSession?.code} · {linkedSession?.time}</b><span className="mt-1 block text-xs text-slate-500">{linkedSession?.name}</span></td><td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${output?'bg-emerald-50 text-emerald-700':'bg-sky-50 text-sky-700'}`}>{sheetKindLabel(sheet)}</span><a href={sheet.url} target="_blank" rel="noreferrer" className="mt-2 flex max-w-[300px] items-center gap-1 truncate font-semibold text-indigo-600 hover:underline"><Link2 className="h-4 w-4 shrink-0" />{sheet.sheetTab||'Mở Google Sheet'}</a>{sheet.pendingManualImport&&<span className="mt-2 block text-xs font-bold text-amber-700">Có chỉnh sửa đang chờ nhập</span>}</td><td className="px-4 py-3"><b className={sheet.automationEnabled?'text-emerald-700':'text-slate-500'}>{sheetScheduleLabel(sheet)}</b>{sheet.lastError&&<span className="mt-1 block max-w-[250px] text-xs text-rose-600">{sheet.lastError}</span>}</td><td className="px-4 py-3 text-center"><button disabled={!canImport||busy} onClick={()=>handleSyncSheet(sheet)} className={`inline-flex min-w-[164px] items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-50 ${output?'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100':'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}><RefreshCw className={`h-4 w-4 ${syncingSheetId===sheet.id?'animate-spin':''}`}/>{syncingSheetId===sheet.id?'Đang kiểm tra':output?'Nhập bản chỉnh sửa':'Xem trước & nhập'}</button></td><td className="px-4 py-3 text-center">{output?<button disabled={!canImport||busy||sheet.pendingManualImport} title={sheet.pendingManualImport?'Nhập bản chỉnh sửa trước khi xuất':''} onClick={()=>handleExportSheet(sheet)} className="inline-flex min-w-[142px] items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"><UploadCloud className={`h-4 w-4 ${exportingSheetId===sheet.id?'animate-pulse':''}`}/>{exportingSheetId===sheet.id?'Đang xuất':'Xuất ngay'}</button>:<span className="text-xs text-slate-400">Không xuất</span>}</td><td className="px-4 py-3 text-right">{canImport&&<span className="inline-flex gap-1"><button disabled={busy} onClick={()=>handleEditSheet(sheet)} className="rounded p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-50" title="Cấu hình"><Pencil className="h-4 w-4"/></button><button disabled={busy} onClick={()=>handleDeleteSheet(sheet.id)} className="rounded p-1.5 text-rose-600 hover:bg-rose-50 disabled:opacity-50" title="Xóa"><Trash2 className="h-4 w-4"/></button></span>}</td></tr>})}
-          </tbody></table></div>
-        )}
-      </section>
-
-      {/* Modal Thêm/Sửa nguồn dữ liệu */}
+{/* Modal Thêm/Sửa nguồn dữ liệu */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4">
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
