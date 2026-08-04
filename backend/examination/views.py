@@ -12,6 +12,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from .models import Competition, ExamSession, Candidate, CandidateParticipation, RoundResult, ExamRoom, LogNote, ExaminationSheet, ExaminationSheetPublication
+from .eligibility import ELIGIBILITY_ELIGIBLE, normalize_eligibility
 from authentication.models import SystemConfig, UserProfile
 from authentication.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, IsManagerOrAdmin, IsAdmin
 from .sheet_publication import academic_year_for_date, publication_payload, session_academic_year, session_tab_name, sync_publication
@@ -585,6 +586,8 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
             configured_rounds[history_index] if history_index < len(configured_rounds) else None,
         )
         values['round_id'] = str(item.get('roundId') or (matching_round or {}).get('id') or '').strip()
+        if values.get('eligibility'):
+            values['eligibility'] = normalize_eligibility(values['eligibility'])
         if values.get('exam_date'):
             values['exam_date'] = parse_dob(values['exam_date']) or values['exam_date']
         values['raw_data'] = {str(key): value for key, value in item.items() if value not in (None, '')}
@@ -1425,6 +1428,7 @@ def exam_room_allocation(request, session_id, round_id):
     round_name = str(round_config.get('name') or '').strip()
     result_query = RoundResult.objects.filter(
         participation__session=session,
+        eligibility=ELIGIBILITY_ELIGIBLE,
     ).filter(
         Q(round_id=str(round_id)) | Q(round_id='', round_name=round_name),
     )
@@ -1690,7 +1694,8 @@ def round_result_detail(request, pk):
     }
     for payload_field, model_field in fields.items():
         if payload_field in data:
-            setattr(item, model_field, str(data[payload_field] or '').strip())
+            value = str(data[payload_field] or '').strip()
+            setattr(item, model_field, normalize_eligibility(value) if payload_field == 'eligibility' else value)
     registration = data.get('registration') if isinstance(data.get('registration'), dict) else {}
     registration_fields = {
         'subject': 'subject', 'category': 'category', 'registrationMethod': 'registration_method',

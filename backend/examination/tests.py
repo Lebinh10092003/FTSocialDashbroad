@@ -490,6 +490,25 @@ class ExamRoomAllocationTests(TestCase):
         self.assertEqual(result.sbd, 'ROOM-UPDATED')
 
 
+    def test_room_counts_and_manual_updates_use_only_the_two_eligibility_states(self):
+        result = RoundResult.objects.get(participation__candidate_id='ROOM-001')
+        result.eligibility = 'Không đủ điều kiện tham gia Vòng 1'
+        result.save(update_fields=['eligibility'])
+
+        listing = self.client.get(self.url)
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(listing.data['candidateCount'], 4)
+
+        response = self.client.put(
+            f'/api/examination/round-results/{result.id}',
+            {'eligibility': 'Đủ điều kiện tham gia Vòng 1'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        result.refresh_from_db()
+        self.assertEqual(result.eligibility, 'Đủ điều kiện')
+
+
 class CandidateImportReuseTests(TestCase):
     def setUp(self):
         self.user = UserProfile.objects.create(email='reuse-admin@example.com', name='Reuse Admin', role='ADMIN')

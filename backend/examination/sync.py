@@ -10,6 +10,7 @@ import unicodedata
 import urllib.parse
 from django.utils import timezone
 from .models import Candidate, CandidateParticipation, RoundResult, ExamSession, Competition, ExaminationSheet, LogNote
+from .eligibility import normalize_eligibility
 from authentication.models import SystemConfig
 from integrations.google_sheets import build_sheets_service, extract_spreadsheet_id
 
@@ -373,6 +374,7 @@ def history_from_sheet_row(headers, row):
                     values[key] = value
                     break
         if values:
+            values['eligibility'] = normalize_eligibility(values.get('eligibility'))
             detailed_name = source_group
             parts = re.split(r'\s*[–—-]\s*', source_group, maxsplit=1)
             if len(parts) == 2 and normalise_str(parts[0]).startswith(f'vong{number}'):
@@ -576,6 +578,8 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
             model_field: clean_txt(item.get(payload_field))
             for payload_field, model_field in ROUND_HISTORY_FIELD_MAP.items()
         }
+        if values.get('eligibility'):
+            values['eligibility'] = normalize_eligibility(values['eligibility'])
         if values.get('exam_date'):
             values['exam_date'] = parse_dob(values['exam_date']) or values['exam_date']
         values['raw_data'] = {str(key): value for key, value in item.items() if value not in (None, '')}

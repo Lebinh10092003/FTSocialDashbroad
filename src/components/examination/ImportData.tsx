@@ -120,6 +120,7 @@ const aliases: Record<string, string[]> = {
 const normalise = (value: unknown) => String(value ?? '').trim().toLocaleLowerCase('vi-VN')
   .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 const text = (value: unknown) => String(value ?? '').trim();
+const normalizeEligibility = (value: unknown) => { const normalized = normalise(value); return normalized.includes('khong du dieu kien') || normalized.includes('chua du dieu kien') ? 'Không đủ điều kiện' : 'Đủ điều kiện'; };
 const valueFor = (entries: [string, string][], field: string) => aliases[field]?.map(alias => entries.find(([key]) => key.includes(alias))?.[1] || '').find(Boolean) || '';
 
 type RoundHistory = { round: string; eligibility?: string; sbd?: string; date?: string; time?: string; mode?: string; location?: string; link?: string; account?: string; password?: string; attendance?: string; score?: string; scoreRate?: string; rank?: string; result?: string; note?: string };
@@ -137,7 +138,7 @@ function historyFromRow(row: ImportRow): RoundHistory[] {
     const sourceGroup = sourceHeader.split(':', 1)[0].replace(/\s+Điều kiện tham gia\s*$/iu, '').trim();
     const detailedRound = sourceGroup.replace(new RegExp(`^Vòng\\s*${roundNumber}\\s*[–—-]?\\s*`, 'iu'), '').trim();
     const item: RoundHistory = { round: detailedRound || `Vòng ${roundNumber}` };
-    Object.entries(fields).forEach(([field, names]) => { const value = entries.find(([key]) => matchesField(field, key, names))?.[1] || ''; if (value) item[field as keyof RoundHistory] = (field === 'date' ? normaliseBirthDate(value) : value) as never; });
+    Object.entries(fields).forEach(([field, names]) => { const value = entries.find(([key]) => matchesField(field, key, names))?.[1] || ''; if (field === 'eligibility') item.eligibility = normalizeEligibility(value); else if (value) item[field as keyof RoundHistory] = (field === 'date' ? normaliseBirthDate(value) : value) as never; });
     return item;
   }).filter(item => Object.keys(item).length > 1);
 }
