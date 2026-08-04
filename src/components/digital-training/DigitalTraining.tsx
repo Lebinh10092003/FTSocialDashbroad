@@ -40,6 +40,7 @@ type Tab =
   | "sessions"
   | "partner-sessions"
   | "partners"
+  | "leads"
   | "products"
   | "finance"
   | "survey"
@@ -51,6 +52,7 @@ type Modal =
   | "meeting"
   | "other"
   | "partner"
+  | "lead"
   | "class"
   | "material"
   | "survey"
@@ -156,7 +158,22 @@ type Session = {
   notes: string;
   has_materials: boolean;
 };
-type CustomerMeeting = {
+type Lead = {
+  id: number;
+  name: string;
+  lead_type: string;
+  address: string;
+  representative: string;
+  representative_position: string;
+  phone: string;
+  email: string;
+  stage: "discussion" | "meeting" | "proposal" | "negotiation" | "on_hold" | "lost" | "converted";
+  notes: string;
+  converted_partner?: number | null;
+  converted_partner_name?: string;
+  meeting_count: number;
+  next_meeting_at?: { id: number; date: string; start_time?: string | null; title: string } | null;
+};type CustomerMeeting = {
   id: number;
   title: string;
   schedule_type?: "meeting" | "other";
@@ -165,6 +182,8 @@ type CustomerMeeting = {
   representative: string;
   phone: string;
   email: string;
+  lead?: number | null;
+  lead_name?: string;
   date: string;
   start_time?: string | null;
   end_time?: string | null;
@@ -1678,7 +1697,7 @@ export default function DigitalTraining({
       route.tab === "calendar" || route.tab === "sessions",
     ),
     [customerOpen, setCustomerOpen] = useState(
-      route.tab === "partners" || route.tab === "partner-sessions",
+      route.tab === "partners" || route.tab === "leads" || route.tab === "partner-sessions",
     ),
     [productsOpen, setProductsOpen] = useState(route.tab === "products"),
     [productView, setProductView] = useState<ProductView>(route.productView),
@@ -1690,6 +1709,7 @@ export default function DigitalTraining({
     [sessions, setSessions] = useState<Session[]>([]),
     [meetings, setMeetings] = useState<CustomerMeeting[]>([]),
     [partners, setPartners] = useState<Partner[]>([]),
+    [leads, setLeads] = useState<Lead[]>([]),
     [classes, setClasses] = useState<TrainingClass[]>([]),
     [materials, setMaterials] = useState<Material[]>([]),
     [surveys, setSurveys] = useState<Survey[]>([]),
@@ -1720,6 +1740,7 @@ export default function DigitalTraining({
     [trackingPartnerFilter, setTrackingPartnerFilter] = useState(""),
     [trackingContentFilter, setTrackingContentFilter] = useState(""),
     [editingPartner, setEditingPartner] = useState<Partner | null>(null),
+    [editingLead, setEditingLead] = useState<Lead | null>(null),
     [editingSession, setEditingSession] = useState<Session | null>(null),
     [editingMeeting, setEditingMeeting] = useState<CustomerMeeting | null>(
       null,
@@ -1733,6 +1754,7 @@ export default function DigitalTraining({
       route.calendarDetail,
     ),
     [deletePartner, setDeletePartner] = useState<Partner | null>(null),
+    [convertLead, setConvertLead] = useState<Lead | null>(null),
     [deleteSurvey, setDeleteSurvey] = useState<Survey | null>(null),
     [deleteActivity, setDeleteActivity] = useState<WorkActivity | null>(null),
     [deleteMaterial, setDeleteMaterial] = useState<Material | null>(null),
@@ -1772,7 +1794,9 @@ export default function DigitalTraining({
     status: "planned" as "unscheduled" | "planned" | "completed" | "cancelled",
     staff_name: "",
     notes: "",
+    lead: "",
   });
+  const [leadDraft, setLeadDraft] = useState({ name: "", lead_type: "", address: "", representative: "", representative_position: "", phone: "", email: "", stage: "discussion", notes: "" });
   const [pd, setPd] = useState<PartnerDraft>(newPartnerDraft);
   const [renewal, setRenewal] = useState({
     contract_signed_date: "",
@@ -1810,14 +1834,16 @@ export default function DigitalTraining({
         if (!sessionResponse.ok)
           throw Error("Không thể tải dữ liệu Đào tạo số.");
         const sessionRows = await sessionResponse.json();
+        const endpoints = [
+          "customer-meetings",
+          ...(isGuest ? [] : ["leads"]),
+          "partners",
+          "classes",
+          "materials",
+          "surveys",
+        ];
         const list = await Promise.all(
-          [
-            "customer-meetings",
-            "partners",
-            "classes",
-            "materials",
-            "surveys",
-          ].map(async (x) => {
+          endpoints.map(async (x) => {
             const r = await fetch(`/api/digital-training/${x}`, {
               headers: auth(),
             });
@@ -1826,11 +1852,13 @@ export default function DigitalTraining({
           }),
         );
         setSessions(sessionRows);
+        const leadOffset = isGuest ? 0 : 1;
         setMeetings(list[0]);
-        setPartners(list[1]);
-        setClasses(list[2]);
-        setMaterials(list[3]);
-        setSurveys(list[4]);
+        setLeads(isGuest ? [] : list[1]);
+        setPartners(list[1 + leadOffset]);
+        setClasses(list[2 + leadOffset]);
+        setMaterials(list[3 + leadOffset]);
+        setSurveys(list[4 + leadOffset]);
       } catch (e: any) {
         setNotice(e.message);
       } finally {
@@ -1839,7 +1867,7 @@ export default function DigitalTraining({
     };
   useEffect(() => {
     void load();
-  }, [idToken]);
+  }, [idToken, isGuest]);
   useEffect(() => {
     const h = () => {
       const r = currentRoute();
@@ -1985,6 +2013,7 @@ export default function DigitalTraining({
         status: "planned",
         staff_name: "",
         notes: "",
+        lead: "",
       });
       setModal("meeting");
     },
@@ -2045,6 +2074,7 @@ export default function DigitalTraining({
       status: item.status || "planned",
       staff_name: item.staff_name || "",
       notes: item.notes || "",
+      lead: item.lead ? String(item.lead) : "",
     });
     setModal(item.schedule_type === "other" ? "other" : "meeting");
   };
@@ -2169,6 +2199,47 @@ export default function DigitalTraining({
       setNotice(error.message);
     }
   };
+  const saveLead = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!can()) return;
+    try {
+      const saved = editingLead
+        ? await patch(`leads/${editingLead.id}`, leadDraft)
+        : await post("leads", leadDraft);
+      setModal(null);
+      setEditingLead(null);
+      await load();
+      setNotice(editingLead ? "Đã cập nhật khách hàng mới." : `Đã thêm khách hàng mới: ${saved.name}.`);
+    } catch (error: any) {
+      setNotice(error.message);
+    }
+  };
+  const promoteLead = async () => {
+    if (!convertLead || !can()) return;
+    try {
+      const result = await post(`leads/${convertLead.id}/convert`, {});
+      setConvertLead(null);
+      await load();
+      go("partners", result.partner.id);
+      setNotice(`Đã chuyển ${result.partner.name} thành khách hàng hiện tại.`);
+    } catch (error: any) {
+      setNotice(error.message);
+    }
+  };
+  const scheduleLeadMeeting = (lead: Lead) => {
+    setEditingMeeting(null);
+    setMeeting({
+      title: `Gặp ${lead.name}`,
+      schedule_type: "meeting",
+      activity_type: "",
+      customer_type: lead.lead_type || "",
+      representative: lead.representative || "",
+      phone: lead.phone || "",
+      email: lead.email || "",
+      date: today(), start_time: "", end_time: "", location: lead.address || "", content: "", status: "planned", staff_name: "", notes: lead.notes || "", lead: String(lead.id),
+    });
+    setModal("meeting");
+  };
   const saveSession = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!can()) return;
@@ -2211,6 +2282,7 @@ export default function DigitalTraining({
         ...meeting,
         schedule_type: "meeting" as const,
         activity_type: "",
+        lead: meeting.lead ? Number(meeting.lead) : null,
       };
       const saved = editingMeeting
         ? await patch(`customer-meetings/${editingMeeting.id}`, payload)
@@ -3758,7 +3830,7 @@ export default function DigitalTraining({
           )}
           <button
             onClick={() => setCustomerOpen(!customerOpen)}
-            className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "partners" || tab === "partner-sessions" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
+            className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "partners" || tab === "leads" || tab === "partner-sessions" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
           >
             <Handshake className="h-4 w-4" />
             Khách hàng
@@ -3771,7 +3843,14 @@ export default function DigitalTraining({
                 className={`ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold ${tab === "partners" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
               >
                 <Handshake className="h-3.5 w-3.5" />
-                Danh sách khách hàng
+                Khách hàng hiện tại
+              </button>
+              <button
+                onClick={() => go("leads")}
+                className={`ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold ${tab === "leads" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
+              >
+                <Users className="h-3.5 w-3.5" />
+                Khách hàng mới
               </button>
               <button
                 onClick={() => go("partner-sessions")}
@@ -4389,11 +4468,46 @@ export default function DigitalTraining({
                   <p className="mt-2 text-sm">Báo cáo thu chi chỉ dành cho Kế toán, Admin, Quản lý và Giám đốc.</p>
                 </section>
               )}
+              {tab === "leads" && (
+                <section className="mt-6 overflow-hidden rounded-2xl border bg-white shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-3 p-5">
+                    <div>
+                      <h2 className="text-xl font-extrabold">Khách hàng mới</h2>
+                      <p className="mt-1 text-sm text-slate-500">Theo dõi đầu mối đang thảo luận, gặp mặt hoặc thương thảo trước khi ký hợp đồng.</p>
+                    </div>
+                    {!isGuest && <button onClick={() => { setEditingLead(null); setLeadDraft({ name: "", lead_type: "", address: "", representative: "", representative_position: "", phone: "", email: "", stage: "discussion", notes: "" }); setModal("lead"); }} className="ft-primary"><Plus className="h-4 w-4" />Thêm khách hàng mới</button>}
+                  </div>
+                  <div className="grid gap-3 border-y bg-slate-50/70 p-4 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+                    <label className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm đơn vị, đầu mối, số điện thoại hoặc email..." className="w-full rounded-lg border bg-white py-2 pl-9 pr-3 text-sm" /></label>
+                    <div className="rounded-lg border bg-white px-3 py-2 text-sm"><b>{leads.filter(item => item.stage !== "converted").length}</b> đang theo dõi</div>
+                    <div className="rounded-lg border bg-white px-3 py-2 text-sm"><b>{leads.filter(item => item.next_meeting_at).length}</b> có lịch gặp sắp tới</div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="ft-table min-w-[1050px]">
+                      <thead><tr><th>Khách hàng mới</th><th>Đầu mối</th><th>Giai đoạn</th><th>Lịch gặp</th><th>Lịch gần nhất</th><th>Ghi chú</th><th aria-label="Thao tác"></th></tr></thead>
+                      <tbody>
+                        {leads.filter(item => !query || [item.name, item.representative, item.phone, item.email, item.address].join(" ").toLocaleLowerCase("vi-VN").includes(query.toLocaleLowerCase("vi-VN"))).map((item) => (
+                          <tr key={item.id}>
+                            <td><b>{item.name}</b><span className="block text-xs text-slate-500">{item.lead_type || "Chưa phân loại"}</span></td>
+                            <td><b>{item.representative || "—"}</b><span className="block text-xs text-slate-500">{[item.representative_position, item.phone, item.email].filter(Boolean).join(" · ") || "Chưa cập nhật"}</span></td>
+                            <td><span className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-bold text-blue-700">{({ discussion: "Thảo luận", meeting: "Gặp mặt", proposal: "Gửi đề xuất", negotiation: "Thương thảo", on_hold: "Tạm dừng", lost: "Không tiếp tục", converted: "Đã chuyển đổi" } as Record<string, string>)[item.stage] || item.stage}</span></td>
+                            <td>{item.meeting_count} lượt</td>
+                            <td>{item.next_meeting_at ? <><b>{showDate(item.next_meeting_at.date)}</b><span className="block text-xs text-slate-500">{item.next_meeting_at.start_time || "Chưa đặt giờ"}</span></> : <span className="text-slate-400">Chưa có</span>}</td>
+                            <td className="max-w-xs whitespace-normal text-xs text-slate-600">{item.notes || "—"}</td>
+                            <td><div className="flex items-center justify-end gap-2">{!isGuest && <><button type="button" onClick={() => scheduleLeadMeeting(item)} className="ft-btn ft-btn-secondary whitespace-nowrap">Lên lịch gặp</button><button type="button" onClick={() => { setEditingLead(item); setLeadDraft({ name: item.name, lead_type: item.lead_type || "", address: item.address || "", representative: item.representative || "", representative_position: item.representative_position || "", phone: item.phone || "", email: item.email || "", stage: item.stage || "discussion", notes: item.notes || "" }); setModal("lead"); }} className="ft-btn ft-btn-secondary"><Pencil className="h-4 w-4" /></button>{!item.converted_partner && <button type="button" onClick={() => setConvertLead(item)} className="ft-btn border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 whitespace-nowrap">Chuyển thành khách hàng</button>}</>}</div></td>
+                          </tr>
+                        ))}
+                        {!leads.length && <tr><td colSpan={7} className="py-10 text-center text-slate-500">Chưa có khách hàng mới. Hãy thêm đầu mối hoặc tạo từ lịch gặp đầu tiên.</td></tr>}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              )}
               {tab === "partners" && !partner && (
                 <section className="mt-6 overflow-hidden rounded-2xl border bg-white shadow-sm">
                   <div className="flex flex-wrap justify-between gap-3 p-5">
                     <div>
-                      <h2 className="text-xl font-extrabold">Khách hàng</h2>
+                      <h2 className="text-xl font-extrabold">Khách hàng hiện tại</h2>
                       <p className="mt-1 text-sm text-slate-500">
                         Quản lý thông tin liên hệ, sản phẩm đăng ký và tình
                         trạng hợp đồng.
@@ -4409,7 +4523,7 @@ export default function DigitalTraining({
                         className="ft-primary"
                       >
                         <Plus className="h-4 w-4" />
-                        Thêm khách hàng mới
+                        Thêm khách hàng hiện tại
                       </button>
                     )}
                   </div>
@@ -5886,7 +6000,14 @@ export default function DigitalTraining({
                     <option>Khác</option>
                   </select>
                 </label>
-                <div className="grid gap-4 sm:grid-cols-3">
+                                <label>
+                  <span className="mb-1 block text-sm font-bold">Liên kết khách hàng mới</span>
+                  <select value={meeting.lead} onChange={(event) => { const selectedLead = leads.find(item => item.id === Number(event.target.value)); setMeeting({ ...meeting, lead: event.target.value, title: meeting.title || (selectedLead ? `Gặp ${selectedLead.name}` : ""), customer_type: meeting.customer_type || selectedLead?.lead_type || "", representative: meeting.representative || selectedLead?.representative || "", phone: meeting.phone || selectedLead?.phone || "", email: meeting.email || selectedLead?.email || "", location: meeting.location || selectedLead?.address || "" }); }} className="w-full rounded-lg border px-3 py-2">
+                    <option value="">Không gắn khách hàng mới</option>
+                    {leads.filter(item => !item.converted_partner).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  </select>
+                  <small className="mt-1 block text-xs text-slate-500">Lịch gặp sẽ xuất hiện trong hồ sơ khách hàng mới.</small>
+                </label><div className="grid gap-4 sm:grid-cols-3">
                   <Input
                     label="Người đại diện"
                     value={meeting.representative}
@@ -6153,7 +6274,22 @@ export default function DigitalTraining({
               </form>
             </Dialog>
           )}
-          {modal === "partner" && (
+          {modal === "lead" && (
+            <Dialog title={editingLead ? "Chỉnh sửa khách hàng mới" : "Thêm khách hàng mới"} onClose={() => { setModal(null); setEditingLead(null); }}>
+              <form onSubmit={saveLead} className="grid gap-4">
+                <Input label="Tên đơn vị / khách hàng *" required value={leadDraft.name} onChange={(event) => setLeadDraft({ ...leadDraft, name: event.target.value })} />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label><span className="mb-1 block text-sm font-bold">Loại khách hàng</span><select value={leadDraft.lead_type} onChange={(event) => setLeadDraft({ ...leadDraft, lead_type: event.target.value })} className="w-full rounded-lg border px-3 py-2"><option value="">Chưa phân loại</option><option>Khối Giáo dục</option><option>Khối Hành chính công</option><option>Khối Doanh nghiệp</option><option>Khác</option></select></label>
+                  <label><span className="mb-1 block text-sm font-bold">Giai đoạn</span><select value={leadDraft.stage} onChange={(event) => setLeadDraft({ ...leadDraft, stage: event.target.value })} className="w-full rounded-lg border px-3 py-2"><option value="discussion">Thảo luận</option><option value="meeting">Gặp mặt</option><option value="proposal">Gửi đề xuất</option><option value="negotiation">Thương thảo</option><option value="on_hold">Tạm dừng</option><option value="lost">Không tiếp tục</option></select></label>
+                </div>
+                <Input label="Địa chỉ" value={leadDraft.address} onChange={(event) => setLeadDraft({ ...leadDraft, address: event.target.value })} />
+                <div className="grid gap-4 sm:grid-cols-2"><Input label="Người đại diện" value={leadDraft.representative} onChange={(event) => setLeadDraft({ ...leadDraft, representative: event.target.value })} /><Input label="Chức vụ" value={leadDraft.representative_position} onChange={(event) => setLeadDraft({ ...leadDraft, representative_position: event.target.value })} /></div>
+                <div className="grid gap-4 sm:grid-cols-2"><Input label="Số điện thoại" value={leadDraft.phone} onChange={(event) => setLeadDraft({ ...leadDraft, phone: event.target.value })} /><Input label="Email" type="email" value={leadDraft.email} onChange={(event) => setLeadDraft({ ...leadDraft, email: event.target.value })} /></div>
+                <label><span className="mb-1 block text-sm font-bold">Ghi chú trao đổi</span><textarea value={leadDraft.notes} onChange={(event) => setLeadDraft({ ...leadDraft, notes: event.target.value })} className="min-h-24 w-full rounded-lg border px-3 py-2" /></label>
+                <div className="flex justify-end gap-3"><button type="button" onClick={() => { setModal(null); setEditingLead(null); }} className="rounded-lg border px-4 py-2 text-sm font-bold">Hủy</button><button className="ft-primary">{editingLead ? "Lưu thay đổi" : "Thêm khách hàng mới"}</button></div>
+              </form>
+            </Dialog>
+          )}          {modal === "partner" && (
             <Dialog
               title={
                 editingPartner ? "Chỉnh sửa khách hàng" : "Thêm khách hàng mới"
@@ -7073,7 +7209,15 @@ export default function DigitalTraining({
             confirmText="Xóa khách hàng"
             type="danger"
           />
-          {notice && (
+          <ConfirmModal
+            isOpen={!!convertLead}
+            onClose={() => setConvertLead(null)}
+            onConfirm={promoteLead}
+            title="Chuyển thành khách hàng hiện tại"
+            message={`Xác nhận ${convertLead?.name || ""} đã ký hợp đồng? Hệ thống sẽ tạo khách hàng hiện tại, giữ nguyên hồ sơ khách hàng mới và toàn bộ lịch gặp liên kết.`}
+            confirmText="Chuyển thành khách hàng"
+            type="info"
+          />          {notice && (
             <div className="fixed bottom-5 right-5 z-[60] flex max-w-md gap-3 rounded-xl border border-cyan-200 bg-white p-4 shadow-xl">
               <p className="text-sm font-semibold">{notice}</p>
               <button

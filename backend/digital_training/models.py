@@ -164,6 +164,41 @@ class TrainingSession(models.Model):
         ordering = ["session_date", "start_time", "title"]
 
 
+class TrainingLead(models.Model):
+    """A prospective customer before a contract is signed."""
+
+    STAGE_CHOICES = [
+        ("discussion", "Discussion"),
+        ("meeting", "Meeting"),
+        ("proposal", "Proposal"),
+        ("negotiation", "Negotiation"),
+        ("on_hold", "On hold"),
+        ("lost", "Lost"),
+        ("converted", "Converted"),
+    ]
+
+    name = models.CharField(max_length=255)
+    lead_type = models.CharField(max_length=100, blank=True)
+    address = models.CharField(max_length=500, blank=True)
+    representative = models.CharField(max_length=255, blank=True)
+    representative_position = models.CharField(max_length=255, blank=True)
+    phone = models.CharField(max_length=50, blank=True)
+    email = models.EmailField(blank=True)
+    stage = models.CharField(max_length=30, choices=STAGE_CHOICES, default="discussion")
+    notes = models.TextField(blank=True)
+    converted_partner = models.OneToOneField(
+        TrainingPartner,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="source_lead",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+
 class TrainingCustomerMeeting(models.Model):
     """A work-calendar entry for either a new-customer meeting or another activity."""
 
@@ -173,6 +208,7 @@ class TrainingCustomerMeeting(models.Model):
     ]
 
     title = models.CharField(max_length=255)
+    lead = models.ForeignKey(TrainingLead, null=True, blank=True, on_delete=models.SET_NULL, related_name="meetings")
     schedule_type = models.CharField(max_length=20, choices=SCHEDULE_TYPES, default="meeting")
     activity_type = models.CharField(max_length=100, blank=True)
     customer_type = models.CharField(max_length=100, blank=True)

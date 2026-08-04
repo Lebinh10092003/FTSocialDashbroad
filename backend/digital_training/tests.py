@@ -15,7 +15,7 @@ from rest_framework.authtoken.models import Token
 from authentication.models import Department, JobTitle, UserProfile
 from .assessment_service import generate_variants_from_import, parse_assessment_workbook
 from .completion_service import complete_past_training_schedules
-from .models import TrainingAssessment, TrainingClass, TrainingCustomerMeeting, TrainingFinanceEntry, TrainingPartner, TrainingProduct, TrainingProductSubscription, TrainingSession, TrainingSurvey
+from .models import TrainingAssessment, TrainingClass, TrainingCustomerMeeting, TrainingFinanceEntry, TrainingLead, TrainingPartner, TrainingProduct, TrainingProductSubscription, TrainingSession, TrainingSurvey
 from .serializers import TrainingAssessmentSerializer, TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingPartnerSerializer, TrainingProductSerializer, TrainingProductSubscriptionSerializer, TrainingSessionSerializer, TrainingSurveySerializer
 
 
@@ -780,3 +780,51 @@ class TrainingFinancePermissionTests(TestCase):
     def test_ordinary_employee_cannot_view_finance_entries(self):
         employee = self.client_for("employee-finance@example.com", title_name="Nhan vien ky thuat")
         self.assertEqual(employee.get("/api/digital-training/finance-entries").status_code, 403)
+
+class TrainingLeadConversionTests(TestCase):
+    def setUp(self):
+        self.manager = UserProfile.objects.create(
+            email="manager@fermat.vn", name="Quản lý", role="MANAGER", access_modules=["digital-training"]
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.manager)
+
+    def test_guest_cannot_list_prospective_customers(self):
+        response = APIClient().get("/api/digital-training/leads")
+        self.assertEqual(response.status_code, 401)
+
+    def test_lead_keeps_linked_meetings_after_conversion(self):
+        lead = TrainingLead.objects.create(
+            name="Trường THCS Mới", lead_type="Khối Giáo dục", representative="Cô Lan",
+            phone="0900000000", email="lan@example.com", stage="negotiation",
+        )
+        meeting = TrainingCustomerMeeting.objects.create(
+            title="Thương thảo hợp đồng", lead=lead, meeting_date=date(2026, 8, 5), status="planned"
+        )
+        response = self.client.post(f"/api/digital-training/leads/{lead.id}/convert", {}, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        lead.refresh_from_db()
+        meeting.refresh_from_db()
+        self.assertEqual(lead.stage, "converted")
+        self.assertEqual(lead.converted_partner.name, "Trường THCS Mới")
+        self.assertEqual(meeting.lead_id, lead.id)
+        self.assertEqual(response.data["partner"]["contact_person"], "Cô Lan")
+
+    def test_conversion_rejects_duplicate_current_customer(self):
+        TrainingPartner.objects.create(name="Existing school")
+        lead = TrainingLead.objects.create(name="Existing school")
+
+        response = self.client.post(f"/api/digital-training/leads/{lead.id}/convert", {}, format="json")
+
+        self.assertEqual(response.status_code, 409, response.data)
+        lead.refresh_from_db()
+        self.assertIsNone(lead.converted_partner)
+
+    def test_meeting_serializer_returns_linked_lead_name(self):
+        lead = TrainingLead.objects.create(name="Đầu mối mới")
+        meeting = TrainingCustomerMeeting.objects.create(
+            title="Lịch gặp", lead=lead, meeting_date=date(2026, 8, 5), status="planned"
+        )
+        data = TrainingCustomerMeetingSerializer(meeting).data
+        self.assertEqual(data["lead"], lead.id)
+        self.assertEqual(data["lead_name"], lead.name)

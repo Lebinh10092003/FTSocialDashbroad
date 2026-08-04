@@ -6,13 +6,14 @@ from rest_framework.permissions import BasePermission
 import json
 import uuid
 import unicodedata
+from django.utils import timezone
 
-from authentication.permissions import IsManagerOrAdmin
+from authentication.permissions import IsAuthenticated, IsManagerOrAdmin
 from authentication.models import UserProfile
 from examination.models import LogNote
 from .completion_service import complete_past_training_schedules
-from .models import TrainingClass, TrainingCustomerMeeting, TrainingFinanceEntry, TrainingMaterial, TrainingPartner, TrainingProduct, TrainingProductSubscription, TrainingSession, TrainingSurvey
-from .serializers import TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingFinanceEntrySerializer, TrainingMaterialSerializer, TrainingPartnerSerializer, TrainingProductSerializer, TrainingProductSubscriptionSerializer, TrainingSessionSerializer, TrainingSurveySerializer
+from .models import TrainingClass, TrainingCustomerMeeting, TrainingFinanceEntry, TrainingLead, TrainingMaterial, TrainingPartner, TrainingProduct, TrainingProductSubscription, TrainingSession, TrainingSurvey
+from .serializers import TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingFinanceEntrySerializer, TrainingLeadSerializer, TrainingMaterialSerializer, TrainingPartnerSerializer, TrainingProductSerializer, TrainingProductSubscriptionSerializer, TrainingSessionSerializer, TrainingSurveySerializer
 
 
 def _can_manage(request):
@@ -161,6 +162,60 @@ def training_customer_meetings(request):
 @permission_classes([IsAuthenticatedOrReadOnly])
 def training_customer_meeting_detail(request, pk):
     return _crud_detail(request, TrainingCustomerMeeting.objects.all(), TrainingCustomerMeetingSerializer, pk, "cuộc gặp khách hàng")
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def training_leads(request):
+    return _crud_collection(request, TrainingLead.objects.select_related("converted_partner").all(), TrainingLeadSerializer, "khách hàng mới")
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def training_lead_detail(request, pk):
+    return _crud_detail(request, TrainingLead.objects.select_related("converted_partner").all(), TrainingLeadSerializer, pk, "khách hàng mới")
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def training_lead_convert(request, pk):
+    if not _can_manage(request):
+        return _forbidden()
+    lead = TrainingLead.objects.select_related("converted_partner").filter(pk=pk).first()
+    if not lead:
+        return Response({"error": "Không tìm thấy khách hàng mới."}, status=status.HTTP_404_NOT_FOUND)
+    if lead.converted_partner_id:
+        return Response({"error": "Khách hàng mới này đã được chuyển đổi."}, status=status.HTTP_409_CONFLICT)
+    if not lead.name.strip():
+        return Response({"error": "Cần có tên đơn vị trước khi chuyển đổi."}, status=status.HTTP_400_BAD_REQUEST)
+    if TrainingPartner.objects.filter(name__iexact=lead.name.strip()).exists():
+        return Response(
+            {"error": "Đã có khách hàng hiện tại cùng tên. Hãy mở hồ sơ hiện có để cập nhật thay vì tạo trùng."},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    before = _snapshot(TrainingLeadSerializer, lead, request)
+    partner = TrainingPartner.objects.create(
+        name=lead.name.strip(),
+        address=lead.address,
+        contact_person=lead.representative,
+        contact_position=lead.representative_position,
+        phone=lead.phone,
+        email=lead.email,
+        partner_type=lead.lead_type,
+        contract_status="signed",
+        contract_signed_date=timezone.localdate(),
+        contract_start=timezone.localdate().isoformat(),
+        notes=lead.notes,
+    )
+    lead.converted_partner = partner
+    lead.stage = "converted"
+    lead.save(update_fields=["converted_partner", "stage", "updated_at"])
+    _audit_item(lead, "khách hàng mới", "Chuyển thành khách hàng hiện tại", before, request, TrainingLeadSerializer)
+    _audit_item(partner, "khách hàng", "Tạo từ khách hàng mới", None, request, TrainingPartnerSerializer)
+    return Response({
+        "lead": TrainingLeadSerializer(lead, context={"request": request}).data,
+        "partner": TrainingPartnerSerializer(partner, context={"request": request}).data,
+    }, status=status.HTTP_201_CREATED)
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticatedOrReadOnly])

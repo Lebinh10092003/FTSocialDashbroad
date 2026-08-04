@@ -11,6 +11,7 @@ from .product_service import sync_partner_product_subscriptions
 from .models import (
     TrainingAssessment,
     TrainingFinanceEntry,
+    TrainingLead,
     TrainingAssessmentAttempt,
     TrainingClass,
     TrainingCustomerMeeting,
@@ -280,13 +281,42 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
         return super().update(instance, self._sync_partner_from_class(self._sync_primary_category(self._mark_past_session_completed(validated_data))))
 
 
+class TrainingLeadSerializer(serializers.ModelSerializer):
+    meeting_count = serializers.SerializerMethodField()
+    next_meeting_at = serializers.SerializerMethodField()
+    converted_partner_name = serializers.CharField(source="converted_partner.name", read_only=True)
+
+    class Meta:
+        model = TrainingLead
+        fields = [
+            "id", "name", "lead_type", "address", "representative", "representative_position",
+            "phone", "email", "stage", "notes", "converted_partner", "converted_partner_name",
+            "meeting_count", "next_meeting_at", "created_at", "updated_at",
+        ]
+        read_only_fields = ["converted_partner"]
+
+    def get_meeting_count(self, obj):
+        return obj.meetings.count()
+
+    def get_next_meeting_at(self, obj):
+        item = obj.meetings.filter(meeting_date__gte=timezone.localdate()).order_by("meeting_date", "start_time", "id").first()
+        if not item:
+            return None
+        return {
+            "id": item.id,
+            "date": item.meeting_date.isoformat(),
+            "start_time": item.start_time.strftime("%H:%M") if item.start_time else None,
+            "title": item.title,
+        }
+
 class TrainingCustomerMeetingSerializer(serializers.ModelSerializer):
     date = serializers.DateField(source="meeting_date")
+    lead_name = serializers.CharField(source="lead.name", read_only=True)
 
     class Meta:
         model = TrainingCustomerMeeting
         fields = [
-            "id", "title", "schedule_type", "activity_type", "customer_type", "representative", "phone", "email", "date",
+            "id", "title", "lead", "lead_name", "schedule_type", "activity_type", "customer_type", "representative", "phone", "email", "date",
             "start_time", "end_time", "location", "content", "status", "staff_name", "notes", "created_at", "updated_at",
         ]
 
