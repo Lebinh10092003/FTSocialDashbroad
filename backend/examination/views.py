@@ -31,6 +31,7 @@ from .sync import (
     format_person_name,
     export_session_to_google_sheet,
     remote_sheet_fingerprint,
+    output_sheet_export_preview,
     sync_single_sheet,
 )
 
@@ -1970,26 +1971,29 @@ def sheet_export(request, pk):
         return Response({'error': 'Nguồn dữ liệu chưa được gắn với kỳ tổ chức.'}, status=status.HTTP_400_BAD_REQUEST)
     if sheet.stage != 'session-output':
         return Response({'error': 'Sheet đầu vào chỉ dùng để nhập dữ liệu.'}, status=status.HTTP_400_BAD_REQUEST)
-    if sheet.pending_manual_import:
-        return Response({
-            'error': 'Hãy nhập bản chỉnh sửa trên Sheet tổng hợp trước khi xuất.',
-            'pendingManualImport': True,
-        }, status=status.HTTP_409_CONFLICT)
 
     try:
-        changed, _ = output_sheet_has_unreviewed_changes(sheet, getattr(request, 'google_access_token', None))
+        preview = output_sheet_export_preview(sheet, getattr(request, 'google_access_token', None))
     except Exception as exc:
         return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-    if changed:
-        sheet.pending_manual_import = True
-        sheet.status = 'attention'
-        sheet.last_error = 'Sheet tổng hợp có chỉnh sửa chưa được nhập vào hệ thống.'
-        sheet.updated_at = timezone.now()
-        sheet.save(update_fields=['pending_manual_import', 'status', 'last_error', 'updated_at'])
+
+    confirm_overwrite = bool((request.data or {}).get('confirmOverwrite'))
+    preview_fingerprint = str((request.data or {}).get('currentFingerprint') or '')
+    needs_confirmation = preview['hasExistingData'] and preview['hasChanges']
+    if needs_confirmation and (not confirm_overwrite or preview_fingerprint != preview['currentFingerprint']):
         return Response({
-            'error': 'Sheet tổng hợp có chỉnh sửa. Hãy bấm “Nhập bản chỉnh sửa” trước khi xuất để tránh mất dữ liệu.',
-            'pendingManualImport': True,
+            'error': 'Sheet đích có dữ liệu khác với dữ liệu chuẩn bị xuất. Hãy kiểm tra thay đổi và xác nhận trước khi ghi đè.',
+            'requiresConfirmation': True,
+            'preview': preview,
         }, status=status.HTTP_409_CONFLICT)
+
+    if not preview['hasChanges']:
+        sheet.status = 'success'
+        sheet.pending_manual_import = False
+        sheet.last_error = ''
+        sheet.updated_at = timezone.now()
+        sheet.save(update_fields=['status', 'pending_manual_import', 'last_error', 'updated_at'])
+        return Response({'success': True, 'unchanged': True, 'message': 'Dữ liệu trên Sheet đã khớp với hệ thống; không có gì cần ghi đè.', 'preview': preview})
 
     sheet.status = 'running'
     sheet.updated_at = timezone.now()
@@ -2016,8 +2020,7 @@ def sheet_export(request, pk):
     export_content = f'Xuất dữ liệu sang Google Sheet {sheet.name} thành công.'
     append_audit(f'session-{sheet.session_id}', export_content, request, system=True)
     append_competition_scope_audit(sheet.session_id, export_content, request, system=True)
-    return Response(result)
-
+    return Response({**result, 'preview': preview})
 
 @api_view(['POST'])
 @permission_classes([IsManagerOrAdmin])

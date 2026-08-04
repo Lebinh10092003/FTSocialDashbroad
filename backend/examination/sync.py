@@ -101,9 +101,9 @@ def candidate_match_assessment(a, b):
     email_a, email_b = normalized_email(a.get('email')), normalized_email(b.get('email'))
     phone_a, phone_b = normalized_phone(a.get('phone')), normalized_phone(b.get('phone'))
     identifier_pairs = [
-        ('CCCD/Hộ chiếu', identity_a, identity_b),
+        ('CCCD/HÃ¡Â»â„¢ chiÃ¡ÂºÂ¿u', identity_a, identity_b),
         ('email', email_a, email_b),
-        ('số điện thoại', phone_a, phone_b),
+        ('sÃ¡Â»â€˜ Ã„â€˜iÃ¡Â»â€¡n thoÃ¡ÂºÂ¡i', phone_a, phone_b),
     ]
     shared_identifiers = [label for label, left, right in identifier_pairs if left and right and left == right]
     name_matches = same_nonempty(a.get('name'), b.get('name'))
@@ -111,8 +111,8 @@ def candidate_match_assessment(a, b):
     if shared_identifiers:
         reason = ', '.join(shared_identifiers)
         if name_matches:
-            return {'status': 'confirmed', 'reason': f'Họ tên và {reason} trùng'}
-        return {'status': 'possible', 'reason': f'{reason} trùng nhưng họ tên khác, cần xác nhận'}
+            return {'status': 'confirmed', 'reason': f'HÃ¡Â»Â tÃƒÂªn vÃƒÂ  {reason} trÃƒÂ¹ng'}
+        return {'status': 'possible', 'reason': f'{reason} trÃƒÂ¹ng nhÃ†Â°ng hÃ¡Â»Â tÃƒÂªn khÃƒÂ¡c, cÃ¡ÂºÂ§n xÃƒÂ¡c nhÃ¡ÂºÂ­n'}
 
     # Do not use descriptive fields when both records already have a complete
     # but different identity footprint. It is very likely two people.
@@ -133,11 +133,11 @@ def candidate_match_assessment(a, b):
     compatible_birth = bool(year_a and year_b and year_a == year_b)
 
     if full_birth_matches and school_matches and class_matches:
-        return {'status': 'confirmed', 'reason': 'Họ tên, ngày sinh đầy đủ, trường và lớp trùng'}
+        return {'status': 'confirmed', 'reason': 'HÃ¡Â»Â tÃƒÂªn, ngÃƒÂ y sinh Ã„â€˜Ã¡ÂºÂ§y Ã„â€˜Ã¡Â»Â§, trÃ†Â°Ã¡Â»Âng vÃƒÂ  lÃ¡Â»â€ºp trÃƒÂ¹ng'}
     if compatible_birth and (school_matches or class_matches):
-        return {'status': 'possible', 'reason': 'Họ tên, năm/ngày sinh và trường hoặc lớp trùng, cần xác nhận'}
+        return {'status': 'possible', 'reason': 'HÃ¡Â»Â tÃƒÂªn, nÃ„Æ’m/ngÃƒÂ y sinh vÃƒÂ  trÃ†Â°Ã¡Â»Âng hoÃ¡ÂºÂ·c lÃ¡Â»â€ºp trÃƒÂ¹ng, cÃ¡ÂºÂ§n xÃƒÂ¡c nhÃ¡ÂºÂ­n'}
     if school_matches and class_matches:
-        return {'status': 'possible', 'reason': 'Họ tên, trường và lớp trùng nhưng thiếu ngày sinh, cần xác nhận'}
+        return {'status': 'possible', 'reason': 'HÃ¡Â»Â tÃƒÂªn, trÃ†Â°Ã¡Â»Âng vÃƒÂ  lÃ¡Â»â€ºp trÃƒÂ¹ng nhÃ†Â°ng thiÃ¡ÂºÂ¿u ngÃƒÂ y sinh, cÃ¡ÂºÂ§n xÃƒÂ¡c nhÃ¡ÂºÂ­n'}
     return None
 
 
@@ -316,10 +316,10 @@ def round_group_from_header(header):
     if ':' in raw:
         return raw.split(':', 1)[0].strip()
     field_labels = (
-        'Điều kiện tham gia', 'Số báo danh (SBD)', 'Số báo danh', 'Ngày thi', 'Giờ/Ca thi',
-        'Hình thức thi', 'Địa điểm/Phòng thi', 'Link thi', 'Tài khoản/Mã truy cập',
-        'Mật khẩu', 'Trạng thái dự thi', 'Điểm', 'Tỷ lệ điểm', 'Xếp hạng',
-        'Kết quả/Giải thưởng', 'Ghi chú/Sự cố',
+        'Ã„ÂiÃ¡Â»Âu kiÃ¡Â»â€¡n tham gia', 'SÃ¡Â»â€˜ bÃƒÂ¡o danh (SBD)', 'SÃ¡Â»â€˜ bÃƒÂ¡o danh', 'NgÃƒÂ y thi', 'GiÃ¡Â»Â/Ca thi',
+        'HÃƒÂ¬nh thÃ¡Â»Â©c thi', 'Ã„ÂÃ¡Â»â€¹a Ã„â€˜iÃ¡Â»Æ’m/PhÃƒÂ²ng thi', 'Link thi', 'TÃƒÂ i khoÃ¡ÂºÂ£n/MÃƒÂ£ truy cÃ¡ÂºÂ­p',
+        'MÃ¡ÂºÂ­t khÃ¡ÂºÂ©u', 'TrÃ¡ÂºÂ¡ng thÃƒÂ¡i dÃ¡Â»Â± thi', 'Ã„ÂiÃ¡Â»Æ’m', 'TÃ¡Â»Â· lÃ¡Â»â€¡ Ã„â€˜iÃ¡Â»Æ’m', 'XÃ¡ÂºÂ¿p hÃ¡ÂºÂ¡ng',
+        'KÃ¡ÂºÂ¿t quÃ¡ÂºÂ£/GiÃ¡ÂºÂ£i thÃ†Â°Ã¡Â»Å¸ng', 'Ghi chÃƒÂº/SÃ¡Â»Â± cÃ¡Â»â€˜',
     )
     for label in field_labels:
         match = re.search(rf'\s+{re.escape(label)}\s*$', raw, flags=re.IGNORECASE)
@@ -376,7 +376,7 @@ def history_from_sheet_row(headers, row):
         if values:
             values['eligibility'] = normalize_eligibility(values.get('eligibility'))
             detailed_name = source_group
-            parts = re.split(r'\s*[–—-]\s*', source_group, maxsplit=1)
+            parts = re.split(r'\s*[Ã¢â‚¬â€œÃ¢â‚¬â€-]\s*', source_group, maxsplit=1)
             if len(parts) == 2 and normalise_str(parts[0]).startswith(f'vong{number}'):
                 detailed_name = parts[1].strip()
             elif normalise_str(source_group) == f'vong{number}':
@@ -512,11 +512,11 @@ def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url,
             round_groups.append(group)
     warnings = []
     if 'name' not in columns:
-        warnings.append('Không nhận diện được cột Họ và tên thí sinh.')
+        warnings.append('KhÃƒÂ´ng nhÃ¡ÂºÂ­n diÃ¡Â»â€¡n Ã„â€˜Ã†Â°Ã¡Â»Â£c cÃ¡Â»â„¢t HÃ¡Â»Â vÃƒÂ  tÃƒÂªn thÃƒÂ­ sinh.')
     if not any(field in columns for field in ('cccd', 'email', 'phone')):
-        warnings.append('Không có CCCD, email hoặc số điện thoại; việc đối chiếu hồ sơ trùng sẽ kém chính xác.')
+        warnings.append('KhÃƒÂ´ng cÃƒÂ³ CCCD, email hoÃ¡ÂºÂ·c sÃ¡Â»â€˜ Ã„â€˜iÃ¡Â»â€¡n thoÃ¡ÂºÂ¡i; viÃ¡Â»â€¡c Ã„â€˜Ã¡Â»â€˜i chiÃ¡ÂºÂ¿u hÃ¡Â»â€œ sÃ†Â¡ trÃƒÂ¹ng sÃ¡ÂºÂ½ kÃƒÂ©m chÃƒÂ­nh xÃƒÂ¡c.')
     if conflicts:
-        warnings.append(f'Có {conflicts} hồ sơ cần người dùng xác nhận trước khi nhập.')
+        warnings.append(f'CÃƒÂ³ {conflicts} hÃ¡Â»â€œ sÃ†Â¡ cÃ¡ÂºÂ§n ngÃ†Â°Ã¡Â»Âi dÃƒÂ¹ng xÃƒÂ¡c nhÃ¡ÂºÂ­n trÃ†Â°Ã¡Â»â€ºc khi nhÃ¡ÂºÂ­p.')
     return {
         'success': True,
         'records': rows,
@@ -601,12 +601,12 @@ def append_existing_candidate_link_note(candidate, session_id, previous_session_
     if not session:
         return
     previous_sessions = list(ExamSession.objects.filter(id__in=previous_session_ids).exclude(id=session_id).values_list('code', 'name'))
-    previous_label = ', '.join(f'{code} · {name}' for code, name in previous_sessions) or 'chưa có kỳ tổ chức khác được ghi nhận'
+    previous_label = ', '.join(f'{code} Ã‚Â· {name}' for code, name in previous_sessions) or 'chÃ†Â°a cÃƒÂ³ kÃ¡Â»Â³ tÃ¡Â»â€¢ chÃ¡Â»Â©c khÃƒÂ¡c Ã„â€˜Ã†Â°Ã¡Â»Â£c ghi nhÃ¡ÂºÂ­n'
     LogNote.objects.create(
         key=f'candidate-{candidate.code}:import-link:{uuid.uuid4().hex}',
         entity_key=f'candidate-{candidate.code}',
-        content=f'Hệ thống nhận diện hồ sơ đã có. Đã bổ sung dữ liệu vào kỳ tổ chức {session.code} · {session.name}. Thí sinh đã từng thi: {previous_label}.',
-        updated_by='Hệ thống FT Workspace',
+        content=f'HÃ¡Â»â€¡ thÃ¡Â»â€˜ng nhÃ¡ÂºÂ­n diÃ¡Â»â€¡n hÃ¡Â»â€œ sÃ†Â¡ Ã„â€˜ÃƒÂ£ cÃƒÂ³. Ã„ÂÃƒÂ£ bÃ¡Â»â€¢ sung dÃ¡Â»Â¯ liÃ¡Â»â€¡u vÃƒÂ o kÃ¡Â»Â³ tÃ¡Â»â€¢ chÃ¡Â»Â©c {session.code} Ã‚Â· {session.name}. ThÃƒÂ­ sinh Ã„â€˜ÃƒÂ£ tÃ¡Â»Â«ng thi: {previous_label}.',
+        updated_by='HÃ¡Â»â€¡ thÃ¡Â»â€˜ng FT Workspace',
         system=True,
     )
 def sync_session_candidate_totals():
@@ -633,25 +633,25 @@ def sync_session_candidate_totals():
         session.save(update_fields=['candidates_count', 'updated_at'])
 
 PROFILE_EXPORT_HEADERS = [
-    'STT', 'Mã hồ sơ', 'Họ và tên thí sinh', 'Ngày sinh', 'Số CCCD/Hộ chiếu', 'Quốc tịch',
-    'Họ tên phụ huynh', 'Số điện thoại', 'Email', 'Tỉnh/Thành phố', 'Xã/phường', 'Địa chỉ liên hệ',
-    'Trường', 'Lớp đang học (ví dụ: 6A1)', 'Khối lớp',
+    'STT', 'MÃƒÂ£ hÃ¡Â»â€œ sÃ†Â¡', 'HÃ¡Â»Â vÃƒÂ  tÃƒÂªn thÃƒÂ­ sinh', 'NgÃƒÂ y sinh', 'SÃ¡Â»â€˜ CCCD/HÃ¡Â»â„¢ chiÃ¡ÂºÂ¿u', 'QuÃ¡Â»â€˜c tÃ¡Â»â€¹ch',
+    'HÃ¡Â»Â tÃƒÂªn phÃ¡Â»Â¥ huynh', 'SÃ¡Â»â€˜ Ã„â€˜iÃ¡Â»â€¡n thoÃ¡ÂºÂ¡i', 'Email', 'TÃ¡Â»â€°nh/ThÃƒÂ nh phÃ¡Â»â€˜', 'XÃƒÂ£/phÃ†Â°Ã¡Â»Âng', 'Ã„ÂÃ¡Â»â€¹a chÃ¡Â»â€° liÃƒÂªn hÃ¡Â»â€¡',
+    'TrÃ†Â°Ã¡Â»Âng', 'LÃ¡Â»â€ºp Ã„â€˜ang hÃ¡Â»Âc (vÃƒÂ­ dÃ¡Â»Â¥: 6A1)', 'KhÃ¡Â»â€˜i lÃ¡Â»â€ºp',
 ]
-REGISTRATION_EXPORT_HEADERS = ['Môn thi/Lĩnh vực', 'Bảng thi/Category', 'Hình thức đăng ký', 'Tên đội/Nhóm', 'Ngôn ngữ thi', 'Ghi chú']
+REGISTRATION_EXPORT_HEADERS = ['MÃƒÂ´n thi/LÃ„Â©nh vÃ¡Â»Â±c', 'BÃ¡ÂºÂ£ng thi/Category', 'HÃƒÂ¬nh thÃ¡Â»Â©c Ã„â€˜Ã„Æ’ng kÃƒÂ½', 'TÃƒÂªn Ã„â€˜Ã¡Â»â„¢i/NhÃƒÂ³m', 'NgÃƒÂ´n ngÃ¡Â»Â¯ thi', 'Ghi chÃƒÂº']
 ROUND_EXPORT_HEADERS = [
-    'Điều kiện tham gia', 'Số báo danh (SBD)', 'Ngày thi', 'Giờ/Ca thi', 'Hình thức thi', 'Địa điểm/Phòng thi',
-    'Link thi', 'Tài khoản/Mã truy cập', 'Mật khẩu', 'Trạng thái dự thi', 'Điểm', 'Tỷ lệ điểm', 'Xếp hạng',
-    'Kết quả/Giải thưởng', 'Ghi chú/Sự cố',
+    'Ã„ÂiÃ¡Â»Âu kiÃ¡Â»â€¡n tham gia', 'SÃ¡Â»â€˜ bÃƒÂ¡o danh (SBD)', 'NgÃƒÂ y thi', 'GiÃ¡Â»Â/Ca thi', 'HÃƒÂ¬nh thÃ¡Â»Â©c thi', 'Ã„ÂÃ¡Â»â€¹a Ã„â€˜iÃ¡Â»Æ’m/PhÃƒÂ²ng thi',
+    'Link thi', 'TÃƒÂ i khoÃ¡ÂºÂ£n/MÃƒÂ£ truy cÃ¡ÂºÂ­p', 'MÃ¡ÂºÂ­t khÃ¡ÂºÂ©u', 'TrÃ¡ÂºÂ¡ng thÃƒÂ¡i dÃ¡Â»Â± thi', 'Ã„ÂiÃ¡Â»Æ’m', 'TÃ¡Â»Â· lÃ¡Â»â€¡ Ã„â€˜iÃ¡Â»Æ’m', 'XÃ¡ÂºÂ¿p hÃ¡ÂºÂ¡ng',
+    'KÃ¡ÂºÂ¿t quÃ¡ÂºÂ£/GiÃ¡ÂºÂ£i thÃ†Â°Ã¡Â»Å¸ng', 'Ghi chÃƒÂº/SÃ¡Â»Â± cÃ¡Â»â€˜',
 ]
-SUMMARY_EXPORT_HEADERS = ['Vòng cao nhất đã đạt', 'Kết quả cao nhất', 'Link chứng nhận', 'Ngày cập nhật gần nhất']
+SUMMARY_EXPORT_HEADERS = ['VÃƒÂ²ng cao nhÃ¡ÂºÂ¥t Ã„â€˜ÃƒÂ£ Ã„â€˜Ã¡ÂºÂ¡t', 'KÃ¡ÂºÂ¿t quÃ¡ÂºÂ£ cao nhÃ¡ÂºÂ¥t', 'Link chÃ¡Â»Â©ng nhÃ¡ÂºÂ­n', 'NgÃƒÂ y cÃ¡ÂºÂ­p nhÃ¡ÂºÂ­t gÃ¡ÂºÂ§n nhÃ¡ÂºÂ¥t']
 EXPORT_HEADERS = PROFILE_EXPORT_HEADERS + REGISTRATION_EXPORT_HEADERS + ROUND_EXPORT_HEADERS * 3 + SUMMARY_EXPORT_HEADERS
 EXPORT_GROUP_HEADERS = (
-    ['HỒ SƠ THÍ SINH'] + [''] * (len(PROFILE_EXPORT_HEADERS) - 1)
-    + ['THÔNG TIN ĐĂNG KÝ'] + [''] * (len(REGISTRATION_EXPORT_HEADERS) - 1)
-    + ['VÒNG 1'] + [''] * (len(ROUND_EXPORT_HEADERS) - 1)
-    + ['VÒNG 2'] + [''] * (len(ROUND_EXPORT_HEADERS) - 1)
-    + ['VÒNG 3'] + [''] * (len(ROUND_EXPORT_HEADERS) - 1)
-    + ['TỔNG HỢP'] + [''] * (len(SUMMARY_EXPORT_HEADERS) - 1)
+    ['HÃ¡Â»â€™ SÃ†Â  THÃƒÂ SINH'] + [''] * (len(PROFILE_EXPORT_HEADERS) - 1)
+    + ['THÃƒâ€NG TIN Ã„ÂÃ„â€šNG KÃƒÂ'] + [''] * (len(REGISTRATION_EXPORT_HEADERS) - 1)
+    + ['VÃƒâ€™NG 1'] + [''] * (len(ROUND_EXPORT_HEADERS) - 1)
+    + ['VÃƒâ€™NG 2'] + [''] * (len(ROUND_EXPORT_HEADERS) - 1)
+    + ['VÃƒâ€™NG 3'] + [''] * (len(ROUND_EXPORT_HEADERS) - 1)
+    + ['TÃ¡Â»â€NG HÃ¡Â»Â¢P'] + [''] * (len(SUMMARY_EXPORT_HEADERS) - 1)
 )
 
 def _round_slots(round_results):
@@ -706,6 +706,88 @@ def _sheet_range_title(title):
     return "'" + title.replace("'", "''") + "'"
 
 
+def _column_name(index):
+    """Return the familiar A1 column name for a zero-based index."""
+    name = ''
+    number = index + 1
+    while number:
+        number, remainder = divmod(number - 1, 26)
+        name = chr(65 + remainder) + name
+    return name
+
+
+def _output_sheet_target(sheet, service):
+    """Resolve an existing output tab from its configured name or URL gid."""
+    spreadsheet_id = extract_spreadsheet_id(sheet.url)
+    metadata = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields='sheets(properties(sheetId,title))',
+    ).execute()
+    tabs = [item.get('properties', {}) for item in metadata.get('sheets', [])]
+    parsed_url = urllib.parse.urlparse(clean_txt(sheet.url))
+    query = urllib.parse.parse_qs(parsed_url.query)
+    fragment = urllib.parse.parse_qs(parsed_url.fragment)
+    gid = (query.get('gid') or fragment.get('gid') or [''])[0]
+    if gid:
+        for tab in tabs:
+            if str(tab.get('sheetId')) == str(gid):
+                requested_title = clean_txt(sheet.sheet_tab)
+                if requested_title and tab.get('title') != requested_title:
+                    raise ValueError(
+                        f'Link Ä‘ang trá» Ä‘áº¿n tab â€œ{tab.get("title")}â€ (gid={gid}) nhÆ°ng tÃªn tab Ä‘Ã£ khai bÃ¡o lÃ  '
+                        f'â€œ{requested_title}â€. HÃ£y sá»­a tÃªn tab hoáº·c dÃ¡n Ä‘Ãºng liÃªn káº¿t cá»§a tab cáº§n xuáº¥t.'
+                    )
+                return tab
+        raise ValueError('LiÃªn káº¿t Google Sheet cÃ³ gid nhÆ°ng khÃ´ng tÃ¬m tháº¥y tab tÆ°Æ¡ng á»©ng.')
+    requested_title = clean_txt(sheet.sheet_tab)
+    if requested_title:
+        for tab in tabs:
+            if tab.get('title') == requested_title:
+                return tab
+        raise ValueError(f'KhÃ´ng tÃ¬m tháº¥y tab â€œ{requested_title}â€ trong Google Sheet Ä‘Ã£ liÃªn káº¿t.')
+    raise ValueError('Sheet tÃ¡Â»â€¢ng hÃ¡Â»Â£p chÃ†Â°a khai bÃƒÂ¡o tab. HÃƒÂ£y chÃ¡Â»Ân Ã„â€˜ÃƒÂºng tab cÃ¡ÂºÂ§n xuÃ¡ÂºÂ¥t; hÃ¡Â»â€¡ thÃ¡Â»â€˜ng sÃ¡ÂºÂ½ khÃƒÂ´ng tÃ¡Â»Â± tÃ¡ÂºÂ¡o tab mÃ¡Â»â€ºi.')
+
+
+def output_sheet_export_preview(sheet, google_access_token=None, max_changes=250):
+    """Read-only comparison of the existing tab and the values to export."""
+    session = ExamSession.objects.filter(id=sheet.session_id).first()
+    if not session:
+        raise ValueError('KhÃƒÂ´ng tÃƒÂ¬m thÃ¡ÂºÂ¥y kÃ¡Â»Â³ tÃ¡Â»â€¢ chÃ¡Â»Â©c Ã„â€˜Ã†Â°Ã¡Â»Â£c gÃ¡ÂºÂ¯n vÃ¡Â»â€ºi nguÃ¡Â»â€œn Google Sheets.')
+    spreadsheet_id = extract_spreadsheet_id(sheet.url)
+    if not spreadsheet_id:
+        raise ValueError('LiÃƒÂªn kÃ¡ÂºÂ¿t Google Sheets khÃƒÂ´ng hÃ¡Â»Â£p lÃ¡Â»â€¡.')
+    config = SystemConfig.objects.filter(key='main').first()
+    config_data = config.data if config else {}
+    saved_token = config.last_google_access_token if config else None
+    service = build_sheets_service(google_access_token or saved_token, config_data or {})
+    target = _output_sheet_target(sheet, service)
+    tab_name = target.get('title')
+    current = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range=_sheet_range_title(tab_name),
+    ).execute().get('values', [])
+    proposed = session_export_rows(session.id)
+    changes, changed_rows, changed_cells = [], set(), 0
+    for row_index in range(max(len(current), len(proposed))):
+        before_row = current[row_index] if row_index < len(current) else []
+        after_row = proposed[row_index] if row_index < len(proposed) else []
+        for column_index in range(max(len(before_row), len(after_row))):
+            before = str(before_row[column_index]) if column_index < len(before_row) else ''
+            after = str(after_row[column_index]) if column_index < len(after_row) else ''
+            if before == after:
+                continue
+            changed_cells += 1
+            changed_rows.add(row_index + 1)
+            if len(changes) < max_changes:
+                column = _column_name(column_index)
+                changes.append({'row': row_index + 1, 'column': column, 'cell': f'{column}{row_index + 1}', 'current': before, 'next': after})
+    return {
+        'spreadsheetId': spreadsheet_id, 'sheetTab': tab_name, 'sheetId': str(target.get('sheetId', '')),
+        'currentFingerprint': sheet_values_fingerprint(current), 'proposedFingerprint': sheet_values_fingerprint(proposed),
+        'currentRows': len(current), 'proposedRows': len(proposed), 'changedCells': changed_cells,
+        'changedRows': len(changed_rows), 'changes': changes, 'changesTruncated': changed_cells > len(changes),
+        'hasExistingData': bool(current), 'hasChanges': bool(changed_cells),
+    }
+
 def sheet_values_fingerprint(values):
     """Stable fingerprint used to detect edits made in an output Sheet."""
     payload = json.dumps(values or [], ensure_ascii=False, separators=(',', ':'))
@@ -715,25 +797,15 @@ def sheet_values_fingerprint(values):
 def remote_sheet_fingerprint(sheet, google_access_token=None):
     spreadsheet_id = extract_spreadsheet_id(sheet.url)
     if not spreadsheet_id:
-        raise ValueError('Liên kết Google Sheets không hợp lệ.')
+        raise ValueError('LiÃƒÂªn kÃ¡ÂºÂ¿t Google Sheets khÃƒÂ´ng hÃ¡Â»Â£p lÃ¡Â»â€¡.')
     session = ExamSession.objects.filter(id=sheet.session_id).first()
     if not session:
-        raise ValueError('Không tìm thấy kỳ tổ chức được gắn với Google Sheets.')
+        raise ValueError('KhÃƒÂ´ng tÃƒÂ¬m thÃ¡ÂºÂ¥y kÃ¡Â»Â³ tÃ¡Â»â€¢ chÃ¡Â»Â©c Ã„â€˜Ã†Â°Ã¡Â»Â£c gÃ¡ÂºÂ¯n vÃ¡Â»â€ºi Google Sheets.')
     config = SystemConfig.objects.filter(key='main').first()
     config_data = config.data if config else {}
     saved_token = config.last_google_access_token if config else None
     service = build_sheets_service(google_access_token or saved_token, config_data or {})
-    tab_name = clean_txt(sheet.sheet_tab) or f'{session.code} {session.time}'
-    metadata = service.spreadsheets().get(
-        spreadsheetId=spreadsheet_id,
-        fields='sheets(properties(title))',
-    ).execute()
-    titles = {
-        item.get('properties', {}).get('title')
-        for item in metadata.get('sheets', [])
-    }
-    if tab_name not in titles:
-        return sheet_values_fingerprint([])
+    tab_name = _output_sheet_target(sheet, service).get('title')
     values = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
         range=_sheet_range_title(tab_name),
@@ -744,31 +816,16 @@ def remote_sheet_fingerprint(sheet, google_access_token=None):
 def export_session_to_google_sheet(sheet, google_access_token=None):
     session = ExamSession.objects.filter(id=sheet.session_id).first()
     if not session:
-        raise ValueError('Không tìm thấy kỳ tổ chức được gắn với nguồn Google Sheets.')
+        raise ValueError('KhÃƒÂ´ng tÃƒÂ¬m thÃ¡ÂºÂ¥y kÃ¡Â»Â³ tÃ¡Â»â€¢ chÃ¡Â»Â©c Ã„â€˜Ã†Â°Ã¡Â»Â£c gÃ¡ÂºÂ¯n vÃ¡Â»â€ºi nguÃ¡Â»â€œn Google Sheets.')
     spreadsheet_id = extract_spreadsheet_id(sheet.url)
     if not spreadsheet_id:
-        raise ValueError('Liên kết Google Sheets không hợp lệ.')
+        raise ValueError('LiÃƒÂªn kÃ¡ÂºÂ¿t Google Sheets khÃƒÂ´ng hÃ¡Â»Â£p lÃ¡Â»â€¡.')
 
     config = SystemConfig.objects.filter(key='main').first()
     config_data = config.data if config else {}
     saved_token = config.last_google_access_token if config else None
     service = build_sheets_service(google_access_token or saved_token, config_data or {})
-    tab_name = clean_txt(sheet.sheet_tab) or f'{session.code} {session.time}'
-
-    metadata = service.spreadsheets().get(
-        spreadsheetId=spreadsheet_id,
-        fields='sheets(properties(sheetId,title))',
-    ).execute()
-    titles = {
-        item.get('properties', {}).get('title')
-        for item in metadata.get('sheets', [])
-        if item.get('properties', {}).get('title')
-    }
-    if tab_name not in titles:
-        service.spreadsheets().batchUpdate(
-            spreadsheetId=spreadsheet_id,
-            body={'requests': [{'addSheet': {'properties': {'title': tab_name}}}]},
-        ).execute()
+    tab_name = _output_sheet_target(sheet, service).get('title')
 
     values = session_export_rows(session.id)
     range_title = _sheet_range_title(tab_name)
@@ -789,7 +846,7 @@ def export_session_to_google_sheet(sheet, google_access_token=None):
         'sheetTab': tab_name,
         'exported': max(0, len(values) - 1),
         'fingerprint': sheet_values_fingerprint(values),
-        'message': f'Đã xuất {max(0, len(values) - 1)} hồ sơ sang Google Sheets.',
+        'message': f'Ã„ÂÃƒÂ£ xuÃ¡ÂºÂ¥t {max(0, len(values) - 1)} hÃ¡Â»â€œ sÃ†Â¡ sang Google Sheets.',
     }
 
 
@@ -843,7 +900,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
     try:
         candidate_urls = get_google_sheet_csv_urls(spreadsheet_url, sheet_tab)
         if not candidate_urls:
-            raise Exception('Đường dẫn Google Sheets không hợp lệ.')
+            raise Exception('Ã„ÂÃ†Â°Ã¡Â»Âng dÃ¡ÂºÂ«n Google Sheets khÃƒÂ´ng hÃ¡Â»Â£p lÃ¡Â»â€¡.')
             
         raw = ''
         last_error = None
@@ -855,22 +912,22 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
                 }, timeout=15)
                 
                 if res.status_code in [401, 403]:
-                    raise Exception('Sheet chưa mở quyền truy cập công khai. Vui lòng chia sẻ công khai.')
+                    raise Exception('Sheet chÃ†Â°a mÃ¡Â»Å¸ quyÃ¡Â»Ân truy cÃ¡ÂºÂ­p cÃƒÂ´ng khai. Vui lÃƒÂ²ng chia sÃ¡ÂºÂ» cÃƒÂ´ng khai.')
                 res.raise_for_status()
                 
                 res.encoding = 'utf-8'
                 trimmed = res.text.strip()
                 if 'accounts.google.com' in res.url or 'ServiceLogin' in res.url or trimmed.startswith('<!DOCTYPE html') or trimmed.startswith('<html'):
-                    raise Exception('Sheet yêu cầu đăng nhập Google (Chưa mở quyền công khai).')
+                    raise Exception('Sheet yÃƒÂªu cÃ¡ÂºÂ§u Ã„â€˜Ã„Æ’ng nhÃ¡ÂºÂ­p Google (ChÃ†Â°a mÃ¡Â»Å¸ quyÃ¡Â»Ân cÃƒÂ´ng khai).')
                 if not trimmed:
-                    raise Exception('Google Sheets trả về nội dung trống.')
+                    raise Exception('Google Sheets trÃ¡ÂºÂ£ vÃ¡Â»Â nÃ¡Â»â„¢i dung trÃ¡Â»â€˜ng.')
                     
                 raw = res.text
                 last_error = None
                 break
             except Exception as err:
                 last_error = err
-                if 'quyền truy cập' in str(err) or 'đăng nhập' in str(err):
+                if 'quyÃ¡Â»Ân truy cÃ¡ÂºÂ­p' in str(err) or 'Ã„â€˜Ã„Æ’ng nhÃ¡ÂºÂ­p' in str(err):
                     break
                     
         if not raw and last_error:
@@ -882,7 +939,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
         grid = list(reader)
         
         if len(grid) < 2:
-            raise Exception('Không tìm thấy dữ liệu trong tệp (cần ít nhất 1 dòng tiêu đề + 1 dòng dữ liệu).')
+            raise Exception('KhÃƒÂ´ng tÃƒÂ¬m thÃ¡ÂºÂ¥y dÃ¡Â»Â¯ liÃ¡Â»â€¡u trong tÃ¡Â»â€¡p (cÃ¡ÂºÂ§n ÃƒÂ­t nhÃ¡ÂºÂ¥t 1 dÃƒÂ²ng tiÃƒÂªu Ã„â€˜Ã¡Â»Â + 1 dÃƒÂ²ng dÃ¡Â»Â¯ liÃ¡Â»â€¡u).')
             
         header_candidates = []
         for index in range(min(len(grid), 20)):
@@ -912,11 +969,11 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
             amount, invoice, payment_status = value('amount'), value('invoice'), value('paymentStatus')
             legacy_achievement = []
             if amount:
-                legacy_achievement.append(f"Lệ phí: {amount}")
-            if payment_status and payment_status != '—':
+                legacy_achievement.append(f"LÃ¡Â»â€¡ phÃƒÂ­: {amount}")
+            if payment_status and payment_status != 'Ã¢â‚¬â€':
                 legacy_achievement.append(payment_status)
             if invoice and invoice != 'x':
-                legacy_achievement.append(f"HĐ: {invoice}")
+                legacy_achievement.append(f"HÃ„Â: {invoice}")
             registration = {
                 'subject': value('subject'), 'category': value('category'), 'registrationMethod': value('registrationMethod'),
                 'registrationUnit': value('registrationUnit'), 'teamName': value('teamName'), 'examLanguage': value('examLanguage'),
@@ -933,19 +990,19 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
             }
             incoming.append(cand)
             if len(incoming) > 1000:
-                raise Exception('Mỗi lần chỉ được xử lý tối đa 1.000 hồ sơ. Hãy chia tab nguồn thành nhiều đợt nhỏ hơn.')
+                raise Exception('MÃ¡Â»â€”i lÃ¡ÂºÂ§n chÃ¡Â»â€° Ã„â€˜Ã†Â°Ã¡Â»Â£c xÃ¡Â»Â­ lÃƒÂ½ tÃ¡Â»â€˜i Ã„â€˜a 1.000 hÃ¡Â»â€œ sÃ†Â¡. HÃƒÂ£y chia tab nguÃ¡Â»â€œn thÃƒÂ nh nhiÃ¡Â»Âu Ã„â€˜Ã¡Â»Â£t nhÃ¡Â»Â hÃ†Â¡n.')
         if not incoming:
             if preview:
                 result = build_sheet_preview([], header_row, col, raw, session_id, spreadsheet_url, sheet_tab, header_index + 2)
                 result['sessionId'] = session_id or ''
                 result['timestamp'] = ts_vn
-                result['warnings'].append('Không có hồ sơ hợp lệ nào trong tab đã chọn.')
+                result['warnings'].append('KhÃƒÂ´ng cÃƒÂ³ hÃ¡Â»â€œ sÃ†Â¡ hÃ¡Â»Â£p lÃ¡Â»â€¡ nÃƒÂ o trong tab Ã„â€˜ÃƒÂ£ chÃ¡Â»Ân.')
                 return result
             if not preview:
                 update_state({'status': 'success', 'error': None})
             return {
                 'success': True,
-                'message': 'Không có hồ sơ hợp lệ nào trong tệp.',
+                'message': 'KhÃƒÂ´ng cÃƒÂ³ hÃ¡Â»â€œ sÃ†Â¡ hÃ¡Â»Â£p lÃ¡Â»â€¡ nÃƒÂ o trong tÃ¡Â»â€¡p.',
                 'created': 0,
                 'updated': 0,
                 'total': 0,
@@ -999,21 +1056,21 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
                 upsert_participation_history(base, session_id, cand['exam_history'], spreadsheet_url, cand['registration'])
                 if matched:
                     labels = {
-                        'name': 'họ tên', 'birth_date': 'ngày sinh', 'identity': 'CCCD/Hộ chiếu', 'email': 'email',
-                        'phone': 'số điện thoại', 'school': 'trường', 'class_name': 'lớp', 'city': 'tỉnh/thành phố',
-                        'ward': 'xã/phường', 'nationality': 'quốc tịch', 'grade': 'khối lớp', 'address': 'địa chỉ',
-                        'achievement': 'thành tích', 'highest_round': 'vòng cao nhất', 'parent': 'phụ huynh',
+                        'name': 'hÃ¡Â»Â tÃƒÂªn', 'birth_date': 'ngÃƒÂ y sinh', 'identity': 'CCCD/HÃ¡Â»â„¢ chiÃ¡ÂºÂ¿u', 'email': 'email',
+                        'phone': 'sÃ¡Â»â€˜ Ã„â€˜iÃ¡Â»â€¡n thoÃ¡ÂºÂ¡i', 'school': 'trÃ†Â°Ã¡Â»Âng', 'class_name': 'lÃ¡Â»â€ºp', 'city': 'tÃ¡Â»â€°nh/thÃƒÂ nh phÃ¡Â»â€˜',
+                        'ward': 'xÃƒÂ£/phÃ†Â°Ã¡Â»Âng', 'nationality': 'quÃ¡Â»â€˜c tÃ¡Â»â€¹ch', 'grade': 'khÃ¡Â»â€˜i lÃ¡Â»â€ºp', 'address': 'Ã„â€˜Ã¡Â»â€¹a chÃ¡Â»â€°',
+                        'achievement': 'thÃƒÂ nh tÃƒÂ­ch', 'highest_round': 'vÃƒÂ²ng cao nhÃ¡ÂºÂ¥t', 'parent': 'phÃ¡Â»Â¥ huynh',
                     }
                     changes = [
-                        f'Đã cập nhật {labels[field]} từ "{before_values[field] or "chưa có thông tin"}" thành "{getattr(base, field) or "chưa có thông tin"}".'
+                        f'Ã„ÂÃƒÂ£ cÃ¡ÂºÂ­p nhÃ¡ÂºÂ­t {labels[field]} tÃ¡Â»Â« "{before_values[field] or "chÃ†Â°a cÃƒÂ³ thÃƒÂ´ng tin"}" thÃƒÂ nh "{getattr(base, field) or "chÃ†Â°a cÃƒÂ³ thÃƒÂ´ng tin"}".'
                         for field in labels if before_values[field] != getattr(base, field)
                     ]
                     if changes:
                         LogNote.objects.create(
                             key=f'candidate-{base.code}:import-update:{uuid.uuid4().hex}',
                             entity_key=f'candidate-{base.code}',
-                            content=f'Hệ thống tự nhận diện hồ sơ trùng theo {matched_assessment["reason"]}.\n' + '\n'.join(changes),
-                            updated_by='Hệ thống FT Workspace', system=True,
+                            content=f'HÃ¡Â»â€¡ thÃ¡Â»â€˜ng tÃ¡Â»Â± nhÃ¡ÂºÂ­n diÃ¡Â»â€¡n hÃ¡Â»â€œ sÃ†Â¡ trÃƒÂ¹ng theo {matched_assessment["reason"]}.\n' + '\n'.join(changes),
+                            updated_by='HÃ¡Â»â€¡ thÃ¡Â»â€˜ng FT Workspace', system=True,
                         )
                 if not already_in_target_session:
                     linked_existing += 1
@@ -1039,7 +1096,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
         
         return {
             'success': True,
-            'message': f"Đồng bộ thành công – Thêm mới: {created}, Cập nhật: {updated}, Hồ sơ đã có được bổ sung kỳ tổ chức: {linked_existing}, Tổng: {len(incoming)}",
+            'message': f"Ã„ÂÃ¡Â»â€œng bÃ¡Â»â„¢ thÃƒÂ nh cÃƒÂ´ng Ã¢â‚¬â€œ ThÃƒÂªm mÃ¡Â»â€ºi: {created}, CÃ¡ÂºÂ­p nhÃ¡ÂºÂ­t: {updated}, HÃ¡Â»â€œ sÃ†Â¡ Ã„â€˜ÃƒÂ£ cÃƒÂ³ Ã„â€˜Ã†Â°Ã¡Â»Â£c bÃ¡Â»â€¢ sung kÃ¡Â»Â³ tÃ¡Â»â€¢ chÃ¡Â»Â©c: {linked_existing}, TÃ¡Â»â€¢ng: {len(incoming)}",
             'created': created,
             'updated': updated,
             'linkedExisting': linked_existing,
@@ -1052,7 +1109,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
             update_state({'status': 'failed', 'error': msg})
         return {
             'success': False,
-            'message': f"Lỗi: {msg}",
+            'message': f"LÃ¡Â»â€”i: {msg}",
             'created': 0,
             'updated': 0,
             'total': 0,
@@ -1096,7 +1153,7 @@ def sync_examination_from_google_sheet(spreadsheet_url=None, session_id=None, sh
         if not sheets:
             return {
                 'success': False,
-                'message': 'Chưa có tab nguồn nào được cấu hình.',
+                'message': 'ChÃ†Â°a cÃƒÂ³ tab nguÃ¡Â»â€œn nÃƒÂ o Ã„â€˜Ã†Â°Ã¡Â»Â£c cÃ¡ÂºÂ¥u hÃƒÂ¬nh.',
                 'created': 0,
                 'updated': 0,
                 'total': 0,
@@ -1107,7 +1164,7 @@ def sync_examination_from_google_sheet(spreadsheet_url=None, session_id=None, sh
         if unassigned:
             return {
                 'success': False,
-                'message': 'Có tab nguồn chưa được gắn với kỳ tổ chức: ' + ', '.join(unassigned),
+                'message': 'CÃƒÂ³ tab nguÃ¡Â»â€œn chÃ†Â°a Ã„â€˜Ã†Â°Ã¡Â»Â£c gÃ¡ÂºÂ¯n vÃ¡Â»â€ºi kÃ¡Â»Â³ tÃ¡Â»â€¢ chÃ¡Â»Â©c: ' + ', '.join(unassigned),
                 'created': 0,
                 'updated': 0,
                 'total': 0,
@@ -1133,7 +1190,7 @@ def sync_examination_from_google_sheet(spreadsheet_url=None, session_id=None, sh
             else:
                 error_messages.append(f"{sheet.name}: {res['message']}")
                 
-        status_text = f"Đã đồng bộ {success_count}/{len(sheets)} nguồn dữ liệu. (Tổng thêm mới: {total_created}, Cập nhật: {total_updated})"
+        status_text = f"Ã„ÂÃƒÂ£ Ã„â€˜Ã¡Â»â€œng bÃ¡Â»â„¢ {success_count}/{len(sheets)} nguÃ¡Â»â€œn dÃ¡Â»Â¯ liÃ¡Â»â€¡u. (TÃ¡Â»â€¢ng thÃƒÂªm mÃ¡Â»â€ºi: {total_created}, CÃ¡ÂºÂ­p nhÃ¡ÂºÂ­t: {total_updated})"
         status = 'failed' if len(error_messages) == len(sheets) else 'success'
         
         update_global_state({
@@ -1164,7 +1221,7 @@ def sync_examination_from_google_sheet(spreadsheet_url=None, session_id=None, sh
         })
         return {
             'success': False,
-            'message': f"Lỗi: {msg}",
+            'message': f"LÃ¡Â»â€”i: {msg}",
             'created': 0,
             'updated': 0,
             'total': 0,
