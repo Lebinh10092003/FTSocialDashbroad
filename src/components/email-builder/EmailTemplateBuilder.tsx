@@ -47,6 +47,7 @@ import { countEmailBlocks } from '../../lib/emailBlockTree';
 import VariablePicker from './VariablePicker';
 import EmailBuilderHeader from './EmailBuilderHeader';
 import EmailHtmlImportDialog from './EmailHtmlImportDialog';
+import EmailHtmlSourceDialog from './EmailHtmlSourceDialog';
 import AccountMenu from '../AccountMenu';
 import { EmailBuilderDialogProvider, useEmailBuilderDialog } from './EmailBuilderDialog';
 
@@ -86,6 +87,8 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
   const [variables, setVariables] = useState<EmailVariable[]>([]);
   const [showPreview, setShowPreview] = useState(false);
   const [showHtmlImport, setShowHtmlImport] = useState(false);
+  const [showHtmlSource, setShowHtmlSource] = useState(false);
+  const [htmlSource, setHtmlSource] = useState('');
   const [showVarPicker, setShowVarPicker] = useState(false);
   const [insertedVar, setInsertedVar] = useState<{ blockId: string; varName: string } | null>(null);
   const canvasRef = useRef<EmailCanvasHandle>(null);
@@ -669,6 +672,34 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     }
   };
 
+  const handleOpenHtmlSource = async () => {
+    const hadPendingChanges = canvasRef.current?.flushPendingChanges();
+    if (hadPendingChanges) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    const current = templatesRef.current.find(template => template.id === activeTemplateId);
+    if (!current) return;
+    setHtmlSource(generateEmailHtml(current, variables, false).html);
+    setShowHtmlSource(true);
+  };
+
+  const handleApplyHtmlSourceToCurrentTemplate = async (source: string): Promise<string | null> => {
+    const current = templatesRef.current.find(template => template.id === activeTemplateId);
+    if (!current) return 'Không tìm thấy email đang chỉnh sửa.';
+    try {
+      const imported = createEmailTemplateFromHtml(source, current.name, Date.now(), 'preserve');
+      commitActiveTemplate({
+        ...current,
+        subject: imported.subject || current.subject,
+        settings: current.settings,
+        blocks: imported.blocks,
+      });
+      setSelectedBlockId(imported.blocks[0]?.id || null);
+      showToast('Đã áp dụng mã HTML vào email hiện tại.');
+      return null;
+    } catch (error: any) {
+      return error?.message || 'Không thể đọc mã HTML.';
+    }
+  };
+
   const prepareActiveTemplateForDelivery = async () => {
     const current = templatesRef.current.find(template => template.id === activeTemplateId) || activeTemplate;
     if (!current) return null;
@@ -1048,6 +1079,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
         canManageSharing={isTemplateOwner(activeTemplate)}
         onRestoreDefaults={handleRestoreDefaults}
         onImportFile={handleImportFile}
+        onEditHtmlClick={handleOpenHtmlSource}
         onPasteHtmlClick={() => setShowHtmlImport(true)}
         onPreviewClick={handlePreviewEmail}
         onBackToWorkspace={handleBackToList}
@@ -1171,6 +1203,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
               {activeRightTab === 'block' && activeBlock ? (
                 <BlockSettings
                   block={activeBlock}
+                  variables={variables}
                   onUpdateBlockContent={(content) => selectedBlockId && handleUpdateBlockContent(selectedBlockId, content)}
                   onUpdateBlockStyles={(styles) => selectedBlockId && handleUpdateBlockStyles(selectedBlockId, styles)}
                   onUpdateBlock={(nextBlock) => selectedBlockId && handleUpdateWholeBlock(selectedBlockId, nextBlock)}
@@ -1213,6 +1246,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
         />
       )}
       {showHtmlImport && <EmailHtmlImportDialog context="edit" activeTemplateName={activeTemplate.name} onClose={() => setShowHtmlImport(false)} onCreateBlank={handleCreateBlankTemplate} onImport={handleImportPastedHtml} onApplyToCurrent={handleApplyPastedHtmlToCurrentTemplate} />}
+      {showHtmlSource && <EmailHtmlSourceDialog templateName={activeTemplate.name} initialHtml={htmlSource} onClose={() => setShowHtmlSource(false)} onApply={handleApplyHtmlSourceToCurrentTemplate} />}
 
       {showVarPicker && (
         <VariablePicker

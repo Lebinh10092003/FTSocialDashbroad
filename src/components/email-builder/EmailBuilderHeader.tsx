@@ -9,6 +9,7 @@ import {
   Download, 
   Upload, 
   Code2,
+  FileCode2,
   Trash2, 
   Eye, 
   Check, Edit2, Share2
@@ -31,6 +32,7 @@ interface EmailBuilderHeaderProps {
   canManageSharing: boolean;
   onRestoreDefaults: () => void;
   onImportFile: (file: File) => Promise<void>;
+  onEditHtmlClick: () => void;
   onPasteHtmlClick: () => void;
   onPreviewClick: () => void;
   onBackToWorkspace: () => void;
@@ -64,6 +66,7 @@ export default function EmailBuilderHeader({
   canManageSharing,
   onRestoreDefaults,
   onImportFile,
+  onEditHtmlClick,
   onPasteHtmlClick,
   onPreviewClick,
   onBackToWorkspace,
@@ -217,6 +220,15 @@ export default function EmailBuilderHeader({
           onChange={handleFileChange}
           className="hidden"
         />
+
+        <button
+          onClick={onEditHtmlClick}
+          title="Xem và sửa mã HTML của email đang mở"
+          className={iconButtonClass}
+          disabled={isGuest}
+        >
+          <FileCode2 className="w-3.5 h-3.5" />
+        </button>
 
         <button
           onClick={onPasteHtmlClick}

@@ -8,5 +8,6 @@ export const DEFAULT_EMAIL_VARIABLES: EmailVariable[] = [
   { key: 'Trường', label: 'Trường học', defaultValue: 'Tiểu học Đoàn Thị Điểm' },
   { key: 'Mã thí sinh', label: 'Mã số thí sinh', defaultValue: 'AYSBC-50123' },
   { key: 'Ngày thi', label: 'Ngày thi', defaultValue: '25/10/2026' },
-  { key: 'Link đăng ký', label: 'Link đăng ký cá nhân', defaultValue: 'https://aysbc.fermat.vn/register?code=AYSBC-50123' }
+  { key: 'Link đăng ký', label: 'Link đăng ký cá nhân', defaultValue: 'https://aysbc.fermat.vn/register?code=AYSBC-50123' },
+  { key: 'Link xác nhận', label: 'Link xác nhận thông tin', defaultValue: 'https://example.com/xac-nhan?student=FT-00010' }
 ];

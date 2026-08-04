@@ -213,7 +213,7 @@ export function generateEmailHtml(
 <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
     <td align="${align}" style="padding: 0;">
-      ${link ? `<a href="${rep(link)}" target="_blank" style="text-decoration: none; border: none; outline: none;">` : ''}
+      ${link ? `<a href="${rep(link)}" target="_blank" rel="noopener noreferrer" style="text-decoration: none; border: none; outline: none;">` : ''}
         <img src="${rep(url)}" alt="${rep(alt)}" width="${width}"${height ? ` height="${height}"` : ''} style="display: block; border: 0; outline: none; text-decoration: none; width: ${width}px; max-width: 100%; height: ${height ? `${height}px` : 'auto'}; object-fit: contain; margin: ${align === 'center' ? '0 auto' : align === 'right' ? '0 0 0 auto' : '0'};" />
       ${link ? `</a>` : ''}
     </td>
@@ -295,7 +295,7 @@ export function generateEmailHtml(
 <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; border-collapse: collapse; margin-top: ${marginTop}px; margin-bottom: ${marginBottom}px;">
   <tr>
     <td align="${align}" style="padding: 0;">
-      ${link ? `<a href="${rep(link)}" target="_blank" style="text-decoration: none; border: none; outline: none;">` : ''}
+      ${link ? `<a href="${rep(link)}" target="_blank" rel="noopener noreferrer" style="text-decoration: none; border: none; outline: none;">` : ''}
         <img src="${rep(url)}" alt="${rep(alt)}" width="${width}"${height ? ` height="${height}"` : ''} style="display: block; border: 0; outline: none; text-decoration: none; width: ${width}px; max-width: 100%; height: ${height ? `${height}px` : 'auto'}; object-fit: ${height ? 'cover' : 'contain'}; border-radius: ${borderRadius}px; margin: ${align === 'center' ? '0 auto' : align === 'right' ? '0 0 0 auto' : '0'};" />
       ${link ? `</a>` : ''}
     </td>
@@ -354,7 +354,7 @@ export function generateEmailHtml(
       <table role="presentation" class="ft-email-button-table" border="0" cellspacing="0" cellpadding="0" style="width: ${width === 'full' ? '100%' : 'auto'};${minWidth ? `min-width:${minWidth}px;` : ''} border-collapse: collapse;">
         <tr>
           <td class="ft-email-button-cell" align="center" bgcolor="${bg}" style="border-radius: ${radius}px; padding: ${paddingY}px ${paddingX}px;${minWidth ? `min-width:${minWidth}px;` : ''} text-align: center; background-color: ${bg}; white-space: normal;" valign="middle">
-            <a class="ft-email-button-text" href="${rep(link)}" target="_blank" style="display: ${width === 'full' ? 'block' : 'inline-block'}; font-family: ${fontFamily}; color: ${color}; font-size: ${fontSize}px; font-weight: bold; text-decoration: none; border-radius: ${radius}px; background-color: ${bg}; ${width === 'full' ? 'width: 100%;' : 'width: auto;'} box-sizing: border-box; white-space: normal; overflow-wrap: anywhere;">
+            <a class="ft-email-button-text" href="${rep(link)}" target="_blank" rel="noopener noreferrer" style="display: ${width === 'full' ? 'block' : 'inline-block'}; font-family: ${fontFamily}; color: ${color}; font-size: ${fontSize}px; font-weight: bold; text-decoration: none; border-radius: ${radius}px; background-color: ${bg}; ${width === 'full' ? 'width: 100%;' : 'width: auto;'} box-sizing: border-box; white-space: normal; overflow-wrap: anywhere;">
               ${renderedText}
             </a>
           </td>
@@ -377,7 +377,7 @@ export function generateEmailHtml(
           const minWidth = Math.max(0, Number(button.minWidth) || 0);
           const fontSize = Number(button.fontSize) || 14;
           const renderedButtonText = preserveRichTextLineBreaks(rep(sanitizeHtml(button.html || escapePlainTextHtml(button.text || ''))));
-          return `<td class="ft-email-button-cell" align="center" bgcolor="${button.bg || '#0F3A72'}"${minWidth ? ` width="${minWidth}"` : ''} style="border-radius:${button.radius ?? 8}px;padding:${paddingY}px ${paddingX}px;background-color:${button.bg || '#0F3A72'};${minWidth ? `min-width:${minWidth}px;` : ''}"><a class="ft-email-button-text" href="${rep(button.link || '')}" target="_blank" style="display:inline-block;font-family:${fontFamily};color:${button.color || '#ffffff'};font-size:${fontSize}px;line-height:1.2;font-weight:bold;text-decoration:none;white-space:normal;overflow-wrap:anywhere;">${renderedButtonText}</a></td>${index < buttons.length - 1 ? `<td class="ft-email-button-gap" width="${gap}" style="width:${gap}px;font-size:1px;line-height:1px;padding:0;margin:0;">&nbsp;</td>` : ''}`;
+          return `<td class="ft-email-button-cell" align="center" bgcolor="${button.bg || '#0F3A72'}"${minWidth ? ` width="${minWidth}"` : ''} style="border-radius:${button.radius ?? 8}px;padding:${paddingY}px ${paddingX}px;background-color:${button.bg || '#0F3A72'};${minWidth ? `min-width:${minWidth}px;` : ''}"><a class="ft-email-button-text" href="${rep(button.link || '')}" target="_blank" rel="noopener noreferrer" style="display:inline-block;font-family:${fontFamily};color:${button.color || '#ffffff'};font-size:${fontSize}px;line-height:1.2;font-weight:bold;text-decoration:none;white-space:normal;overflow-wrap:anywhere;">${renderedButtonText}</a></td>${index < buttons.length - 1 ? `<td class="ft-email-button-gap" width="${gap}" style="width:${gap}px;font-size:1px;line-height:1px;padding:0;margin:0;">&nbsp;</td>` : ''}`;
         }).join('');
         return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr><td align="${align}" style="padding:0;"><table role="presentation" class="ft-email-button-group" border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;display:inline-table;"><tr>${cells}</tr></table></td></tr></table>`;
       }
@@ -466,7 +466,7 @@ export function generateEmailHtml(
             checkLinkUrl(link.url, 'Mạng xã hội');
             return `
             <td style="padding: 0 8px; font-family: ${fontFamily}; font-size: 13px;">
-              <a href="${rep(link.url)}" target="_blank" style="color: ${linkColor}; text-decoration: none; font-weight: bold;">
+              <a href="${rep(link.url)}" target="_blank" rel="noopener noreferrer" style="color: ${linkColor}; text-decoration: none; font-weight: bold;">
                 ${rep(link.label)}
               </a>
             </td>

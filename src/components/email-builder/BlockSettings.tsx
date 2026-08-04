@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlignCenter, AlignLeft, AlignRight, Link2, Lock, LockOpen, Plus, Search, Trash2, Upload } from 'lucide-react';
-import { EmailBlock } from '../../types/emailBuilder';
+import { EmailBlock, EmailVariable } from '../../types/emailBuilder';
 import { addEmailLayoutCell, getLayoutSlotIndex, normalizeEmailLayout, removeEmailLayoutCell, resizeEmailLayout, updateEmailLayoutCell, updateEmailLayoutColumn } from '../../lib/emailLayout';
 import { getBlockDefinition } from '../../data/emailBlockRegistry';
 import ColorField from './ColorField';
@@ -10,6 +10,7 @@ import { useEmailBuilderDialog } from './EmailBuilderDialog';
 
 interface BlockSettingsProps {
   block: EmailBlock;
+  variables?: EmailVariable[];
   onUpdateBlockContent: (content: Record<string, any>) => void;
   onUpdateBlockStyles: (styles: Record<string, any>) => void;
   onUpdateBlockColumns?: (columns: EmailBlock[][]) => void;
@@ -59,7 +60,7 @@ function NumberDraft({ value, min = 0, max = 2000, step = 1, onCommit, label, li
   return <div><label className="mb-1 block text-[10px] font-bold text-slate-500">{label}</label><input ref={inputRef} type="number" min={min} max={max} step={step} value={draft} onChange={event => { const raw = event.target.value; dirtyRef.current = true; setDraft(raw); const parsed = Number(raw); if (live && raw.trim() !== '' && Number.isFinite(parsed) && parsed >= min && parsed <= max) { dirtyRef.current = false; onCommit(parsed); } }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); commit(draft); event.currentTarget.select(); } }} onBlur={() => commit(draft)} className={fieldClass} /></div>;
 }
 
-export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlockStyles, onUpdateBlockColumns, onUpdateBlock, onApplySelectionFontSize, onApplySelectionTextColor, hasTextSelection = false, selectionFontSize, selectionTextColor, selectionEditorKey }: BlockSettingsProps) {
+export default function BlockSettings({ block, variables = [], onUpdateBlockContent, onUpdateBlockStyles, onUpdateBlockColumns, onUpdateBlock, onApplySelectionFontSize, onApplySelectionTextColor, hasTextSelection = false, selectionFontSize, selectionTextColor, selectionEditorKey }: BlockSettingsProps) {
   const content = block.content;
   const styles = block.styles;
   const definition = getBlockDefinition(block.type);
@@ -173,6 +174,23 @@ export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlo
     if (buttons.length >= 3) return;
     onUpdateBlockContent({ ...content, buttons: [...buttons, { text: `Nút thứ ${buttons.length + 1}`, link: 'https://www.fermat.vn', bg: '#1473d1', color: '#ffffff', radius: 8, fontSize: 13, paddingX: 14, paddingY: 10, minWidth: 0 }] });
   };
+  const renderLinkBinding = (value: string, onChange: (next: string) => void, label = 'Liên kết / URL') => {
+    const tokenMatch = value.trim().match(/^\{\{\s*([^}]+?)\s*\}\}$/);
+    const selectedKey = tokenMatch?.[1] || '';
+    const selectedVariable = variables.find(variable => variable.key === selectedKey);
+    return <div className="space-y-1.5">
+      <label className="block text-[10px] font-bold text-slate-500">{label}</label>
+      <input value={value} onChange={event => onChange(event.target.value)} placeholder="https://... hoặc {{Link xác nhận}}" className={fieldClass} />
+      <label className="block text-[10px] font-bold text-slate-500">Liên kết động theo cột dữ liệu</label>
+      <select value={selectedKey} onChange={event => onChange(event.target.value ? `{{${event.target.value}}}` : '')} className={fieldClass}>
+        <option value="">URL cố định / tự nhập</option>
+        {selectedKey && !selectedVariable && <option value={selectedKey}>{`{{${selectedKey}}}`} (chưa khai báo)</option>}
+        {variables.map(variable => <option key={variable.key} value={variable.key}>{`{{${variable.key}}}`} · {variable.label || variable.key}</option>)}
+      </select>
+      <p className="text-[10px] leading-4 text-slate-500">Chọn biến trùng tên cột, ví dụ cột “Link xác nhận” sẽ dùng <code>{'{{Link xác nhận}}'}</code>. File HTML xuất ra giữ nguyên biến này để luồng gửi mail thay bằng URL của từng dòng.</p>
+    </div>;
+  };
+
   const layoutState = block.type === 'columns' ? normalizeEmailLayout(block) : null;
   const commitLayout = (nextBlock: EmailBlock) => {
     if (onUpdateBlock) onUpdateBlock(nextBlock);
@@ -270,7 +288,7 @@ export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlo
     {block.type === 'button' && <section className="space-y-3">
       <h4 className="text-[10px] font-black uppercase">Nút CTA</h4>
       <div><label className="mb-1 block text-[10px] font-bold text-slate-500">Nhãn nút</label><textarea value={content.text || ''} onChange={event => onUpdateBlockContent({ ...content, text: event.target.value, html: '' })} rows={2} className={fieldClass} /></div>
-      <div><label className="mb-1 block text-[10px] font-bold text-slate-500">Liên kết</label><input value={content.link || ''} onChange={event => updateContent('link', event.target.value)} className={fieldClass} /></div>
+      {renderLinkBinding(content.link || '', value => updateContent('link', value))}
       <div className="grid grid-cols-2 gap-2"><NumberDraft live label="Cỡ chữ (px)" value={hasTextSelection ? selectionFontSize : content.fontSize ?? 15} min={8} max={96} onCommit={value => { const size = value === '' ? 15 : value; if (!onApplySelectionFontSize?.(size)) updateContent('fontSize', size); }} /><NumberDraft label="Rộng tối thiểu (px)" value={content.minWidth ?? 0} max={600} onCommit={value => updateContent('minWidth', value === '' ? 0 : value)} /><NumberDraft label="Đệm ngang (px)" value={content.paddingX ?? 24} max={100} onCommit={value => updateContent('paddingX', value === '' ? 24 : value)} /><NumberDraft label="Đệm dọc (px)" value={content.paddingY ?? 12} max={60} onCommit={value => updateContent('paddingY', value === '' ? 12 : value)} /><NumberDraft label="Bo góc (px)" value={content.radius ?? 8} max={80} onCommit={value => updateContent('radius', value === '' ? 8 : value)} /></div>
       <div><label className="mb-1 block text-[10px] font-bold text-slate-500">Độ rộng nút</label><select value={content.width || 'auto'} onChange={event => updateContent('width', event.target.value)} className={fieldClass}><option value="auto">Theo nội dung</option><option value="full">Toàn chiều rộng</option></select></div>
       {alignControl}
@@ -283,7 +301,7 @@ export default function BlockSettings({ block, onUpdateBlockContent, onUpdateBlo
       {groupButtons().map((button: any, index: number) => <div key={index} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
         <div className="flex items-center justify-between"><p className="text-[10px] font-black uppercase">Nút {index + 1}</p>{groupButtons().length > 2 && <button type="button" onClick={() => onUpdateBlockContent({ ...content, buttons: groupButtons().filter((_, buttonIndex) => buttonIndex !== index) })} className="rounded p-1 text-rose-500" title="Xóa nút"><Trash2 className="h-4 w-4" /></button>}</div>
         <textarea value={button.text || ''} onChange={event => updateGroupButton(index, { text: event.target.value, html: '' })} rows={2} placeholder="Nhãn nút" className={fieldClass} />
-        <input value={button.link || ''} onChange={event => updateGroupButton(index, { link: event.target.value })} placeholder="https://..." className={fieldClass} />
+        {renderLinkBinding(button.link || '', value => updateGroupButton(index, { link: value }), `Li\u00ean k\u1ebft n\u00fat ${index + 1}`)}
         <div className="grid grid-cols-2 gap-2"><NumberDraft live label="Cỡ chữ (px)" value={hasTextSelection && selectionEditorKey === `${block.id}:button:${index}` ? selectionFontSize : button.fontSize ?? 14} min={8} max={96} onCommit={value => { const size = value === '' ? 14 : value; if (!(hasTextSelection && selectionEditorKey === `${block.id}:button:${index}` && onApplySelectionFontSize?.(size))) updateGroupButton(index, { fontSize: size }); }} /><NumberDraft label="Rộng tối thiểu (px)" value={button.minWidth ?? 0} max={400} onCommit={value => updateGroupButton(index, { minWidth: value === '' ? 0 : value })} /><NumberDraft label="Đệm ngang (px)" value={button.paddingX ?? 18} max={80} onCommit={value => updateGroupButton(index, { paddingX: value === '' ? 18 : value })} /><NumberDraft label="Đệm dọc (px)" value={button.paddingY ?? 11} max={50} onCommit={value => updateGroupButton(index, { paddingY: value === '' ? 11 : value })} /><NumberDraft label="Bo góc (px)" value={button.radius ?? 8} max={80} onCommit={value => updateGroupButton(index, { radius: value === '' ? 8 : value })} /></div>
         <div className="grid grid-cols-2 gap-2"><ColorField label="Màu nền" value={button.bg || '#0F3A72'} onChange={value => updateGroupButton(index, { bg: value })} /><ColorField label={hasTextSelection && selectionEditorKey === `${block.id}:button:${index}` ? 'Màu chữ vùng chọn' : 'Màu chữ'} value={hasTextSelection && selectionEditorKey === `${block.id}:button:${index}` && selectionTextColor ? selectionTextColor : button.color || '#ffffff'} onChange={value => { if (!(hasTextSelection && selectionEditorKey === `${block.id}:button:${index}` && onApplySelectionTextColor?.(value))) updateGroupButton(index, { color: value }); }} /></div>
       </div>)}
