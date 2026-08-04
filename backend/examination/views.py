@@ -40,6 +40,14 @@ def audit_actor(request):
     return getattr(request.user, 'email', '') or getattr(request, 'user_email', '') or 'Nhân viên FT Workspace'
 
 
+def normalize_online_room_link(value):
+    """Accept familiar Meet/Facebook links pasted without an explicit protocol."""
+    link = str(value or '').strip()
+    host = link.split('/', 1)[0].casefold()
+    is_facebook_host = host == 'facebook.com' or host.endswith('.facebook.com') or host in {'fb.com', 'www.fb.com', 'fb.watch', 'm.me', 'www.m.me'}
+    return f'https://{link}' if host == 'meet.google.com' or is_facebook_host else link
+
+
 def describe_rounds(rounds):
     """Describe every configured round and its concrete days/slots for audit logs."""
     if not isinstance(rounds, list):
@@ -1479,7 +1487,7 @@ def exam_room_allocation(request, session_id, round_id):
             return Response({'error': f'Phòng thứ {position + 1} không đúng định dạng.'}, status=status.HTTP_400_BAD_REQUEST)
         number = str(item.get('number') or '').strip()
         location = str(item.get('location') or '').strip()
-        link = str(item.get('link') or '').strip()
+        link = normalize_online_room_link(item.get('link'))
         if not number:
             return Response({'error': f'Vui lòng nhập số hoặc mã cho phòng thứ {position + 1}.'}, status=status.HTTP_400_BAD_REQUEST)
         if len(number) > 100:
@@ -1493,7 +1501,7 @@ def exam_room_allocation(request, session_id, round_id):
         if mode == ExamRoom.MODE_ONLINE:
             parsed_link = urllib.parse.urlparse(link)
             if parsed_link.scheme not in {'http', 'https'} or not parsed_link.netloc:
-                return Response({'error': f'Link của phòng "{number}" chưa hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'error': f'Link của phòng "{number}" chưa hợp lệ. Có thể dán link Google Meet/Facebook không cần https://.'}, status=status.HTTP_400_BAD_REQUEST)
         cleaned_rooms.append({
             'number': number,
             'label': f'{common_name} {number}'.strip(),

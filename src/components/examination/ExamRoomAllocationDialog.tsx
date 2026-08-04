@@ -44,6 +44,11 @@ const authHeaders = (idToken?: string | null) => ({
   'Content-Type': 'application/json',
   Authorization: `Bearer ${idToken || ''}`,
 });
+const normalizeOnlineLink = (value: string) => {
+  const link = value.trim();
+  if (/^https?:\/\/\S+$/i.test(link)) return link;
+  return /^(?:meet\.google\.com|(?:[a-z0-9-]+\.)?facebook\.com|(?:www\.)?(?:fb\.com|fb\.watch|m\.me))(?:\/|$)/i.test(link) ? `https://${link}` : link;
+};
 
 export default function ExamRoomAllocationDialog({ sessionId, round, candidateCount, idToken, onAllocated }: Props) {
   const [open, setOpen] = useState(false);
@@ -146,8 +151,9 @@ export default function ExamRoomAllocationDialog({ sessionId, round, candidateCo
       setError('Mỗi phòng trực tiếp cần có địa chỉ/số phòng.');
       return;
     }
-    if (mode === 'ONLINE' && rooms.some(room => !/^https?:\/\/\S+$/i.test(room.link.trim()))) {
-      setError('Mỗi phòng trực tuyến cần có link bắt đầu bằng http:// hoặc https://.');
+    const normalizedOnlineRooms = rooms.map(room => ({ ...room, link: normalizeOnlineLink(room.link) }));
+    if (mode === 'ONLINE' && normalizedOnlineRooms.some(room => !/^https?:\/\/\S+$/i.test(room.link))) {
+      setError('Vui lòng nhập link hợp lệ. Link Google Meet/Facebook có thể dán không cần https://.');
       return;
     }
     if (strategy === 'CAPACITY' && maxCandidates <= 0) {
@@ -172,7 +178,7 @@ export default function ExamRoomAllocationDialog({ sessionId, round, candidateCo
           rooms: rooms.map(room => ({
             number: room.number.trim(),
             location: room.location.trim(),
-            link: room.link.trim(),
+            link: normalizeOnlineLink(room.link),
           })),
         }),
       });
@@ -271,7 +277,7 @@ export default function ExamRoomAllocationDialog({ sessionId, round, candidateCo
                 <label><span className="mb-1 block text-xs font-bold text-slate-500">Số/mã phòng</span><input value={room.number} onChange={event => updateRoom(room.id, 'number', event.target.value)} maxLength={100} placeholder="101" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2"/></label>
                 {mode === 'IN_PERSON'
                   ? <label><span className="mb-1 block text-xs font-bold text-slate-500">Địa chỉ / vị trí / số phòng</span><input value={room.location} onChange={event => updateRoom(room.id, 'location', event.target.value)} placeholder="Tầng 2, số 10 Trần Phú, Hà Nội" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2"/></label>
-                  : <label><span className="mb-1 block text-xs font-bold text-slate-500">Link phòng trực tuyến</span><input type="url" value={room.link} onChange={event => updateRoom(room.id, 'link', event.target.value)} placeholder="https://meet.google.com/..." className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2"/></label>}
+                  : <label><span className="mb-1 block text-xs font-bold text-slate-500">Link phòng trực tuyến</span><input type="url" value={room.link} onChange={event => updateRoom(room.id, 'link', event.target.value)} placeholder="meet.google.com/... hoặc facebook.com/..." className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2"/></label>}
                 <div><span className="mb-1 block text-xs font-bold text-slate-500">Dự kiến</span><div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-extrabold text-[#001e40]">{roomCounts[index] || 0} thí sinh</div></div>
                 <button type="button" disabled={rooms.length === 1} onClick={() => setRooms(current => current.filter(item => item.id !== room.id))} className="inline-flex h-10 items-center justify-center rounded-lg border border-rose-200 px-3 text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-35" aria-label={`Xóa phòng ${index + 1}`}><Trash2 className="h-4 w-4"/></button>
               </article>)}

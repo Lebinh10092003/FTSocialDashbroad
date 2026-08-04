@@ -473,6 +473,23 @@ class ExamRoomAllocationTests(TestCase):
         self.assertTrue(exported[2][round_start + 5].startswith('Zoom 01'))
         self.assertEqual(exported[2][round_start + 6], 'https://meet.example.test/room-01')
 
+
+    def test_meet_and_facebook_links_without_protocol_are_normalized(self):
+        response = self.client.post(self.url, {
+            'commonName': 'Phòng trực tuyến',
+            'mode': 'ONLINE',
+            'allocationStrategy': 'BALANCED',
+            'rooms': [
+                {'number': 'Meet', 'link': 'meet.google.com/abc-defg-hij'},
+                {'number': 'Facebook', 'link': 'm.facebook.com/groups/example'},
+            ],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            set(ExamRoom.objects.values_list('link', flat=True)),
+            {'https://meet.google.com/abc-defg-hij', 'https://m.facebook.com/groups/example'},
+        )
     def test_import_uses_stable_round_id_when_round_name_changes(self):
         from .views import upsert_participation_history
 
