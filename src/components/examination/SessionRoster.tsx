@@ -15,6 +15,10 @@ const dash = (value?: string) => value || '—';
 const roundFields: Array<[keyof CandidateExamHistory, string]> = [['eligibility', 'Điều kiện dự thi'], ['sbd', 'Số báo danh'], ['date', 'Ngày thi'], ['time', 'Giờ / ca thi'], ['mode', 'Hình thức'], ['location', 'Địa điểm / phòng'], ['link', 'Link dự thi (Nếu có)'], ['account', 'Tài khoản'], ['password', 'Mật khẩu'], ['attendance', 'Trạng thái dự thi'], ['score', 'Điểm'], ['scoreRate', 'Tỷ lệ điểm'], ['rank', 'Xếp hạng'], ['result', 'Kết quả'], ['note', 'Ghi chú']];
 const registrationFields = [['subject', 'Môn / lĩnh vực'], ['category', 'Bảng thi'], ['registrationMethod', 'Hình thức đăng ký'], ['registrationUnit', 'Đơn vị đăng ký'], ['teamName', 'Đội / nhóm'], ['examLanguage', 'Ngôn ngữ thi'], ['generalNote', 'Ghi chú chung'], ['certificateLink', 'Link chứng nhận']] as const;
 const blankSlot = (): SessionRoundSlot => ({ id: `slot-${Date.now()}-${Math.random().toString(16).slice(2)}`, date: '', time: '', mode: '', link: '', location: '', note: '' });
+const normalizeRosterText = (value?: string) => (value || '').toLocaleLowerCase('vi').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\u0111/g, 'd').replace(/[^a-z0-9]+/g, '');
+const rosterGrade = (candidate: Candidate) => { const match = String(candidate.grade || candidate.className || '').match(/\d+/); return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER; };
+const rosterNameKey = (candidate: Candidate) => { const words = candidate.name.trim().split(/\s+/).filter(Boolean); const nationality = normalizeRosterText(candidate.nationality); const vietnamese = !nationality || nationality === 'vietnam'; return normalizeRosterText(vietnamese ? words.at(-1) : words[0]); };
+const compareSessionCandidates = (left: Candidate, right: Candidate) => rosterGrade(left) - rosterGrade(right) || rosterNameKey(left).localeCompare(rosterNameKey(right), 'vi', { numeric: true }) || left.name.localeCompare(right.name, 'vi', { numeric: true }) || left.code.localeCompare(right.code, 'en', { numeric: true });
 
 export default function SessionRoster({ session, candidates, toolbar, onOpenCandidate, idToken, canEdit, onCandidateUpdated, onCandidatesUpdated, onSessionUpdated, tab: controlledTab, onTabChange, hideTabs }: Props) {
   const [localTab, setLocalTab] = useState<RosterTab>('info');
@@ -30,7 +34,7 @@ export default function SessionRoster({ session, candidates, toolbar, onOpenCand
   const rounds = sessionRounds(session);
   useEffect(() => { if (typeof tab === 'number') setRoundSection('info'); }, [tab]);
   useEffect(() => setRosterPage(1), [query, tab, roundSection]);
-  const rows = useMemo(() => candidates.filter(candidate => candidate.sessionIds?.includes(session.id) || candidate.participations?.some(item => item.sessionId === session.id) || (!candidate.sessionIds?.length && (candidate.contests || '').includes(session.code))), [candidates, session]);
+  const rows = useMemo(() => candidates.filter(candidate => candidate.sessionIds?.includes(session.id) || candidate.participations?.some(item => item.sessionId === session.id) || (!candidate.sessionIds?.length && (candidate.contests || '').includes(session.code))).sort(compareSessionCandidates), [candidates, session]);
   const filtered = rows.filter(candidate => { const participation = candidate.participations?.find(item => item.sessionId === session.id); return [candidate.code, candidate.name, candidate.birthDate, candidate.className, candidate.school, candidate.city, ...Object.values(participation?.registration || {}), ...(participation?.rounds || []).flatMap(round => Object.values(round))].join(' ').toLocaleLowerCase('vi').includes(query.toLocaleLowerCase('vi')); });
   const entryForRound = (candidate: Candidate, index: number) => candidate.participations?.find(item => item.sessionId === session.id)?.rounds?.[index];
   const isEligibleForRound = (candidate: Candidate, index: number) => entryForRound(candidate, index)?.eligibility === 'Đủ điều kiện';

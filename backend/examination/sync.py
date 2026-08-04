@@ -669,15 +669,28 @@ def _round_slots(round_results):
     return slots
 
 
+def session_candidate_sort_key(candidate):
+    """Sort a session roster by grade, then the culturally appropriate given name."""
+    grade_source = clean_txt(candidate.grade) or clean_txt(candidate.class_name)
+    grade_match = re.search(r'\d+', grade_source)
+    grade = int(grade_match.group()) if grade_match else 999
+    words = [word for word in re.split(r'\s+', clean_txt(candidate.name)) if word]
+    nationality = normalise_str(candidate.nationality)
+    # Empty nationality remains Vietnamese for the existing SCO data. For an
+    # overseas record, use its first name instead of applying Vietnamese order.
+    is_vietnamese = not nationality or nationality in {'vietnam', 'viet nam'}
+    given_name = words[-1] if is_vietnamese and words else (words[0] if words else '')
+    return (grade, normalise_str(given_name), normalise_str(candidate.name), normalise_str(candidate.code))
+
 def session_export_rows(session_id):
     """Build a re-importable export matching the official candidate template."""
     rows = [EXPORT_GROUP_HEADERS, EXPORT_HEADERS]
-    participations = (
+    participations = list(
         CandidateParticipation.objects.filter(session_id=session_id)
         .select_related('candidate')
         .prefetch_related('round_results')
-        .order_by('candidate__sort_key', 'candidate__code')
     )
+    participations.sort(key=lambda item: session_candidate_sort_key(item.candidate))
     for sequence, participation in enumerate(participations, start=1):
         candidate = participation.candidate
         row = [
