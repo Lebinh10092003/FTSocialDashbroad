@@ -55,7 +55,8 @@ const escapeEditableText = (text = '') => text
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;')
   .replace(/\r\n?|\n/g, '<br>');
-const buttonEditableHtml = (html = '', text = '') => editableHtml(html) || escapeEditableText(text);
+const stripButtonInnerLinks = (html = '') => html.replace(/<\/?a\b[^>]*>/gi, '');
+const buttonEditableHtml = (html = '', text = '') => stripButtonInnerLinks(editableHtml(html) || escapeEditableText(text));
 
 interface EmailCanvasProps {
   blocks: EmailBlock[];
@@ -590,7 +591,7 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     const buttonEditorKey = `${block.id}:button`;
     const groupEditorKey = (buttonIndex: number) => `${block.id}:button:${buttonIndex}`;
     const commitButtonEditor = (editable: HTMLElement) => {
-      const html = normalizeEditableHtml(editable.innerHTML);
+      const html = stripButtonInnerLinks(normalizeEditableHtml(editable.innerHTML));
       const text = editable.innerText.replace(/\r\n?/g, '\n');
       if (html === normalizeEditableHtml(buttonEditableHtml(content.html, content.text || '')) && text === (content.text || '')) return false;
       onUpdateBlockContent(block.id, { ...content, html, text });
@@ -599,7 +600,7 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     const commitGroupButtonEditor = (buttonIndex: number, editable: HTMLElement) => {
       const button = groupButtons[buttonIndex];
       if (!button) return false;
-      const html = normalizeEditableHtml(editable.innerHTML);
+      const html = stripButtonInnerLinks(normalizeEditableHtml(editable.innerHTML));
       const text = editable.innerText.replace(/\r\n?/g, '\n');
       if (html === normalizeEditableHtml(buttonEditableHtml(button.html, button.text || '')) && text === (button.text || '')) return false;
       updateGroupButton(buttonIndex, { html, text });

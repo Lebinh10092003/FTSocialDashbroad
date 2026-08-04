@@ -43,6 +43,9 @@ const escapePlainTextHtml = (text = '') => text
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;');
 
+// A button owns its URL through its outer anchor; nested anchors make browsers resolve {{Variable}} as a relative URL.
+const stripButtonInnerLinks = (html: string) => html.replace(/<\/?a\b[^>]*>/gi, '');
+
 /** Turn pasted bare web addresses into safe, clickable links without changing existing anchors. */
 const autoLinkPlainUrls = (html: string, linkColor: string) => {
   if (typeof DOMParser === 'undefined') return html;
@@ -332,7 +335,7 @@ export function generateEmailHtml(
 
       case 'button': {
         const text = content.text || '';
-        const renderedText = preserveRichTextLineBreaks(rep(sanitizeHtml(content.html || escapePlainTextHtml(text))));
+        const renderedText = preserveRichTextLineBreaks(rep(stripButtonInnerLinks(sanitizeHtml(content.html || escapePlainTextHtml(text)))));
         const link = content.link || '';
         const bg = content.bg || settings.btnDefaultBg || '#1473d1';
         const color = content.color || settings.btnDefaultTextColor || '#ffffff';
@@ -376,7 +379,7 @@ export function generateEmailHtml(
           const paddingY = Number(button.paddingY) || 11;
           const minWidth = Math.max(0, Number(button.minWidth) || 0);
           const fontSize = Number(button.fontSize) || 14;
-          const renderedButtonText = preserveRichTextLineBreaks(rep(sanitizeHtml(button.html || escapePlainTextHtml(button.text || ''))));
+          const renderedButtonText = preserveRichTextLineBreaks(rep(stripButtonInnerLinks(sanitizeHtml(button.html || escapePlainTextHtml(button.text || '')))));
           return `<td class="ft-email-button-cell" align="center" bgcolor="${button.bg || '#0F3A72'}"${minWidth ? ` width="${minWidth}"` : ''} style="border-radius:${button.radius ?? 8}px;padding:${paddingY}px ${paddingX}px;background-color:${button.bg || '#0F3A72'};${minWidth ? `min-width:${minWidth}px;` : ''}"><a class="ft-email-button-text" href="${rep(button.link || '')}" target="_blank" rel="noopener noreferrer" style="display:inline-block;font-family:${fontFamily};color:${button.color || '#ffffff'};font-size:${fontSize}px;line-height:1.2;font-weight:bold;text-decoration:none;white-space:normal;overflow-wrap:anywhere;">${renderedButtonText}</a></td>${index < buttons.length - 1 ? `<td class="ft-email-button-gap" width="${gap}" style="width:${gap}px;font-size:1px;line-height:1px;padding:0;margin:0;">&nbsp;</td>` : ''}`;
         }).join('');
         return `<table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr><td align="${align}" style="padding:0;"><table role="presentation" class="ft-email-button-group" border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;display:inline-table;"><tr>${cells}</tr></table></td></tr></table>`;
