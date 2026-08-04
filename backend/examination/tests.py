@@ -943,6 +943,40 @@ class SessionOutputSheetTests(TestCase):
         self.assertGreater(preview['writeChangedCells'], 0)
 
 
+    def test_round_template_slot_controls_import_and_export_column(self):
+        from .sync import EXPORT_GROUP_HEADERS, EXPORT_HEADERS, history_from_sheet_row, merged_headers, session_export_rows
+        from .views import upsert_participation_history
+
+        self.session.rounds = [
+            {'id': 'screening', 'name': 'Screening'},
+            {'id': 'national-final', 'name': 'National Final'},
+            {'id': 'international-final', 'name': 'International Final'},
+        ]
+        self.session.save(update_fields=['rounds'])
+        candidate = Candidate.objects.create(
+            id='FT-ROUND-SLOT', code='FT-ROUND-SLOT', name='Round Slot Candidate',
+            highest_round='V\u00f2ng 1 \u2013 Screening', sort_key='round-slot-candidate',
+        )
+        headers = merged_headers([EXPORT_GROUP_HEADERS, EXPORT_HEADERS], 1)
+        imported_row = [''] * len(headers)
+        imported_row[36] = 'Eligible'
+        imported_row[38] = '09/08/2026'
+        history = history_from_sheet_row(headers, imported_row)
+
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]['templateSlot'], 2)
+        self.assertEqual(history[0]['templateColumns']['eligibility'], 'AK')
+        self.assertEqual(history[0]['templateColumns']['date'], 'AM')
+        upsert_participation_history(candidate, self.session.id, history)
+        result = RoundResult.objects.get(participation__candidate=candidate)
+        self.assertEqual(result.round_id, 'national-final')
+
+        exported = session_export_rows(self.session.id)[2]
+        self.assertEqual(exported[21], '')
+        self.assertEqual(exported[36], '\u0110\u1ee7 \u0111i\u1ec1u ki\u1ec7n')
+        self.assertEqual(exported[66], 'V\u00f2ng 2 \u2013 National Final')
+
+
 class ExaminationSheetAutomationTests(TestCase):
     def setUp(self):
         self.session = ExamSession.objects.create(

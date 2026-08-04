@@ -587,12 +587,13 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
             model_field: str(item.get(payload_field) or '').strip()
             for payload_field, model_field in ROUND_FIELD_MAP.items()
         }
-        matching_round = next(
-            (
-                config for config in configured_rounds
-                if str(config.get('name') or '').strip().casefold() == round_name.casefold()
-            ),
-            configured_rounds[history_index] if history_index < len(configured_rounds) else None,
+        template_slot = int(item.get('templateSlot') or 0) if str(item.get('templateSlot') or '').isdigit() else 0
+        matching_round = (
+            configured_rounds[template_slot - 1] if 1 <= template_slot <= len(configured_rounds)
+            else next(
+                (config for config in configured_rounds if str(config.get('name') or '').strip().casefold() == round_name.casefold()),
+                configured_rounds[history_index] if history_index < len(configured_rounds) else None,
+            )
         )
         values['round_id'] = str(item.get('roundId') or (matching_round or {}).get('id') or '').strip()
         if values.get('eligibility'):

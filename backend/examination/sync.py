@@ -328,28 +328,71 @@ def round_group_from_header(header):
     return raw
 
 
+ROUND_TEMPLATE_FIELD_ORDER = (
+    'eligibility', 'sbd', 'date', 'time', 'mode', 'location', 'link', 'account',
+    'password', 'attendance', 'score', 'scoreRate', 'rank', 'result', 'note',
+)
+ROUND_FIELD_ALIASES = {
+    'eligibility': ['dieukienduthi', 'dieukien'], 'sbd': ['sobaodanh', 'sbd'],
+    'date': ['ngaythi'], 'time': ['giocathi', 'giothi'], 'mode': ['hinhthucthi'],
+    'location': ['diadiemphongthi', 'diadiemthi'], 'link': ['linkthi'],
+    'account': ['taikhoanmatruycap', 'taikhoan'], 'password': ['matkhau', 'password'],
+    'attendance': ['trangthaiduthi', 'trangthaithamgia'], 'scoreRate': ['tylediem'],
+    'score': ['diem'], 'rank': ['xephang'], 'result': ['ketquagiaithuong', 'ketqua'],
+    'note': ['ghichusuco', 'ghichu'],
+}
+
+
+def _round_name_from_group(source_group, number):
+    detailed_name = clean_txt(source_group)
+    parts = re.split(r'\s*[-\u2013\u2014]\s*', detailed_name, maxsplit=1)
+    if len(parts) == 2 and normalise_str(parts[0]).startswith(f'vong{number}'):
+        detailed_name = parts[1].strip()
+    elif normalise_str(detailed_name) == f'vong{number}':
+        detailed_name = ''
+    return detailed_name or ('V\u00f2ng ' + str(number))
+
+
+def _is_official_round_layout(headers):
+    """Official template columns are fixed: V:AJ, AK:AY, AZ:BN.
+
+    Repeated labels such as Ng\u00e0y thi or \u0110i\u1ec3m are therefore resolved by their
+    A1 position, not by the first matching label.
+    """
+    if len(headers) < 66:
+        return False
+    starts = (21, 36, 51)
+    return all(
+        index < len(headers) and normalise_str(headers[index]).endswith('dieukienthamgia')
+        for index in starts
+    )
+
+
 def history_from_sheet_row(headers, row):
-    field_aliases = {
-        'eligibility': ['dieukienduthi', 'dieukien'],
-        'sbd': ['sobaodanh', 'sbd'],
-        'date': ['ngaythi'],
-        'time': ['giocathi', 'giothi'],
-        'mode': ['hinhthucthi'],
-        'location': ['diadiemphongthi', 'diadiemthi'],
-        'link': ['linkthi'],
-        'account': ['taikhoanmatruycap', 'taikhoan'],
-        'password': ['matkhau', 'password'],
-        'attendance': ['trangthaiduthi', 'trangthaithamgia'],
-        'scoreRate': ['tylediem'],
-        'score': ['diem'],
-        'rank': ['xephang'],
-        'result': ['ketquagiaithuong', 'ketqua'],
-        'note': ['ghichusuco', 'ghichu'],
-    }
     rounds = []
+    if _is_official_round_layout(headers):
+        for number, start in enumerate((21, 36, 51), start=1):
+            values, columns = {}, {}
+            source_group = round_group_from_header(headers[start])
+            for offset, key in enumerate(ROUND_TEMPLATE_FIELD_ORDER):
+                index = start + offset
+                value = clean_txt(row[index]) if index < len(row) else ''
+                if value:
+                    values[key] = value
+                    columns[key] = _column_name(index)
+            if values:
+                values['eligibility'] = normalize_eligibility(values.get('eligibility'))
+                values['round'] = _round_name_from_group(source_group, number)
+                values['templateSlot'] = number
+                values['templateColumns'] = columns
+                rounds.append(values)
+        return rounds
+
+    # Legacy/custom Sheet: retain header parsing, but remember the exact A1
+    # columns that were selected so a later review can explain every mapping.
     for number in (1, 2, 3):
         prefix = f"vong{number}"
-        values = {}
+        values, columns = {}, {}
         source_group = ''
         for index, header in enumerate(headers):
             if index >= len(row):
@@ -362,9 +405,7 @@ def history_from_sheet_row(headers, row):
             value = clean_txt(row[index])
             if not value:
                 continue
-            for key, aliases in field_aliases.items():
-                # The generic alias "diem" also occurs inside a location header.
-                # A score is the terminal field, never location or score rate.
+            for key, aliases in ROUND_FIELD_ALIASES.items():
                 matches = (
                     normalized.endswith('diem') and 'diadiem' not in normalized and 'tylediem' not in normalized
                     if key == 'score'
@@ -372,19 +413,15 @@ def history_from_sheet_row(headers, row):
                 )
                 if matches:
                     values[key] = value
+                    columns[key] = _column_name(index)
                     break
         if values:
             values['eligibility'] = normalize_eligibility(values.get('eligibility'))
-            detailed_name = source_group
-            parts = re.split(r'\s*[–—-]\s*', source_group, maxsplit=1)
-            if len(parts) == 2 and normalise_str(parts[0]).startswith(f'vong{number}'):
-                detailed_name = parts[1].strip()
-            elif normalise_str(source_group) == f'vong{number}':
-                detailed_name = ''
-            values['round'] = detailed_name or ('V' + chr(242) + 'ng ' + str(number))
+            values['round'] = _round_name_from_group(source_group, number)
+            values['templateSlot'] = number
+            values['templateColumns'] = columns
             rounds.append(values)
     return rounds
-
 
 def sync_candidate_payload(candidate):
     """Return the same record shape accepted by the reviewed import endpoint."""
@@ -654,20 +691,34 @@ EXPORT_GROUP_HEADERS = (
     + ['TỔNG HỢP'] + [''] * (len(SUMMARY_EXPORT_HEADERS) - 1)
 )
 
-def _round_slots(round_results):
+def _round_slots(round_results, configured_rounds):
+    """Place a result in the configured template slot, never by DB ordering."""
     slots = {}
-    unnumbered = []
+    by_id = {clean_txt(item.get('id')): index for index, item in enumerate(configured_rounds, start=1) if clean_txt(item.get('id'))}
+    by_name = {normalise_str(item.get('name')): index for index, item in enumerate(configured_rounds, start=1) if normalise_str(item.get('name'))}
+    leftovers = []
     for item in round_results:
-        match = re.search(r'([1-3])', clean_txt(item.round_name))
-        if match and int(match.group(1)) not in slots:
-            slots[int(match.group(1))] = item
+        slot = by_id.get(clean_txt(item.round_id)) or by_name.get(normalise_str(item.round_name))
+        if not slot:
+            match = re.search(r'(?<!\d)([1-3])(?!\d)', clean_txt(item.round_name))
+            slot = int(match.group(1)) if match else None
+        if slot and slot not in slots and slot <= 3:
+            slots[slot] = item
         else:
-            unnumbered.append(item)
+            leftovers.append(item)
     for number in (1, 2, 3):
-        if number not in slots and unnumbered:
-            slots[number] = unnumbered.pop(0)
+        if number not in slots and leftovers:
+            slots[number] = leftovers.pop(0)
     return slots
 
+
+def _session_highest_round(slots, configured_rounds):
+    if not slots:
+        return ''
+    slot = max(slots)
+    config = configured_rounds[slot - 1] if slot <= len(configured_rounds) else {}
+    name = clean_txt(config.get('name')) or clean_txt(slots[slot].round_name)
+    return f'V\u00f2ng {slot} \u2013 {name}' if name else f'V\u00f2ng {slot}'
 
 def session_candidate_sort_key(candidate):
     """Sort a session roster by grade, then the culturally appropriate given name."""
@@ -701,6 +752,8 @@ def format_sheet_percentage(value):
 
 def session_export_rows(session_id):
     """Build a re-importable export matching the official candidate template."""
+    session = ExamSession.objects.filter(id=session_id).first()
+    configured_rounds = [item for item in ((session.rounds if session else []) or []) if isinstance(item, dict)]
     rows = [EXPORT_GROUP_HEADERS, EXPORT_HEADERS]
     participations = list(
         CandidateParticipation.objects.filter(session_id=session_id)
@@ -717,7 +770,7 @@ def session_export_rows(session_id):
             participation.subject or '', participation.category or '', participation.registration_method or '', participation.team_name or '',
             participation.exam_language or '', participation.general_note or '',
         ]
-        slots = _round_slots(list(participation.round_results.all()))
+        slots = _round_slots(list(participation.round_results.all()), configured_rounds)
         for number in (1, 2, 3):
             result = slots.get(number)
             if not result:
@@ -728,7 +781,7 @@ def session_export_rows(session_id):
                 result.link, result.account, result.password, result.attendance, result.score, format_sheet_percentage(result.score_rate),
                 result.rank, result.result, result.note,
             ])
-        row.extend([candidate.highest_round or '', candidate.achievement or '', participation.certificate_link or '', candidate.updated or ''])
+        row.extend([_session_highest_round(slots, configured_rounds), candidate.achievement or '', participation.certificate_link or '', candidate.updated or ''])
         rows.append(row)
     return rows
 
