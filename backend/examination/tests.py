@@ -878,6 +878,71 @@ class SessionOutputSheetTests(TestCase):
         self.assertEqual(output.sheet_tab, 'SCO - IEO')
 
 
+    def test_output_export_uses_vietnamese_date_and_percentage_display(self):
+        from .sync import PROFILE_EXPORT_HEADERS, REGISTRATION_EXPORT_HEADERS, format_sheet_percentage, session_export_rows
+
+        candidate = Candidate.objects.create(
+            id='FT-OUTPUT-001', code='FT-OUTPUT-001', name='Output Candidate',
+            birth_date='2018-11-08', sort_key='output-candidate',
+        )
+        participation = CandidateParticipation.objects.create(candidate=candidate, session=self.session)
+        RoundResult.objects.create(
+            participation=participation, round_name='Round 1',
+            exam_date='2026-08-09', score_rate='97.14%',
+        )
+
+        row = session_export_rows(self.session.id)[2]
+        round_start = len(PROFILE_EXPORT_HEADERS) + len(REGISTRATION_EXPORT_HEADERS)
+        self.assertEqual(row[3], '08/11/2018')
+        self.assertEqual(row[round_start + 2], '09/08/2026')
+        self.assertEqual(row[round_start + 11], '97,14%')
+        self.assertEqual(format_sheet_percentage('97,14%'), '97,14%')
+
+    def test_unmatched_sheet_row_is_blocked_with_exact_row_and_identity(self):
+        from .sync import _aligned_export_rows
+
+        CandidateParticipation.objects.create(
+            candidate=Candidate.objects.create(
+                id='FT-OUTPUT-002', code='FT-OUTPUT-002', name='Known Candidate', sort_key='known-candidate',
+            ),
+            session=self.session,
+        )
+        alignment = _aligned_export_rows([['1', 'OLD-001', 'Unknown Candidate', '08/11/2018']], self.session.id)
+
+        self.assertEqual(alignment['matchConflicts'][0]['row'], 3)
+        self.assertIn('Unknown Candidate', alignment['matchConflicts'][0]['sheetIdentity'])
+        self.assertIn('Kh\u00f4ng t\u00ecm th\u1ea5y', alignment['matchConflicts'][0]['reason'])
+
+
+    @patch('examination.sync._output_sheet_target')
+    @patch('examination.sync.build_sheets_service')
+    def test_preview_does_not_require_review_for_empty_sheet_cells(self, build_service, target):
+        from .sync import output_sheet_export_preview
+
+        candidate = Candidate.objects.create(
+            id='FT-OUTPUT-003', code='FT-OUTPUT-003', name='Preview Candidate',
+            birth_date='2018-11-08', sort_key='preview-candidate',
+        )
+        CandidateParticipation.objects.create(candidate=candidate, session=self.session)
+        output = ExaminationSheet.objects.create(
+            id='output-preview', name='Output preview',
+            url='https://docs.google.com/spreadsheets/d/output-preview/edit?gid=7',
+            session_id=self.session.id, stage='session-output', sheet_tab='SCO - ISO',
+            created_at=timezone.now(), updated_at=timezone.now(),
+        )
+        target.return_value = {'title': 'SCO - ISO'}
+        build_service.return_value.spreadsheets.return_value.values.return_value.get.return_value.execute.return_value = {
+            'values': [['1', '', 'Preview Candidate', '08/11/2018']]
+        }
+
+        preview = output_sheet_export_preview(output)
+
+        self.assertTrue(preview['hasChanges'])
+        self.assertFalse(preview['hasReviewChanges'])
+        self.assertEqual(preview['changedCells'], 0)
+        self.assertGreater(preview['writeChangedCells'], 0)
+
+
 class ExaminationSheetAutomationTests(TestCase):
     def setUp(self):
         self.session = ExamSession.objects.create(

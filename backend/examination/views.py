@@ -1987,7 +1987,7 @@ def sheet_export(request, pk):
 
     confirm_overwrite = bool((request.data or {}).get('confirmOverwrite'))
     preview_fingerprint = str((request.data or {}).get('currentFingerprint') or '')
-    needs_confirmation = preview['hasExistingData'] and preview['hasChanges']
+    needs_confirmation = preview['hasExistingData'] and preview.get('hasReviewChanges', preview['hasChanges'])
     if needs_confirmation and (not confirm_overwrite or preview_fingerprint != preview['currentFingerprint']):
         return Response({
             'error': 'Sheet đích có dữ liệu khác với dữ liệu chuẩn bị xuất. Hãy kiểm tra thay đổi và xác nhận trước khi ghi đè.',

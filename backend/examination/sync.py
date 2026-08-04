@@ -682,6 +682,23 @@ def session_candidate_sort_key(candidate):
     given_name = words[-1] if is_vietnamese and words else (words[0] if words else '')
     return (grade, normalise_str(given_name), normalise_str(candidate.name), normalise_str(candidate.code))
 
+def format_sheet_date(value):
+    """Write dates in the Vietnamese template's stable DD/MM/YYYY display format."""
+    parsed = parse_dob(value)
+    if re.fullmatch(r'\d{4}-\d{2}-\d{2}', parsed):
+        return datetime.date.fromisoformat(parsed).strftime('%d/%m/%Y')
+    return clean_txt(value)
+
+
+def format_sheet_percentage(value):
+    """Use a decimal comma for a simple percentage in Vietnamese Google Sheets."""
+    raw = clean_txt(value)
+    match = re.fullmatch(r'([+-]?\d+)[\.,](\d+)(\s*%)?', raw)
+    if not match:
+        return raw
+    return f'{match.group(1)},{match.group(2)}{match.group(3) or ""}'
+
+
 def session_export_rows(session_id):
     """Build a re-importable export matching the official candidate template."""
     rows = [EXPORT_GROUP_HEADERS, EXPORT_HEADERS]
@@ -694,7 +711,7 @@ def session_export_rows(session_id):
     for sequence, participation in enumerate(participations, start=1):
         candidate = participation.candidate
         row = [
-            sequence, candidate.code, candidate.name, candidate.birth_date or '', candidate.identity or '', candidate.nationality or '',
+            sequence, candidate.code, candidate.name, format_sheet_date(candidate.birth_date), candidate.identity or '', candidate.nationality or '',
             candidate.parent or '', candidate.phone or '', candidate.email or '', candidate.city or '', candidate.ward or '', candidate.address or '',
             candidate.school or '', candidate.class_name or '', candidate.grade or '',
             participation.subject or '', participation.category or '', participation.registration_method or '', participation.team_name or '',
@@ -707,8 +724,8 @@ def session_export_rows(session_id):
                 row.extend([''] * len(ROUND_EXPORT_HEADERS))
                 continue
             row.extend([
-                result.eligibility, result.sbd, result.exam_date, result.time_slot, result.mode, result.location,
-                result.link, result.account, result.password, result.attendance, result.score, result.score_rate,
+                result.eligibility, result.sbd, format_sheet_date(result.exam_date), result.time_slot, result.mode, result.location,
+                result.link, result.account, result.password, result.attendance, result.score, format_sheet_percentage(result.score_rate),
                 result.rank, result.result, result.note,
             ])
         row.extend([candidate.highest_round or '', candidate.achievement or '', participation.certificate_link or '', candidate.updated or ''])
@@ -775,6 +792,39 @@ def _export_row_record(row):
     }
 
 
+def _row_identity_description(record):
+    labels = (
+        ('code', 'M\u00e3 h\u1ed3 s\u01a1'), ('name', 'H\u1ecd t\u00ean'), ('birth_date', 'Ng\u00e0y sinh'),
+        ('identity', 'CCCD/H\u1ed9 chi\u1ebfu'), ('email', 'Email'), ('phone', 'S\u1ed1 \u0111i\u1ec7n tho\u1ea1i'),
+    )
+    return ' \u00b7 '.join(f'{label}: {record[key]}' for key, label in labels if clean_txt(record.get(key))) or 'Kh\u00f4ng c\u00f3 th\u00f4ng tin \u0111\u1ecbnh danh'
+
+
+def _candidate_options_for_sheet_row(sheet_record, proposed_rows):
+    options = []
+    for candidate_row in proposed_rows:
+        candidate_record = _export_row_record(candidate_row)
+        same_name = same_nonempty(sheet_record['name'], candidate_record['name'])
+        same_contact = any((
+            normalized_identity(sheet_record['identity']) and normalized_identity(sheet_record['identity']) == normalized_identity(candidate_record['identity']),
+            normalized_email(sheet_record['email']) and normalized_email(sheet_record['email']) == normalized_email(candidate_record['email']),
+            normalized_phone(sheet_record['phone']) and normalized_phone(sheet_record['phone']) == normalized_phone(candidate_record['phone']),
+        ))
+        if same_name or same_contact:
+            options.append(_row_identity_description(candidate_record))
+    return options[:5]
+
+
+def _match_conflict(row, sheet_record, reason, proposed_rows):
+    return {
+        'row': row,
+        'rowLabel': sheet_record['name'] or f'H\u00e0ng d\u1eef li\u1ec7u {row}',
+        'reason': reason,
+        'sheetIdentity': _row_identity_description(sheet_record),
+        'candidateOptions': _candidate_options_for_sheet_row(sheet_record, proposed_rows),
+    }
+
+
 def _export_row_match(sheet_row, candidate_row):
     """Return a safe, deterministic row match without relying on sort order."""
     sheet_record = _export_row_record(sheet_row)
@@ -812,7 +862,7 @@ def _aligned_export_rows(current_rows, session_id):
     Row 1 is the group label and row 2 is the immutable column header. This
     function receives data rows only (starting at row 3). Existing unmatched
     Sheet rows are retained. System candidates that have no Sheet counterpart
-    are appended, while ambiguous matches block an overwrite.
+    are appended, while ambiguous or missing matches block an overwrite.
     """
     proposed_rows = session_export_rows(session_id)[2:]
     remaining = set(range(len(proposed_rows)))
@@ -825,6 +875,7 @@ def _aligned_export_rows(current_rows, session_id):
     for row_index, sheet_row in enumerate(current_rows):
         if not any(clean_txt(value) for value in sheet_row):
             continue
+        sheet_record = _export_row_record(sheet_row)
         candidates = []
         for candidate_index in remaining:
             match = _export_row_match(sheet_row, proposed_rows[candidate_index])
@@ -832,27 +883,32 @@ def _aligned_export_rows(current_rows, session_id):
                 score, reason = match
                 candidates.append((score, candidate_index, reason))
         if not candidates:
-            unmatched_sheet_rows.append(row_index + 3)
+            row = row_index + 3
+            unmatched_sheet_rows.append(row)
+            conflicts.append(_match_conflict(
+                row, sheet_record,
+                'Kh\u00f4ng t\u00ecm th\u1ea5y h\u1ed3 s\u01a1 trong h\u1ec7 th\u1ed1ng kh\u1edbp an to\u00e0n v\u1edbi d\u00f2ng Sheet n\u00e0y. D\u00f2ng s\u1ebd kh\u00f4ng b\u1ecb ghi \u0111\u00e8.',
+                proposed_rows,
+            ))
             continue
         highest = max(score for score, _, _ in candidates)
         best = [(candidate_index, reason) for score, candidate_index, reason in candidates if score == highest]
-        sheet_record = _export_row_record(sheet_row)
         if len(best) != 1:
-            conflicts.append({
-                'row': row_index + 3,
-                'rowLabel': sheet_record['name'] or f'H\u00e0ng d\u1eef li\u1ec7u {row_index + 3}',
-                'reason': 'C\u00f3 nhi\u1ec1u th\u00ed sinh c\u00f9ng kh\u1edbp; c\u1ea7n m\u00e3 h\u1ed3 s\u01a1 ho\u1eb7c th\u00f4ng tin \u0111\u1ecbnh danh \u0111\u1ec3 ph\u00e2n bi\u1ec7t.',
-            })
+            conflicts.append(_match_conflict(
+                row_index + 3, sheet_record,
+                'C\u00f3 nhi\u1ec1u th\u00ed sinh c\u00f9ng kh\u1edbp; c\u1ea7n m\u00e3 h\u1ed3 s\u01a1 ho\u1eb7c th\u00f4ng tin \u0111\u1ecbnh danh \u0111\u1ec3 ph\u00e2n bi\u1ec7t.',
+                [proposed_rows[index] for index, _ in best],
+            ))
             continue
         candidate_index, reason = best[0]
         if highest == 50:
             same_name_count = sum(1 for candidate_row in proposed_rows if same_nonempty(_export_row_record(sheet_row)['name'], _export_row_record(candidate_row)['name']))
             if same_name_count != 1:
-                conflicts.append({
-                    'row': row_index + 3,
-                    'rowLabel': sheet_record['name'] or f'H\u00e0ng d\u1eef li\u1ec7u {row_index + 3}',
-                    'reason': 'Tr\u00f9ng h\u1ecd t\u00ean nh\u01b0ng thi\u1ebfu ng\u00e0y sinh ho\u1eb7c \u0111\u1ecbnh danh \u0111\u1ec3 gh\u00e9p an to\u00e0n.',
-                })
+                conflicts.append(_match_conflict(
+                    row_index + 3, sheet_record,
+                    'Tr\u00f9ng h\u1ecd t\u00ean nh\u01b0ng thi\u1ebfu ng\u00e0y sinh ho\u1eb7c th\u00f4ng tin \u0111\u1ecbnh danh \u0111\u1ec3 gh\u00e9p an to\u00e0n.',
+                    proposed_rows,
+                ))
                 continue
         replacement = list(proposed_rows[candidate_index])
         # The Sheet owns its display order, so its STT stays with the existing row.
@@ -872,11 +928,12 @@ def _aligned_export_rows(current_rows, session_id):
         candidate_record = _export_row_record(candidate_row)
         possible_rows = [index + 3 for index, sheet_row in enumerate(current_rows) if same_nonempty(_export_row_record(sheet_row)['name'], candidate_record['name'])]
         if possible_rows:
-            conflicts.append({
-                'row': possible_rows[0],
-                'rowLabel': candidate_record['name'] or f'H\u00e0ng d\u1eef li\u1ec7u {possible_rows[0]}',
-                'reason': 'C\u00f3 c\u00f9ng h\u1ecd t\u00ean tr\u00ean Sheet nh\u01b0ng kh\u00f4ng \u0111\u1ee7 th\u00f4ng tin \u0111\u1ec3 gh\u00e9p an to\u00e0n.',
-            })
+            row = possible_rows[0]
+            conflicts.append(_match_conflict(
+                row, _export_row_record(current_rows[row - 3]),
+                'C\u00f3 c\u00f9ng h\u1ecd t\u00ean tr\u00ean Sheet nh\u01b0ng kh\u00f4ng \u0111\u1ee7 th\u00f4ng tin \u0111\u1ec3 gh\u00e9p an to\u00e0n.',
+                [candidate_row],
+            ))
             continue
         appended = list(candidate_row)
         appended[0] = next_stt
@@ -893,15 +950,35 @@ def _aligned_export_rows(current_rows, session_id):
         'systemRows': len(proposed_rows),
     }
 
-
 def sheet_values_fingerprint(values):
     """Stable fingerprint used to detect edits made in an output Sheet."""
     payload = json.dumps(values or [], ensure_ascii=False, separators=(',', ':'))
     return hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
 
+AUTO_OVERWRITE_EXPORT_HEADERS = {'Ng\u00e0y c\u1eadp nh\u1eadt g\u1ea7n nh\u1ea5t'}
+DATE_EXPORT_HEADERS = {'Ng\u00e0y sinh', 'Ng\u00e0y thi'}
+PERCENT_EXPORT_HEADERS = {'T\u1ef7 l\u1ec7 \u0111i\u1ec3m'}
+
+
+def _sheet_values_equivalent(before, after, field):
+    if clean_txt(before) == clean_txt(after):
+        return True
+    if field in DATE_EXPORT_HEADERS:
+        before_date, after_date = parse_dob(before), parse_dob(after)
+        return bool(before_date and after_date and before_date == after_date)
+    if field in PERCENT_EXPORT_HEADERS:
+        return format_sheet_percentage(before) == format_sheet_percentage(after)
+    return False
+
+
 def output_sheet_export_preview(sheet, google_access_token=None, max_changes=250):
-    """Compare data rows only; Sheet rows 1 and 2 are never overwritten."""
+    """Compare data rows only; Sheet rows 1 and 2 are never overwritten.
+
+    Empty Sheet cells filled from the system and the automatic update timestamp
+    are written without appearing as a conflict. Existing non-empty values that
+    would change are the only cells requiring explicit confirmation.
+    """
     session = ExamSession.objects.filter(id=sheet.session_id).first()
     if not session:
         raise ValueError('Kh\u00f4ng t\u00ecm th\u1ea5y k\u1ef3 t\u1ed5 ch\u1ee9c \u0111\u01b0\u1ee3c g\u1eafn v\u1edbi ngu\u1ed3n Google Sheets.')
@@ -920,7 +997,9 @@ def output_sheet_export_preview(sheet, google_access_token=None, max_changes=250
     ).execute().get('values', [])
     alignment = _aligned_export_rows(current, session.id)
     proposed = alignment['values']
-    changes, changed_rows, changed_cells = [], set(), 0
+    changes, changed_rows = [], set()
+    write_changed_cells = 0
+    review_changed_cells = 0
     for row_index in range(max(len(current), len(proposed))):
         before_row = current[row_index] if row_index < len(current) else []
         after_row = proposed[row_index] if row_index < len(proposed) else []
@@ -934,11 +1013,17 @@ def output_sheet_export_preview(sheet, google_access_token=None, max_changes=250
             after = str(after_row[column_index]) if column_index < len(after_row) else ''
             if before == after:
                 continue
-            changed_cells += 1
+            write_changed_cells += 1
+            field = str(EXPORT_HEADERS[column_index]) if len(EXPORT_HEADERS) > column_index else _column_name(column_index)
+            # New values, formatting-equivalent values, and the timestamp do
+            # not need operator review; they are still included in the write.
+            needs_review = bool(clean_txt(before)) and field not in AUTO_OVERWRITE_EXPORT_HEADERS and not _sheet_values_equivalent(before, after, field)
+            if not needs_review:
+                continue
+            review_changed_cells += 1
             changed_rows.add(sheet_row)
             if len(changes) < max_changes:
                 column = _column_name(column_index)
-                field = str(EXPORT_HEADERS[column_index]) if len(EXPORT_HEADERS) > column_index else column
                 changes.append({
                     'row': sheet_row,
                     'rowLabel': record_label,
@@ -950,9 +1035,12 @@ def output_sheet_export_preview(sheet, google_access_token=None, max_changes=250
                 })
     return {
         'currentFingerprint': sheet_values_fingerprint(current), 'sheetTab': tab_name,
-        'currentRows': len(current), 'proposedRows': len(proposed), 'changedCells': changed_cells,
-        'changedRows': len(changed_rows), 'changes': changes, 'changesTruncated': changed_cells > len(changes),
-        'hasExistingData': bool(current), 'hasChanges': bool(changed_cells),
+        'currentRows': len(current), 'proposedRows': len(proposed),
+        'changedCells': review_changed_cells, 'changedRows': len(changed_rows),
+        'writeChangedCells': write_changed_cells,
+        'changes': changes, 'changesTruncated': review_changed_cells > len(changes),
+        'hasExistingData': bool(current), 'hasChanges': bool(write_changed_cells),
+        'hasReviewChanges': bool(review_changed_cells),
         **{key: alignment[key] for key in ('matchedRows', 'appendedRows', 'unmatchedSheetRows', 'matchConflicts', 'systemRows')},
     }
 
