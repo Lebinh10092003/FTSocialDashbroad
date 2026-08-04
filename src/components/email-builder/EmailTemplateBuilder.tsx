@@ -696,7 +696,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
         settings: current.settings,
         blocks: imported.blocks,
       });
-      setSelectedBlockId(imported.blocks[0]?.id || null);
+      setSelectedBlockId(null);
       showToast('Đã áp dụng mã HTML vào email hiện tại.');
       return null;
     } catch (error: any) {
