@@ -94,6 +94,8 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
   const canvasRef = useRef<EmailCanvasHandle>(null);
   const templatesRef = useRef<EmailTemplate[]>([]);
   const editorHistory = useRef<Record<string, { past: EmailTemplate[]; future: EmailTemplate[]; lastCommitAt: number; lastSignature: string }>>({});
+  const pendingTemplateSaves = useRef<Record<string, { revision: number; saving: boolean; latest: EmailTemplate }>>({});
+  const templateMutationClock = useRef(0);
   const panelWidthSyncTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Routing modes
@@ -237,33 +239,44 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     return Boolean(userEmail) && template.createdBy.trim().toLowerCase() === userEmail.trim().toLowerCase();
   };
   const applyServerTemplate = (serverTemplate: EmailTemplate) => {
+    const localTemplate = templatesRef.current.find(template => template.id === serverTemplate.id);
+    if (localTemplate && Number(serverTemplate.lastUpdated || 0) < Number(localTemplate.lastUpdated || 0)) return;
     updateTemplatesList(templatesRef.current.map(template => template.id === serverTemplate.id ? serverTemplate : template));
+  };
+
+  // Keep only the newest unsaved editor state per template. This prevents an
+  // earlier save response from repainting a newer undo/redo state.
+  const saveLatestTemplate = (template: EmailTemplate) => {
+    const templateId = template.id;
+    const pending = pendingTemplateSaves.current[templateId] || { revision: 0, saving: false, latest: structuredClone(template) };
+    pending.latest = structuredClone(template);
+    pending.revision += 1;
+    pendingTemplateSaves.current[templateId] = pending;
+    if (pending.saving) return;
+
+    pending.saving = true;
+    void (async () => {
+      while (true) {
+        const revision = pending.revision;
+        const snapshot = pending.latest;
+        const serverTemplate = await saveTemplateAsync(snapshot);
+        if (pending.revision === revision) {
+          pending.saving = false;
+          if (serverTemplate) applyServerTemplate(serverTemplate);
+          return;
+        }
+      }
+    })();
+  };
+
+  const nextTemplateTimestamp = (current?: EmailTemplate) => {
+    templateMutationClock.current = Math.max(Date.now(), templateMutationClock.current + 1, Number(current?.lastUpdated || 0) + 1);
+    return templateMutationClock.current;
   };
 
   const getTemplateHistory = (templateId: string) => {
     if (!editorHistory.current[templateId]) editorHistory.current[templateId] = { past: [], future: [], lastCommitAt: 0, lastSignature: '' };
     return editorHistory.current[templateId];
-  };
-
-  const getHistorySignature = (current: EmailTemplate, next: EmailTemplate) => {
-    if (current.subject !== next.subject) return 'subject';
-    if (current.name !== next.name) return 'name';
-    if (JSON.stringify(current.settings) !== JSON.stringify(next.settings)) return 'email-settings';
-    const flatten = (blocks: EmailBlock[], result = new Map<string, string>()) => {
-      blocks.forEach(block => {
-        result.set(block.id, JSON.stringify({ type: block.type, content: block.content, styles: block.styles, visible: block.visible }));
-        flatten(block.children || [], result);
-        (block.columns || []).forEach(column => flatten(column, result));
-      });
-      return result;
-    };
-    const before = flatten(current.blocks);
-    const after = flatten(next.blocks);
-    const beforeIds = [...before.keys()].sort().join('|');
-    const afterIds = [...after.keys()].sort().join('|');
-    if (beforeIds !== afterIds) return 'block-structure';
-    const changedIds = [...after.keys()].filter(id => before.get(id) !== after.get(id)).sort();
-    return changedIds.length ? `blocks:${changedIds.join('|')}` : 'template';
   };
 
   const commitActiveTemplate = (nextTemplate: EmailTemplate) => {
@@ -274,22 +287,17 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     const comparableNext = { ...nextTemplate, lastUpdated: 0 };
     if (JSON.stringify(comparableCurrent) === JSON.stringify(comparableNext)) return;
     const history = getTemplateHistory(activeTemplateId);
-    const now = Date.now();
-    const signature = getHistorySignature(current, nextTemplate);
-    const shouldGroup = history.lastSignature === signature && now - history.lastCommitAt < 750;
-    if (!shouldGroup) {
-      history.past.push(structuredClone(current));
-      if (history.past.length > 100) history.past.shift();
-    }
-    history.lastCommitAt = now;
-    history.lastSignature = signature;
+    // A discrete UI action (add row, add block, remove column, ...) must always
+    // be reversible with one Ctrl+Z. Do not merge it with a nearby action.
+    history.past.push(structuredClone(current));
+    if (history.past.length > 100) history.past.shift();
+    history.lastCommitAt = 0;
+    history.lastSignature = '';
     history.future = [];
-    const updatedTemplate = { ...nextTemplate, lastUpdated: Date.now() };
+    const updatedTemplate = { ...nextTemplate, lastUpdated: nextTemplateTimestamp(current) };
     const updated = currentTemplates.map(template => template.id === activeTemplateId ? updatedTemplate : template);
     updateTemplatesList(updated);
-    void saveTemplateAsync(updatedTemplate).then(serverTemplate => {
-      if (serverTemplate) applyServerTemplate(serverTemplate);
-    });
+    saveLatestTemplate(updatedTemplate);
   };
 
   const handleUndo = () => {
@@ -302,11 +310,9 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     history.future.push(structuredClone(current));
     history.lastCommitAt = 0;
     history.lastSignature = '';
-    const restored = { ...previous, lastUpdated: Date.now() };
+    const restored = { ...previous, lastUpdated: nextTemplateTimestamp(current) };
     updateTemplatesList(currentTemplates.map(template => template.id === activeTemplateId ? restored : template));
-    void saveTemplateAsync(restored).then(serverTemplate => {
-      if (serverTemplate) applyServerTemplate(serverTemplate);
-    });
+    saveLatestTemplate(restored);
     setSelectedBlockId(selected => selected && findEmailBlock(previous.blocks, selected) ? selected : null);
     showToast('Đã hoàn tác thay đổi.');
   };
@@ -320,11 +326,9 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     history.past.push(structuredClone(current));
     history.lastCommitAt = 0;
     history.lastSignature = '';
-    const restored = { ...next, lastUpdated: Date.now() };
+    const restored = { ...next, lastUpdated: nextTemplateTimestamp(current) };
     updateTemplatesList(currentTemplates.map(template => template.id === activeTemplateId ? restored : template));
-    void saveTemplateAsync(restored).then(serverTemplate => {
-      if (serverTemplate) applyServerTemplate(serverTemplate);
-    });
+    saveLatestTemplate(restored);
     setSelectedBlockId(selected => selected && findEmailBlock(next.blocks, selected) ? selected : null);
     showToast('Đã làm lại thay đổi.');
   };
@@ -785,13 +789,13 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
   useEffect(() => {
     if (editorMode !== 'edit') return;
     const handleHistoryShortcut = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.isComposing || !(event.ctrlKey || event.metaKey)) return;
       const key = event.key.toLowerCase();
       if (key === 'z' && !event.shiftKey) { event.preventDefault(); handleUndo(); }
       else if (key === 'y' || (key === 'z' && event.shiftKey)) { event.preventDefault(); handleRedo(); }
     };
-    window.addEventListener('keydown', handleHistoryShortcut);
-    return () => window.removeEventListener('keydown', handleHistoryShortcut);
+    window.addEventListener('keydown', handleHistoryShortcut, true);
+    return () => window.removeEventListener('keydown', handleHistoryShortcut, true);
   }, [editorMode, activeTemplateId, templates]);
 
   const handleCreateBlankTemplate = async (name: string): Promise<string | null> => {
@@ -1089,7 +1093,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
         copySubjectSuccess={copySubjectSuccess}
         onUndo={handleUndo}
         onRedo={handleRedo}
-        canUndo={canUndo || Boolean(selectedBlockId)}
+        canUndo={canUndo}
         canRedo={canRedo}
       />
 
