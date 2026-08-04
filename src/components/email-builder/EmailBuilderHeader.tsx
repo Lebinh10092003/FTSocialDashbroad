@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 import { EmailTemplate } from '../../types/emailBuilder';
 import AccountMenu from '../AccountMenu';
-import { exportTemplateToJson } from '../../lib/emailStorage';
 import { useEmailBuilderDialog } from './EmailBuilderDialog';
 
 interface EmailBuilderHeaderProps {
@@ -24,6 +23,7 @@ interface EmailBuilderHeaderProps {
   onSelectTemplate: (id: string) => void;
   onRenameTemplate: (name: string) => void;
   onDuplicateTemplate: () => void;
+  onExportHtml: () => void;
   onDeleteTemplate: () => void;
   onPublishTemplate: () => void;
   onUnpublishTemplate: () => void;
@@ -56,6 +56,7 @@ export default function EmailBuilderHeader({
   onSelectTemplate,
   onRenameTemplate,
   onDuplicateTemplate,
+  onExportHtml,
   onDeleteTemplate,
   onPublishTemplate,
   onUnpublishTemplate,
@@ -195,8 +196,8 @@ export default function EmailBuilderHeader({
         </button>
 
         <button
-          onClick={() => { if (!exportTemplateToJson(template)) void dialog.alert('Không thể xuất file JSON template.', 'Xuất mẫu thất bại'); }}
-          title="Xuất file JSON"
+          onClick={onExportHtml}
+          title="Xuất file HTML"
           className={iconButtonClass}
         >
           <Download className="w-3.5 h-3.5" />

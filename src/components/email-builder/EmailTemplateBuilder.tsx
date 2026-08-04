@@ -679,6 +679,38 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     return prepared;
   };
 
+  const downloadTemplateHtml = (template: EmailTemplate) => {
+    const { html } = generateEmailHtml(template, variables, false);
+    const safeName = (template.name || 'email')
+      .trim()
+      .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '-')
+      .replace(/\s+/g, ' ');
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.href = url;
+    downloadAnchor.download = `${safeName || 'email'}.html`;
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportHtml = async () => {
+    const changed = canvasRef.current?.flushPendingChanges();
+    if (changed) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    const templateToExport = await prepareActiveTemplateForDelivery();
+    if (!templateToExport) return;
+    downloadTemplateHtml(templateToExport);
+    showToast('Đã xuất file HTML.');
+  };
+
+  const handleExportTemplateHtml = async (template: EmailTemplate) => {
+    const prepared = await prepareEmailIconsForDelivery(template);
+    downloadTemplateHtml(prepared);
+    showToast('Đã xuất file HTML.');
+  };
+
   // 7. Copying to Clipboard
   const handleCopyEmail = async () => {
     if (!activeTemplate) return;
@@ -924,17 +956,8 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
                         </button>
                         
                         <button
-                          onClick={() => {
-                            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tpl, null, 2));
-                            const downloadAnchor = document.createElement('a');
-                            downloadAnchor.setAttribute("href", dataStr);
-                            downloadAnchor.setAttribute("download", `${tpl.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_template.json`);
-                            document.body.appendChild(downloadAnchor);
-                            downloadAnchor.click();
-                            downloadAnchor.remove();
-                            showToast('Đã xuất file JSON.');
-                          }}
-                          title="Xuất file JSON"
+                          onClick={() => { void handleExportTemplateHtml(tpl); }}
+                          title="Xuất file HTML"
                           className="p-1.5 hover:bg-slate-100 hover:text-blue-600 text-slate-450 rounded-lg cursor-pointer"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1017,6 +1040,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
         onSelectTemplate={handleSelectTemplate}
         onRenameTemplate={handleRenameTemplate}
         onDuplicateTemplate={handleDuplicateTemplate}
+        onExportHtml={handleExportHtml}
         onDeleteTemplate={handleDeleteTemplate}
         onPublishTemplate={handlePublishTemplate}
         onUnpublishTemplate={handleUnpublishTemplate}
