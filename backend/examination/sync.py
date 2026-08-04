@@ -734,18 +734,18 @@ def _output_sheet_target(sheet, service):
                 requested_title = clean_txt(sheet.sheet_tab)
                 if requested_title and tab.get('title') != requested_title:
                     raise ValueError(
-                        f'Link ?ang tr? ??n tab ?{tab.get("title")}? (gid={gid}) nh?ng t?n tab ?? khai b?o l? '
-                        f'?{requested_title}?. H?y s?a t?n tab ho?c d?n ??ng li?n k?t c?a tab c?n xu?t.'
+                        f'Link đang trỏ đến tab “{tab.get("title")}” (gid={gid}) nhưng tên tab đã khai báo là '
+                        f'“{requested_title}”. Hãy sửa tên tab hoặc dán đúng liên kết của tab cần xuất.'
                     )
                 return tab
-        raise ValueError('Li?n k?t Google Sheet c? gid nh?ng kh?ng t?m th?y tab t??ng ?ng.')
+        raise ValueError('Liên kết Google Sheet có gid nhưng không tìm thấy tab tương ứng.')
     requested_title = clean_txt(sheet.sheet_tab)
     if requested_title:
         for tab in tabs:
             if tab.get('title') == requested_title:
                 return tab
-        raise ValueError(f'Kh?ng t?m th?y tab ?{requested_title}? trong Google Sheet ?? li?n k?t.')
-    raise ValueError('Sheet t?ng h?p ch?a khai b?o tab. H?y ch?n ??ng tab c?n xu?t; h? th?ng s? kh?ng t? t?o tab m?i.')
+        raise ValueError(f'Không tìm thấy tab “{requested_title}” trong Google Sheet đã liên kết.')
+    raise ValueError('Sheet tổng hợp chưa khai báo tab. Hãy chọn đúng tab cần xuất; hệ thống sẽ không tự tạo tab mới.')
 
 
 def sheet_values_fingerprint(values):
@@ -758,10 +758,10 @@ def output_sheet_export_preview(sheet, google_access_token=None, max_changes=250
     """Compare only rows 2 onward; row 1 is a user-owned group heading."""
     session = ExamSession.objects.filter(id=sheet.session_id).first()
     if not session:
-        raise ValueError('Kh?ng t?m th?y k? t? ch?c ???c g?n v?i ngu?n Google Sheets.')
+        raise ValueError('Không tìm thấy kỳ tổ chức được gắn với nguồn Google Sheets.')
     spreadsheet_id = extract_spreadsheet_id(sheet.url)
     if not spreadsheet_id:
-        raise ValueError('Li?n k?t Google Sheets kh?ng h?p l?.')
+        raise ValueError('Liên kết Google Sheets không hợp lệ.')
     config = SystemConfig.objects.filter(key='main').first()
     config_data = config.data if config else {}
     saved_token = config.last_google_access_token if config else None
@@ -780,11 +780,11 @@ def output_sheet_export_preview(sheet, google_access_token=None, max_changes=250
         after_row = proposed[row_index] if row_index < len(proposed) else []
         sheet_row = row_index + 2
         record_row = after_row or before_row
-        record_label = 'H?ng ti?u ??'
+        record_label = 'Hàng tiêu đề'
         if row_index >= 1 and record_row:
             profile_code = str(record_row[1]) if len(record_row) > 1 and record_row[1] else ''
             candidate_name = str(record_row[2]) if len(record_row) > 2 and record_row[2] else ''
-            record_label = ' ? '.join(item for item in [profile_code, candidate_name] if item) or f'H?ng d? li?u {sheet_row}'
+            record_label = ' · '.join(item for item in [profile_code, candidate_name] if item) or f'Hàng dữ liệu {sheet_row}'
         for column_index in range(max(len(before_row), len(after_row))):
             before = str(before_row[column_index]) if column_index < len(before_row) else ''
             after = str(after_row[column_index]) if column_index < len(after_row) else ''
@@ -816,10 +816,10 @@ def output_sheet_export_preview(sheet, google_access_token=None, max_changes=250
 def remote_sheet_fingerprint(sheet, google_access_token=None):
     spreadsheet_id = extract_spreadsheet_id(sheet.url)
     if not spreadsheet_id:
-        raise ValueError('Li?n k?t Google Sheets kh?ng h?p l?.')
+        raise ValueError('Liên kết Google Sheets không hợp lệ.')
     session = ExamSession.objects.filter(id=sheet.session_id).first()
     if not session:
-        raise ValueError('Kh?ng t?m th?y k? t? ch?c ???c g?n v?i Google Sheets.')
+        raise ValueError('Không tìm thấy kỳ tổ chức được gắn với Google Sheets.')
     config = SystemConfig.objects.filter(key='main').first()
     config_data = config.data if config else {}
     saved_token = config.last_google_access_token if config else None
@@ -835,10 +835,10 @@ def remote_sheet_fingerprint(sheet, google_access_token=None):
 def export_session_to_google_sheet(sheet, google_access_token=None):
     session = ExamSession.objects.filter(id=sheet.session_id).first()
     if not session:
-        raise ValueError('Kh?ng t?m th?y k? t? ch?c ???c g?n v?i ngu?n Google Sheets.')
+        raise ValueError('Không tìm thấy kỳ tổ chức được gắn với nguồn Google Sheets.')
     spreadsheet_id = extract_spreadsheet_id(sheet.url)
     if not spreadsheet_id:
-        raise ValueError('Li?n k?t Google Sheets kh?ng h?p l?.')
+        raise ValueError('Liên kết Google Sheets không hợp lệ.')
 
     config = SystemConfig.objects.filter(key='main').first()
     config_data = config.data if config else {}
@@ -865,7 +865,7 @@ def export_session_to_google_sheet(sheet, google_access_token=None):
         'sheetTab': tab_name,
         'exported': max(0, len(values) - 1),
         'fingerprint': sheet_values_fingerprint(values),
-        'message': f'?? xu?t {max(0, len(values) - 1)} h? s? sang Google Sheets.',
+        'message': f'Đã xuất {max(0, len(values) - 1)} hồ sơ sang Google Sheets.',
     }
 
 
