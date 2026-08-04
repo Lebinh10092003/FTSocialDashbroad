@@ -33,6 +33,15 @@ export const updateEmailBlock = (blocks: EmailBlock[], id: string, update: (bloc
         columns: block.columns ? block.columns.map(column => updateEmailBlock(column, id, update)) : undefined
       });
 
+/** Replaces one block with zero or more sibling blocks, preserving its parent layout. */
+export const replaceEmailBlock = (blocks: EmailBlock[], id: string, replacements: EmailBlock[]): EmailBlock[] =>
+  blocks.flatMap(block => block.id === id
+    ? replacements
+    : [{
+        ...block,
+        children: block.children ? replaceEmailBlock(block.children, id, replacements) : undefined,
+        columns: block.columns ? block.columns.map(column => replaceEmailBlock(column, id, replacements)) : undefined,
+      }]);
 export const removeEmailBlock = (blocks: EmailBlock[], id: string): EmailBlock[] =>
   blocks.filter(block => block.id !== id).map(block => ({
     ...block,

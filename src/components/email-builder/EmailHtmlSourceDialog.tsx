@@ -45,7 +45,7 @@ export default function EmailHtmlSourceDialog({ templateName, initialHtml, onClo
       </header>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4 sm:px-6">
         <textarea autoFocus value={html} onChange={event => setHtml(event.target.value)} spellCheck={false} className="min-h-[420px] w-full resize-y rounded-xl border border-slate-200 bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-900"><FileCheck2 className="mt-0.5 h-4 w-4 shrink-0" />Mã sẽ được kiểm tra an toàn rồi áp dụng cho email này dưới dạng khối HTML. Các biến như <code>{'{{Link xác nhận}}'}</code> được giữ nguyên trong HTML xuất ra.</div>
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-900"><FileCheck2 className="mt-0.5 h-4 w-4 shrink-0" />Mã sẽ được kiểm tra an toàn và tách lại thành các khối chỉnh sửa được. Các biến như <code>{'{{Link xác nhận}}'}</code> được giữ nguyên trong HTML xuất ra.</div>
         {error && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs font-bold text-rose-700">{error}</p>}
       </div>
       <footer className="flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">

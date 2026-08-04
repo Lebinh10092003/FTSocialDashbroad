@@ -198,6 +198,11 @@ export function generateEmailHtml(
 
     // Helper to replace variables inside block values
     const rep = (val: string) => replaceVariables(val, variables, useMock);
+    const htmlOverride = typeof content.htmlOverride === 'string' ? content.htmlOverride.trim() : '';
+    if (htmlOverride) {
+      const safeHtml = inlineCustomCss(sanitizeCustomHtml(rep(htmlOverride)));
+      return `<div class="ft-email-block ft-email-block-html-override" style="margin-top:${marginTop}px;margin-bottom:${marginBottom}px;color:${blockTextColor};${fillHeightStyle}">${safeHtml}</div>`;
+    }
 
     switch (block.type) {
       case 'logo': {

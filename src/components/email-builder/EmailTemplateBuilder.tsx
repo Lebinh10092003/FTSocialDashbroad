@@ -12,7 +12,7 @@ import {
 
 import { BlockType, EmailBlock, EmailSettings, EmailTemplate, EmailVariable } from '../../types/emailBuilder';
 import { createEmailBlock, getBlockDefinition } from '../../data/emailBlockRegistry';
-import { addEmailBlock, addEmailBlockRelative, duplicateEmailBlock, findEmailBlock, moveEmailBlock, moveEmailBlockByDirection, removeEmailBlock, updateEmailBlock } from '../../lib/emailBlockTree';
+import { addEmailBlock, addEmailBlockRelative, duplicateEmailBlock, findEmailBlock, moveEmailBlock, moveEmailBlockByDirection, removeEmailBlock, replaceEmailBlock, updateEmailBlock } from '../../lib/emailBlockTree';
 import { 
   loadTemplates, 
   saveTemplates, 
@@ -37,6 +37,7 @@ import { generateEmailHtml } from '../../lib/emailHtmlGenerator';
 import { copyEmailToClipboard, copyTextToClipboard } from '../../lib/emailClipboard';
 import { createBlankEmailTemplate, createEmailTemplateFromHtml, HtmlImportMode, isHtmlEmailFile } from '../../lib/emailTemplateFactory';
 import { prepareEmailIconsForDelivery } from '../../lib/emailIconDelivery';
+import { importHtmlToEmailBlocks } from '../../lib/emailHtmlBlockImporter';
 
 import BlockLibrary from './BlockLibrary';
 import EmailCanvas, { EmailCanvasHandle, EmailSelectionFormat } from './EmailCanvas';
@@ -502,6 +503,37 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     handleUpdateTemplateBlocks(blocks);
   };
 
+  const handleSplitCustomHtml = async (id: string) => {
+    if (!activeTemplate) return;
+    const sourceBlock = findEmailBlock(activeTemplate.blocks, id);
+    if (sourceBlock?.type !== 'custom-html') return;
+    const sourceHtml = String(sourceBlock.content.html || '').trim();
+    if (!sourceHtml) { showToast('Khối HTML này chưa có nội dung để tách.'); return; }
+
+    const converted = importHtmlToEmailBlocks(sourceHtml, Date.now());
+    const splitBlocks = converted.blocks.map((item, index, list) => ({
+      ...item,
+      visible: sourceBlock.visible,
+      styles: {
+        ...item.styles,
+        marginTop: index === 0 ? sourceBlock.styles.marginTop ?? item.styles.marginTop : item.styles.marginTop,
+        marginBottom: index === list.length - 1 ? sourceBlock.styles.marginBottom ?? item.styles.marginBottom : item.styles.marginBottom,
+      },
+    }));
+    const remainsSingleCustomBlock = splitBlocks.length === 1 && splitBlocks[0].type === 'custom-html';
+    if (!splitBlocks.length || remainsSingleCustomBlock) {
+      showToast('Không tìm thấy cấu trúc có thể tách; khối HTML được giữ nguyên để tránh mất giao diện.');
+      return;
+    }
+    const accepted = await dialog.confirm(
+      `Tách Custom HTML này thành ${countEmailBlocks(splitBlocks)} khối chỉnh sửa được? Phần HTML đặc thù có thể vẫn được giữ thành Custom HTML riêng.`,
+      { title: 'Tách Custom HTML', confirmText: 'Tách khối' },
+    );
+    if (!accepted) return;
+    handleUpdateTemplateBlocks(replaceEmailBlock(activeTemplate.blocks, id, splitBlocks));
+    setSelectedBlockId(splitBlocks[0].id);
+    showToast(`Đã tách Custom HTML thành ${countEmailBlocks(splitBlocks)} khối.`);
+  };
   // 5. Variables Operations
   const updateVariablesList = (newList: EmailVariable[]) => {
     setVariables(newList);
@@ -689,7 +721,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     const current = templatesRef.current.find(template => template.id === activeTemplateId);
     if (!current) return 'Không tìm thấy email đang chỉnh sửa.';
     try {
-      const imported = createEmailTemplateFromHtml(source, current.name, Date.now(), 'preserve');
+      const imported = createEmailTemplateFromHtml(source, current.name, Date.now(), 'editable');
       commitActiveTemplate({
         ...current,
         subject: imported.subject || current.subject,
@@ -1211,6 +1243,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
                   onUpdateBlockContent={(content) => selectedBlockId && handleUpdateBlockContent(selectedBlockId, content)}
                   onUpdateBlockStyles={(styles) => selectedBlockId && handleUpdateBlockStyles(selectedBlockId, styles)}
                   onUpdateBlock={(nextBlock) => selectedBlockId && handleUpdateWholeBlock(selectedBlockId, nextBlock)}
+                  onSplitCustomHtml={() => selectedBlockId && void handleSplitCustomHtml(selectedBlockId)}
                   onApplySelectionFontSize={(size) => selectedBlockId ? canvasRef.current?.applySelectionFontSize(selectedBlockId, size) || false : false}
                   hasTextSelection={selectionFormat?.blockId === selectedBlockId && selectionFormat.hasSelection}
                   selectionFontSize={selectionFormat?.blockId === selectedBlockId && selectionFormat.hasSelection ? selectionFormat.fontSize : undefined}

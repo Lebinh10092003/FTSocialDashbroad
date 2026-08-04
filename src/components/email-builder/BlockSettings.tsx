@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlignCenter, AlignLeft, AlignRight, Link2, Lock, LockOpen, Plus, Search, Trash2, Upload } from 'lucide-react';
+import { AlignCenter, AlignLeft, AlignRight, Code2, Link2, Lock, LockOpen, Plus, Search, Trash2, Upload } from 'lucide-react';
 import { EmailBlock, EmailVariable } from '../../types/emailBuilder';
 import { addEmailLayoutCell, getLayoutSlotIndex, normalizeEmailLayout, removeEmailLayoutCell, resizeEmailLayout, updateEmailLayoutCell, updateEmailLayoutColumn } from '../../lib/emailLayout';
 import { getBlockDefinition } from '../../data/emailBlockRegistry';
@@ -15,6 +15,7 @@ interface BlockSettingsProps {
   onUpdateBlockStyles: (styles: Record<string, any>) => void;
   onUpdateBlockColumns?: (columns: EmailBlock[][]) => void;
   onUpdateBlock?: (block: EmailBlock) => void;
+  onSplitCustomHtml?: () => void;
   onApplySelectionFontSize?: (size: number) => boolean;
   onApplySelectionTextColor?: (color: string) => boolean;
   hasTextSelection?: boolean;
@@ -36,6 +37,13 @@ const LABELS: Record<string, string> = {
 };
 
 const COLOR_KEYS = new Set(['bg', 'color', 'background', 'backgroundColor', 'borderColor', 'textColor', 'linkColor', 'headerBg', 'headerColor', 'bodyBg', 'bodyColor', 'headingColor']);
+
+const escapeHtmlSource = (value: unknown) => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
 
 function NumberDraft({ value, min = 0, max = 2000, step = 1, onCommit, label, live = false }: { value: number | string | null | undefined; min?: number; max?: number; step?: number; onCommit: (value: number | '') => void; label: string; live?: boolean }) {
   const [draft, setDraft] = React.useState(value === null || value === undefined ? '' : String(value));
@@ -60,7 +68,7 @@ function NumberDraft({ value, min = 0, max = 2000, step = 1, onCommit, label, li
   return <div><label className="mb-1 block text-[10px] font-bold text-slate-500">{label}</label><input ref={inputRef} type="number" min={min} max={max} step={step} value={draft} onChange={event => { const raw = event.target.value; dirtyRef.current = true; setDraft(raw); const parsed = Number(raw); if (live && raw.trim() !== '' && Number.isFinite(parsed) && parsed >= min && parsed <= max) { dirtyRef.current = false; onCommit(parsed); } }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); commit(draft); event.currentTarget.select(); } }} onBlur={() => commit(draft)} className={fieldClass} /></div>;
 }
 
-export default function BlockSettings({ block, variables = [], onUpdateBlockContent, onUpdateBlockStyles, onUpdateBlockColumns, onUpdateBlock, onApplySelectionFontSize, onApplySelectionTextColor, hasTextSelection = false, selectionFontSize, selectionTextColor, selectionEditorKey }: BlockSettingsProps) {
+export default function BlockSettings({ block, variables = [], onUpdateBlockContent, onUpdateBlockStyles, onUpdateBlockColumns, onUpdateBlock, onSplitCustomHtml, onApplySelectionFontSize, onApplySelectionTextColor, hasTextSelection = false, selectionFontSize, selectionTextColor, selectionEditorKey }: BlockSettingsProps) {
   const content = block.content;
   const styles = block.styles;
   const definition = getBlockDefinition(block.type);
@@ -68,9 +76,51 @@ export default function BlockSettings({ block, variables = [], onUpdateBlockCont
   const [uploadError, setUploadError] = React.useState('');
   const [iconQuery, setIconQuery] = React.useState('');
   const [iconCategory, setIconCategory] = React.useState<'all' | EmailIconOption['category']>('all');
+  const [isHtmlEditorOpen, setIsHtmlEditorOpen] = React.useState(false);
+  const [htmlDraft, setHtmlDraft] = React.useState('');
   const dialog = useEmailBuilderDialog();
   const updateContent = (key: string, value: any) => onUpdateBlockContent({ ...content, [key]: value });
   const updateStyles = (key: string, value: any) => onUpdateBlockStyles({ ...styles, [key]: value });
+
+  const defaultBlockHtmlSource = () => {
+    const existing = typeof content.html === 'string' ? content.html.trim() : '';
+    if (typeof content.htmlOverride === 'string' && content.htmlOverride.trim()) return content.htmlOverride;
+    if (block.type === 'button') {
+      return `<a href="${escapeHtmlSource(content.link || 'https://')}" target="_blank" rel="noopener noreferrer" style="display:inline-block">${existing || escapeHtmlSource(content.text || 'Nút CTA')}</a>`;
+    }
+    if (block.type === 'button-group' || block.type === 'button-group-3') {
+      const buttons = groupButtons();
+      return buttons.map((button: any) => `<a href="${escapeHtmlSource(button.link || 'https://')}" target="_blank" rel="noopener noreferrer" style="display:inline-block">${button.html || escapeHtmlSource(button.text || 'Nút CTA')}</a>`).join('\n');
+    }
+    if (existing) return existing;
+    const text = content.text || content.heading || content.body || content.description || content.title || '';
+    return text ? `<div>${escapeHtmlSource(text)}</div>` : '<div><!-- Nhập HTML cho block này --></div>';
+  };
+
+  React.useEffect(() => {
+    setIsHtmlEditorOpen(false);
+    setHtmlDraft(defaultBlockHtmlSource());
+  }, [block.id]);
+
+  const openHtmlEditor = () => {
+    setHtmlDraft(defaultBlockHtmlSource());
+    setIsHtmlEditorOpen(true);
+  };
+  const applyHtmlOverride = () => {
+    const htmlOverride = htmlDraft.trim();
+    if (!htmlOverride) return;
+    onUpdateBlockContent({ ...content, htmlOverride });
+    setIsHtmlEditorOpen(false);
+  };
+  const clearHtmlOverride = async () => {
+    if (!content.htmlOverride) return;
+    const accepted = await dialog.confirm('Block sẽ quay lại giao diện được dựng từ các thuộc tính bên trên. HTML riêng của block này sẽ bị bỏ.', { title: 'Khôi phục HTML dựng sẵn', confirmText: 'Kh?i ph?c' });
+    if (!accepted) return;
+    const { htmlOverride, ...nextContent } = content;
+    onUpdateBlockContent(nextContent);
+    setHtmlDraft(defaultBlockHtmlSource());
+    setIsHtmlEditorOpen(false);
+  };
 
   const applyImageMetadata = (url: string) => {
     const image = new Image();
@@ -308,5 +358,17 @@ export default function BlockSettings({ block, variables = [], onUpdateBlockCont
     </section>}
 
     {collectionEntries.map(([key, rawItems]) => { const items = rawItems as any[]; return <section key={key} className="space-y-2"><div className="flex items-center justify-between"><h4 className="text-[10px] font-black uppercase">{LABELS[key] || key}</h4><button type="button" onClick={() => addCollectionItem(key, items)} className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700"><Plus className="h-3.5 w-3.5" />Thêm</button></div>{items.map((item, index) => <div key={index} className="flex gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">{typeof item === 'string' ? <input value={item} onChange={event => updateCollectionItem(key, index, event.target.value)} className={fieldClass} /> : <div className="grid min-w-0 flex-1 gap-2">{Object.entries(item || {}).filter(([, value]) => typeof value === 'string' || typeof value === 'number').map(([field, value]) => COLOR_KEYS.has(field) ? <div key={field}><ColorField label={LABELS[field] || field} value={String(value)} onChange={next => updateCollectionItem(key, index, { ...item, [field]: next })} compact /></div> : <label key={field} className="text-[9px] font-bold text-slate-500">{LABELS[field] || field}<input value={String(value)} onChange={event => updateCollectionItem(key, index, { ...item, [field]: event.target.value })} className={`${fieldClass} mt-1`} /></label>)}</div>}<button type="button" onClick={() => updateContent(key, items.filter((_, itemIndex) => itemIndex !== index))} className="h-fit rounded-lg p-2 text-rose-500 hover:bg-rose-50"><Trash2 className="h-4 w-4" /></button></div>)}</section>; })}
+
+    {block.type === 'custom-html' && <section className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+      <div><h4 className="text-[10px] font-black uppercase text-amber-900">Tách Custom HTML</h4><p className="mt-1 text-[10px] leading-4 text-amber-800">Tự nhận diện tiêu đề, văn bản, ảnh, nút, bảng và cột. HTML đặc thù sẽ được giữ lại thành block riêng để tránh mất giao diện.</p></div>
+      <button type="button" onClick={onSplitCustomHtml} disabled={!String(content.html || '').trim()} className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3 py-2 text-[10px] font-bold text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"><Code2 className="h-3.5 w-3.5" />Tách thành các khối chỉnh sửa</button>
+    </section>}
+    <section className="space-y-3 border-t border-slate-200 pt-5">
+      <div className="flex items-start justify-between gap-3">
+        <div><h4 className="text-[10px] font-black uppercase">HTML của khối</h4><p className="mt-1 text-[10px] leading-4 text-slate-500">Chỉnh mã riêng cho block này. Lề, vị trí và trạng thái ẩn/hiện vẫn giữ nguyên.</p></div>
+        {content.htmlOverride && <span className="shrink-0 rounded-full bg-amber-50 px-2 py-1 text-[9px] font-black text-amber-700">Đang ghi đè</span>}
+      </div>
+      {!isHtmlEditorOpen ? <div className="flex flex-wrap gap-2"><button type="button" onClick={openHtmlEditor} className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-[10px] font-bold text-blue-700 hover:bg-blue-100"><Code2 className="h-3.5 w-3.5" />Sửa HTML của khối</button>{content.htmlOverride && <button type="button" onClick={() => void clearHtmlOverride()} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold text-slate-600 hover:bg-slate-50">Khôi phục giao diện dựng sẵn</button>}</div> : <div className="space-y-2 rounded-xl border border-blue-200 bg-blue-50/40 p-3"><textarea value={htmlDraft} onChange={event => setHtmlDraft(event.target.value)} spellCheck={false} rows={14} className="w-full resize-y rounded-lg border border-slate-200 bg-slate-950 p-3 font-mono text-[10px] leading-5 text-slate-100 outline-none focus:border-blue-500" /><p className="text-[9px] leading-4 text-slate-500">Chỉ dùng HTML email-safe. Script, iframe và mã không an toàn sẽ tự bị loại trước khi xuất email. Biến như <code>{'{{Link xác nhận}}'}</code> được giữ nguyên.</p><div className="flex justify-end gap-2"><button type="button" onClick={() => setIsHtmlEditorOpen(false)} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-bold text-slate-600">Hủy</button><button type="button" onClick={applyHtmlOverride} disabled={!htmlDraft.trim()} className="rounded-lg bg-blue-600 px-3 py-1.5 text-[10px] font-bold text-white disabled:opacity-50">Áp dụng cho block này</button></div></div>}
+    </section>
   </div>;
 }
