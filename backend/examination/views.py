@@ -1600,6 +1600,85 @@ def exam_room_allocation(request, session_id, round_id):
     })
 
 
+@api_view(['POST'])
+@permission_classes([IsManagerOrAdmin])
+def apply_round_slot(request, session_id, round_id):
+    """Apply one configured exam slot to all eligible candidates in a round.
+
+    A slot supplies the shared exam schedule.  Room allocation is intentionally
+    untouched: `location`, `room_name`, and `exam_room` remain owned by rooms.
+    """
+    try:
+        session = ExamSession.objects.get(id=session_id)
+    except ExamSession.DoesNotExist:
+        return Response({'error': 'Không tìm thấy kỳ tổ chức.'}, status=status.HTTP_404_NOT_FOUND)
+
+    round_config = _session_round_config(session, round_id)
+    if not round_config:
+        return Response({'error': 'Không tìm thấy vòng thi trong kỳ tổ chức này.'}, status=status.HTTP_404_NOT_FOUND)
+    slots = [slot for slot in (round_config.get('slots') or []) if isinstance(slot, dict)]
+    data = request.data or {}
+    requested_slot_id = str(data.get('slotId') or '').strip()
+    try:
+        requested_index = int(data.get('slotIndex')) if data.get('slotIndex') is not None else None
+    except (TypeError, ValueError):
+        requested_index = None
+    selected = next((slot for slot in slots if requested_slot_id and str(slot.get('id') or '') == requested_slot_id), None)
+    if selected is None and requested_index is not None and 0 <= requested_index < len(slots):
+        selected = slots[requested_index]
+    if not selected:
+        return Response({'error': 'Không tìm thấy lịch/ca thi đã chọn.'}, status=status.HTTP_404_NOT_FOUND)
+
+    values = {key: str(selected.get(key) or '').strip() for key in ('date', 'time', 'mode', 'link')}
+    if not any(values.values()):
+        return Response({'error': 'Lịch/ca thi chưa có dữ liệu để áp dụng.'}, status=status.HTTP_400_BAD_REQUEST)
+    apply_link = bool(data.get('applyLink', True))
+    round_name = str(round_config.get('name') or '').strip()
+    results = RoundResult.objects.filter(
+        participation__session=session,
+        eligibility=ELIGIBILITY_ELIGIBLE,
+    ).filter(Q(round_id=str(round_id)) | Q(round_id='', round_name=round_name)).select_related('participation__candidate')
+
+    changed = 0
+    candidate_ids = []
+    with transaction.atomic():
+        for result in results.select_for_update():
+            update_fields = []
+            for slot_field, model_field in (('date', 'exam_date'), ('time', 'time_slot'), ('mode', 'mode')):
+                value = values[slot_field]
+                if value and getattr(result, model_field) != value:
+                    setattr(result, model_field, value)
+                    update_fields.append(model_field)
+            if apply_link and values['link'] and result.link != values['link']:
+                result.link = values['link']
+                update_fields.append('link')
+            if result.round_id != str(round_id):
+                result.round_id = str(round_id)
+                update_fields.append('round_id')
+            candidate_ids.append(result.participation.candidate_id)
+            if update_fields:
+                result.save(update_fields=list(set(update_fields)) + ['updated_at'])
+                candidate = result.participation.candidate
+                candidate.updated = timezone.now().strftime('%d/%m/%Y %H:%M')
+                candidate.save(update_fields=['updated'])
+                changed += 1
+
+    slot_number = (slots.index(selected) + 1) if selected in slots else 1
+    audit_content = f'Áp dụng lịch/ca {slot_number} cho {round_name}: {changed}/{len(candidate_ids)} thí sinh được cập nhật.'
+    append_audit(f'session-{session.id}', audit_content, request)
+    append_competition_scope_audit(session, audit_content, request)
+    candidates = Candidate.objects.filter(id__in=candidate_ids).order_by('sort_key', 'code')
+    return Response({
+        'sessionId': session.id,
+        'roundId': str(round_id),
+        'roundName': round_name,
+        'slotIndex': slot_number - 1,
+        'candidateCount': len(candidate_ids),
+        'updatedCount': changed,
+        'updatedCandidates': [serialize_candidate(candidate, include_private=True) for candidate in candidates],
+    })
+
+
 @api_view(['PUT', 'DELETE'])
 @permission_classes([IsManagerOrAdmin])
 def candidate_detail(request, pk):

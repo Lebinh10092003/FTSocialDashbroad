@@ -550,6 +550,39 @@ class ExamRoomAllocationTests(TestCase):
         self.assertEqual(result.eligibility, 'Đủ điều kiện')
 
 
+    def test_apply_configured_slot_updates_schedule_without_touching_room(self):
+        self.session.rounds = [{
+            'id': 'round-1', 'name': 'Vòng 1', 'label': '', 'date': '',
+            'slots': [
+                {'id': 'morning', 'date': '2026-08-09', 'time': '10:30 - 11:30', 'mode': 'Trực tuyến', 'link': 'https://exam.example.test/common'},
+                {'id': 'afternoon', 'date': '2026-08-09', 'time': '14:00 - 15:00', 'mode': 'Trực tuyến', 'link': 'https://exam.example.test/afternoon'},
+            ],
+        }]
+        self.session.save(update_fields=['rounds'])
+        first = RoundResult.objects.get(participation__candidate_id='ROOM-001')
+        first.location = 'Room 101: https://meet.example.test/room'
+        first.room_name = 'Room 101'
+        first.save(update_fields=['location', 'room_name'])
+        endpoint = f'/api/examination/sessions/{self.session.id}/rounds/round-1/apply-slot'
+
+        response = self.client.post(endpoint, {'slotId': 'morning', 'slotIndex': 0, 'applyLink': True}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['candidateCount'], 5)
+        self.assertEqual(response.data['updatedCount'], 5)
+        results = list(RoundResult.objects.order_by('participation__candidate__code'))
+        self.assertTrue(all(result.exam_date == '2026-08-09' for result in results))
+        self.assertTrue(all(result.time_slot == '10:30 - 11:30' for result in results))
+        self.assertTrue(all(result.link == 'https://exam.example.test/common' for result in results))
+        first.refresh_from_db()
+        self.assertEqual(first.location, 'Room 101: https://meet.example.test/room')
+        self.assertEqual(first.room_name, 'Room 101')
+
+        response = self.client.post(endpoint, {'slotId': 'afternoon', 'slotIndex': 1, 'applyLink': False}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(all(result.time_slot == '14:00 - 15:00' for result in RoundResult.objects.all()))
+        self.assertTrue(all(result.link == 'https://exam.example.test/common' for result in RoundResult.objects.all()))
+
+
 class CandidateImportReuseTests(TestCase):
     def setUp(self):
         self.user = UserProfile.objects.create(email='reuse-admin@example.com', name='Reuse Admin', role='ADMIN')
