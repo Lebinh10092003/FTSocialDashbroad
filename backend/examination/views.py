@@ -1560,9 +1560,9 @@ def exam_room_allocation(request, session_id, round_id):
             result.round_id = str(round_id)
             result.room_name = room.label
             result.mode = 'Trực tiếp' if mode == ExamRoom.MODE_IN_PERSON else 'Trực tuyến'
-            result.location = ' · '.join(value for value in [room.label, room.location] if value)
-            result.link = room.link if mode == ExamRoom.MODE_ONLINE else ''
-            result.save(update_fields=['exam_room', 'round_id', 'room_name', 'mode', 'location', 'link', 'updated_at'])
+            result.location = f'{room.label}:\n{room.link}' if mode == ExamRoom.MODE_ONLINE else ' · '.join(value for value in [room.label, room.location] if value)
+            # A room link identifies where the candidate sits; the exam link is a separate field and must be preserved.
+            result.save(update_fields=['exam_room', 'round_id', 'room_name', 'mode', 'location', 'updated_at'])
 
     strategy_label = 'chia đều' if strategy == ExamRoom.STRATEGY_BALANCED else f'tối đa {max_candidates} thí sinh/phòng'
     audit_content = (

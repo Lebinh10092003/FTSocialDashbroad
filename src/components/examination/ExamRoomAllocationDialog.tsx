@@ -211,7 +211,7 @@ export default function ExamRoomAllocationDialog({ sessionId, round, candidateCo
           <div>
             <p className="text-xs font-extrabold uppercase tracking-[0.12em] text-[#aa3000]">{round.name}</p>
             <h2 id="room-allocation-title" className="mt-1 text-xl font-extrabold text-[#001e40] sm:text-2xl">Tạo / phân phòng thi</h2>
-            <p className="mt-1 text-sm text-slate-500">Thông tin phòng sẽ được ghi vào dữ liệu vòng thi của từng thí sinh và sẵn sàng xuất Google Sheets.</p>
+            <p className="mt-1 text-sm text-slate-500">Thông tin phân phòng sẽ được ghi vào Địa điểm/Phòng của từng thí sinh; Link dự thi được giữ riêng để làm bài.</p>
           </div>
           <button type="button" onClick={() => !saving && setOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Đóng popup phân phòng"><X className="h-5 w-5"/></button>
         </header>
@@ -277,7 +277,7 @@ export default function ExamRoomAllocationDialog({ sessionId, round, candidateCo
                 <label><span className="mb-1 block text-xs font-bold text-slate-500">Số/mã phòng</span><input value={room.number} onChange={event => updateRoom(room.id, 'number', event.target.value)} maxLength={100} placeholder="101" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2"/></label>
                 {mode === 'IN_PERSON'
                   ? <label><span className="mb-1 block text-xs font-bold text-slate-500">Địa chỉ / vị trí / số phòng</span><input value={room.location} onChange={event => updateRoom(room.id, 'location', event.target.value)} placeholder="Tầng 2, số 10 Trần Phú, Hà Nội" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2"/></label>
-                  : <label><span className="mb-1 block text-xs font-bold text-slate-500">Link phòng trực tuyến</span><input type="url" value={room.link} onChange={event => updateRoom(room.id, 'link', event.target.value)} placeholder="meet.google.com/... hoặc facebook.com/..." className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2"/></label>}
+                  : <label><span className="mb-1 block text-xs font-bold text-slate-500">Link phòng trực tuyến</span><input type="url" value={room.link} onChange={event => updateRoom(room.id, 'link', event.target.value)} placeholder="meet.google.com/... hoặc facebook.com/..." className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2"/><span className="mt-1 block text-[11px] text-slate-500">Sẽ hiển thị cùng tên phòng trong Địa điểm/Phòng, không thay Link dự thi.</span></label>}
                 <div><span className="mb-1 block text-xs font-bold text-slate-500">Dự kiến</span><div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-extrabold text-[#001e40]">{roomCounts[index] || 0} thí sinh</div></div>
                 <button type="button" disabled={rooms.length === 1} onClick={() => setRooms(current => current.filter(item => item.id !== room.id))} className="inline-flex h-10 items-center justify-center rounded-lg border border-rose-200 px-3 text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-35" aria-label={`Xóa phòng ${index + 1}`}><Trash2 className="h-4 w-4"/></button>
               </article>)}

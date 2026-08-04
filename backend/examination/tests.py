@@ -449,6 +449,8 @@ class ExamRoomAllocationTests(TestCase):
     def test_online_room_assignment_is_ready_for_google_sheet_export(self):
         from .sync import PROFILE_EXPORT_HEADERS, REGISTRATION_EXPORT_HEADERS, session_export_rows
 
+        RoundResult.objects.update(link='https://exam.example.test/start')
+
         response = self.client.post(self.url, {
             'commonName': 'Zoom',
             'mode': 'ONLINE',
@@ -465,13 +467,15 @@ class ExamRoomAllocationTests(TestCase):
         self.assertEqual([result.room_name for result in results[:3]], ['Zoom 01'] * 3)
         self.assertEqual([result.room_name for result in results[3:]], ['Zoom 02'] * 2)
         self.assertTrue(all(result.mode == 'Trực tuyến' for result in results))
-        self.assertTrue(all(result.location.startswith('Zoom ') for result in results))
+        self.assertEqual([result.location for result in results[:3]], ['Zoom 01:\nhttps://meet.example.test/room-01'] * 3)
+        self.assertEqual([result.location for result in results[3:]], ['Zoom 02:\nhttps://meet.example.test/room-02'] * 2)
+        self.assertTrue(all(result.link == 'https://exam.example.test/start' for result in results))
 
         exported = session_export_rows(self.session.id)
         round_start = len(PROFILE_EXPORT_HEADERS) + len(REGISTRATION_EXPORT_HEADERS)
         self.assertEqual(exported[2][round_start + 4], 'Trực tuyến')
-        self.assertTrue(exported[2][round_start + 5].startswith('Zoom 01'))
-        self.assertEqual(exported[2][round_start + 6], 'https://meet.example.test/room-01')
+        self.assertEqual(exported[2][round_start + 5], 'Zoom 01:\nhttps://meet.example.test/room-01')
+        self.assertEqual(exported[2][round_start + 6], 'https://exam.example.test/start')
 
 
     def test_meet_and_facebook_links_without_protocol_are_normalized(self):
