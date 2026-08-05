@@ -10,6 +10,7 @@ import { getEmailLucideIcon } from '../../lib/emailIcon';
 import { emailIconRasterKey } from '../../lib/emailIconDelivery';
 import { getEmailBlockPresentation, getEmailLayoutCellPresentation, isDarkEmailColor } from '../../lib/emailPresentation';
 import { useEmailBuilderDialog } from './EmailBuilderDialog';
+import { matchesSearch } from '../../lib/searchText';
 
 export interface EmailCanvasHandle {
   hasTextSelection: (blockId: string) => boolean;
@@ -785,7 +786,7 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     if (sourceId && blocks.length) onDropBlock(sourceId, blocks[blocks.length - 1].id, undefined, 'after');
     else if (type && EMAIL_BLOCK_REGISTRY[type]) onAddBlock(type);
   };
-  const filteredDefinitions = BLOCK_CATEGORIES.map(category => ({ ...category, items: Object.values(EMAIL_BLOCK_REGISTRY).filter(item => item.category === category.id && `${item.label} ${item.description}`.toLowerCase().includes(blockQuery.toLowerCase())) })).filter(category => category.items.length);
+  const filteredDefinitions = BLOCK_CATEGORIES.map(category => ({ ...category, items: Object.values(EMAIL_BLOCK_REGISTRY).filter(item => item.category === category.id && matchesSearch(`${item.label} ${item.description}`, blockQuery)) })).filter(category => category.items.length);
 
   return <div className="flex w-full flex-col items-center px-4 py-6 md:px-8">
     <style>{'::highlight(ft-email-selection){background:#2563eb;color:#ffffff;} [contenteditable="true"] a{color:#2563eb!important;text-decoration:underline!important;} [contenteditable="true"]::selection,[contenteditable="true"] *::selection{background:#2563eb;color:#ffffff;} [data-ft-placeholder="true"]:empty::before{content:attr(data-placeholder);color:#94a3b8;font-weight:400;pointer-events:none;}'}</style>

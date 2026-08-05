@@ -3840,8 +3840,8 @@ export default function DigitalTraining({
           {customerOpen && (
             <div className="space-y-1">
               <button
-                onClick={() => go("partners")}
-                className={`ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold ${tab === "partners" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
+                onClick={() => goProduct("allocation")}
+                className={`ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold ${tab === "products" && productView === "allocation" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
               >
                 <Handshake className="h-3.5 w-3.5" />
                 Khách hàng hiện tại
@@ -3875,9 +3875,7 @@ export default function DigitalTraining({
               <button onClick={() => goProduct("catalog")} className={`ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold ${tab === "products" && productView === "catalog" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}>
                 <PackageSearch className="h-3.5 w-3.5" />Danh mục
               </button>
-              <button onClick={() => goProduct("allocation")} className={`ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold ${tab === "products" && productView === "allocation" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}>
-                <Handshake className="h-3.5 w-3.5" />Phân bổ sản phẩm
-              </button>
+
               <button onClick={() => goProduct("statistics")} className={`ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold ${tab === "products" && productView === "statistics" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}>
                 <ClipboardList className="h-3.5 w-3.5" />Thống kê sử dụng
               </button>

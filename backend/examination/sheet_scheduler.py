@@ -6,6 +6,7 @@ from .models import ExaminationSheet, LogNote
 from .sync import (
     export_session_to_google_sheet,
     remote_sheet_fingerprint,
+    output_sheet_export_preview,
     sheet_values_fingerprint,
     sync_single_sheet,
 )
@@ -84,6 +85,16 @@ def run_output_exports(now=None):
                 sheet.save(update_fields=['pending_manual_import', 'status', 'last_error', 'updated_at'])
                 summary['blocked'] += 1
                 record_sheet_log(sheet, 'Tạm dừng xuất tự động vì Sheet tổng hợp có chỉnh sửa đang chờ nhập thủ công.')
+                continue
+            preview = output_sheet_export_preview(sheet)
+            if preview.get('appendedRows'):
+                sheet.pending_manual_import = True
+                sheet.status = 'attention'
+                sheet.last_error = 'Số lượng thí sinh giữa hệ thống và Sheet đang lệch; chờ người quản lý chọn cách xử lý.'
+                sheet.updated_at = now
+                sheet.save(update_fields=['pending_manual_import', 'status', 'last_error', 'updated_at'])
+                summary['blocked'] += 1
+                record_sheet_log(sheet, 'Tạm dừng xuất tự động vì danh sách thí sinh giữa hệ thống và Sheet bị lệch.')
                 continue
             result = export_session_to_google_sheet(sheet)
             sheet.last_export_at = now

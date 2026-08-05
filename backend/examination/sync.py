@@ -449,6 +449,10 @@ def sync_candidate_payload(candidate):
 
 def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url, sheet_tab='', source_row_offset=1):
     existing = list(Candidate.objects.all())
+    # Compare against memberships in this session, not every historic profile.
+    session_candidates = list(Candidate.objects.filter(participations__session_id=session_id).distinct()) if session_id else []
+    session_candidate_ids = {candidate.id for candidate in session_candidates}
+    matched_session_candidate_ids = set()
     created = matched = conflicts = changed = unchanged = 0
     rows = []
     profile_fields = (
@@ -486,6 +490,8 @@ def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url,
 
         if base:
             matched += 1
+            if base.id in session_candidate_ids:
+                matched_session_candidate_ids.add(base.id)
             for model_field, incoming_field in profile_fields:
                 incoming_value = clean_txt(item.get(incoming_field))
                 add_fill_change(model_field, model_field, getattr(base, model_field), incoming_value)
@@ -544,6 +550,24 @@ def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url,
         }
         rows.append(payload)
 
+    # Do not hide the other side of a count mismatch. These people are already
+    # in the selected session on Fermat but have no safe counterpart in Sheet.
+    # Import does not remove them automatically.
+    web_only_records = [
+        {
+            'code': candidate.code,
+            'name': candidate.name,
+            'birthDate': candidate.birth_date or '',
+            'identity': candidate.identity or '',
+            'email': candidate.email or '',
+            'phone': candidate.phone or '',
+            'school': candidate.school or '',
+            'className': candidate.class_name or '',
+        }
+        for candidate in session_candidates
+        if candidate.id not in matched_session_candidate_ids
+    ]
+
     mapped = []
     used_indices = set()
     for field, index in columns.items():
@@ -573,7 +597,9 @@ def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url,
         'summary': {
             'total': len(rows), 'new': created, 'matched': matched, 'changed': changed,
             'unchanged': unchanged, 'conflicts': conflicts,
+            'webOnly': len(web_only_records),
         },
+        'webOnlyRecords': web_only_records,
         'mapping': {
             'headerCount': len(headers), 'mapped': mapped,
             'unmapped': [header for index, header in enumerate(headers) if header and index not in used_indices],
@@ -935,6 +961,7 @@ def _aligned_export_rows(current_rows, session_id):
     aligned_rows = [list(row) for row in current_rows]
     matched_rows = 0
     appended_rows = 0
+    appended_values = []
     unmatched_sheet_rows = []
     conflicts = []
 
@@ -1005,12 +1032,14 @@ def _aligned_export_rows(current_rows, session_id):
         appended[0] = next_stt
         next_stt += 1
         aligned_rows.append(appended)
+        appended_values.append(appended)
         appended_rows += 1
 
     return {
         'values': aligned_rows,
         'matchedRows': matched_rows,
         'appendedRows': appended_rows,
+        'appendedValues': appended_values,
         'unmatchedSheetRows': unmatched_sheet_rows,
         'matchConflicts': conflicts,
         'systemRows': len(proposed_rows),
@@ -1105,9 +1134,10 @@ def output_sheet_export_preview(sheet, google_access_token=None, max_changes=250
         'changedCells': review_changed_cells, 'changedRows': len(changed_rows),
         'writeChangedCells': write_changed_cells,
         'changes': changes, 'changesTruncated': review_changed_cells > len(changes),
-        'hasExistingData': bool(current), 'hasChanges': bool(write_changed_cells),
+        'hasExistingData': bool(current), 'hasChanges': bool(write_changed_cells or alignment['unmatchedSheetRows']),
         'hasReviewChanges': bool(review_changed_cells),
         **{key: alignment[key] for key in ('matchedRows', 'appendedRows', 'unmatchedSheetRows', 'matchConflicts', 'systemRows')},
+        'appendedCandidates': [_export_row_record(row) for row in alignment['appendedValues']],
     }
 
 def remote_sheet_fingerprint(sheet, google_access_token=None):
@@ -1129,7 +1159,7 @@ def remote_sheet_fingerprint(sheet, google_access_token=None):
     return sheet_values_fingerprint(values)
 
 
-def export_session_to_google_sheet(sheet, google_access_token=None):
+def export_session_to_google_sheet(sheet, google_access_token=None, export_mode='merge', append_candidate_codes=None):
     session = ExamSession.objects.filter(id=sheet.session_id).first()
     if not session:
         raise ValueError('Không tìm thấy kỳ tổ chức được gắn với nguồn Google Sheets.')
@@ -1149,23 +1179,46 @@ def export_session_to_google_sheet(sheet, google_access_token=None):
         range=f'{range_title}!A3:ZZ',
     ).execute().get('values', [])
     alignment = _aligned_export_rows(current, session.id)
-    if alignment['matchConflicts']:
-        raise ValueError('Kh\u00f4ng th\u1ec3 xu\u1ea5t v\u00ec c\u00f3 th\u00ed sinh ch\u01b0a gh\u00e9p \u0111\u01b0\u1ee3c an to\u00e0n v\u1edbi d\u00f2ng tr\u00ean Sheet.')
-    values = alignment['values']
-    if values:
+    if export_mode not in {'merge', 'append-only'}:
+        raise ValueError('Invalid export mode.')
+    selected_codes = {clean_txt(code).upper() for code in (append_candidate_codes or []) if clean_txt(code)}
+    appended_codes = {clean_txt(_export_row_record(row)['code']).upper() for row in alignment['appendedValues']}
+    # An omitted selection means all new candidates. A supplied selection is
+    # authoritative: unticked web-only candidates are not added to Sheet.
+    skipped_appended_codes = appended_codes - selected_codes if append_candidate_codes is not None else set()
+    values = [
+        row for row in session_export_rows(session.id)[2:]
+        if clean_txt(_export_row_record(row)['code']).upper() not in skipped_appended_codes
+    ]
+    values_to_write = [
+        row for row in alignment['appendedValues']
+        if clean_txt(_export_row_record(row)['code']).upper() not in skipped_appended_codes
+    ] if export_mode == 'append-only' else values
+    start_row = len(current) + 3 if export_mode == 'append-only' else 3
+    if export_mode == 'merge':
+        # A normal export is authoritative for the output tab: rows only in
+        # Sheet disappear when the web roster is smaller.
+        service.spreadsheets().values().clear(
+            spreadsheetId=spreadsheet_id,
+            range=f'{range_title}!A3:ZZ',
+            body={},
+        ).execute()
+    if values_to_write:
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
-            range=f'{range_title}!A3',
+            range=f'{range_title}!A{start_row}',
             valueInputOption='RAW',
-            body={'values': values},
+            body={'values': values_to_write},
         ).execute()
+    exported_count = len(values_to_write) if export_mode == 'append-only' else len(values)
+    resulting_values = [*current, *values_to_write] if export_mode == 'append-only' else values
     return {
         'success': True,
         'sessionId': session.id,
         'sheetTab': tab_name,
-        'exported': alignment['matchedRows'] + alignment['appendedRows'],
-        'fingerprint': sheet_values_fingerprint(values),
-        'message': '\u0110\u00e3 xu\u1ea5t {} h\u1ed3 s\u01a1 sang Google Sheets.'.format(alignment['matchedRows'] + alignment['appendedRows']),
+        'exported': exported_count,
+        'fingerprint': sheet_values_fingerprint(resulting_values),
+        'message': '\u0110\u00e3 xu\u1ea5t {} h\u1ed3 s\u01a1 sang Google Sheets.'.format(exported_count),
     }
 
 

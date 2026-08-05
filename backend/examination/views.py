@@ -2057,16 +2057,24 @@ def sheet_export(request, pk):
     except Exception as exc:
         return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-    if preview.get('matchConflicts'):
-        return Response({
-            'error': 'Kh\u00f4ng th\u1ec3 ghi \u0111\u00e8: c\u00f3 th\u00ed sinh ch\u01b0a gh\u00e9p \u0111\u01b0\u1ee3c an to\u00e0n v\u1edbi d\u00f2ng tr\u00ean Sheet.',
-            'requiresConfirmation': True,
-            'requiresManualResolution': True,
-            'preview': preview,
-        }, status=status.HTTP_409_CONFLICT)
-
+    export_mode = str((request.data or {}).get('exportMode') or 'merge').strip()
+    if export_mode not in {'merge', 'append-only'}:
+        return Response({'error': 'Chế độ xuất dữ liệu không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
+    # Only web-only candidates require a choice. Extra rows already in Sheet
+    # follow the normal overwrite export flow.
+    roster_mismatch = bool(preview.get('appendedRows'))
+    selected_append_codes = (request.data or {}).get('appendCandidateCodes')
+    if selected_append_codes is not None and (not isinstance(selected_append_codes, list) or len(selected_append_codes) > 1000):
+        return Response({'error': 'Danh sách thí sinh cần thêm không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
     confirm_overwrite = bool((request.data or {}).get('confirmOverwrite'))
     preview_fingerprint = str((request.data or {}).get('currentFingerprint') or '')
+    if roster_mismatch and (not confirm_overwrite or preview_fingerprint != preview['currentFingerprint']):
+        return Response({
+            'error': 'Số lượng thí sinh giữa hệ thống và Sheet đang lệch. Hãy chọn cách xử lý sau khi xem danh sách.',
+            'requiresConfirmation': True,
+            'requiresRosterReview': True,
+            'preview': preview,
+        }, status=status.HTTP_409_CONFLICT)
     needs_confirmation = preview['hasExistingData'] and preview.get('hasReviewChanges', preview['hasChanges'])
     if needs_confirmation and (not confirm_overwrite or preview_fingerprint != preview['currentFingerprint']):
         return Response({
@@ -2087,7 +2095,7 @@ def sheet_export(request, pk):
     sheet.updated_at = timezone.now()
     sheet.save(update_fields=['status', 'updated_at'])
     try:
-        result = export_session_to_google_sheet(sheet, getattr(request, 'google_access_token', None))
+        result = export_session_to_google_sheet(sheet, getattr(request, 'google_access_token', None), export_mode=export_mode, append_candidate_codes=selected_append_codes)
     except Exception as exc:
         sheet.status = 'failed'
         sheet.last_error = str(exc)
@@ -2297,8 +2305,12 @@ def import_candidates(request):
         session_id = str(data.get('sessionId') or '').strip()
         source_sheet_id = str(data.get('sheetId') or '').strip()
         source_fingerprint = str(data.get('sourceFingerprint') or '').strip()
+        remove_session_candidate_codes = data.get('removeSessionCandidateCodes') or []
+        if not isinstance(remove_session_candidate_codes, list) or len(remove_session_candidate_codes) > 1000:
+            return Response({'error': 'Danh sách thí sinh cần gỡ khỏi kỳ thi không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
+        remove_session_candidate_codes = {str(code or '').strip().upper() for code in remove_session_candidate_codes if str(code or '').strip()}
         update_mode = str(data.get('updateMode') or 'replace-nonempty').strip()
-        if update_mode not in {'fill-empty', 'replace-nonempty'}:
+        if update_mode not in {'add-only', 'fill-empty', 'replace-nonempty'}:
             return Response({'error': 'Chính sách cập nhật dữ liệu không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
         
         if not input_records:
@@ -2424,6 +2436,9 @@ def import_candidates(request):
 
             same_code_cand = next((e for e in existing if rec_code and e.code.upper() == rec_code), None)
             base = matched or same_code_cand or forced_candidate
+            # Add-only leaves every existing profile and participation untouched.
+            if update_mode == 'add-only' and base:
+                continue
             code = base.code if base else (rec_code if (rec_code and rec_code not in existing_codes_set) else next_code(existing_codes_set))
             ts_vn = timezone.now().strftime('%d/%m/%Y %H:%M')
             
@@ -2513,11 +2528,22 @@ def import_candidates(request):
                 created += 1
                 items_returned.append(serialize_candidate(new_c))
                 
+        removed_from_session = 0
+        if remove_session_candidate_codes:
+            for candidate in Candidate.objects.filter(code__in=remove_session_candidate_codes):
+                had_membership = CandidateParticipation.objects.filter(candidate=candidate, session_id=session_id).exists() or session_id in list(candidate.session_ids or [])
+                CandidateParticipation.objects.filter(candidate=candidate, session_id=session_id).delete()
+                session_ids = [item for item in (candidate.session_ids or []) if str(item) != session_id]
+                if session_ids != list(candidate.session_ids or []):
+                    candidate.session_ids = session_ids
+                    candidate.save(update_fields=['session_ids', 'updated_at'])
+                if had_membership:
+                    removed_from_session += 1
         sync_session_candidate_totals()
         source_label = str(source or 'nguồn nhập dữ liệu').strip()
         existing_summary = f'; trong đó {linked_existing} hồ sơ đã có được bổ sung vào kỳ tổ chức này' if linked_existing else ''
-        policy_label = 'chỉ bổ sung trường còn trống' if update_mode == 'fill-empty' else 'cập nhật theo giá trị có nội dung trong nguồn'
-        import_summary = f'Hệ thống nhập dữ liệu từ {source_label}: thêm {created} thí sinh, cập nhật {updated} thí sinh{existing_summary}; chính sách: {policy_label}. Không xóa dữ liệu do ô nguồn trống.'
+        policy_label = {'add-only': 'chỉ nhập hồ sơ chưa có trên hệ thống', 'fill-empty': 'chỉ bổ sung trường còn trống', 'replace-nonempty': 'cập nhật theo giá trị có nội dung trong nguồn'}[update_mode]
+        import_summary = f'Hệ thống nhập dữ liệu từ {source_label}: thêm {created} thí sinh, cập nhật {updated} thí sinh, gỡ {removed_from_session} thí sinh khỏi kỳ thi{existing_summary}; chính sách: {policy_label}. Không xóa dữ liệu do ô nguồn trống.'
         append_audit(f'session-{session_id}', import_summary, request, system=True)
         append_competition_scope_audit(target_session, import_summary, request, system=True)
         if source_sheet:
@@ -2528,7 +2554,7 @@ def import_candidates(request):
             source_sheet.last_error = ''
             source_sheet.updated_at = timezone.now()
             source_sheet.save(update_fields=['last_import_at', 'last_content_fingerprint', 'pending_manual_import', 'status', 'last_error', 'updated_at'])
-        return Response({'created': created, 'updated': updated, 'linkedExisting': linked_existing, 'items': items_returned})
+        return Response({'created': created, 'updated': updated, 'linkedExisting': linked_existing, 'removedFromSession': removed_from_session, 'items': items_returned})
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

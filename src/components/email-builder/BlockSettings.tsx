@@ -7,6 +7,7 @@ import ColorField from './ColorField';
 import { EMAIL_ICON_CATEGORY_LABELS, EMAIL_ICON_LIBRARY, EmailIconOption } from '../../data/emailIconLibrary';
 import { getEmailLucideIcon } from '../../lib/emailIcon';
 import { useEmailBuilderDialog } from './EmailBuilderDialog';
+import { matchesSearch } from '../../lib/searchText';
 
 interface BlockSettingsProps {
   block: EmailBlock;
@@ -172,8 +173,8 @@ export default function BlockSettings({ block, variables = [], onUpdateBlockCont
 
   const filteredIcons = EMAIL_ICON_LIBRARY.filter(option => {
     const matchesCategory = iconCategory === 'all' || option.category === iconCategory;
-    const query = iconQuery.trim().toLocaleLowerCase('vi');
-    return matchesCategory && (!query || `${option.label} ${option.name}`.toLocaleLowerCase('vi').includes(query));
+    const query = iconQuery.trim();
+    return matchesCategory && matchesSearch(`${option.label} ${option.name}`, query);
   });
 
   const ImageUploader = () => <div className="space-y-2">

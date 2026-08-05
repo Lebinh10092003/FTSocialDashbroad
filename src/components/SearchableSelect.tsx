@@ -1,5 +1,6 @@
 import { ChevronDown, Search, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { matchesSearch } from '../lib/searchText';
 
 type Option = { value: string; label: string };
 type Shared = { options: Option[]; placeholder?: string; searchPlaceholder?: string; className?: string };
@@ -8,7 +9,7 @@ type Props = Shared & ({ value: string; onChange: (value: string) => void; multi
 export default function SearchableSelect({ value, onChange, options, placeholder = 'Chọn mục', searchPlaceholder = 'Tìm kiếm trong bộ lọc...', className = '', multiple = false }: Props) {
   const [open, setOpen] = useState(false); const [query, setQuery] = useState(''); const root = useRef<HTMLDivElement>(null);
   const values = multiple ? value as string[] : [value as string]; const selected = options.filter(option => values.includes(option.value));
-  const matches = useMemo(() => options.filter(option => option.label.toLocaleLowerCase('vi-VN').includes(query.toLocaleLowerCase('vi-VN'))), [options, query]);
+  const matches = useMemo(() => options.filter(option => matchesSearch(option.label, query)), [options, query]);
   useEffect(() => { const close = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); }; document.addEventListener('mousedown', close); return () => document.removeEventListener('mousedown', close); }, []);
   const choose = (next: string) => { if (!multiple) { (onChange as (value: string) => void)(next); setOpen(false); return; } const current = value as string[]; (onChange as (value: string[]) => void)(next === '' ? [] : current.includes(next) ? current.filter(item => item !== next) : [...current, next]); };
   const label = multiple ? selected.length ? selected.map(item => item.label).join(', ') : placeholder : selected[0]?.label || placeholder;

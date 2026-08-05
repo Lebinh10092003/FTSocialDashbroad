@@ -12,6 +12,7 @@ import {
 
 import { BlockType, EmailBlock, EmailSettings, EmailTemplate, EmailVariable } from '../../types/emailBuilder';
 import { createEmailBlock, getBlockDefinition } from '../../data/emailBlockRegistry';
+import { matchesSearch } from '../../lib/searchText';
 import { addEmailBlock, addEmailBlockRelative, duplicateEmailBlock, findEmailBlock, moveEmailBlock, moveEmailBlockByDirection, removeEmailBlock, replaceEmailBlock, updateEmailBlock } from '../../lib/emailBlockTree';
 import { 
   loadTemplates, 
@@ -851,8 +852,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
   const handleCreateTemplate = () => setShowHtmlImport(true);
 
   const filteredTemplates = templates.filter(t => 
-    t.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    t.subject.toLowerCase().includes(searchQuery.toLowerCase())
+    matchesSearch(`${t.name} ${t.subject}`, searchQuery)
   );
   const addEmailTileIndex = Math.max(0, filteredTemplates.findIndex(template => !template.id.startsWith('aysbc-')));
 

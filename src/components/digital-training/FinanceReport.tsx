@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { appDialog } from "../AppDialog";
+import { matchesSearch } from "../../lib/searchText";
 import {
   ArrowDownCircle,
   ArrowUpCircle,
@@ -117,11 +118,11 @@ export default function FinanceReport({
   }, [idToken]);
 
   const visible = useMemo(() => entries.filter((item) => {
-    const needle = filters.search.trim().toLocaleLowerCase("vi-VN");
+    const needle = filters.search;
     const searchable = [item.category, item.description, item.partner_name, item.reference_code]
       .join(" ")
       .toLocaleLowerCase("vi-VN");
-    return (!needle || searchable.includes(needle))
+    return matchesSearch(searchable, needle)
       && (!filters.dateFrom || item.transaction_date >= filters.dateFrom)
       && (!filters.dateTo || item.transaction_date <= filters.dateTo)
       && (!filters.entryType || item.entry_type === filters.entryType)

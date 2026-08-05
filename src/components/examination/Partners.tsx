@@ -5,6 +5,7 @@ import LogNotes, { appendLogNote, formatChangeLog } from './LogNotes';
 import ConfirmModal from '../ConfirmModal';
 import SearchableSelect from '../SearchableSelect';
 import { LIST_PAGE_SIZE, TablePagination } from './ui';
+import { matchesSearch } from '../../lib/searchText';
 
 export type PartnerStudentCount = { session: string; count: number };
 export type Partner = {
@@ -45,8 +46,8 @@ export default function Partners({ partners, onPartnersChange, actor, idToken, c
     return { province: optionsFor('province'), school: optionsFor('school'), level: optionsFor('level') };
   }, [partners]);
   const filtered = useMemo(() => partners.filter(item => {
-    const haystack = `${item.province} ${item.ward} ${item.school} ${item.level} ${item.representative} ${item.phone} ${item.email} ${item.contests.join(' ')}`.toLocaleLowerCase('vi-VN');
-    return haystack.includes(query.toLocaleLowerCase('vi-VN'))
+    const haystack = `${item.province} ${item.ward} ${item.school} ${item.level} ${item.representative} ${item.phone} ${item.email} ${item.contests.join(' ')}`;
+    return matchesSearch(haystack, query)
       && (!partnerFilters.province.length || partnerFilters.province.includes(item.province))
       && (!partnerFilters.school.length || partnerFilters.school.includes(item.school))
       && (!partnerFilters.level.length || partnerFilters.level.includes(item.level));

@@ -1041,9 +1041,11 @@ class ExaminationSheetAutomationTests(TestCase):
         self.assertIsNotNone(source.last_import_at)
 
     @patch('examination.sheet_scheduler.export_session_to_google_sheet')
+    @patch('examination.sheet_scheduler.output_sheet_export_preview')
     @patch('examination.sheet_scheduler.output_sheet_has_unreviewed_changes')
-    def test_output_schedule_exports_only_when_sheet_has_no_pending_edit(self, changed, export_sheet):
+    def test_output_schedule_exports_only_when_sheet_has_no_pending_edit(self, changed, preview, export_sheet):
         changed.return_value = (False, 'same')
+        preview.return_value = {'appendedRows': 0, 'unmatchedSheetRows': []}
         export_sheet.return_value = {'success': True, 'exported': 5, 'fingerprint': 'new-fingerprint'}
         output = ExaminationSheet.objects.create(
             id='output-auto', name='Sheet tổng hợp', url='https://docs.google.com/spreadsheets/d/output',
@@ -1059,6 +1061,27 @@ class ExaminationSheetAutomationTests(TestCase):
         output.refresh_from_db()
         self.assertEqual(output.last_content_fingerprint, 'new-fingerprint')
         self.assertFalse(output.pending_manual_import)
+
+    @patch('examination.sheet_scheduler.export_session_to_google_sheet')
+    @patch('examination.sheet_scheduler.output_sheet_export_preview')
+    @patch('examination.sheet_scheduler.output_sheet_has_unreviewed_changes')
+    def test_output_schedule_blocks_roster_mismatch_for_manual_resolution(self, changed, preview, export_sheet):
+        changed.return_value = (False, 'same')
+        preview.return_value = {'appendedRows': 2, 'unmatchedSheetRows': []}
+        output = ExaminationSheet.objects.create(
+            id='output-mismatch', name='Sheet tổng hợp', url='https://docs.google.com/spreadsheets/d/output',
+            session_id=self.session.id, stage='session-output', automation_enabled=True,
+            created_at=timezone.now(), updated_at=timezone.now(),
+        )
+
+        from .sheet_scheduler import run_output_exports
+        result = run_output_exports()
+
+        self.assertEqual(result['blocked'], 1)
+        export_sheet.assert_not_called()
+        output.refresh_from_db()
+        self.assertTrue(output.pending_manual_import)
+        self.assertEqual(output.status, 'attention')
 
     @patch('examination.sheet_scheduler.export_session_to_google_sheet')
     @patch('examination.sheet_scheduler.output_sheet_has_unreviewed_changes')
