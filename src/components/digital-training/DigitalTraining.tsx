@@ -470,6 +470,16 @@ const pathFor = (tab: Tab, id?: number | null) =>
 const productPath = (view: ProductView) => `/digital-training/products/${view}`;
 const calendarDetailPath = (detail: CalendarDetail) =>
   `/digital-training/calendar/${detail.kind}/${detail.sourceId}`;
+const menuOpenState = (tab: Tab, productView: ProductView) => ({
+  schedule: tab === "calendar" || tab === "sessions",
+  customer:
+    tab === "partners" ||
+    tab === "leads" ||
+    tab === "partner-sessions" ||
+    (tab === "products" && productView === "allocation"),
+  products: tab === "products" && productView !== "allocation",
+  survey: tab === "survey",
+});
 function Dialog({
   title,
   onClose,
@@ -1694,14 +1704,18 @@ export default function DigitalTraining({
   const route = currentRoute(),
     [tab, setTab] = useState<Tab>(route.tab),
     [scheduleOpen, setScheduleOpen] = useState(
-      route.tab === "calendar" || route.tab === "sessions",
+      menuOpenState(route.tab, route.productView).schedule,
     ),
     [customerOpen, setCustomerOpen] = useState(
-      route.tab === "partners" || route.tab === "leads" || route.tab === "partner-sessions" || (route.tab === "products" && route.productView === "allocation"),
+      menuOpenState(route.tab, route.productView).customer,
     ),
-    [productsOpen, setProductsOpen] = useState(route.tab === "products" && route.productView !== "allocation"),
+    [productsOpen, setProductsOpen] = useState(
+      menuOpenState(route.tab, route.productView).products,
+    ),
     [productView, setProductView] = useState<ProductView>(route.productView),
-    [surveyOpen, setSurveyOpen] = useState(route.tab === "survey"),
+    [surveyOpen, setSurveyOpen] = useState(
+      menuOpenState(route.tab, route.productView).survey,
+    ),
     [selected, setSelected] = useState<number | null>(route.partnerId),
     [selectedSurvey, setSelectedSurvey] = useState<number | null>(
       route.surveyId,
@@ -1765,6 +1779,13 @@ export default function DigitalTraining({
     [surveyPartnerTypeFilter, setSurveyPartnerTypeFilter] = useState(""),
     [surveyPartnerFilter, setSurveyPartnerFilter] = useState(""),
     [file, setFile] = useState<File | null>(null);
+  const applyMenuState = (nextTab: Tab, nextProductView: ProductView) => {
+    const menu = menuOpenState(nextTab, nextProductView);
+    setScheduleOpen(menu.schedule);
+    setCustomerOpen(menu.customer);
+    setProductsOpen(menu.products);
+    setSurveyOpen(menu.survey);
+  };
   const [sd, setSd] = useState({
     title: "",
     date: today(),
@@ -1877,9 +1898,7 @@ export default function DigitalTraining({
     const h = () => {
       const r = currentRoute();
       setTab(r.tab);
-      setScheduleOpen(r.tab === "calendar" || r.tab === "sessions");
-      setCustomerOpen(r.tab === "partners" || r.tab === "leads" || r.tab === "partner-sessions" || (r.tab === "products" && r.productView === "allocation"));
-      setProductsOpen(r.tab === "products" && r.productView !== "allocation");
+      applyMenuState(r.tab, r.productView);
       setProductView(r.productView);
       setSelected(r.partnerId);
       setSelectedSurvey(r.surveyId);
@@ -1890,9 +1909,8 @@ export default function DigitalTraining({
   }, []);
   const go = (t: Tab, id?: number | null) => {
       setCalendarDetail(null);
-      setScheduleOpen(t === "calendar" || t === "sessions");
-      setCustomerOpen(t === "partners" || t === "partner-sessions");
-      setProductsOpen(t === "products");
+      const nextProductView = t === "products" ? "catalog" : productView;
+      applyMenuState(t, nextProductView);
       if (t === "products") setProductView("catalog");
       setTab(t);
       if (t === "survey") {
@@ -1906,10 +1924,7 @@ export default function DigitalTraining({
     },
     goProduct = (view: ProductView) => {
       setCalendarDetail(null);
-      const allocationView = view === "allocation";
-      setScheduleOpen(false);
-      setCustomerOpen(allocationView);
-      setProductsOpen(!allocationView);
+      applyMenuState("products", view);
       setProductView(view);
       setTab("products");
       setSelected(null);
@@ -1918,6 +1933,7 @@ export default function DigitalTraining({
     },
     openCalendarDetail = (detail: CalendarDetail) => {
       setCalendarDetail(detail);
+      applyMenuState("calendar", productView);
       setTab("calendar");
       setSelected(null);
       setSelectedSurvey(null);
