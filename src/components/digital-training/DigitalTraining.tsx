@@ -1697,9 +1697,9 @@ export default function DigitalTraining({
       route.tab === "calendar" || route.tab === "sessions",
     ),
     [customerOpen, setCustomerOpen] = useState(
-      route.tab === "partners" || route.tab === "leads" || route.tab === "partner-sessions",
+      route.tab === "partners" || route.tab === "leads" || route.tab === "partner-sessions" || (route.tab === "products" && route.productView === "allocation"),
     ),
-    [productsOpen, setProductsOpen] = useState(route.tab === "products"),
+    [productsOpen, setProductsOpen] = useState(route.tab === "products" && route.productView !== "allocation"),
     [productView, setProductView] = useState<ProductView>(route.productView),
     [surveyOpen, setSurveyOpen] = useState(route.tab === "survey"),
     [selected, setSelected] = useState<number | null>(route.partnerId),
@@ -1878,8 +1878,8 @@ export default function DigitalTraining({
       const r = currentRoute();
       setTab(r.tab);
       setScheduleOpen(r.tab === "calendar" || r.tab === "sessions");
-      setCustomerOpen(r.tab === "partners" || r.tab === "partner-sessions");
-      setProductsOpen(r.tab === "products");
+      setCustomerOpen(r.tab === "partners" || r.tab === "leads" || r.tab === "partner-sessions" || (r.tab === "products" && r.productView === "allocation"));
+      setProductsOpen(r.tab === "products" && r.productView !== "allocation");
       setProductView(r.productView);
       setSelected(r.partnerId);
       setSelectedSurvey(r.surveyId);
@@ -1906,9 +1906,10 @@ export default function DigitalTraining({
     },
     goProduct = (view: ProductView) => {
       setCalendarDetail(null);
+      const allocationView = view === "allocation";
       setScheduleOpen(false);
-      setCustomerOpen(false);
-      setProductsOpen(true);
+      setCustomerOpen(allocationView);
+      setProductsOpen(!allocationView);
       setProductView(view);
       setTab("products");
       setSelected(null);
@@ -3838,7 +3839,7 @@ export default function DigitalTraining({
           )}
           <button
             onClick={() => setCustomerOpen(!customerOpen)}
-            className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "partners" || tab === "leads" || tab === "partner-sessions" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
+            className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "partners" || tab === "leads" || tab === "partner-sessions" || (tab === "products" && productView === "allocation") ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
           >
             <Handshake className="h-4 w-4" />
             Khách hàng
@@ -3871,7 +3872,7 @@ export default function DigitalTraining({
           )}
           <button
             onClick={() => setProductsOpen(!productsOpen)}
-            className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "products" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
+            className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "products" && productView !== "allocation" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
           >
             <PackageSearch className="h-4 w-4" />
             Sản phẩm & dịch vụ
