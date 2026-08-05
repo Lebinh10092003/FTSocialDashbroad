@@ -31,7 +31,7 @@ import ConfirmModal from "../ConfirmModal";
 import SearchableSelect from "../SearchableSelect";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import FinanceReport from "./FinanceReport";
-import ProductManagement, { type ProductView } from "./ProductManagement";
+import ProductManagement, { type ProductView, type ProductSubscription } from "./ProductManagement";
 import TrainingOverview from "./TrainingOverview";
 
 type Tab =
@@ -1709,6 +1709,7 @@ export default function DigitalTraining({
     [sessions, setSessions] = useState<Session[]>([]),
     [meetings, setMeetings] = useState<CustomerMeeting[]>([]),
     [partners, setPartners] = useState<Partner[]>([]),
+    [partnerProductSubscriptions, setPartnerProductSubscriptions] = useState<ProductSubscription[]>([]),
     [leads, setLeads] = useState<Lead[]>([]),
     [classes, setClasses] = useState<TrainingClass[]>([]),
     [materials, setMaterials] = useState<Material[]>([]),
@@ -1834,6 +1835,9 @@ export default function DigitalTraining({
         if (!sessionResponse.ok)
           throw Error("Không thể tải dữ liệu Đào tạo số.");
         const sessionRows = await sessionResponse.json();
+        const productSubscriptionResponse = await fetch("/api/digital-training/product-subscriptions", { headers: auth() });
+        if (!productSubscriptionResponse.ok) throw Error("Could not load product subscriptions.");
+        const productSubscriptionRows = await productSubscriptionResponse.json();
         const endpoints = [
           "customer-meetings",
           ...(isGuest ? [] : ["leads"]),
@@ -1852,6 +1856,7 @@ export default function DigitalTraining({
           }),
         );
         setSessions(sessionRows);
+        setPartnerProductSubscriptions(productSubscriptionRows);
         const leadOffset = isGuest ? 0 : 1;
         setMeetings(list[0]);
         setLeads(isGuest ? [] : list[1]);
@@ -3215,6 +3220,8 @@ export default function DigitalTraining({
     };
   })();
   const partner = partners.find((x) => x.id === selected);
+  const partnerProducts = partner ? partnerProductSubscriptions.filter((item) => item.partner === partner.id) : [];
+  const productSubscriptionStatus = (value?: string) => ({ active: "\u0110ang s\u1eed d\u1ee5ng", expiring: "S\u1eafp h\u1ebft h\u1ea1n", expired: "\u0110\u00e3 h\u1ebft h\u1ea1n", paused: "T\u1ea1m d\u1eebng", cancelled: "\u0110\u00e3 h\u1ee7y" }[value || ""] || "Ch\u01b0a c\u1eadp nh\u1eadt");
   const surveyDetail = surveys.find((x) => x.id === selectedSurvey);
   const partnerWardOptions = Array.from(
     new Set(
@@ -4452,6 +4459,7 @@ export default function DigitalTraining({
                   idToken={idToken}
                   isGuest={isGuest}
                   view={productView}
+                  onOpenPartnerDetail={(partnerId) => { openPartnerDetail("partners", partnerId); void load(); }}
                 />
               )}
               {tab === "finance" && canViewFinance && (
@@ -5157,7 +5165,18 @@ export default function DigitalTraining({
                         </p>
                       </div>
                     </article>
-                    <article className="mt-5 overflow-x-auto rounded-2xl border bg-white shadow-sm">
+                    <article className="mt-5 rounded-2xl border bg-white p-5 shadow-sm">
+                      <div>
+                        <h3 className="font-extrabold">{"S\u1ea3n ph\u1ea9m \u0111\u0103ng k\u00fd"}</h3>
+                        <p className="mt-1 text-sm text-slate-500">{"Th\u00f4ng tin \u0111\u1ea7y \u0111\u1ee7 v\u1ec1 s\u1ed1 l\u01b0\u1ee3ng, tr\u1ea1ng th\u00e1i v\u00e0 th\u1eddi h\u1ea1n s\u1eed d\u1ee5ng."}</p>
+                      </div>
+                      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {partner.planned_sessions > 0 && <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-4"><b>{"T\u1eadp hu\u1ea5n"}</b><p className="mt-2 text-sm">{"S\u1ed1 bu\u1ed5i \u0111\u0103ng k\u00fd: "}{partner.planned_sessions}</p><p className="mt-1 text-sm">{"\u0110\u00e3 th\u1ef1c hi\u1ec7n: "}{partner.completed_sessions || 0}</p></div>}
+                        {partnerProducts.map((item) => <div key={item.id} className="rounded-xl border p-4"><b>{item.product_name}</b><p className="mt-2 text-sm">{"SL: "}{item.quantity}{" - "}{productSubscriptionStatus(item.effective_status)}</p><p className="mt-1 text-sm">{"H\u1ea1n s\u1eed d\u1ee5ng: "}{item.expires_at ? showDate(item.expires_at) : "Ch\u01b0a c\u00f3 h\u1ea1n"}</p>{item.starts_at && <p className="mt-1 text-xs text-slate-500">{"B\u1eaft \u0111\u1ea7u: "}{showDate(item.starts_at)}</p>}{item.notes && <p className="mt-2 whitespace-pre-wrap border-t pt-2 text-xs text-slate-600">{"Ghi ch\u00fa: "}{item.notes}</p>}</div>)}
+                        {!partner.planned_sessions && !partnerProducts.length && <p className="text-sm text-slate-500">{"Ch\u01b0a c\u00f3 s\u1ea3n ph\u1ea9m \u0111\u0103ng k\u00fd."}</p>}
+                      </div>
+                    </article>
+                                        <article className="mt-5 overflow-x-auto rounded-2xl border bg-white shadow-sm">
                       <div className="flex items-center justify-between p-5">
                         <div>
                           <h3 className="font-extrabold">
