@@ -1143,21 +1143,32 @@ def output_sheet_export_preview(sheet, google_access_token=None, max_changes=250
 def remote_sheet_fingerprint(sheet, google_access_token=None):
     spreadsheet_id = extract_spreadsheet_id(sheet.url)
     if not spreadsheet_id:
-        raise ValueError('Liên kết Google Sheets không hợp lệ.')
+        raise ValueError('Li?n k?t Google Sheets kh?ng h?p l?.')
     session = ExamSession.objects.filter(id=sheet.session_id).first()
     if not session:
-        raise ValueError('Không tìm thấy kỳ tổ chức được gắn với Google Sheets.')
+        raise ValueError('Kh?ng t?m th?y k? t? ch?c ???c g?n v?i Google Sheets.')
     config = SystemConfig.objects.filter(key='main').first()
     config_data = config.data if config else {}
     saved_token = config.last_google_access_token if config else None
-    service = build_sheets_service(google_access_token or saved_token, config_data or {})
-    tab_name = _output_sheet_target(sheet, service).get('title')
-    values = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id,
-        range=f'{_sheet_range_title(tab_name)}!A3:ZZ',
-    ).execute().get('values', [])
-    return sheet_values_fingerprint(values)
-
+    try:
+        service = build_sheets_service(google_access_token or saved_token, config_data or {})
+        tab_name = _output_sheet_target(sheet, service).get('title')
+        values = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f'{_sheet_range_title(tab_name)}!A3:ZZ',
+        ).execute().get('values', [])
+        return sheet_values_fingerprint(values)
+    except Exception as api_error:
+        # A publicly shared Sheet can be safely reviewed/imported even when
+        # this server has no Google API credential. Use its exported CSV as a
+        # stable stale-preview guard; writes still require the Sheets API.
+        try:
+            return public_sheet_fingerprint(sheet.url, sheet.sheet_tab)
+        except Exception as public_error:
+            raise ValueError(
+                f'Kh?ng th? ki?m tra phi?n b?n hi?n t?i c?a Google Sheet. '
+                f'Google Sheets API: {api_error}; ??c c?ng khai: {public_error}'
+            ) from public_error
 
 def export_session_to_google_sheet(sheet, google_access_token=None, export_mode='merge', append_candidate_codes=None):
     session = ExamSession.objects.filter(id=sheet.session_id).first()
@@ -1255,6 +1266,29 @@ def get_google_sheet_csv_urls(spreadsheet_url, sheet_tab=''):
             urls.append(f"https://docs.google.com/spreadsheets/d/{sheet_id}/pub?output=csv{gid_param}")
         
     return urls
+
+
+
+def public_sheet_fingerprint(spreadsheet_url, sheet_tab=''):
+    """Fingerprint the exact public CSV used by the import preview."""
+    last_error = None
+    for csv_url in get_google_sheet_csv_urls(spreadsheet_url, sheet_tab):
+        try:
+            response = requests.get(csv_url, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            }, timeout=15)
+            if response.status_code in [401, 403]:
+                raise ValueError('Sheet ch?a m? quy?n xem c?ng khai.')
+            response.raise_for_status()
+            response.encoding = 'utf-8'
+            content = response.text.strip()
+            if not content or 'accounts.google.com' in response.url or content.startswith('<!DOCTYPE html') or content.startswith('<html'):
+                raise ValueError('Sheet y?u c?u ??ng nh?p Google ho?c kh?ng c? d? li?u c?ng khai.')
+            return hashlib.sha256(response.text.encode('utf-8')).hexdigest()
+        except Exception as exc:
+            last_error = exc
+    raise ValueError(str(last_error or 'Kh?ng ??c ???c CSV c?ng khai c?a Google Sheet.'))
+
 
 def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None, preview=False, sheet_tab=''):
     def update_state(data):

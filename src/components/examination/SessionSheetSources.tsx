@@ -45,8 +45,8 @@ export default function SessionSheetSources({ sources, sessionId, sessionLabel, 
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken || ''}` },
         body: JSON.stringify({ id: source.id }),
       });
-      const preview = await previewResponse.json();
-      if (!previewResponse.ok) throw new Error('\u004b\u0068\u00f4\u006e\u0067 th\u1ec3 \u0111\u1ecdc ngu\u1ed3n d\u1eef li\u1ec7u n\u00e0y.');
+      const preview = await previewResponse.json().catch(() => ({}));
+      if (!previewResponse.ok) throw new Error(preview?.error || '\u004b\u0068\u00f4\u006e\u0067 th\u1ec3 \u0111\u1ecdc ngu\u1ed3n d\u1eef li\u1ec7u n\u00e0y.');
       setImportMode('fill-empty');
       setRemoveWebOnlyCandidates(false);
       setImportPreview({ source, data: preview as ImportPreview });
