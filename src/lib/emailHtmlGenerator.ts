@@ -573,6 +573,16 @@ export function generateEmailHtml(
   };
 
   const blockHtmls = template.blocks.map(block => renderBlock(block)).join('\n');
+  // One canonical email body for preview and clipboard. The complete export
+  // wraps it in an outer page table, but that shell must never be pasted into
+  // Gmail/Outlook because it carries the editor's external background color.
+  const contentTableHtml = `<table role="presentation" class="ft-email-content" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: separate; border-spacing: 0; border-radius: ${settings.borderRadius || 0}px; overflow: hidden; box-shadow: 0 4px 18px rgba(19,50,92,0.09); font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
+    <tr>
+      <td class="ft-email-content-cell" width="100%" style="width: 100%; max-width: 100%; box-sizing: border-box; padding: ${settings.contentPadding}px;">
+        ${blockHtmls}
+      </td>
+    </tr>
+  </table>`;
   const responsiveStyle = `<style type="text/css">
     html, body { width: 100% !important; min-width: 0 !important; }
     .ft-email-root, .ft-email-content { width: 100% !important; table-layout: fixed !important; }
@@ -613,13 +623,7 @@ export function generateEmailHtml(
   <table role="presentation" class="ft-email-root" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; table-layout: fixed; border-collapse: collapse; background-color: ${settings.externalBg || '#f1f5f9'};">
     <tr>
       <td align="center" style="padding: 0;">
-        <table role="presentation" class="ft-email-content" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: separate; border-spacing: 0; border-radius: ${settings.borderRadius || 0}px; overflow: hidden; box-shadow: 0 4px 18px rgba(19,50,92,0.09); font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
-          <tr>
-            <td class="ft-email-content-cell" width="100%" style="width: 100%; max-width: 100%; box-sizing: border-box; padding: ${settings.contentPadding}px;">
-              ${blockHtmls}
-            </td>
-          </tr>
-        </table>
+        ${contentTableHtml}
       </td>
     </tr>
   </table>
@@ -675,36 +679,14 @@ export function generateEmailHtml(
 </head>
 <body>
   <div class="ft-email-preview-wrapper">
-    <table role="presentation" class="ft-email-content ft-email-preview-card" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: separate; border-spacing: 0; border-radius: ${settings.borderRadius || 0}px; overflow: hidden; box-shadow: 0 4px 18px rgba(19,50,92,0.09); font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
-      <tr>
-        <td class="ft-email-content-cell" width="100%" style="width: 100%; max-width: 100%; box-sizing: border-box; padding: ${settings.contentPadding}px;">
-          ${blockHtmls}
-        </td>
-      </tr>
-    </table>
+    ${contentTableHtml}
   </div>
 </body>
 </html>`;
 
-  // Fallback wrapper if the preview document cannot be sliced as expected.
-  const fallbackCopyHtml = `<table role="presentation" class="ft-email-root" width="100%" border="0" cellspacing="0" cellpadding="0" style="width: 100%; table-layout: fixed; border-collapse: collapse; background-color: #ffffff;">
-  <tr>
-    <td align="center" style="padding: 0;">
-      <table role="presentation" class="ft-email-content" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: separate; border-spacing: 0; border-radius: ${settings.borderRadius || 0}px; overflow: hidden; box-shadow: 0 4px 18px rgba(19,50,92,0.09); font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
-        <tr>
-          <td class="ft-email-content-cell" width="100%" style="width: 100%; max-width: 100%; box-sizing: border-box; padding: ${settings.contentPadding}px;">
-            ${blockHtmls}
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
-</table>`;
-  const previewFragmentStart = html.indexOf('<table role="presentation"');
-  const previewFragmentEnd = html.lastIndexOf('</table>') + '</table>'.length;
-  const copyTableHtml = previewFragmentStart >= 0 && previewFragmentEnd > previewFragmentStart
-    ? html.slice(previewFragmentStart, previewFragmentEnd) : fallbackCopyHtml;
-  const copyHtml = `${responsiveStyle}${copyTableHtml}`;
+  // Clipboard must contain the email body only. Do not derive it by slicing
+  // the complete document: the first table is the decorative outer shell.
+  const copyHtml = `${responsiveStyle}${contentTableHtml}`;
 
   // Build plain text fallback
   const plainTextLines: string[] = [];

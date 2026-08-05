@@ -201,7 +201,13 @@ export function sanitizeCustomHtml(html: string): string {
       htmlElement.style.height = 'auto';
     }
   });
-  return doc.body.innerHTML;
+  // A Custom HTML block can contain a complete email copied from this editor.
+  // Keep only its innermost content cell; otherwise every clipboard/export
+  // round-trip carries the old root table and its external background again.
+  const generatedContentTables = Array.from(doc.body.querySelectorAll<HTMLTableElement>('table.ft-email-content'));
+  const generatedContent = generatedContentTables.at(-1);
+  const generatedContentCell = generatedContent?.querySelector<HTMLTableCellElement>(':scope > tbody > tr > td.ft-email-content-cell');
+  return generatedContentCell ? generatedContentCell.innerHTML : doc.body.innerHTML;
 }
 
 /** Small dependency-free CSS inliner for Custom HTML export (tag, .class and #id rules). */
