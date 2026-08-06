@@ -1398,14 +1398,18 @@ def session_detail(request, pk):
 
 
 def _session_round_config(session, round_id):
-    return next(
-        (
-            item for item in (session.rounds or [])
-            if isinstance(item, dict) and str(item.get('id') or '') == str(round_id or '')
-        ),
-        None,
-    )
-
+    configured = [item for item in (session.rounds or []) if isinstance(item, dict)]
+    matched = next((item for item in configured if str(item.get('id') or '') == str(round_id or '')), None)
+    if matched:
+        return matched
+    # Older sessions predate the editable `rounds` JSON configuration. Their
+    # UI still exposes two legacy rounds, so room and schedule APIs must do the
+    # same instead of returning a false 404.
+    legacy_rounds = [
+        {'id': 'legacy-national', 'name': 'Vòng Chung kết Quốc gia', 'label': session.national or '', 'date': session.national_date or '', 'slots': []},
+        {'id': 'legacy-international', 'name': 'Vòng Chung kết Quốc tế', 'label': session.international or '', 'date': session.international_date or '', 'slots': []},
+    ]
+    return next((item for item in legacy_rounds if item['id'] == str(round_id or '')), None)
 
 def _serialize_exam_room(room):
     return {
@@ -1445,7 +1449,7 @@ def exam_room_allocation(request, session_id, round_id):
     )
 
     if request.method == 'GET':
-        rooms = list(ExamRoom.objects.filter(session=session, round_id=round_id))
+        rooms = list(ExamRoom.objects.filter(session=session).filter(Q(round_id=str(round_id)) | Q(round_name=round_name)))
         return Response({
             'sessionId': session.id,
             'roundId': str(round_id),
@@ -1542,7 +1546,7 @@ def exam_room_allocation(request, session_id, round_id):
                 'candidateCount': len(locked_results),
                 'capacity': capacity,
             }, status=status.HTTP_409_CONFLICT)
-        previous_rooms = list(ExamRoom.objects.filter(session=session, round_id=round_id))
+        previous_rooms = list(ExamRoom.objects.filter(session=session).filter(Q(round_id=str(round_id)) | Q(round_name=round_name)))
         # Deleting a room only nulls its foreign key. Clear its derived display
         # values too, so an ineligible candidate does not keep a stale room
         # after a reset/reallocation.
@@ -1769,7 +1773,7 @@ def candidate_detail(request, pk):
 @permission_classes([IsManagerOrAdmin])
 def round_result_detail(request, pk):
     try:
-        item = RoundResult.objects.select_related('participation__candidate').get(id=pk)
+        item = RoundResult.objects.select_related('participation__candidate', 'participation__session', 'exam_room').get(id=pk)
     except RoundResult.DoesNotExist:
         return Response({'error': 'Không tìm thấy dữ liệu vòng thi.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1802,7 +1806,7 @@ def round_result_detail(request, pk):
         sync_session_candidate_totals()
         return Response({'candidate': serialize_candidate(candidate)})
     data = request.data or {}
-    before_round = {'eligibility': item.eligibility, 'sbd': item.sbd, 'date': item.exam_date, 'time': item.time_slot, 'mode': item.mode, 'location': item.location, 'link': item.link, 'account': item.account, 'password': item.password, 'attendance': item.attendance, 'score': item.score, 'scoreRate': item.score_rate, 'rank': item.rank, 'result': item.result, 'note': item.note, 'registration': json.dumps(item.participation.registration_data or {}, ensure_ascii=False)}
+    before_round = {'roomName': item.room_name, 'eligibility': item.eligibility, 'sbd': item.sbd, 'date': item.exam_date, 'time': item.time_slot, 'mode': item.mode, 'location': item.location, 'link': item.link, 'account': item.account, 'password': item.password, 'attendance': item.attendance, 'score': item.score, 'scoreRate': item.score_rate, 'rank': item.rank, 'result': item.result, 'note': item.note, 'registration': json.dumps(item.participation.registration_data or {}, ensure_ascii=False)}
     fields = {
         'eligibility': 'eligibility', 'sbd': 'sbd', 'date': 'exam_date', 'time': 'time_slot',
         'mode': 'mode', 'location': 'location', 'link': 'link', 'account': 'account', 'password': 'password',
@@ -1813,6 +1817,48 @@ def round_result_detail(request, pk):
         if payload_field in data:
             value = str(data[payload_field] or '').strip()
             setattr(item, model_field, normalize_eligibility(value) if payload_field == 'eligibility' else value)
+    requested_round_id = str(data.get('roundId') or item.round_id or '').strip()
+    if 'roomId' in data:
+        requested_room_id = str(data.get('roomId') or '').strip()
+        previous_room = item.exam_room
+        if requested_room_id:
+            room = ExamRoom.objects.filter(id=requested_room_id, session=item.participation.session).first()
+            if not room:
+                return Response({'error': 'Không tìm thấy phòng thi đã chọn.'}, status=status.HTTP_404_NOT_FOUND)
+            if requested_round_id and room.round_id != requested_round_id:
+                return Response({'error': 'Phòng thi không thuộc vòng đang chọn.'}, status=status.HTTP_400_BAD_REQUEST)
+            item.exam_room = room
+            item.round_id = room.round_id
+            item.room_name = room.label
+            item.mode = 'Trực tiếp' if room.mode == ExamRoom.MODE_IN_PERSON else 'Trực tuyến'
+            item.location = f'{room.label}:\n{room.link}' if room.mode == ExamRoom.MODE_ONLINE else ' · '.join(value for value in [room.label, room.location] if value)
+            if room.exam_link:
+                item.link = room.exam_link
+            elif previous_room and previous_room.exam_link and item.link == previous_room.exam_link:
+                item.link = ''
+        else:
+            item.exam_room = None
+            item.room_name = ''
+            item.location = ''
+            if previous_room and previous_room.exam_link and item.link == previous_room.exam_link:
+                item.link = ''
+
+    if 'slotId' in data:
+        round_config = _session_round_config(item.participation.session, requested_round_id)
+        if not round_config:
+            return Response({'error': 'Không tìm thấy vòng thi để đổi ca.'}, status=status.HTTP_404_NOT_FOUND)
+        requested_slot_id = str(data.get('slotId') or '').strip()
+        slot = next((value for value in (round_config.get('slots') or []) if isinstance(value, dict) and str(value.get('id') or '') == requested_slot_id), None)
+        if not slot:
+            return Response({'error': 'Không tìm thấy lịch/ca thi đã chọn.'}, status=status.HTTP_404_NOT_FOUND)
+        for slot_field, model_field in (('date', 'exam_date'), ('time', 'time_slot'), ('mode', 'mode')):
+            value = str(slot.get(slot_field) or '').strip()
+            if value:
+                setattr(item, model_field, value)
+        slot_link = str(slot.get('link') or '').strip()
+        if slot_link:
+            item.link = slot_link
+        item.round_id = requested_round_id
     registration = data.get('registration') if isinstance(data.get('registration'), dict) else {}
     registration_fields = {
         'subject': 'subject', 'category': 'category', 'registrationMethod': 'registration_method',
@@ -1833,8 +1879,8 @@ def round_result_detail(request, pk):
     candidate = item.participation.candidate
     candidate.updated = timezone.now().strftime('%d/%m/%Y %H:%M')
     candidate.save(update_fields=['updated'])
-    after_round = {'eligibility': item.eligibility, 'sbd': item.sbd, 'date': item.exam_date, 'time': item.time_slot, 'mode': item.mode, 'location': item.location, 'link': item.link, 'account': item.account, 'password': item.password, 'attendance': item.attendance, 'score': item.score, 'scoreRate': item.score_rate, 'rank': item.rank, 'result': item.result, 'note': item.note, 'registration': json.dumps(item.participation.registration_data or {}, ensure_ascii=False)}
-    round_labels = {'eligibility':'Điều kiện', 'sbd':'Số báo danh', 'date':'Ngày thi', 'time':'Giờ/ca thi', 'mode':'Hình thức', 'location':'Địa điểm', 'link':'Link dự thi (Nếu có)', 'account':'Tài khoản', 'password':'Mật khẩu', 'attendance':'Trạng thái dự thi', 'score':'Điểm', 'scoreRate':'Tỷ lệ điểm', 'rank':'Xếp hạng', 'result':'Kết quả', 'note':'Ghi chú', 'registration':'Thông tin đăng ký'}
+    after_round = {'roomName': item.room_name, 'eligibility': item.eligibility, 'sbd': item.sbd, 'date': item.exam_date, 'time': item.time_slot, 'mode': item.mode, 'location': item.location, 'link': item.link, 'account': item.account, 'password': item.password, 'attendance': item.attendance, 'score': item.score, 'scoreRate': item.score_rate, 'rank': item.rank, 'result': item.result, 'note': item.note, 'registration': json.dumps(item.participation.registration_data or {}, ensure_ascii=False)}
+    round_labels = {'roomName':'Phòng thi', 'eligibility':'Điều kiện', 'sbd':'Số báo danh', 'date':'Ngày thi', 'time':'Giờ/ca thi', 'mode':'Hình thức', 'location':'Địa điểm', 'link':'Link dự thi (Nếu có)', 'account':'Tài khoản', 'password':'Mật khẩu', 'attendance':'Trạng thái dự thi', 'score':'Điểm', 'scoreRate':'Tỷ lệ điểm', 'rank':'Xếp hạng', 'result':'Kết quả', 'note':'Ghi chú', 'registration':'Thông tin đăng ký'}
     change_text = audit_values(before_round, after_round, round_labels)
     audit_content = f'Cập nhật {item.round_name} cho {candidate.code} ({candidate.name}): ' + (change_text or 'Không có thay đổi dữ liệu.')
     append_audit(f'candidate-{candidate.code}', audit_content, request)

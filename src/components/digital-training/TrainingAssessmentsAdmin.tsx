@@ -250,6 +250,16 @@ export default function TrainingAssessmentsAdmin({
   const structureTotal = structurePayload.reduce((sum, row) => sum + row.count, 0);
   const bankFilterOptions = (field: keyof typeof bankFilters) => Array.from(new Set(bankQuestions.map((item) => String(item[field] || "")).filter(Boolean))).sort();
   const filteredBankQuestions = bankQuestions.filter((item) => Object.entries(bankFilters).every(([field, value]) => !value || String(item[field] || "") === value));
+  const partnerOptions = useMemo(() => Array.from(new Set(items.map((item) => item.partner_name).filter(Boolean))).sort(), [items]);
+  const filteredItems = useMemo(() => items.filter((item) => {
+    if (filterStatus && item.status !== filterStatus) return false;
+    if (filterPartner && item.partner_name !== filterPartner) return false;
+    if (filterText) {
+      const needle = filterText.toLowerCase();
+      return item.title.toLowerCase().includes(needle) || (item.partner_name || "").toLowerCase().includes(needle) || (item.class_name || "").toLowerCase().includes(needle);
+    }
+    return true;
+  }), [items, filterStatus, filterPartner, filterText]);
 
   const openCreate = () => {
     setDraft(emptyDraft());
@@ -744,18 +754,6 @@ export default function TrainingAssessmentsAdmin({
       </section>
     );
   }
-
-  // Filtered list
-  const partnerOptions = useMemo(() => Array.from(new Set(items.map((item) => item.partner_name).filter(Boolean))).sort(), [items]);
-  const filteredItems = useMemo(() => items.filter((item) => {
-    if (filterStatus && item.status !== filterStatus) return false;
-    if (filterPartner && item.partner_name !== filterPartner) return false;
-    if (filterText) {
-      const needle = filterText.toLowerCase();
-      return item.title.toLowerCase().includes(needle) || (item.partner_name || "").toLowerCase().includes(needle) || (item.class_name || "").toLowerCase().includes(needle);
-    }
-    return true;
-  }), [items, filterStatus, filterPartner, filterText]);
 
   return (
     <section className="mt-6 overflow-hidden rounded-2xl border bg-white shadow-sm">

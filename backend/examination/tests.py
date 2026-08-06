@@ -608,6 +608,67 @@ class ExamRoomAllocationTests(TestCase):
         self.assertTrue(all(result.link == 'https://exam.example.test/common' for result in RoundResult.objects.all()))
 
 
+    def test_legacy_round_rooms_are_listed_for_sessions_without_round_config(self):
+        legacy = ExamSession.objects.create(
+            id='legacy-room-session', competition_id=self.competition.id, code='LEGACY', name='Legacy rooms',
+            parent='Legacy', organizer='FermatTech', time='', sort_key='legacy-room-session',
+            national='26/07/2026', national_date='2026-07-26',
+        )
+        candidate = Candidate.objects.create(
+            id='LEGACY-001', code='LEGACY-001', name='Legacy Candidate', sort_key='legacy-candidate',
+            session_ids=[legacy.id], contests='LEGACY',
+        )
+        participation = CandidateParticipation.objects.create(candidate=candidate, session=legacy)
+        result = RoundResult.objects.create(
+            participation=participation, round_id='legacy-national', round_name='Vòng Chung kết Quốc gia',
+        )
+        room = ExamRoom.objects.create(
+            session=legacy, round_id='legacy-national', round_name='Vòng Chung kết Quốc gia',
+            common_name='Phòng legacy', room_number='101', label='Phòng legacy 101',
+            mode=ExamRoom.MODE_IN_PERSON, location='Hà Nội',
+        )
+        result.exam_room = room
+        result.room_name = room.label
+        result.save(update_fields=['exam_room', 'room_name'])
+
+        response = self.client.get(f'/api/examination/sessions/{legacy.id}/rounds/legacy-national/rooms')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['assignedCount'], 1)
+        self.assertEqual(response.data['rooms'][0]['label'], 'Phòng legacy 101')
+
+    def test_manager_can_move_one_candidate_to_another_room_and_slot(self):
+        self.session.rounds = [{
+            'id': 'round-1', 'name': 'Vòng 1', 'label': '', 'date': '',
+            'slots': [
+                {'id': 'morning', 'date': '2026-08-09', 'time': '08:00 - 09:00', 'mode': 'Trực tuyến', 'link': ''},
+                {'id': 'afternoon', 'date': '2026-08-09', 'time': '14:00 - 15:00', 'mode': 'Trực tuyến', 'link': ''},
+            ],
+        }]
+        self.session.save(update_fields=['rounds'])
+        allocated = self.client.post(self.url, {
+            'commonName': 'Phòng thi', 'mode': 'IN_PERSON', 'allocationStrategy': 'BALANCED',
+            'rooms': [
+                {'number': '101', 'location': 'Hà Nội'},
+                {'number': '102', 'location': 'Hà Nội'},
+            ],
+        }, format='json')
+        self.assertEqual(allocated.status_code, 200, allocated.data)
+        rooms = list(ExamRoom.objects.order_by('room_number'))
+        result = RoundResult.objects.get(participation__candidate_id='ROOM-001')
+
+        response = self.client.put(
+            f'/api/examination/round-results/{result.id}',
+            {'roundId': 'round-1', 'roomId': str(rooms[1].id), 'slotId': 'afternoon'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        result.refresh_from_db()
+        self.assertEqual(result.exam_room_id, rooms[1].id)
+        self.assertEqual(result.room_name, rooms[1].label)
+        self.assertEqual(result.time_slot, '14:00 - 15:00')
+
 class CandidateImportReuseTests(TestCase):
     def setUp(self):
         self.user = UserProfile.objects.create(email='reuse-admin@example.com', name='Reuse Admin', role='ADMIN')

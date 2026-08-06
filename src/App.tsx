@@ -567,7 +567,20 @@ export default function App() {
     );
   }
 
-  if (viewMode === 'training-assessments' && !canAccessView('training-assessments')) return null;
+  if (viewMode === 'training-assessments' && !canAccessView('training-assessments')) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-slate-50 p-6 text-slate-800">
+        <div className="w-full max-w-xl rounded-2xl border border-amber-200 bg-white p-6 shadow-sm">
+          <h1 className="text-xl font-extrabold text-[#001e40]">Chưa thể mở Khảo sát kết thúc tập huấn</h1>
+          <p className="mt-2 text-sm text-slate-600">
+            {authChecking ? 'Đang kiểm tra quyền truy cập…' : isGuest ? 'Vui lòng đăng nhập để truy cập mô-đun này.' : 'Tài khoản của bạn chưa được cấp quyền Đào tạo số.'}
+          </p>
+          <button onClick={() => setViewMode('workspace')} className="mt-5 ft-btn ft-btn-secondary">Quay lại Workspace</button>
+        </div>
+        {loginModal}{profileModal}
+      </div>
+    );
+  }
 
   if (viewMode === 'training-assessments') {
     return (
