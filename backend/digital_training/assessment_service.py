@@ -316,21 +316,29 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
             raise ValueError("Số câu trong cơ cấu đề phải là số nguyên.")
         if count <= 0:
             continue
+        rule_type = str(rule.get("type") or "").strip()
         structured_rules.append({
             "category": str(rule.get("category") or "").strip().casefold(),
+            "knowledge_type": str(rule.get("knowledge_type") or "").strip().casefold(),
+            "type": _question_type(rule_type) if rule_type else "",
             "difficulty": str(rule.get("difficulty") or "").strip().casefold(),
             "count": count,
         })
+
+    def matches_structure_rule(question, rule):
+        return (
+            (not rule["category"] or str(question.get("category") or "").strip().casefold() == rule["category"])
+            and (not rule["knowledge_type"] or str(question.get("knowledge_type") or "").strip().casefold() == rule["knowledge_type"])
+            and (not rule["type"] or _question_type(question.get("type") or "") == rule["type"])
+            and (not rule["difficulty"] or str(question.get("difficulty") or "").strip().casefold() == rule["difficulty"])
+        )
+
     if structured_rules and sum(rule["count"] for rule in structured_rules) != questions_per_variant:
-        raise ValueError("Tổng số câu trong cơ cấu chủ đề/độ khó phải bằng số câu mỗi mã đề.")
+        raise ValueError("Tổng số câu trong cơ cấu loại/kiểu câu hỏi/độ khó phải bằng số câu mỗi mã đề.")
     for rule in structured_rules:
-        available = [question for question in unique_questions if (
-            not rule["category"] or str(question.get("category") or "").strip().casefold() == rule["category"]
-        ) and (
-            not rule["difficulty"] or str(question.get("difficulty") or "").strip().casefold() == rule["difficulty"]
-        )]
+        available = [question for question in unique_questions if matches_structure_rule(question, rule)]
         if len(available) < rule["count"]:
-            raise ValueError("Ngân hàng không đủ câu cho một dòng cơ cấu chủ đề/độ khó.")
+            raise ValueError("Ngân hàng không đủ câu cho một dòng cơ cấu loại/kiểu câu hỏi/độ khó.")
 
     seed = int(seed) if seed not in (None, "") else secrets.randbits(63)
     rng = random.Random(seed)
@@ -373,8 +381,7 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
                 ranked = [
                     question for question in unique_questions
                     if str(question["id"]) not in selected_ids
-                    and (not rule["category"] or str(question.get("category") or "").strip().casefold() == rule["category"])
-                    and (not rule["difficulty"] or str(question.get("difficulty") or "").strip().casefold() == rule["difficulty"])
+                    and matches_structure_rule(question, rule)
                 ]
                 rng.shuffle(ranked)
                 ranked.sort(key=lambda question: usage[str(question["id"])])

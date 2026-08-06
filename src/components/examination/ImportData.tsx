@@ -71,7 +71,7 @@ interface SheetSource {
 type PreviewStatus = 'new' | 'changed' | 'unchanged' | 'conflict';
 type PreviewCandidate = Candidate & {
   examHistory?: RoundHistory[];
-  _preview?: { sourceRow: number; status: PreviewStatus; matchedCode?: string; changedFields?: string[] };
+  _preview?: { sourceRow: number; status: PreviewStatus; matchedCode?: string; changedFields?: string[]; changes?: { field: string; label: string; current: string; next: string }[] };
 };
 type SheetImportPreview = {
   records: PreviewCandidate[];
@@ -382,7 +382,7 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
     );
   };
 
-  const requestSheetPreview = async (payload: { id?: string; url?: string; sessionId?: string; sheetTab?: string }) => {
+  const requestSheetPreview = async (payload: { id?: string; url?: string; sessionId?: string; sheetTab?: string; updateMode?: 'fill-empty' | 'replace-nonempty' }) => {
     const response = await fetch('/api/examination/sheets/preview', {
       method: 'POST', headers: authHeaders, body: JSON.stringify(payload),
     });
@@ -687,12 +687,12 @@ export default function ImportData({ idToken, googleAccessToken, canImport, sess
 
               <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200">
                 <table className="min-w-[880px] w-full text-left text-sm">
-                  <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-3 py-3">Dòng</th><th className="px-3 py-3">Trạng thái</th><th className="px-3 py-3">Thí sinh</th><th className="px-3 py-3">Mã đối chiếu</th><th className="px-3 py-3">Trường / lớp</th><th className="px-3 py-3">Vòng có dữ liệu</th></tr></thead>
+                  <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-3 py-3">Dòng</th><th className="px-3 py-3">Trạng thái</th><th className="px-3 py-3">Thí sinh</th><th className="px-3 py-3">Mã đối chiếu</th><th className="px-3 py-3">Trường / lớp</th><th className="px-3 py-3">Nội dung sẽ cập nhật</th><th className="px-3 py-3">Vòng có dữ liệu</th></tr></thead>
                   <tbody className="divide-y divide-slate-100">{sheetPreview.records.slice(0, 12).map((row, index) => {
                     const preview = row._preview;
                     const statusLabel = { new: 'Tạo mới', changed: 'Có thay đổi', unchanged: 'Không đổi', conflict: 'Cần đối chiếu' }[preview?.status || 'new'];
                     const statusTone = { new: 'bg-blue-50 text-blue-700', changed: 'bg-amber-50 text-amber-700', unchanged: 'bg-emerald-50 text-emerald-700', conflict: 'bg-rose-50 text-rose-700' }[preview?.status || 'new'];
-                    return <tr key={`${preview?.sourceRow || index}-${row.name}`}><td className="px-3 py-3">{preview?.sourceRow || index + 1}</td><td className="px-3 py-3"><span className={`rounded-full px-2 py-1 text-xs font-bold ${statusTone}`}>{statusLabel}</span></td><td className="px-3 py-3"><b>{row.name}</b><div className="text-xs text-slate-500">{formatBirthDate(row.birthDate)} · {row.phone || row.email || 'Chưa có thông tin liên hệ'}</div></td><td className="px-3 py-3">{preview?.matchedCode || row.code || 'Tự sinh'}</td><td className="px-3 py-3">{row.school || '—'}{row.className ? ` · ${row.className}` : ''}</td><td className="px-3 py-3">{row.examHistory?.map(item => item.round).join(', ') || '—'}</td></tr>;
+                    return <tr key={`${preview?.sourceRow || index}-${row.name}`}><td className="px-3 py-3">{preview?.sourceRow || index + 1}</td><td className="px-3 py-3"><span className={`rounded-full px-2 py-1 text-xs font-bold ${statusTone}`}>{statusLabel}</span></td><td className="px-3 py-3"><b>{row.name}</b><div className="text-xs text-slate-500">{formatBirthDate(row.birthDate)} · {row.phone || row.email || 'Chưa có thông tin liên hệ'}</div></td><td className="px-3 py-3">{preview?.matchedCode || row.code || 'Tự sinh'}</td><td className="px-3 py-3">{row.school || '—'}{row.className ? ` · ${row.className}` : ''}</td><td className="px-3 py-3 text-xs">{preview?.changes?.length ? <ul className="space-y-1">{preview.changes.map(change => <li key={change.field}><b>{change.label}:</b> <span className="text-slate-500">{change.current || 'Trống'}</span> → <span className="font-semibold text-amber-800">{change.next}</span></li>)}</ul> : '—'}</td><td className="px-3 py-3">{row.examHistory?.map(item => item.round).join(', ') || '—'}</td></tr>;
                   })}</tbody>
                 </table>
               </div>

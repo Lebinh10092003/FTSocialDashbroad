@@ -5,7 +5,7 @@ import type { Candidate, SessionRound } from './types';
 type AllocationStrategy = 'BALANCED' | 'CAPACITY';
 type ExamMode = 'IN_PERSON' | 'ONLINE';
 type RoomDraft = { id: string; number: string; location: string; link: string; examLink: string };
-type SavedRoom = {
+export type SavedRoom = {
   id: string;
   commonName: string;
   number: string;
@@ -31,7 +31,7 @@ type Props = {
   round: SessionRound;
   candidateCount: number;
   idToken?: string | null;
-  onAllocated: (candidates: Candidate[]) => void;
+  onAllocated: (candidates: Candidate[], rooms: SavedRoom[]) => void;
 };
 
 const newRoom = (): RoomDraft => ({
@@ -194,7 +194,7 @@ export default function ExamRoomAllocationDialog({ sessionId, round, candidateCo
       if (!response.ok) throw new Error(body.error || 'Không thể phân phòng thi.');
       setKnownRoomCount(body.rooms.length);
       setTotalCandidates(body.candidateCount);
-      onAllocated(body.updatedCandidates || []);
+      onAllocated(body.updatedCandidates || [], body.rooms || []);
       setNotice(`Đã phân ${body.assignedCount} thí sinh vào ${body.rooms.length} phòng.`);
       setOpen(false);
     } catch (saveError) {

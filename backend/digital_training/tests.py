@@ -4,6 +4,7 @@ from collections import Counter
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from zipfile import ZipFile
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.contrib.auth import get_user_model
@@ -710,6 +711,36 @@ class TrainingAssessmentTests(TestCase):
             self.assertEqual(counts[("Topic B", "Hard")], 3)
         self.assertEqual(sum(item["count"] for item in result["generation_config"]["structure"]), 5)
 
+    def test_import_generation_honors_knowledge_type_and_question_type_structure(self):
+        source_questions = []
+        for knowledge_type, question_type, difficulty in [
+            ("Theory", "short_answer", "Easy"),
+            ("Practice", "practical_submission", "Hard"),
+        ]:
+            for index in range(1, 5):
+                source_questions.append({
+                    "id": f"{knowledge_type}-{question_type}-{index}",
+                    "type": question_type,
+                    "text": f"{knowledge_type} {question_type} question {index}",
+                    "options": [],
+                    "correct_answers": ["ok"],
+                    "points": 1,
+                    "required": True,
+                    "knowledge_type": knowledge_type,
+                    "difficulty": difficulty,
+                })
+        structure = [
+            {"knowledge_type": "Theory", "type": "short_answer", "difficulty": "Easy", "count": 2},
+            {"knowledge_type": "Practice", "type": "practical_submission", "difficulty": "Hard", "count": 2},
+        ]
+
+        result = generate_variants_from_import(source_questions, 3, 4, seed=7, structure=structure)
+
+        for variant in result["variants"]:
+            questions = [item for item in result["questions"] if item["variant"] == variant["name"]]
+            counts = Counter((item["knowledge_type"], item["type"], item["difficulty"]) for item in questions)
+            self.assertEqual(counts[("Theory", "short_answer", "Easy")], 2)
+            self.assertEqual(counts[("Practice", "practical_submission", "Hard")], 2)
     def test_xlsx_parser_uses_sheet_names_for_prepared_variants(self):
         workbook = Workbook()
         first = workbook.active
@@ -725,6 +756,49 @@ class TrainingAssessmentTests(TestCase):
         self.assertEqual(result["question_count"], 2)
         self.assertEqual(result["errors"], [])
 
+
+class TrainingAssessmentImportPreviewTests(TestCase):
+    def setUp(self):
+        self.manager = UserProfile.objects.create(
+            email="assessment-manager@example.test",
+            name="Assessment Manager",
+            role="MANAGER",
+            access_modules=["digital-training"],
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.manager)
+
+    def test_explicit_variant_count_overrides_participant_based_suggestion(self):
+        source_questions = [{
+            "id": "bank-1",
+            "type": "short_answer",
+            "text": "Question one",
+            "options": [],
+            "correct_answers": ["ok"],
+            "points": 1,
+            "required": True,
+        }]
+        parsed = {"questions": source_questions, "errors": []}
+        with patch("digital_training.assessment_views.fetch_google_sheet", return_value=b"workbook"), patch(
+            "digital_training.assessment_views.parse_assessment_workbook", return_value=parsed
+        ):
+            response = self.client.post(
+                "/api/digital-training/assessments/import-preview",
+                {
+                    "google_sheet_url": "https://docs.google.com/spreadsheets/d/example",
+                    "import_mode": "auto_generate",
+                    "participant_count": 40,
+                    "max_people_per_variant": 8,
+                    "variant_count": 3,
+                    "questions_per_variant": 1,
+                    "seed": 1,
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data["variants"]), 3)
+        self.assertEqual(response.data["generation_config"]["variant_count"], 3)
 
 class TrainingFinancePermissionTests(TestCase):
     def client_for(self, email, role="EMPLOYEE", title_name="", department_name=""):

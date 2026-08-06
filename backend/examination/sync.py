@@ -447,7 +447,7 @@ def sync_candidate_payload(candidate):
     }
 
 
-def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url, sheet_tab='', source_row_offset=1):
+def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url, sheet_tab='', source_row_offset=1, update_mode='replace-nonempty'):
     existing = list(Candidate.objects.all())
     # Compare against memberships in this session, not every historic profile.
     session_candidates = list(Candidate.objects.filter(participations__session_id=session_id).distinct()) if session_id else []
@@ -456,10 +456,10 @@ def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url,
     created = matched = conflicts = changed = unchanged = 0
     rows = []
     profile_fields = (
-        ('name', 'name'), ('birth_date', 'birth_date'), ('identity', 'identity'), ('email', 'email'),
-        ('phone', 'phone'), ('school', 'school'), ('class_name', 'class_name'), ('city', 'city'),
-        ('ward', 'ward'), ('nationality', 'nationality'), ('grade', 'grade'), ('address', 'address'),
-        ('achievement', 'achievement'), ('highest_round', 'highest_round'), ('parent', 'parent'),
+        ('name', 'name', 'Họ và tên'), ('birth_date', 'birth_date', 'Ngày sinh'), ('identity', 'identity', 'CCCD/Hộ chiếu'), ('email', 'email', 'Email'),
+        ('phone', 'phone', 'Số điện thoại'), ('school', 'school', 'Trường'), ('class_name', 'class_name', 'Lớp'), ('city', 'city', 'Tỉnh/Thành phố'),
+        ('ward', 'ward', 'Xã/Phường'), ('nationality', 'nationality', 'Quốc tịch'), ('grade', 'grade', 'Khối lớp'), ('address', 'address', 'Địa chỉ'),
+        ('achievement', 'achievement', 'Kết quả cao nhất'), ('highest_round', 'highest_round', 'Vòng cao nhất đã đạt'), ('parent', 'parent', 'Phụ huynh'),
     )
     for source_index, item in enumerate(incoming, start=source_row_offset):
         assessments = []
@@ -476,15 +476,17 @@ def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url,
         same_code = next((candidate for candidate in existing if item.get('code') and candidate.code.upper() == item['code'].upper()), None)
         base = confirmed[0][0] if len(confirmed) == 1 else same_code
         possible = [(candidate, assessment) for candidate, assessment in assessments if assessment['status'] == 'possible']
-        # Source imports are non-destructive: only blank Fermat fields are filled.
-        # Preview exactly those writes, rather than reporting values that will be retained.
+        # Mirror the selected import policy. The old implementation always
+        # previewed fill-empty changes, even though the default policy replaces
+        # non-empty source values.
         changed_fields = []
         changes = []
 
-        def add_fill_change(field, label, current, incoming_value):
+        def add_change(field, label, current, incoming_value):
             current_value = clean_txt(current)
             next_value = clean_txt(incoming_value)
-            if next_value and not current_value:
+            can_write = next_value and (update_mode == 'replace-nonempty' or not current_value)
+            if can_write and current_value != next_value:
                 changed_fields.append(field)
                 changes.append({'field': field, 'label': label, 'current': current_value, 'next': next_value})
 
@@ -492,12 +494,12 @@ def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url,
             matched += 1
             if base.id in session_candidate_ids:
                 matched_session_candidate_ids.add(base.id)
-            for model_field, incoming_field in profile_fields:
+            for model_field, incoming_field, label in profile_fields:
                 incoming_value = clean_txt(item.get(incoming_field))
-                add_fill_change(model_field, model_field, getattr(base, model_field), incoming_value)
+                add_change(model_field, label, getattr(base, model_field), incoming_value)
             participation = CandidateParticipation.objects.filter(candidate=base, session_id=session_id).prefetch_related('round_results').first() if session_id else None
             if not participation:
-                add_fill_change('session', 'Kỳ tổ chức', '', 'Thêm vào kỳ tổ chức')
+                add_change('session', 'Kỳ tổ chức', '', 'Thêm vào kỳ tổ chức')
             else:
                 registration_fields = {
                     'subject': 'subject', 'category': 'category', 'registrationMethod': 'registration_method',
@@ -506,7 +508,7 @@ def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url,
                 }
                 for incoming_field, model_field in registration_fields.items():
                     incoming_value = clean_txt((item.get('registration') or {}).get(incoming_field))
-                    add_fill_change(f'registration.{incoming_field}', incoming_field, getattr(participation, model_field), incoming_value)
+                    add_change(f'registration.{incoming_field}', incoming_field, getattr(participation, model_field), incoming_value)
                 existing_rounds = list(participation.round_results.all())
                 for history_index, history_item in enumerate(item.get('exam_history') or []):
                     incoming_round = clean_txt(history_item.get('round'))
@@ -514,13 +516,13 @@ def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url,
                     if not existing_round and history_index < len(existing_rounds):
                         existing_round = existing_rounds[history_index]
                     if not existing_round:
-                        add_fill_change(f'round.{incoming_round}', incoming_round or 'Vòng thi', '', 'Thêm dữ liệu vòng')
+                        add_change(f'round.{incoming_round}', incoming_round or 'Vòng thi', '', 'Thêm dữ liệu vòng')
                         continue
                     for payload_field, model_field in ROUND_HISTORY_FIELD_MAP.items():
                         incoming_value = clean_txt(history_item.get(payload_field))
                         if payload_field == 'date' and incoming_value:
                             incoming_value = parse_dob(incoming_value) or incoming_value
-                        add_fill_change(
+                        add_change(
                             f'round.{incoming_round}.{payload_field}',
                             f'{incoming_round or "V?ng thi"} · {payload_field}',
                             getattr(existing_round, model_field), incoming_value,
@@ -1290,7 +1292,7 @@ def public_sheet_fingerprint(spreadsheet_url, sheet_tab=''):
     raise ValueError(str(last_error or 'Kh?ng ??c ???c CSV c?ng khai c?a Google Sheet.'))
 
 
-def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None, preview=False, sheet_tab=''):
+def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None, preview=False, sheet_tab='', preview_update_mode='replace-nonempty'):
     def update_state(data):
         if sheet_doc_id:
             try:
@@ -1399,7 +1401,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
                 raise Exception('Mỗi lần chỉ được xử lý tối đa 1.000 hồ sơ. Hãy chia tab nguồn thành nhiều đợt nhỏ hơn.')
         if not incoming:
             if preview:
-                result = build_sheet_preview([], header_row, col, raw, session_id, spreadsheet_url, sheet_tab, header_index + 2)
+                result = build_sheet_preview([], header_row, col, raw, session_id, spreadsheet_url, sheet_tab, header_index + 2, preview_update_mode)
                 result['sessionId'] = session_id or ''
                 result['timestamp'] = ts_vn
                 result['warnings'].append('Không có hồ sơ hợp lệ nào trong tab đã chọn.')
@@ -1416,7 +1418,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
             }
 
         if preview:
-            result = build_sheet_preview(incoming, header_row, col, raw, session_id, spreadsheet_url, sheet_tab, header_index + 2)
+            result = build_sheet_preview(incoming, header_row, col, raw, session_id, spreadsheet_url, sheet_tab, header_index + 2, preview_update_mode)
             result['sessionId'] = session_id or ''
             result['timestamp'] = ts_vn
             return result

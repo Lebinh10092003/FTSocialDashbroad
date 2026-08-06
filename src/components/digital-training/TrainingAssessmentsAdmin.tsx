@@ -134,6 +134,15 @@ const statusLabel: Record<string, string> = {
   closed: "Đã đóng",
 };
 
+const questionTypeLabels: Record<string, string> = {
+  single_choice: "Trắc nghiệm",
+  multiple_choice: "Trắc nghiệm nhiều đáp án",
+  short_answer: "Trả lời ngắn",
+  matching: "Ghép nối",
+  ordering: "Sắp xếp",
+  practical_submission: "Điền đáp án / nộp sản phẩm",
+  file_upload: "Tải tệp",
+};
 export default function TrainingAssessmentsAdmin({
   idToken,
   sessions,
@@ -153,7 +162,8 @@ export default function TrainingAssessmentsAdmin({
   const [draft, setDraft] = useState(emptyDraft);
   const [importMode, setImportMode] = useState<"prepared" | "auto_generate">("prepared");
   const [questionsPerVariant, setQuestionsPerVariant] = useState("20");
-  const [variantCountOverride, setVariantCountOverride] = useState<number | null>(null);
+  const [variantCount, setVariantCount] = useState("1");
+  const [variantCountOverridden, setVariantCountOverridden] = useState(false);
   const [sourceMode, setSourceMode] = useState<"xlsx" | "google_sheet">("xlsx");
   const [file, setFile] = useState<File | null>(null);
   const [sheetUrl, setSheetUrl] = useState("");
@@ -214,22 +224,28 @@ export default function TrainingAssessmentsAdmin({
   }, [classes, sessions]);
 
   const participantRows = useMemo(() => parseParticipants(draft.participants_text), [draft.participants_text]);
-  const computedVariantCount = Math.max(1, Math.ceil(participantRows.length / 8));
-  const effectiveVariantCount = variantCountOverride !== null ? variantCountOverride : computedVariantCount;
+  const suggestedVariantCount = Math.max(1, Math.ceil(participantRows.length / 8));
+  const normalizedVariantCount = Math.max(1, Math.min(200, Number.parseInt(variantCount, 10) || 1));
+  useEffect(() => {
+    if (!variantCountOverridden) setVariantCount(String(suggestedVariantCount));
+  }, [suggestedVariantCount, variantCountOverridden]);
   const bankQuestions = preview?.bank_questions || [];
-  const structureRows = useMemo(() => Array.from(new Map(bankQuestions.map((item) => {
-    const category = String(item.category || "").trim();
-    const difficulty = String(item.difficulty || "").trim();
-    const key = `${category}\u241f${difficulty}`;
-    return [key, {
-      key,
-      category,
-      difficulty,
-      available: bankQuestions.filter((question) => String(question.category || "").trim() === category && String(question.difficulty || "").trim() === difficulty).length,
-    }];
-  })).values()), [bankQuestions]);
+  const structureRows = useMemo(() => {
+    const rows = new Map<string, { key: string; category: string; knowledgeType: string; type: string; difficulty: string; available: number }>();
+    bankQuestions.forEach((item) => {
+      const category = String(item.category || "").trim();
+      const knowledgeType = String(item.knowledge_type || "").trim();
+      const type = String(item.type || "").trim();
+      const difficulty = String(item.difficulty || "").trim();
+      const key = `${category}\u241f${knowledgeType}\u241f${type}\u241f${difficulty}`;
+      const row = rows.get(key) || { key, category, knowledgeType, type, difficulty, available: 0 };
+      row.available += 1;
+      rows.set(key, row);
+    });
+    return Array.from(rows.values());
+  }, [bankQuestions]);
   const structurePayload = structureRows
-    .map((row) => ({ category: row.category, difficulty: row.difficulty, count: Number(structureRules[row.key] || 0) }))
+    .map((row) => ({ category: row.category, knowledge_type: row.knowledgeType, type: row.type, difficulty: row.difficulty, count: Number(structureRules[row.key] || 0) }))
     .filter((row) => row.count > 0);
   const structureTotal = structurePayload.reduce((sum, row) => sum + row.count, 0);
   const bankFilterOptions = (field: keyof typeof bankFilters) => Array.from(new Set(bankQuestions.map((item) => String(item[field] || "")).filter(Boolean))).sort();
@@ -241,7 +257,8 @@ export default function TrainingAssessmentsAdmin({
     setSheetUrl("");
     setImportMode("prepared");
     setQuestionsPerVariant("20");
-    setVariantCountOverride(null);
+    setVariantCount("1");
+    setVariantCountOverridden(false);
     setPreview(null);
     setStructureRules({});
     setStructureDirty(false);
@@ -259,9 +276,8 @@ export default function TrainingAssessmentsAdmin({
         const data = new FormData();
         data.append("file", file);
         data.append("import_mode", importMode);
-        data.append("participant_count", String(participantRows.length));
-        data.append("max_people_per_variant", "8");
-        data.append("variant_count", String(effectiveVariantCount));
+        data.append("participant_count", String(participantRows.length));        data.append("max_people_per_variant", "8");
+        data.append("variant_count", String(normalizedVariantCount));
         data.append("audience_group", draft.audience_group);
         if (importMode === "auto_generate") {
           data.append("questions_per_variant", questionsPerVariant);
@@ -280,7 +296,7 @@ export default function TrainingAssessmentsAdmin({
           body: JSON.stringify({
             google_sheet_url: sheetUrl.trim(),
             import_mode: importMode,
-            variant_count: effectiveVariantCount,
+            variant_count: normalizedVariantCount,
             questions_per_variant: questionsPerVariant,
             participant_count: participantRows.length,
             max_people_per_variant: 8,
@@ -612,7 +628,7 @@ export default function TrainingAssessmentsAdmin({
                 <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Tên bài *</span><input className="ft-input" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Bài kiểm tra cuối học phần" /></label>
                 <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Đơn vị / phân lớp *</span><select className="ft-input" value={draft.target} onChange={(event) => setDraft({ ...draft, target: event.target.value })}><option value="">Chọn đơn vị hoặc phân lớp</option>{targets.map((target) => <option key={target.value} value={target.value}>{target.label}</option>)}</select><small className="mt-1 block text-slate-500">Mỗi đơn vị/phân lớp chỉ có một khảo sát kết thúc tập huấn và một link công khai.</small></label>
                 {(preview?.available_groups || []).length > 0 && <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Nhóm đối tượng trong ngân hàng *</span><select className="ft-input" value={draft.audience_group} onChange={(event) => { setDraft({ ...draft, audience_group: event.target.value }); setPreview(null); }}><option value="">Chọn nhóm đối tượng</option>{(preview?.available_groups || []).map((group) => <option key={group} value={group}>{group}</option>)}</select><small className="mt-1 block text-slate-500">Sau khi chọn nhóm, bấm đọc lại dữ liệu để tạo đúng câu hỏi.</small></label>}
-                <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Danh sách người tham gia *</span><textarea className="ft-input min-h-32 font-mono text-xs" value={draft.participants_text} onChange={(event) => { setDraft({ ...draft, participants_text: event.target.value }); setPreview(null); }} placeholder={'Mã, Họ tên, Email, Số điện thoại, Đơn vị, Nhóm\nGV-001, Nguyễn Văn A, a@example.com, 090..., Trường A, THPT'} /><small className="mt-1 block text-slate-500">{participantRows.length} người · hệ thống tự tính {computedVariantCount} mã đề, tối đa 8 người/mã.</small></label>
+                <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Danh sách người tham gia *</span><textarea className="ft-input min-h-32 font-mono text-xs" value={draft.participants_text} onChange={(event) => { setDraft({ ...draft, participants_text: event.target.value }); setPreview(null); }} placeholder={'Mã, Họ tên, Email, Số điện thoại, Đơn vị, Nhóm\nGV-001, Nguyễn Văn A, a@example.com, 090..., Trường A, THPT'} /><small className="mt-1 block text-slate-500">{participantRows.length} người · gợi ý {suggestedVariantCount} mã đề (khoảng 8 người/mã). Bạn có thể điều chỉnh số mã đề ở khung bên phải.</small></label>
                 <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Google Sheet đầu ra của đợt thi</span><input type="url" className="ft-input" value={draft.output_sheet_url} onChange={(event) => setDraft({ ...draft, output_sheet_url: event.target.value })} placeholder="https://docs.google.com/spreadsheets/d/..." /><small className="mt-1 block text-slate-500">Dùng file riêng của khách hàng; hệ thống tạo các trang Tổng quan, Phân đề, Đề, Bài làm và Nhật ký xóa.</small></label>
                 <fieldset className="sm:col-span-2 rounded-xl border bg-slate-50 p-4"><legend className="px-2 text-sm font-extrabold text-slate-800">Nơi lưu tệp bài làm trên Google Drive</legend><label><span className="mb-1 block text-sm font-bold">ID thư mục gốc</span><input className="ft-input bg-white" value={draft.drive_folder_id} onChange={(event) => setDraft({ ...draft, drive_folder_id: event.target.value })} placeholder="Ví dụ: 1AbC... lấy từ URL thư mục Drive" /></label><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="flex items-start gap-2 rounded-lg border bg-white p-3 text-sm"><input type="checkbox" className="mt-1" checked={draft.create_customer_folder} onChange={(event) => setDraft({ ...draft, create_customer_folder: event.target.checked })} /><span><b className="block">Tạo thư mục theo khách hàng</b><span className="text-xs text-slate-500">Mặc định dùng tên đơn vị đã chọn.</span></span></label><label className="flex items-start gap-2 rounded-lg border bg-white p-3 text-sm"><input type="checkbox" className="mt-1" checked={draft.create_participant_folder} onChange={(event) => setDraft({ ...draft, create_participant_folder: event.target.checked })} /><span><b className="block">Mỗi người một thư mục</b><span className="text-xs text-slate-500">Tránh lẫn tệp giữa các bài làm.</span></span></label>{draft.create_customer_folder && <label><span className="mb-1 block text-xs font-bold">Tên thư mục khách hàng (không bắt buộc)</span><input className="ft-input bg-white" value={draft.customer_folder_name} onChange={(event) => setDraft({ ...draft, customer_folder_name: event.target.value })} placeholder="Để trống để dùng tên đơn vị" /></label>}{draft.create_participant_folder && <label><span className="mb-1 block text-xs font-bold">Mẫu tên thư mục người làm</span><input className="ft-input bg-white font-mono text-sm" value={draft.participant_folder_template} onChange={(event) => setDraft({ ...draft, participant_folder_template: event.target.value })} /><small className="mt-1 block text-slate-500">Biến: {"{participant_code}"}, {"{respondent_name}"}, {"{email}"}, {"{phone}"}, {"{variant}"}.</small></label>}</div></fieldset>
                 <label><span className="mb-1 block text-sm font-bold">Thời gian làm bài (phút)</span><input type="number" min="1" max="480" className="ft-input" value={draft.duration_minutes} onChange={(event) => setDraft({ ...draft, duration_minutes: event.target.value })} /></label>
@@ -627,42 +643,10 @@ export default function TrainingAssessmentsAdmin({
               <h3 className="font-extrabold">{importMode === "auto_generate" ? "File câu hỏi nguồn" : "Nguồn các mã đề"}</h3>
               {importMode === "auto_generate" && <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
                 <div className="grid grid-cols-2 gap-3">
-                  <label>
-                    <span className="mb-1 block text-xs font-bold text-emerald-900">Số mã đề</span>
-                    <input
-                      type="number"
-                      min={computedVariantCount}
-                      max={20}
-                      className="ft-input bg-white"
-                      value={effectiveVariantCount}
-                      onChange={(event) => {
-                        const val = Math.max(1, Number(event.target.value));
-                        setVariantCountOverride(val === computedVariantCount ? null : val);
-                        setPreview(null);
-                      }}
-                    />
-                    <small className="mt-1 block text-[11px] text-emerald-800">
-                      Tự tính: {computedVariantCount} · Khuyến nghị 4–5
-                      {variantCountOverride !== null && <span className="ml-2 rounded bg-amber-100 px-1 text-amber-800">Đã ghi đè</span>}
-                    </small>
-                  </label>
-                  <label>
-                    <span className="mb-1 block text-xs font-bold text-emerald-900">Số câu/mã đề</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="200"
-                      className="ft-input bg-white"
-                      value={questionsPerVariant}
-                      onChange={(event) => { setQuestionsPerVariant(event.target.value); setPreview(null); setStructureRules({}); setStructureDirty(false); }}
-                    />
-                  </label>
+                  <label><span className="mb-1 block text-xs font-bold text-emerald-900">Số mã đề</span><input type="number" min="1" max="200" className="ft-input bg-white" value={variantCount} onChange={(event) => { setVariantCount(event.target.value); setVariantCountOverridden(true); setPreview(null); setStructureRules({}); setStructureDirty(false); }} /><small className="mt-1 block text-[11px] text-emerald-800">Gợi ý hiện tại: {suggestedVariantCount} mã; có thể chọn từ 1 đến 200.</small></label>
+                  <label><span className="mb-1 block text-xs font-bold text-emerald-900">Số câu/mã đề</span><input type="number" min="1" max="200" className="ft-input bg-white" value={questionsPerVariant} onChange={(event) => { setQuestionsPerVariant(event.target.value); setPreview(null); setStructureRules({}); setStructureDirty(false); }} /></label>
                 </div>
-                {!preview && (file || sheetUrl) && (
-                  <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-                    ⚠️ Cấu hình đã thay đổi. Bấm "Đọc file và tự động sinh đề" để cập nhật.
-                  </p>
-                )}
+                {!preview && (file || sheetUrl) && <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-800">Cấu hình đã thay đổi. Bấm “Đọc file và tự động sinh đề” để cập nhật.</p>}
               </div>}
               <div className="mt-3 grid grid-cols-2 rounded-xl bg-slate-200 p-1 text-sm font-bold">
                 <button onClick={() => { setSourceMode("xlsx"); setPreview(null); setStructureRules({}); setStructureDirty(false); }} className={`rounded-lg px-3 py-2 ${sourceMode === "xlsx" ? "bg-white shadow-sm" : ""}`}>Tệp XLSX</button>
@@ -678,8 +662,8 @@ export default function TrainingAssessmentsAdmin({
                 </div>
                 <div className="flex flex-wrap gap-2">{preview.variants.map((variant) => <span key={variant.name} className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-800">{variant.name}: {variant.question_count} câu</span>)}</div>
                 {preview.import_mode === "auto_generate" && !!structureRows.length && <div className="rounded-xl border bg-white p-3">
-                  <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-extrabold uppercase text-slate-500">Cơ cấu chủ đề / độ khó</p><p className="mt-1 text-xs text-slate-500">Để trống nếu muốn hệ thống chia theo tỷ lệ ngân hàng.</p></div><b className={`text-sm ${structureTotal > 0 && structureTotal !== Number(questionsPerVariant) ? "text-rose-600" : "text-emerald-700"}`}>{structureTotal || "Tự động"}{structureTotal > 0 ? ` / ${questionsPerVariant} câu` : ""}</b></div>
-                  <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">{structureRows.map((row) => <label key={row.key} className="grid grid-cols-[minmax(0,1fr)_72px] items-center gap-2 rounded-lg bg-slate-50 p-2"><span className="text-xs"><b>{row.category || "Không chủ đề"}</b><span className="block text-[11px] text-slate-500">{row.difficulty || "Không độ khó"} · có {row.available} câu</span></span><input type="number" min="0" max={row.available} className="rounded-lg border px-2 py-1.5 text-sm" value={structureRules[row.key] || ""} placeholder="0" onChange={(event) => { setStructureRules((current) => ({ ...current, [row.key]: event.target.value })); setStructureDirty(true); }} /></label>)}</div>
+                  <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-extrabold uppercase text-slate-500">Cơ cấu loại / kiểu câu hỏi / độ khó</p><p className="mt-1 text-xs text-slate-500">Đặt số câu cho từng tổ hợp. Tổng phải bằng số câu/mã đề; để trống để hệ thống tự cân bằng.</p></div><b className={`text-sm ${structureTotal > 0 && structureTotal !== Number(questionsPerVariant) ? "text-rose-600" : "text-emerald-700"}`}>{structureTotal || "Tự động"}{structureTotal > 0 ? ` / ${questionsPerVariant} câu` : ""}</b></div>
+                  <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">{structureRows.map((row) => <label key={row.key} className="grid grid-cols-[minmax(0,1fr)_72px] items-center gap-2 rounded-lg bg-slate-50 p-2"><span className="text-xs"><b>{row.category || "Không chủ đề"}</b><span className="block text-[11px] text-slate-500">{row.knowledgeType || "Không loại"} · {(questionTypeLabels[row.type] || row.type || "Không kiểu")} · {row.difficulty || "Không độ khó"} · có {row.available} câu</span></span><input type="number" min="0" max={row.available} className="rounded-lg border px-2 py-1.5 text-sm" value={structureRules[row.key] || ""} placeholder="0" onChange={(event) => { setStructureRules((current) => ({ ...current, [row.key]: event.target.value })); setStructureDirty(true); }} /></label>)}</div>
                   {structureDirty && <p className="mt-2 text-xs font-bold text-amber-700">Đã đổi cơ cấu. Bấm Sinh lại các mã đề để áp dụng.</p>}
                 </div>}
                 {!!bankQuestions.length && <button type="button" onClick={() => setScreen("bank")} className="ft-btn ft-btn-secondary w-full justify-center"><FileSpreadsheet className="h-4 w-4" />Mở trang ngân hàng câu hỏi ({bankQuestions.length})</button>}

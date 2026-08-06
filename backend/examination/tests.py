@@ -425,6 +425,31 @@ class ExamRoomAllocationTests(TestCase):
         self.assertEqual(listing.data['assignedCount'], 5)
         self.assertEqual(len(listing.data['rooms']), 2)
 
+    def test_reallocation_clears_rooms_for_candidates_no_longer_eligible(self):
+        first = self.client.post(self.url, {
+            'commonName': 'Phòng cũ',
+            'mode': 'IN_PERSON',
+            'allocationStrategy': 'BALANCED',
+            'rooms': [{'number': '101', 'location': 'Hà Nội'}],
+        }, format='json')
+        self.assertEqual(first.status_code, 200)
+        excluded = RoundResult.objects.get(participation__candidate_id='ROOM-001')
+        excluded.eligibility = 'Không đủ điều kiện'
+        excluded.save(update_fields=['eligibility'])
+
+        second = self.client.post(self.url, {
+            'commonName': 'Phòng mới',
+            'mode': 'IN_PERSON',
+            'allocationStrategy': 'BALANCED',
+            'rooms': [{'number': '201', 'location': 'Hà Nội'}],
+        }, format='json')
+
+        self.assertEqual(second.status_code, 200)
+        excluded.refresh_from_db()
+        self.assertIsNone(excluded.exam_room)
+        self.assertEqual(excluded.room_name, '')
+        self.assertEqual(excluded.location, '')
+        self.assertEqual(ExamRoom.objects.get().label, 'Phòng mới 201')
     def test_capacity_allocation_rejects_insufficient_rooms_without_replacing_data(self):
         ExamRoom.objects.create(
             session=self.session, round_id='round-1', round_name='Vòng 1', common_name='Phòng cũ',
@@ -1117,6 +1142,29 @@ class SheetCandidateImportPreviewTests(TestCase):
             ],
         )
 
+    def test_preview_lists_nonempty_values_that_will_be_replaced(self):
+        from .sync import build_sheet_preview
+
+        candidate = Candidate.objects.create(
+            id='FT-PREVIEW-CHANGED', code='FT-PREVIEW-CHANGED', name='Preview Candidate',
+            email='preview@example.com', sort_key='preview-candidate',
+        )
+        participation = CandidateParticipation.objects.create(candidate=candidate, session=self.session)
+        RoundResult.objects.create(
+            participation=participation, round_id='international', round_name='International',
+            score='5', result='Old award',
+        )
+
+        preview = build_sheet_preview([{
+            'name': 'Preview Candidate', 'email': 'preview@example.com',
+            'exam_history': [{'round': 'International', 'score': '9', 'result': 'New award'}],
+        }], [], {}, '', self.session.id, 'https://docs.google.com/spreadsheets/d/example/edit')
+
+        changes = {item['field']: item for item in preview['records'][0]['_preview']['changes']}
+        self.assertEqual(preview['records'][0]['_preview']['status'], 'changed')
+        self.assertEqual(changes['round.International.score']['current'], '5')
+        self.assertEqual(changes['round.International.score']['next'], '9')
+        self.assertEqual(changes['round.International.result']['next'], 'New award')
     @patch('examination.sync.requests.get')
     def test_preview_reads_two_row_schema_without_mutating_candidates(self, mock_get):
         csv_text = (

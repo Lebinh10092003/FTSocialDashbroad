@@ -205,7 +205,14 @@ def assessment_import_preview(request):
                     return _assessment_error("Cơ cấu chủ đề/độ khó không đúng định dạng JSON.")
             if not isinstance(structure, list):
                 return _assessment_error("Cơ cấu chủ đề/độ khó phải là một danh sách.")
-            computed_variant_count = math.ceil(participant_count / max_people) if participant_count else max(1, int(request.data.get("variant_count") or 1))
+            requested_variant_count = request.data.get("variant_count")
+            if requested_variant_count not in (None, ""):
+                try:
+                    computed_variant_count = int(requested_variant_count)
+                except (TypeError, ValueError):
+                    return _assessment_error("Số mã đề không hợp lệ.")
+            else:
+                computed_variant_count = math.ceil(participant_count / max_people) if participant_count else 1
             generated = generate_variants_from_import(
                 source_questions,
                 computed_variant_count,

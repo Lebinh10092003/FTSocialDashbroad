@@ -1542,7 +1542,22 @@ def exam_room_allocation(request, session_id, round_id):
                 'candidateCount': len(locked_results),
                 'capacity': capacity,
             }, status=status.HTTP_409_CONFLICT)
-        ExamRoom.objects.filter(session=session, round_id=round_id).delete()
+        previous_rooms = list(ExamRoom.objects.filter(session=session, round_id=round_id))
+        # Deleting a room only nulls its foreign key. Clear its derived display
+        # values too, so an ineligible candidate does not keep a stale room
+        # after a reset/reallocation.
+        for stale_result in RoundResult.objects.select_for_update().select_related('exam_room').filter(exam_room__in=previous_rooms):
+            previous_room = stale_result.exam_room
+            stale_result.exam_room = None
+            stale_result.room_name = ''
+            stale_result.location = ''
+            stale_result.mode = ''
+            update_fields = ['exam_room', 'room_name', 'location', 'mode', 'updated_at']
+            if previous_room and previous_room.exam_link and stale_result.link == previous_room.exam_link:
+                stale_result.link = ''
+                update_fields.append('link')
+            stale_result.save(update_fields=update_fields)
+        ExamRoom.objects.filter(id__in=[room.id for room in previous_rooms]).delete()
         created_rooms = [
             ExamRoom.objects.create(
                 session=session,
@@ -2164,6 +2179,9 @@ def sheet_import_preview(request):
     source_url = str(data.get('url') or '').strip()
     session_id = str(data.get('sessionId') or '').strip()
     sheet_tab = str(data.get('sheetTab') or '').strip()
+    update_mode = str(data.get('updateMode') or 'replace-nonempty').strip()
+    if update_mode not in {'fill-empty', 'replace-nonempty'}:
+        return Response({'error': 'Chính sách cập nhật dữ liệu không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
     source_name = 'Google Sheets'
     source_stage = ''
 
@@ -2194,6 +2212,7 @@ def sheet_import_preview(request):
         session_id=session_id,
         preview=True,
         sheet_tab=sheet_tab,
+        preview_update_mode=update_mode,
     )
     if not result.get('success'):
         return Response({'error': result.get('message') or 'Không thể đọc Google Sheets.'}, status=status.HTTP_400_BAD_REQUEST)
