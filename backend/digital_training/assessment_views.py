@@ -136,6 +136,19 @@ def assessment_detail(request, pk):
     if not _can_manage(request):
         return _forbidden()
     if request.method == "DELETE":
+        active_count = item.attempts.filter(status="in_progress").count()
+        if active_count:
+            return _assessment_error(
+                f"Có {active_count} người đang làm bài. Đóng bài trước khi xóa.",
+                status.HTTP_409_CONFLICT,
+            )
+        total_attempts = item.attempts.count()
+        force = str(request.data.get("force") or "").strip().lower() in {"true", "1", "yes"}
+        if total_attempts and not force:
+            return _assessment_error(
+                f"Bài có {total_attempts} lượt đã nộp. Gửi thêm force=true để xác nhận xóa toàn bộ.",
+                status.HTTP_409_CONFLICT,
+            )
         item.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
     serializer = TrainingAssessmentSerializer(item, data=request.data, partial=True, context={"request": request})
@@ -192,7 +205,7 @@ def assessment_import_preview(request):
                     return _assessment_error("Cơ cấu chủ đề/độ khó không đúng định dạng JSON.")
             if not isinstance(structure, list):
                 return _assessment_error("Cơ cấu chủ đề/độ khó phải là một danh sách.")
-            computed_variant_count = math.ceil(participant_count / max_people) if participant_count else request.data.get("variant_count", 1)
+            computed_variant_count = math.ceil(participant_count / max_people) if participant_count else max(1, int(request.data.get("variant_count") or 1))
             generated = generate_variants_from_import(
                 source_questions,
                 computed_variant_count,

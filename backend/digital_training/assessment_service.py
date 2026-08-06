@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import io
 import json
 import os
@@ -192,7 +193,7 @@ def parse_assessment_workbook(content, source_name=""):
                 if question_type == "single_choice" and len(correct) != 1:
                     errors.append(f"{sheet.title}!{row_number}: cần đúng 1 đáp án A–E.")
                 elif question_type == "multiple_choice" and not correct:
-                    errors.append(f"{sheet.title}!{row_number}: can co it nhat 1 dap an dung.")
+                    errors.append(f"{sheet.title}!{row_number}: cần có ít nhất 1 đáp án đúng.")
             elif question_type in {"short_answer", "matching", "ordering"} and correct_raw:
                 separator = r"[|;]" if question_type == "short_answer" else r"[|]"
                 correct = [part.strip() for part in re.split(separator, correct_raw) if part.strip()]
@@ -287,7 +288,7 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
     except (TypeError, ValueError):
         raise ValueError("Số mã đề và số câu mỗi đề phải là số nguyên.")
     if variant_count < 1 or variant_count > 200:
-        raise ValueError('So ma de phai tu 1 den 200.')
+        raise ValueError("Số mã đề phải từ 1 đến 200.")
     if questions_per_variant < 1 or questions_per_variant > 200:
         raise ValueError("Số câu mỗi đề phải từ 1 đến 200.")
 
@@ -407,7 +408,8 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
             item["source_question_id"] = source_id
             item["variant"] = f"Đề {variant_index}"
             item["order"] = order
-            item["id"] = f"de{variant_index}-{order}-{_key(source_id)[:24]}"
+            short_hash = hashlib.md5(source_id.encode()).hexdigest()[:10]
+            item["id"] = f"de{variant_index}-{order}-{short_hash}"
             generated.append(item)
 
     warnings = []

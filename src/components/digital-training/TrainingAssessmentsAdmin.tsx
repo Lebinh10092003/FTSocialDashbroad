@@ -15,6 +15,7 @@ import {
   Plus,
   QrCode,
   RefreshCw,
+  Search,
   Send,
   Shuffle,
   Trash2,
@@ -152,6 +153,7 @@ export default function TrainingAssessmentsAdmin({
   const [draft, setDraft] = useState(emptyDraft);
   const [importMode, setImportMode] = useState<"prepared" | "auto_generate">("prepared");
   const [questionsPerVariant, setQuestionsPerVariant] = useState("20");
+  const [variantCountOverride, setVariantCountOverride] = useState<number | null>(null);
   const [sourceMode, setSourceMode] = useState<"xlsx" | "google_sheet">("xlsx");
   const [file, setFile] = useState<File | null>(null);
   const [sheetUrl, setSheetUrl] = useState("");
@@ -162,6 +164,10 @@ export default function TrainingAssessmentsAdmin({
   const [bankFilters, setBankFilters] = useState({ category: "", knowledge_type: "", type: "", difficulty: "" });
   const [structureRules, setStructureRules] = useState<Record<string, string>>({});
   const [structureDirty, setStructureDirty] = useState(false);
+  // List filters
+  const [filterText, setFilterText] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [filterPartner, setFilterPartner] = useState("");
   const auth = { Authorization: `Bearer ${idToken}` };
 
   const load = async () => {
@@ -209,6 +215,7 @@ export default function TrainingAssessmentsAdmin({
 
   const participantRows = useMemo(() => parseParticipants(draft.participants_text), [draft.participants_text]);
   const computedVariantCount = Math.max(1, Math.ceil(participantRows.length / 8));
+  const effectiveVariantCount = variantCountOverride !== null ? variantCountOverride : computedVariantCount;
   const bankQuestions = preview?.bank_questions || [];
   const structureRows = useMemo(() => Array.from(new Map(bankQuestions.map((item) => {
     const category = String(item.category || "").trim();
@@ -234,6 +241,7 @@ export default function TrainingAssessmentsAdmin({
     setSheetUrl("");
     setImportMode("prepared");
     setQuestionsPerVariant("20");
+    setVariantCountOverride(null);
     setPreview(null);
     setStructureRules({});
     setStructureDirty(false);
@@ -253,9 +261,9 @@ export default function TrainingAssessmentsAdmin({
         data.append("import_mode", importMode);
         data.append("participant_count", String(participantRows.length));
         data.append("max_people_per_variant", "8");
+        data.append("variant_count", String(effectiveVariantCount));
         data.append("audience_group", draft.audience_group);
         if (importMode === "auto_generate") {
-          data.append("variant_count", String(computedVariantCount));
           data.append("questions_per_variant", questionsPerVariant);
           data.append("structure", JSON.stringify(structurePayload));
         }
@@ -272,7 +280,7 @@ export default function TrainingAssessmentsAdmin({
           body: JSON.stringify({
             google_sheet_url: sheetUrl.trim(),
             import_mode: importMode,
-            variant_count: computedVariantCount,
+            variant_count: effectiveVariantCount,
             questions_per_variant: questionsPerVariant,
             participant_count: participantRows.length,
             max_people_per_variant: 8,
@@ -461,7 +469,16 @@ export default function TrainingAssessmentsAdmin({
 
   const remove = async () => {
     if (!selected) return;
-    const confirmed = await appDialog.confirm(`Xóa “${selected.title}” và toàn bộ lượt làm bài?`, {
+    // First check if there's data
+    const hasAttempts = selected.attempts_count > 0;
+    const hasActive = selected.sync_counts?.pending > 0;
+    let confirmMsg = `Xóa "${selected.title}" và toàn bộ lượt làm bài?`;
+    if (hasActive) {
+      confirmMsg = `Bài có lượt đang chờ đồng bộ. Xóa sẽ mất dữ liệu! Tiếp tục?`;
+    } else if (hasAttempts) {
+      confirmMsg = `Bài có ${selected.submitted_count} lượt đã nộp. Xóa toàn bộ?`;
+    }
+    const confirmed = await appDialog.confirm(confirmMsg, {
       title: "Xóa bài đánh giá",
       confirmText: "Xóa bài đánh giá",
       tone: "danger",
@@ -471,9 +488,14 @@ export default function TrainingAssessmentsAdmin({
     try {
       const response = await fetch(`/api/digital-training/assessments/${selected.id}`, {
         method: "DELETE",
-        headers: auth,
+        headers: { ...auth, "Content-Type": "application/json" },
+        body: JSON.stringify({ force: true }),
       });
-      if (!response.ok) throw new Error(await errorText(response));
+      if (!response.ok) {
+        const errText = await errorText(response);
+        // 409 = active users or force needed
+        throw new Error(errText);
+      }
       setItems((current) => current.filter((item) => item.id !== selected.id));
       setSelected(null);
       setScreen("list");
@@ -603,9 +625,44 @@ export default function TrainingAssessmentsAdmin({
             </div>
             <div className="rounded-2xl border bg-slate-50 p-5">
               <h3 className="font-extrabold">{importMode === "auto_generate" ? "File câu hỏi nguồn" : "Nguồn các mã đề"}</h3>
-              {importMode === "auto_generate" && <div className="mt-3 grid grid-cols-2 gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                <label><span className="mb-1 block text-xs font-bold text-emerald-900">Số mã đề</span><input type="number" min="2" max="10" className="ft-input bg-white" value={computedVariantCount} readOnly /><small className="mt-1 block text-[11px] text-emerald-800">Khuyến nghị 4–5</small></label>
-                <label><span className="mb-1 block text-xs font-bold text-emerald-900">Số câu/mã đề</span><input type="number" min="1" max="200" className="ft-input bg-white" value={questionsPerVariant} onChange={(event) => { setQuestionsPerVariant(event.target.value); setPreview(null); setStructureRules({}); setStructureDirty(false); }} /></label>
+              {importMode === "auto_generate" && <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <label>
+                    <span className="mb-1 block text-xs font-bold text-emerald-900">Số mã đề</span>
+                    <input
+                      type="number"
+                      min={computedVariantCount}
+                      max={20}
+                      className="ft-input bg-white"
+                      value={effectiveVariantCount}
+                      onChange={(event) => {
+                        const val = Math.max(1, Number(event.target.value));
+                        setVariantCountOverride(val === computedVariantCount ? null : val);
+                        setPreview(null);
+                      }}
+                    />
+                    <small className="mt-1 block text-[11px] text-emerald-800">
+                      Tự tính: {computedVariantCount} · Khuyến nghị 4–5
+                      {variantCountOverride !== null && <span className="ml-2 rounded bg-amber-100 px-1 text-amber-800">Đã ghi đè</span>}
+                    </small>
+                  </label>
+                  <label>
+                    <span className="mb-1 block text-xs font-bold text-emerald-900">Số câu/mã đề</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="200"
+                      className="ft-input bg-white"
+                      value={questionsPerVariant}
+                      onChange={(event) => { setQuestionsPerVariant(event.target.value); setPreview(null); setStructureRules({}); setStructureDirty(false); }}
+                    />
+                  </label>
+                </div>
+                {!preview && (file || sheetUrl) && (
+                  <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                    ⚠️ Cấu hình đã thay đổi. Bấm "Đọc file và tự động sinh đề" để cập nhật.
+                  </p>
+                )}
               </div>}
               <div className="mt-3 grid grid-cols-2 rounded-xl bg-slate-200 p-1 text-sm font-bold">
                 <button onClick={() => { setSourceMode("xlsx"); setPreview(null); setStructureRules({}); setStructureDirty(false); }} className={`rounded-lg px-3 py-2 ${sourceMode === "xlsx" ? "bg-white shadow-sm" : ""}`}>Tệp XLSX</button>
@@ -628,19 +685,39 @@ export default function TrainingAssessmentsAdmin({
                 {!!bankQuestions.length && <button type="button" onClick={() => setScreen("bank")} className="ft-btn ft-btn-secondary w-full justify-center"><FileSpreadsheet className="h-4 w-4" />Mở trang ngân hàng câu hỏi ({bankQuestions.length})</button>}
                 {preview.warnings.map((warning) => <p key={warning} className="rounded-lg bg-amber-50 p-2 text-xs text-amber-800">{warning}</p>)}
                 {preview.errors.map((error) => <p key={error} className="rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{error}</p>)}
-                {!preview.errors.length && <div className="max-h-80 space-y-2 overflow-y-auto rounded-xl border bg-white p-2">
+                {!preview.errors.length && <div className="max-h-96 space-y-2 overflow-y-auto rounded-xl border bg-white p-2">
                   <p className="px-2 pt-1 text-xs font-extrabold uppercase text-slate-500">Xem trước từng mã đề</p>
                   {preview.variants.map((variant, variantIndex) => <details key={variant.name} open={variantIndex === 0} className="rounded-lg border">
                     <summary className="cursor-pointer px-3 py-2 text-sm font-extrabold text-[#001e40]">{variant.name} · {variant.question_count} câu</summary>
                     <ol className="space-y-2 border-t p-3">
-                      {preview.questions.filter((question) => question.variant === variant.name).map((question) => <li key={question.id} className="text-xs text-slate-700">
-                        <b>{question.order}. {question.text}</b>
-                        <span className="mt-0.5 block text-[11px] text-slate-500">
-                          {question.type === "single_choice" ? `Đáp án: ${(question.correct_answers || []).join(", ")}` : question.type === "short_answer" ? "Trả lời ngắn" : "Tải ảnh thực hành"}
-                          {question.category ? ` · ${question.category}` : ""}
-                          {question.difficulty ? ` · ${question.difficulty}` : ""}
-                        </span>
-                      </li>)}
+                      {preview.questions.filter((q) => q.variant === variant.name).map((q) => {
+                        const correctSet = new Set((q.correct_answers || []).map(String));
+                        return <li key={q.id} className="rounded-lg border bg-slate-50 p-3 text-xs">
+                          <div className="flex items-start justify-between gap-2">
+                            <b className="text-slate-800">{q.order}. {q.text}</b>
+                            <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700">{q.points}đ</span>
+                          </div>
+                          {q.category && <span className="mt-1 inline-block rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-bold text-violet-700">{q.category}{q.difficulty ? ` · ${q.difficulty}` : ""}</span>}
+                          {(q.options || []).length > 0 && <ul className="mt-2 space-y-1">
+                            {(q.options || []).map((opt: any) => {
+                              const isCorrect = correctSet.has(String(opt.key));
+                              return <li key={opt.key} className={`flex items-start gap-2 rounded px-2 py-1 ${isCorrect ? "bg-emerald-50 text-emerald-800" : "text-slate-600"}`}>
+                                <span className={`shrink-0 font-black ${isCorrect ? "text-emerald-600" : "text-slate-400"}`}>{opt.key}.</span>
+                                <span>{opt.text}</span>
+                                {isCorrect && <span className="ml-auto shrink-0 text-emerald-600">✓</span>}
+                              </li>;
+                            })}
+                          </ul>}
+                          {q.type === "short_answer" && (q.correct_answers || []).length > 0 && (
+                            <p className="mt-2 rounded bg-emerald-50 px-2 py-1 text-[11px] text-emerald-800">
+                              Đáp án mẫu: {(q.correct_answers || []).join(" / ")}
+                            </p>
+                          )}
+                          {(q.type === "practical_submission" || q.type === "file_upload") && (
+                            <p className="mt-1 text-[11px] italic text-slate-500">Câu tải ảnh / nộp tệp — chấm thủ công</p>
+                          )}
+                        </li>;
+                      })}
                     </ol>
                   </details>)}
                 </div>}
@@ -684,14 +761,55 @@ export default function TrainingAssessmentsAdmin({
     );
   }
 
+  // Filtered list
+  const partnerOptions = useMemo(() => Array.from(new Set(items.map((item) => item.partner_name).filter(Boolean))).sort(), [items]);
+  const filteredItems = useMemo(() => items.filter((item) => {
+    if (filterStatus && item.status !== filterStatus) return false;
+    if (filterPartner && item.partner_name !== filterPartner) return false;
+    if (filterText) {
+      const needle = filterText.toLowerCase();
+      return item.title.toLowerCase().includes(needle) || (item.partner_name || "").toLowerCase().includes(needle) || (item.class_name || "").toLowerCase().includes(needle);
+    }
+    return true;
+  }), [items, filterStatus, filterPartner, filterText]);
+
   return (
     <section className="mt-6 overflow-hidden rounded-2xl border bg-white shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3 p-5">
         <div><h2 className="text-xl font-extrabold">Khảo sát kết thúc tập huấn</h2><p className="mt-1 text-sm text-slate-500">Một link cho mỗi đơn vị/phân lớp, tự chia đều 4–5 mã đề và chấm điểm tập trung.</p></div>
         {!isGuest && <div className="flex gap-2"><button onClick={() => void load()} className="ft-btn ft-btn-secondary"><RefreshCw className="h-4 w-4" /></button><button onClick={openCreate} className="ft-primary"><Plus className="h-4 w-4" />Tạo khảo sát kết thúc</button></div>}
       </div>
+      {/* Filter bar */}
+      {items.length > 0 && (
+        <div className="flex flex-wrap gap-3 border-t bg-slate-50 px-5 py-3">
+          <div className="relative flex-1 min-w-48">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              className="ft-input pl-9 text-sm"
+              placeholder="Tìm theo tên, đơn vị..."
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+            />
+          </div>
+          <select className="ft-input w-auto text-sm" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+            <option value="">Tất cả trạng thái</option>
+            <option value="draft">Bản nháp</option>
+            <option value="published">Đang mở</option>
+            <option value="closed">Đã đóng</option>
+          </select>
+          {partnerOptions.length > 1 && (
+            <select className="ft-input w-auto text-sm" value={filterPartner} onChange={(e) => setFilterPartner(e.target.value)}>
+              <option value="">Tất cả đơn vị</option>
+              {partnerOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          )}
+          {(filterText || filterStatus || filterPartner) && (
+            <button onClick={() => { setFilterText(""); setFilterStatus(""); setFilterPartner(""); }} className="text-xs font-bold text-slate-500 hover:text-slate-800">✕ Xóa bộ lọc</button>
+          )}
+        </div>
+      )}
       {notice && <p className="mx-5 mb-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{notice}</p>}
-      <div className="overflow-x-auto"><table className="ft-table min-w-[1050px]"><thead><tr><th>STT</th><th>Người</th><th>Bài đánh giá</th><th>Đơn vị / phân lớp</th><th>Mã đề</th><th>Thời gian</th><th>Lượt làm</th><th>Điểm TB</th><th>Trạng thái</th></tr></thead><tbody>{items.length ? items.map((item, index) => <tr key={item.id} onClick={() => void openDetail(item)} className="cursor-pointer hover:bg-blue-50"><td>{index + 1}</td><td><b>{item.participant_count || 0}</b><span className="block text-xs text-slate-500">tối đa {item.max_people_per_variant || 8}/mã</span></td><td><b>{item.title}</b><span className="mt-1 block text-xs font-bold text-blue-600">{item.generation_mode === "auto_generate" ? "Tự động sinh từ file" : "Đề soạn sẵn"}</span><span className="mt-1 block font-mono text-xs text-slate-400">/training-assessment/{item.public_slug}</span></td><td>{item.partner_name || "—"}<span className="block text-xs text-slate-500">{item.class_name || "Không chia lớp"}</span></td><td>{item.variants.length}<span className="block text-xs text-slate-500">{item.variants.map((variant) => variant.name).join(", ")}</span></td><td><span className="inline-flex items-center gap-1"><Clock3 className="h-3.5 w-3.5" />{item.duration_minutes} phút</span></td><td>{item.submitted_count} / {item.attempts_count}</td><td>{item.average_score == null ? "—" : `${item.average_score}%`}</td><td><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${item.status === "published" ? "bg-emerald-100 text-emerald-800" : item.status === "closed" ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-700"}`}>{statusLabel[item.status]}</span><span className={`mt-1 block text-[11px] font-bold ${item.sync_counts?.error ? "text-rose-600" : item.sync_counts?.pending ? "text-amber-600" : "text-emerald-600"}`}>Sync: {item.sync_counts?.synced || 0}/{item.submitted_count}{item.sync_counts?.error ? ` - ${item.sync_counts.error} lỗi` : ""}</span></td></tr>) : <tr><td colSpan={8} className="py-12 text-center text-slate-500">{busy ? "Đang tải..." : "Chưa có bài kiểm tra cuối tập huấn."}</td></tr>}</tbody></table></div>
+      <div className="overflow-x-auto"><table className="ft-table min-w-[1050px]"><thead><tr><th>STT</th><th>Người</th><th>Bài đánh giá</th><th>Đơn vị / phân lớp</th><th>Mã đề</th><th>Thời gian</th><th>Lượt làm</th><th>Điểm TB</th><th>Trạng thái</th></tr></thead><tbody>{filteredItems.length ? filteredItems.map((item, index) => <tr key={item.id} onClick={() => void openDetail(item)} className="cursor-pointer hover:bg-blue-50"><td>{index + 1}</td><td><b>{item.participant_count || 0}</b><span className="block text-xs text-slate-500">tối đa {item.max_people_per_variant || 8}/mã</span></td><td><b>{item.title}</b><span className="mt-1 block text-xs font-bold text-blue-600">{item.generation_mode === "auto_generate" ? "Tự động sinh từ file" : "Đề soạn sẵn"}</span><span className="mt-1 block font-mono text-xs text-slate-400">/training-assessment/{item.public_slug}</span></td><td>{item.partner_name || "—"}<span className="block text-xs text-slate-500">{item.class_name || "Không chia lớp"}</span></td><td>{item.variants.length}<span className="block text-xs text-slate-500">{item.variants.map((v) => v.name).join(", ")}</span></td><td><span className="inline-flex items-center gap-1"><Clock3 className="h-3.5 w-3.5" />{item.duration_minutes} phút</span></td><td>{item.submitted_count} / {item.attempts_count}</td><td>{item.average_score == null ? "—" : `${item.average_score}%`}</td><td><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${item.status === "published" ? "bg-emerald-100 text-emerald-800" : item.status === "closed" ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-700"}`}>{statusLabel[item.status]}</span><span className={`mt-1 block text-[11px] font-bold ${item.sync_counts?.error ? "text-rose-600" : item.sync_counts?.pending ? "text-amber-600" : "text-emerald-600"}`}>Sync: {item.sync_counts?.synced || 0}/{item.submitted_count}{item.sync_counts?.error ? ` - ${item.sync_counts.error} lỗi` : ""}</span></td></tr>) : <tr><td colSpan={9} className="py-12 text-center text-slate-500">{busy ? "Đang tải..." : items.length ? "Không có kết quả khớp bộ lọc." : "Chưa có bài kiểm tra cuối tập huấn."}</td></tr>}</tbody></table></div>
     </section>
   );
 }

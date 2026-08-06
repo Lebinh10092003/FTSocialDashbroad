@@ -191,6 +191,22 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
     return () => window.clearInterval(timer);
   }, [attempt?.expires_at, attempt?.status, answers]);
 
+  // Re-sync timer when tab regains focus (fix browser background throttling)
+  useEffect(() => {
+    if (!attempt?.expires_at || attempt.status !== "in_progress") return;
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      const remaining = Math.max(
+        0,
+        Math.ceil((new Date(attempt.expires_at).getTime() - Date.now()) / 1000),
+      );
+      setSecondsLeft(remaining);
+      if (remaining === 0 && !submittingRef.current) void save(true);
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [attempt?.expires_at, attempt?.status]);
+
   useEffect(() => {
     if (!attempt?.access_token || attempt.status !== "in_progress") return;
     setSaveState("Có thay đổi chưa lưu");
