@@ -56,38 +56,39 @@ export default function TrainingAssessmentWorkspace({
   }, [idToken]);
 
   return (
-    <div className="ft-module-shell flex min-h-screen bg-slate-50 font-sans">
-      <aside className="ft-sidebar hidden w-[280px] shrink-0 flex-col lg:flex">
-        <div className="p-4">
-          <div className="flex items-center gap-3 rounded-2xl bg-white p-4">
-            <img src="/logo.png" alt="FermatTech" className="h-10 object-contain" />
-            <div className="border-l pl-3">
-              <b>Fermat</b>
-              <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-blue-600">
-                Khảo sát kết thúc tập huấn
-              </p>
-            </div>
+    <div className="ft-module-shell min-h-screen bg-slate-50 font-sans">
+      <aside className="dt-sidebar ft-module-sidebar fixed inset-y-0 left-0 hidden w-64 flex-col md:flex">
+        {/* Brand */}
+        <div className="ft-sidebar-brand flex items-center gap-3">
+          <img src="/logo.png" alt="FermatTech" className="h-9 w-auto object-contain" />
+          <div className="min-w-0 border-l border-sky-100 pl-3">
+            <b className="block text-xl font-extrabold leading-none">Fermat</b>
+            <p className="mt-1 text-[10px] font-extrabold uppercase tracking-[0.12em] text-blue-200">
+              Khảo sát kết thúc tập huấn
+            </p>
           </div>
         </div>
-        <nav className="flex-1 space-y-2 px-4 pt-4">
-          <div className="ft-nav-item ft-nav-item-active flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-xs font-bold">
-            <FileCheck2 className="h-4 w-4" />
+        {/* Nav */}
+        <nav className="flex-1 space-y-1 overflow-y-auto p-4">
+          <div className="ft-nav-item ft-nav-item-active flex items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-sm font-bold">
+            <FileCheck2 className="h-5 w-5 shrink-0" />
             Khảo sát kết thúc tập huấn
           </div>
           <button
             onClick={onOpenDigitalTraining}
-            className="ft-nav-item flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold"
+            className="ft-nav-item flex w-full items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-left text-sm font-bold"
           >
-            <GraduationCap className="h-4 w-4" />
+            <GraduationCap className="h-5 w-5 shrink-0" />
             Mở Đào tạo số
           </button>
         </nav>
+        {/* Footer */}
         <div className="ft-sidebar-footer border-t p-4">
           <button
             onClick={onBackToWorkspace}
-            className="ft-sidebar-back mb-3 flex w-full items-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-bold"
+            className="ft-sidebar-back mb-3 flex w-full items-center gap-3 rounded-xl border p-3 text-left text-sm font-bold"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-5 w-5" />
             Quay lại Workspace
           </button>
           <AccountMenu
@@ -102,8 +103,8 @@ export default function TrainingAssessmentWorkspace({
         </div>
       </aside>
 
-      <main className="min-w-0 flex-1">
-        <header className="border-b bg-white px-5 py-4 lg:px-8">
+      <main className="md:ml-64">
+        <header className="border-b bg-white px-5 py-4 md:px-8">
           <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-blue-600">
@@ -113,7 +114,7 @@ export default function TrainingAssessmentWorkspace({
                 Khảo sát kết thúc tập huấn
               </h1>
             </div>
-            <button onClick={onBackToWorkspace} className="ft-btn ft-btn-secondary lg:hidden">
+            <button onClick={onBackToWorkspace} className="ft-btn ft-btn-secondary md:hidden">
               <ArrowLeft className="h-4 w-4" />
               Workspace
             </button>
