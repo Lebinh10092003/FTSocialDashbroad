@@ -28,6 +28,7 @@ import LogNotes, {
 } from "../examination/LogNotes";
 import AccountMenu from "../AccountMenu";
 import ConfirmModal from "../ConfirmModal";
+import { appDialog } from "../AppDialog";
 import SearchableSelect from "../SearchableSelect";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import FinanceReport from "./FinanceReport";
@@ -184,6 +185,10 @@ type Lead = {
   email: string;
   lead?: number | null;
   lead_name?: string;
+  partner?: number | null;
+  partner_name?: string;
+  opportunity?: number | null;
+  product_name?: string;
   date: string;
   start_time?: string | null;
   end_time?: string | null;
@@ -1821,6 +1826,8 @@ export default function DigitalTraining({
     staff_name: "",
     notes: "",
     lead: "",
+  partner: "",
+  product: "",
   });
   const [leadDraft, setLeadDraft] = useState({ name: "", lead_type: "", address: "", representative: "", representative_position: "", phone: "", email: "", stage: "discussion", notes: "" });
   const [pd, setPd] = useState<PartnerDraft>(newPartnerDraft);
@@ -2046,6 +2053,8 @@ export default function DigitalTraining({
         staff_name: "",
         notes: "",
         lead: "",
+      partner: "",
+      product: "",
       });
       setModal("meeting");
     },
@@ -2068,6 +2077,8 @@ export default function DigitalTraining({
         staff_name: "",
         notes: "",
         lead: "",
+      partner: "",
+      product: "",
       });
       setModal("other");
     };
@@ -2242,7 +2253,8 @@ export default function DigitalTraining({
       const duplicate = partners.find((item) => item.name.trim().toLocaleLowerCase("vi-VN") === leadDraft.name.trim().toLocaleLowerCase("vi-VN"));
       if (duplicate) {
         const services = partnerProductSubscriptions.filter((item) => item.partner === duplicate.id).map((item) => `${item.product_name}: ${productSubscriptionStatus(item.effective_status)}${item.expires_at ? ` (${showDate(item.expires_at)})` : ""}`).join("\n") || "Ch\u01b0a ghi nh\u1eadn d\u1ecbch v\u1ee5 \u0111ang s\u1eed d\u1ee5ng.";
-        if (window.confirm(`\u0110\u00e3 c\u00f3 kh\u00e1ch h\u00e0ng \"${duplicate.name}\".\n${services}\n\nOK: m\u1edf h\u1ed3 s\u01a1 \u0111\u1ec3 c\u1eadp nh\u1eadt / t\u1ea1o l\u1ecbch g\u1eb7p.\nCancel: v\u1eabn l\u01b0u \u0111\u00e2y l\u00e0 kh\u00e1ch h\u00e0ng kh\u00e1c.`)) { setModal(null); go("partners", duplicate.id); return; }
+        const openExisting = await appDialog.confirm(`\u0110\u00e3 c\u00f3 kh\u00e1ch h\u00e0ng \"${duplicate.name}\".\n${services}\n\nM\u1edf h\u1ed3 s\u01a1 hi\u1ec7n c\u00f3 \u0111\u1ec3 c\u1eadp nh\u1eadt ho\u1eb7c t\u1ea1o l\u1ecbch g\u1eb7p?`, { title: "Ph\u00e1t hi\u1ec7n kh\u00e1ch h\u00e0ng tr\u00f9ng", confirmText: "M\u1edf h\u1ed3 s\u01a1", cancelText: "Kh\u00f4ng ph\u1ea3i kh\u00e1ch n\u00e0y", tone: "warning" });
+        if (openExisting) { setModal(null); go("partners", duplicate.id); return; }
         leadPayload = { ...leadDraft, allow_existing_partner: true };
       }
     }    try {
@@ -2279,7 +2291,7 @@ export default function DigitalTraining({
       representative: lead.representative || "",
       phone: lead.phone || "",
       email: lead.email || "",
-      date: today(), start_time: "", end_time: "", location: lead.address || "", content: "", status: "planned", staff_name: "", notes: lead.notes || "", lead: String(lead.id),
+      date: today(), start_time: "", end_time: "", location: lead.address || "", content: "", status: "planned", staff_name: "", notes: lead.notes || "", lead: String(lead.id), partner: "", product: "",
     });
     setModal("meeting");
   };
