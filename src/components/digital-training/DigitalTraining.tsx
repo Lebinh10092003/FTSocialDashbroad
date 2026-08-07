@@ -170,6 +170,7 @@ type Lead = {
   representative_position: string;
   phone: string;
   email: string;
+  interested_products?: string[];
   stage: "discussion" | "meeting" | "proposal" | "negotiation" | "on_hold" | "lost" | "converted";
   notes: string;
   converted_partner?: number | null;
@@ -795,13 +796,7 @@ function ContentsPicker({
     </div>
   );
 }
-const productCatalog = [
-  "Không gian dữ liệu dùng chung",
-  "Lớp học số/Trường học số",
-  "AI có bản quyền dùng chung",
-  "Dashboard",
-  "Tập huấn",
-];
+
 const vietnamProvinces = [
   "Hà Nội",
   "Cao Bằng",
@@ -846,7 +841,7 @@ function ProductSelect({
   label,
   value,
   onChange,
-  options = productCatalog,
+  options = [],
   allowCustom = false,
   disabled = false,
 }: {
@@ -1854,7 +1849,7 @@ export default function DigitalTraining({
   partner: "",
   product: "",
   });
-  const [leadDraft, setLeadDraft] = useState({ name: "", lead_type: "", address: "", representative: "", representative_position: "", phone: "", email: "", stage: "discussion", notes: "" });
+  const [leadDraft, setLeadDraft] = useState({ name: "", lead_type: "", address: "", representative: "", representative_position: "", phone: "", email: "", interested_products: [] as string[], stage: "discussion", notes: "" });
   const [pd, setPd] = useState<PartnerDraft>(newPartnerDraft);
   const [renewal, setRenewal] = useState({
     contract_signed_date: "",
@@ -3185,6 +3180,10 @@ export default function DigitalTraining({
           item.sourceId === calendarDetail.sourceId,
       )
     : undefined;
+  const activeProductNames = useMemo(
+    () => productCatalog.filter((item) => item.active).map((item) => item.name),
+    [productCatalog],
+  );
   const employeeOptions = useMemo(
     () =>
       Array.from(
@@ -4584,7 +4583,7 @@ export default function DigitalTraining({
                       <h2 className="text-xl font-extrabold">Khách hàng mới</h2>
                       <p className="mt-1 text-sm text-slate-500">Theo dõi đầu mối đang thảo luận, gặp mặt hoặc thương thảo trước khi ký hợp đồng.</p>
                     </div>
-                    {!isGuest && <button onClick={() => { setEditingLead(null); setLeadDraft({ name: "", lead_type: "", address: "", representative: "", representative_position: "", phone: "", email: "", stage: "discussion", notes: "" }); setModal("lead"); }} className="ft-primary"><Plus className="h-4 w-4" />Thêm khách hàng mới</button>}
+                    {!isGuest && <button onClick={() => { setEditingLead(null); setLeadDraft({ name: "", lead_type: "", address: "", representative: "", representative_position: "", phone: "", email: "", interested_products: [], stage: "discussion", notes: "" }); setModal("lead"); }} className="ft-primary"><Plus className="h-4 w-4" />Thêm khách hàng mới</button>}
                   </div>
                   <div className="grid gap-3 border-y bg-slate-50/70 p-4 md:grid-cols-[minmax(0,1fr)_auto_auto]">
                     <label className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm đơn vị, đầu mối, số điện thoại hoặc email..." className="w-full rounded-lg border bg-white py-2 pl-9 pr-3 text-sm" /></label>
@@ -4603,7 +4602,7 @@ export default function DigitalTraining({
                             <td>{item.meeting_count} lượt</td>
                             <td>{item.next_meeting_at ? <><b>{showDate(item.next_meeting_at.date)}</b><span className="block text-xs text-slate-500">{item.next_meeting_at.start_time || "Chưa đặt giờ"}</span></> : <span className="text-slate-400">Chưa có</span>}</td>
                             <td className="max-w-xs whitespace-normal text-xs text-slate-600">{item.notes || "—"}</td>
-                            <td><div className="flex items-center justify-end gap-2">{!isGuest && <><button type="button" onClick={() => scheduleLeadMeeting(item)} className="ft-btn ft-btn-secondary whitespace-nowrap">Lên lịch gặp</button><button type="button" onClick={() => { setEditingLead(item); setLeadDraft({ name: item.name, lead_type: item.lead_type || "", address: item.address || "", representative: item.representative || "", representative_position: item.representative_position || "", phone: item.phone || "", email: item.email || "", stage: item.stage || "discussion", notes: item.notes || "" }); setModal("lead"); }} className="ft-btn ft-btn-secondary"><Pencil className="h-4 w-4" /></button>{!item.converted_partner && <button type="button" onClick={() => setConvertLead(item)} className="ft-btn border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 whitespace-nowrap">Chuyển thành khách hàng</button>}</>}</div></td>
+                            <td><div className="flex items-center justify-end gap-2">{!isGuest && <><button type="button" onClick={() => scheduleLeadMeeting(item)} className="ft-btn ft-btn-secondary whitespace-nowrap">Lên lịch gặp</button><button type="button" onClick={() => { setEditingLead(item); setLeadDraft({ name: item.name, lead_type: item.lead_type || "", address: item.address || "", representative: item.representative || "", representative_position: item.representative_position || "", phone: item.phone || "", email: item.email || "", interested_products: item.interested_products || [], stage: item.stage || "discussion", notes: item.notes || "" }); setModal("lead"); }} className="ft-btn ft-btn-secondary"><Pencil className="h-4 w-4" /></button>{!item.converted_partner && <button type="button" onClick={() => setConvertLead(item)} className="ft-btn border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 whitespace-nowrap">Chuyển thành khách hàng</button>}</>}</div></td>
                           </tr>
                         ))}
                         {!leads.some(item => !item.converted_partner && item.stage !== "converted") && <tr><td colSpan={7} className="py-10 text-center text-slate-500">Chưa có khách hàng mới. Hãy thêm đầu mối hoặc tạo từ lịch gặp đầu tiên.</td></tr>}
@@ -6430,6 +6429,7 @@ export default function DigitalTraining({
             <Dialog title={editingLead ? "Chỉnh sửa khách hàng mới" : "Thêm khách hàng mới"} onClose={() => { setModal(null); setEditingLead(null); }}>
               <form onSubmit={saveLead} className="grid gap-4">
                 <Input label="Tên đơn vị / khách hàng *" required value={leadDraft.name} onChange={(event) => setLeadDraft({ ...leadDraft, name: event.target.value })} />
+                <ProductSelect label="Sản phẩm quan tâm" value={leadDraft.interested_products} onChange={(interested_products) => setLeadDraft({ ...leadDraft, interested_products })} options={activeProductNames} />
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label><span className="mb-1 block text-sm font-bold">Loại khách hàng</span><select value={leadDraft.lead_type} onChange={(event) => setLeadDraft({ ...leadDraft, lead_type: event.target.value })} className="w-full rounded-lg border px-3 py-2"><option value="">Chưa phân loại</option><option>Khối Giáo dục</option><option>Khối Hành chính công</option><option>Khối Doanh nghiệp</option><option>Khác</option></select></label>
                   <label><span className="mb-1 block text-sm font-bold">Giai đoạn</span><select value={leadDraft.stage} onChange={(event) => setLeadDraft({ ...leadDraft, stage: event.target.value })} className="w-full rounded-lg border px-3 py-2"><option value="discussion">Thảo luận</option><option value="meeting">Gặp mặt</option><option value="proposal">Gửi đề xuất</option><option value="negotiation">Thương thảo</option><option value="on_hold">Tạm dừng</option><option value="lost">Không tiếp tục</option></select></label>
@@ -6772,9 +6772,9 @@ export default function DigitalTraining({
                       label="Sản phẩm đăng ký"
                       value={pd.products}
                       onChange={(products) => setPd({ ...pd, products })}
-                      allowCustom
+                      options={activeProductNames}
                     />
-                    {pd.products.includes("AI có bản quyền dùng chung") && (
+                    {pd.products.some((product) => product.toLocaleLowerCase("vi-VN").includes("ai")) && (
                       <div className="mt-4 max-w-sm">
                         <Input
                           label="Số tài khoản AI đăng ký"

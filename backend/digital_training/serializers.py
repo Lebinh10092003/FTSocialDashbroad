@@ -303,10 +303,15 @@ class TrainingLeadSerializer(serializers.ModelSerializer):
         model = TrainingLead
         fields = [
             "id", "name", "lead_type", "address", "representative", "representative_position",
-            "phone", "email", "stage", "notes", "converted_partner", "converted_partner_name",
+            "phone", "email", "interested_products", "stage", "notes", "converted_partner", "converted_partner_name",
             "meeting_count", "next_meeting_at", "created_at", "updated_at",
         ]
         read_only_fields = ["converted_partner"]
+
+    def validate_interested_products(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Danh sach san pham quan tam phai la danh sach.")
+        return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
 
     def get_meeting_count(self, obj):
         return obj.meetings.count()

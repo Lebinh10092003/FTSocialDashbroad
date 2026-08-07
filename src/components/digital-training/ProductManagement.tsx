@@ -154,7 +154,7 @@ export default function ProductManagement({
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
   const [savedColumnIds, setSavedColumnIds] = useState<number[] | null>(null);
   const [otherProductsPartnerId, setOtherProductsPartnerId] = useState<number | null>(null);
-  const [productDraft, setProductDraft] = useState({ id: 0, name: "", product_type: "product", description: "", active: true, display_order: 0 });
+  const [productDraft, setProductDraft] = useState({ id: 0, name: "", product_type: "product", description: "", active: true });
   const auth = idToken ? { Authorization: `Bearer ${idToken}` } : {};
   const columnPreferenceKey = useMemo(() => `digital-training.product-columns.${encodeURIComponent(preferenceIdentity(idToken))}`, [idToken]);
 
@@ -340,8 +340,7 @@ export default function ProductManagement({
       product_type: item.product_type,
       description: item.description || "",
       active: item.active,
-      display_order: item.display_order,
-    } : { id: 0, name: "", product_type: "product", description: "", active: true, display_order: products.length + 1 });
+    } : { id: 0, name: "", product_type: "product", description: "", active: true });
     setNotice("");
     setProductOpen(true);
   };
@@ -359,7 +358,6 @@ export default function ProductManagement({
           product_type: productDraft.product_type,
           description: productDraft.description,
           active: productDraft.active,
-          display_order: Number(productDraft.display_order || 0),
         }),
       });
       if (!response.ok) throw new Error(await apiError(response));
@@ -397,7 +395,7 @@ export default function ProductManagement({
       <header className="rounded-2xl border bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div><p className="text-xs font-bold uppercase tracking-wide text-blue-600">{view === "allocation" ? "Khách hàng và sản phẩm đang dùng" : "Danh mục và mức sử dụng"}</p><h1 className="mt-1 text-2xl font-extrabold">{view === "allocation" ? "Khách hàng hiện tại" : "Sản phẩm & dịch vụ"}</h1><p className="mt-2 text-sm text-slate-500">{view === "allocation" ? "Theo dõi đầu mối, số lượng và hạn sử dụng của từng sản phẩm theo khách hàng." : "Quản lý danh mục và theo dõi mức sử dụng sản phẩm, dịch vụ."}</p></div>
-          <div className="flex flex-wrap gap-2"><button onClick={() => void load()} className="ft-btn ft-btn-secondary"><RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />Làm mới</button>{!isGuest && <button onClick={() => { if (view === "allocation") onCreatePartner?.(); else openProduct(); }} className="ft-primary"><PackagePlus className="h-4 w-4" />Thêm mới</button>}</div>
+          <div className="flex flex-wrap gap-2"><button onClick={() => void load()} className="ft-btn ft-btn-secondary"><RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />Làm mới</button>{!isGuest && view === "allocation" && <button onClick={() => onCreatePartner?.()} className="ft-primary"><Users className="h-4 w-4" />Thêm khách hàng</button>}</div>
         </div>
 
       </header>
@@ -415,7 +413,7 @@ export default function ProductManagement({
       {notice && <p className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700">{notice}</p>}
 
       {view === "catalog" ? <article className="overflow-hidden rounded-2xl border bg-white shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 p-5"><div><h2 className="font-extrabold">Danh mục sản phẩm & dịch vụ</h2><p className="mt-1 text-xs text-slate-500">Quản lý tên, loại, mô tả, thứ tự hiển thị và trạng thái kinh doanh.</p></div>{!isGuest && <button onClick={() => openProduct()} className="ft-primary"><PackagePlus className="h-4 w-4" />Thêm mới</button>}</div>
+        <div className="flex flex-wrap items-center justify-between gap-3 p-5"><div><h2 className="font-extrabold">Danh mục sản phẩm & dịch vụ</h2><p className="mt-1 text-xs text-slate-500">Quản lý tên, loại, mô tả và trạng thái kinh doanh.</p></div>{!isGuest && <button onClick={() => openProduct()} className="ft-primary"><PackagePlus className="h-4 w-4" />Thêm mới</button>}</div>
         <div className="overflow-x-auto border-t"><table className="ft-table min-w-[900px]"><thead><tr><th>STT</th><th>Tên sản phẩm / dịch vụ</th><th>Loại</th><th>Mô tả</th><th>Khách hàng</th><th>Tổng số lượng</th><th>Trạng thái</th><th></th></tr></thead><tbody>{[...products].sort((a, b) => a.display_order - b.display_order || a.name.localeCompare(b.name, "vi")).map((item, index) => <tr key={item.id}><td>{index + 1}</td><td><b>{item.name}</b><span className="block text-xs text-slate-400">{item.code}</span></td><td><span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-bold text-blue-700">{item.product_type === "service" ? "Dịch vụ" : "Sản phẩm"}</span></td><td className="max-w-md whitespace-normal text-sm text-slate-600">{item.description || "—"}</td><td>{item.customer_count}</td><td><b>{item.total_quantity}</b></td><td><span className={`rounded-full px-2 py-1 text-xs font-bold ${item.active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{item.active ? "Đang kinh doanh" : "Ngừng kinh doanh"}</span></td><td>{!isGuest && <button type="button" onClick={() => openProduct(item)} className="ft-btn ft-btn-secondary"><Pencil className="h-4 w-4" />Sửa</button>}</td></tr>)}{!products.length && <tr><td colSpan={8} className="py-10 text-center text-slate-500">Chưa có sản phẩm hoặc dịch vụ.</td></tr>}</tbody></table></div>
       </article> : view === "allocation" ? <article className="overflow-hidden rounded-2xl border bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4"><div><h2 className="font-extrabold">{"S\u1ea3n ph\u1ea9m \u0111ang s\u1eed d\u1ee5ng theo kh\u00e1ch h\u00e0ng"}</h2><p className="text-xs text-slate-500">{filteredPartners.length} {"kh\u00e1ch h\u00e0ng /"} {activeSubscriptions.length} {"\u0111\u0103ng k\u00fd \u0111ang s\u1eed d\u1ee5ng / t\u1ed5ng s\u1ed1 l\u01b0\u1ee3ng"} {totalQuantity}</p></div><button type="button" onClick={() => setColumnPickerOpen(true)} className="ft-btn ft-btn-secondary"><SlidersHorizontal className="h-4 w-4" />{"Ch\u1ecdn c\u1ed9t s\u1ea3n ph\u1ea9m"} ({productColumns.length})</button></div>
@@ -433,8 +431,7 @@ export default function ProductManagement({
           <div className="flex items-start justify-between"><div><h2 className="text-xl font-extrabold">{productDraft.id ? "Cập nhật danh mục" : "Thêm sản phẩm hoặc dịch vụ"}</h2><p className="mt-1 text-sm text-slate-500">Thông tin danh mục được dùng chung cho phân bổ và thống kê.</p></div><button type="button" onClick={() => setProductOpen(false)}><X className="h-5 w-5" /></button></div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Tên sản phẩm / dịch vụ *</span><input required className="ft-input" value={productDraft.name} onChange={(event) => setProductDraft({ ...productDraft, name: event.target.value })} /></label>
-            <label><span className="mb-1 block text-sm font-bold">Loại *</span><select className="ft-input" value={productDraft.product_type} onChange={(event) => setProductDraft({ ...productDraft, product_type: event.target.value })}><option value="product">Sản phẩm</option><option value="service">Dịch vụ</option></select></label>
-            <label><span className="mb-1 block text-sm font-bold">Thứ tự hiển thị</span><input type="number" min="0" className="ft-input" value={productDraft.display_order} onChange={(event) => setProductDraft({ ...productDraft, display_order: Number(event.target.value) })} /></label>
+            <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Loại *</span><select className="ft-input" value={productDraft.product_type} onChange={(event) => setProductDraft({ ...productDraft, product_type: event.target.value })}><option value="product">Sản phẩm</option><option value="service">Dịch vụ</option></select></label>
             <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Mô tả</span><textarea className="ft-input min-h-24" value={productDraft.description} onChange={(event) => setProductDraft({ ...productDraft, description: event.target.value })} /></label>
             <label className="sm:col-span-2 flex items-center gap-2 rounded-xl border bg-slate-50 p-3"><input type="checkbox" checked={productDraft.active} onChange={(event) => setProductDraft({ ...productDraft, active: event.target.checked })} /><span className="text-sm font-bold">Đang kinh doanh và cho phép phân bổ mới</span></label>
           </div>

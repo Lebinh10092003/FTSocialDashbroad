@@ -198,6 +198,7 @@ class TrainingLead(models.Model):
     representative_position = models.CharField(max_length=255, blank=True)
     phone = models.CharField(max_length=50, blank=True)
     email = models.EmailField(blank=True)
+    interested_products = models.JSONField(default=list, blank=True)
     stage = models.CharField(max_length=30, choices=STAGE_CHOICES, default="discussion")
     notes = models.TextField(blank=True)
     converted_partner = models.OneToOneField(

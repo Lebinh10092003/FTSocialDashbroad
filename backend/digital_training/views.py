@@ -12,6 +12,7 @@ from authentication.permissions import IsAuthenticated, IsManagerOrAdmin
 from authentication.models import UserProfile
 from examination.models import LogNote
 from .completion_service import complete_past_training_schedules
+from .product_service import sync_partner_product_subscriptions
 from .models import TrainingClass, TrainingCustomerMeeting, TrainingFinanceEntry, TrainingLead, TrainingMaterial, TrainingPartner, TrainingProduct, TrainingProductOpportunity, TrainingProductSubscription, TrainingSession, TrainingSurvey
 from .serializers import TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingFinanceEntrySerializer, TrainingLeadSerializer, TrainingMaterialSerializer, TrainingPartnerSerializer, TrainingProductOpportunitySerializer, TrainingProductSerializer, TrainingProductSubscriptionSerializer, TrainingSessionSerializer, TrainingSurveySerializer
 
@@ -207,11 +208,13 @@ def training_lead_convert(request, pk):
         phone=lead.phone,
         email=lead.email,
         partner_type=lead.lead_type,
+        products=lead.interested_products,
         contract_status="signed",
         contract_signed_date=timezone.localdate(),
         contract_start=timezone.localdate().isoformat(),
         notes=lead.notes,
     )
+    sync_partner_product_subscriptions(partner)
     lead.converted_partner = partner
     lead.stage = "converted"
     lead.save(update_fields=["converted_partner", "stage", "updated_at"])
