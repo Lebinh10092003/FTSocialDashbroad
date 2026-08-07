@@ -1,12 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { ArrowLeft, Check, Copy, Mail, PenLine } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Mail } from 'lucide-react';
 import { createEmailBlock } from '../../data/emailBlockRegistry';
 import { copyEmailToClipboard } from '../../lib/emailClipboard';
 import { generateEmailHtml } from '../../lib/emailHtmlGenerator';
 import { EmailTemplate } from '../../types/emailBuilder';
 
 interface SignatureBuilderProps {
-  onBackToWorkspace: () => void;
   onOpenEmailBuilder: () => void;
 }
 
@@ -14,7 +13,7 @@ const fieldClass = 'mt-1 w-full rounded-lg border border-slate-200 bg-white px-3
 const labelClass = 'block text-[10px] font-extrabold uppercase tracking-wide text-slate-500';
 const socialFields: Array<[string, string]> = [['Facebook', 'facebook'], ['LinkedIn', 'linkedIn'], ['YouTube', 'youtube'], ['Instagram', 'instagram'], ['Kênh khác', 'other']];
 
-export default function SignatureBuilder({ onBackToWorkspace, onOpenEmailBuilder }: SignatureBuilderProps) {
+export default function SignatureBuilder({ onOpenEmailBuilder }: SignatureBuilderProps) {
   const [content, setContent] = useState(() => createEmailBlock('signature-builder', 'signature-studio').content);
   const [copied, setCopied] = useState(false);
   const update = (key: string, value: unknown) => setContent(current => ({ ...current, [key]: value }));
@@ -34,7 +33,7 @@ export default function SignatureBuilder({ onBackToWorkspace, onOpenEmailBuilder
   return <div className="min-h-screen bg-slate-100 font-sans text-slate-800">
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur sm:px-7">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
-        <div className="flex items-center gap-3"><button type="button" onClick={onBackToWorkspace} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" title="Quay lại Workspace"><ArrowLeft className="h-5 w-5" /></button><div className="grid h-9 w-9 place-items-center rounded-xl bg-blue-600 text-white"><PenLine className="h-5 w-5" /></div><div><h1 className="text-sm font-black text-slate-900">Trình tạo chữ ký</h1><p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">FermatTech Workspace</p></div></div>
+        <div className="flex items-center gap-3"><button type="button" onClick={onOpenEmailBuilder} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" title="Quay lại Trình tạo Email"><ArrowLeft className="h-5 w-5" /></button><div><h1 className="text-sm font-black text-slate-900">Trình tạo chữ ký</h1><p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Thuộc Trình tạo Email</p></div></div>
         <div className="flex items-center gap-2"><button type="button" onClick={onOpenEmailBuilder} className="hidden rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 sm:inline-flex sm:items-center sm:gap-1.5"><Mail className="h-3.5 w-3.5" />Mẫu Email</button><button type="button" onClick={() => void copySignature()} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-black text-white hover:bg-blue-700">{copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}{copied ? 'Đã sao chép' : 'Sao chép chữ ký'}</button></div>
       </div>
     </header>

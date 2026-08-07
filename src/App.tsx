@@ -1,6 +1,6 @@
 import React, { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { appDialog } from './components/AppDialog';
-import { BadgeDollarSign, CalendarCheck, ChartColumnBig, ClipboardList, FileCheck2, GraduationCap, Mail, PenLine, QrCode, ShieldUser } from 'lucide-react';
+import { BadgeDollarSign, CalendarCheck, ChartColumnBig, ClipboardList, FileCheck2, GraduationCap, Mail, QrCode, ShieldUser } from 'lucide-react';
 
 import { Channel, UserRole } from './types';
 import Sidebar from './components/social-dashboard/Sidebar';
@@ -437,13 +437,6 @@ export default function App() {
         icon: Mail,
       },
       {
-        mode: 'signature-builder',
-        title: 'Trình tạo chữ ký',
-        description: 'Tạo chữ ký email có logo, thông tin liên hệ và các kênh mạng xã hội.',
-        gradient: 'from-[#1473D1] to-[#00A4BD]',
-        icon: PenLine,
-      },
-      {
         mode: 'qr-generator',
         title: 'Trình tạo mã QR',
         description: 'Tạo QR đi thẳng tới form khảo sát, tài liệu hoặc bất kỳ đường dẫn nào.',
@@ -632,7 +625,7 @@ export default function App() {
   if (viewMode === 'signature-builder' && !canAccessView('signature-builder')) return null;
 
   if (viewMode === 'signature-builder') {
-    return <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp Trình tạo chữ ký...</div>}><SignatureBuilder onBackToWorkspace={() => setViewMode('workspace')} onOpenEmailBuilder={() => setViewMode('email-builder')} /></Suspense>;
+    return <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp Trình tạo chữ ký...</div>}><SignatureBuilder onOpenEmailBuilder={() => setViewMode('email-builder')} /></Suspense>;
   }
 
   if (viewMode === 'email-builder' && !canAccessView('email-builder')) return null;
