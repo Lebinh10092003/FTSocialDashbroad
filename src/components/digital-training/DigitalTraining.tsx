@@ -155,6 +155,8 @@ type Session = {
   attendees: number;
   location: string;
   staff_name?: string;
+  instructor_name?: string;
+  support_staff_name?: string;
   status: "unscheduled" | "planned" | "completed" | "cancelled";
   notes: string;
   has_materials: boolean;
@@ -198,6 +200,7 @@ type Lead = {
   staff_name?: string;
   notes: string;
 };
+type EmployeeOption = { name: string; email: string };
 type ProductOption = { id: number; name: string; active: boolean };
 type ProductOpportunity = { id: number; partner: number; partner_name: string; product: number; product_name: string; status: "negotiating" | "on_hold" | "won" | "lost"; notes: string; meeting_count: number };
 type CalendarItem = {
@@ -298,6 +301,8 @@ type WorkActivity = {
   location: string;
   status: "unscheduled" | "planned" | "completed" | "cancelled";
   staffName: string;
+  instructorName?: string;
+  supportStaffName?: string;
 };
 type TrainingClass = {
   id: number;
@@ -1638,31 +1643,40 @@ function WorkScheduleDetail({
         </div>
         <div className="mt-6 grid gap-5 border-t pt-5 sm:grid-cols-2 xl:grid-cols-3">
           <p>
-            <b className="block text-xs uppercase text-slate-500">Trạng thái</b>
+            <b className="block text-xs uppercase text-slate-500">{"Tr\u1ea1ng th\u00e1i"}</b>
             <span className={`mt-1 inline-flex rounded-full border px-2 py-1 text-xs font-bold ${scheduleStatusClass[activity.status] || "border-slate-200 bg-slate-100 text-slate-600"}`}>
               {status[activity.status]}
             </span>
           </p>
           <p>
-            <b className="block text-xs uppercase text-slate-500">Khách hàng</b>
-            {activity.customerName || "—"}
+            <b className="block text-xs uppercase text-slate-500">{"Kh\u00e1ch h\u00e0ng"}</b>
+            {activity.customerName || "\u2014"}
           </p>
           <p>
-            <b className="block text-xs uppercase text-slate-500">
-              Lớp/Phân nhóm
-            </b>
-            {activity.className || "—"}
+            <b className="block text-xs uppercase text-slate-500">{"L\u1edbp/Ph\u00e2n nh\u00f3m"}</b>
+            {activity.className || "\u2014"}
           </p>
           <p>
-            <b className="block text-xs uppercase text-slate-500">Địa điểm</b>
-            {activity.location || "—"}
+            <b className="block text-xs uppercase text-slate-500">{"\u0110\u1ecba \u0111i\u1ec3m"}</b>
+            {activity.location || "\u2014"}
           </p>
-          <p>
-            <b className="block text-xs uppercase text-slate-500">
-              Nhân viên phụ trách
-            </b>
-            {activity.staffName || "Chưa phân công"}
-          </p>
+          {activity.kind === "training" ? (
+            <>
+              <p>
+                <b className="block text-xs uppercase text-slate-500">{"Gi\u1ea3ng vi\u00ean"}</b>
+                {activity.instructorName || activity.staffName || "\u2014"}
+              </p>
+              <p>
+                <b className="block text-xs uppercase text-slate-500">{"Nh\u00e2n vi\u00ean h\u1ed7 tr\u1ee3"}</b>
+                {activity.supportStaffName || "\u2014"}
+              </p>
+            </>
+          ) : (
+            <p>
+              <b className="block text-xs uppercase text-slate-500">{"Nh\u00e2n vi\u00ean ph\u1ee5 tr\u00e1ch"}</b>
+              {activity.staffName || "\u2014"}
+            </p>
+          )}
           <p className="sm:col-span-2 xl:col-span-3">
             <b className="block text-xs uppercase text-slate-500">Nội dung</b>
             {activity.content || "—"}
@@ -1737,6 +1751,7 @@ export default function DigitalTraining({
       route.surveyId,
     ),
     [sessions, setSessions] = useState<Session[]>([]),
+    [employees, setEmployees] = useState<EmployeeOption[]>([]),
     [meetings, setMeetings] = useState<CustomerMeeting[]>([]),
     [partners, setPartners] = useState<Partner[]>([]),
     [partnerProductSubscriptions, setPartnerProductSubscriptions] = useState<ProductSubscription[]>([]),
@@ -1814,7 +1829,8 @@ export default function DigitalTraining({
     contents: [] as string[],
     attendees: "0",
     location: "",
-    staff_name: "",
+    instructor_name: "",
+    support_staff_name: "",
     status: "planned",
     notes: "",
   });
@@ -1883,6 +1899,8 @@ export default function DigitalTraining({
           fetch("/api/digital-training/products", { headers: auth() }).then(async (r) => { if (!r.ok) throw Error("Kh�ng th? t?i danh m?c s?n ph?m."); return r.json(); }),
           fetch("/api/digital-training/product-opportunities", { headers: auth() }).then(async (r) => { if (!r.ok) throw Error("Kh�ng th? t?i co h?i s?n ph?m."); return r.json(); }),
         ]);
+        const staffResponse = await fetch("/api/auth/assignable-staff", { headers: auth() });
+        const staffRows = staffResponse.ok ? await staffResponse.json() : [];
         const endpoints = [
           "customer-meetings",
           ...(isGuest ? [] : ["leads"]),
@@ -1901,6 +1919,7 @@ export default function DigitalTraining({
           }),
         );
         setSessions(sessionRows);
+        setEmployees(Array.isArray(staffRows) ? staffRows : []);
         setPartnerProductSubscriptions(productSubscriptionRows);
         setProductCatalog(productRows);
         setProductOpportunities(opportunityRows);
@@ -2037,7 +2056,8 @@ export default function DigitalTraining({
         contents: [],
         attendees: "0",
         location: "",
-        staff_name: "",
+        instructor_name: "",
+        support_staff_name: "",
         status: "planned",
         notes: "",
       });
@@ -2103,7 +2123,8 @@ export default function DigitalTraining({
       contents: item.contents || [],
       attendees: String(item.attendees || 0),
       location: item.location || "",
-      staff_name: item.staff_name || "",
+      instructor_name: item.instructor_name || item.staff_name || "",
+      support_staff_name: item.support_staff_name || "",
       status: item.status,
       notes: item.notes || "",
     });
@@ -3126,6 +3147,8 @@ export default function DigitalTraining({
         location: item.location || "—",
         status: item.status,
         staffName: item.staff_name || "",
+        instructorName: item.instructor_name || "",
+        supportStaffName: item.support_staff_name || "",
       })),
       ...meetings.map((item) => {
         const isOther = item.schedule_type === "other",
@@ -3162,6 +3185,16 @@ export default function DigitalTraining({
           item.sourceId === calendarDetail.sourceId,
       )
     : undefined;
+  const employeeOptions = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...employees.map((item) => item.name.trim()),
+          ...workActivities.map((item) => item.staffName.trim()),
+        ].filter(Boolean)),
+      ).sort((a, b) => a.localeCompare(b, "vi")),
+    [employees, workActivities],
+  );
   const sessionStaffOptions = useMemo(
     () =>
       Array.from(
@@ -6008,13 +6041,20 @@ export default function DigitalTraining({
                     value={sd.location}
                     onChange={(e) => setSd({ ...sd, location: e.target.value })}
                   />
-                  <Input
-                    label="Nhân viên phụ trách"
-                    value={sd.staff_name}
-                    onChange={(e) =>
-                      setSd({ ...sd, staff_name: e.target.value })
-                    }
-                  />
+                  <label>
+                    <span className="mb-1 block text-sm font-bold">{"Gi\u1ea3ng vi\u00ean"}</span>
+                    <select value={sd.instructor_name} onChange={(e) => setSd({ ...sd, instructor_name: e.target.value })} className="w-full rounded-lg border px-3 py-2">
+                      <option value="">{"Ch\u1ecdn gi\u1ea3ng vi\u00ean"}</option>
+                      {employeeOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span className="mb-1 block text-sm font-bold">{"Nh\u00e2n vi\u00ean h\u1ed7 tr\u1ee3"}</span>
+                    <select value={sd.support_staff_name} onChange={(e) => setSd({ ...sd, support_staff_name: e.target.value })} className="w-full rounded-lg border px-3 py-2">
+                      <option value="">{"Ch\u01b0a ph\u00e2n c\u00f4ng"}</option>
+                      {employeeOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                  </label>
                   <Input
                     label="Số người tham gia"
                     type="number"
@@ -6148,6 +6188,24 @@ export default function DigitalTraining({
                       setMeeting({ ...meeting, end_time })
                     }
                   />
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label>
+                    <span className="mb-1 block text-sm font-bold">{"Tr\u1ea1ng th\u00e1i"}</span>
+                    <select value={meeting.status} onChange={(e) => setMeeting({ ...meeting, status: e.target.value as typeof meeting.status })} className="w-full rounded-lg border px-3 py-2">
+                      <option value="unscheduled">{"Ch\u01b0a c\u00f3 l\u1ecbch"}</option>
+                      <option value="planned">{"\u0110\u00e3 l\u00ean l\u1ecbch"}</option>
+                      <option value="completed">{"Ho\u00e0n th\u00e0nh"}</option>
+                      <option value="cancelled">{"\u0110\u00e3 h\u1ee7y"}</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span className="mb-1 block text-sm font-bold">{"Nh\u00e2n vi\u00ean ph\u1ee5 tr\u00e1ch"}</span>
+                    <select value={meeting.staff_name} onChange={(e) => setMeeting({ ...meeting, staff_name: e.target.value })} className="w-full rounded-lg border px-3 py-2">
+                      <option value="">{"Ch\u01b0a ph\u00e2n c\u00f4ng"}</option>
+                      {employeeOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                  </label>
                 </div>
                 <Input
                   label="Địa điểm"
@@ -6317,13 +6375,13 @@ export default function DigitalTraining({
                       <option value="cancelled">Đã hủy</option>
                     </select>
                   </label>
-                  <Input
-                    label="Nhân viên phụ trách"
-                    value={meeting.staff_name}
-                    onChange={(e) =>
-                      setMeeting({ ...meeting, staff_name: e.target.value })
-                    }
-                  />
+                  <label>
+                    <span className="mb-1 block text-sm font-bold">{"Nh\u00e2n vi\u00ean ph\u1ee5 tr\u00e1ch"}</span>
+                    <select value={meeting.staff_name} onChange={(e) => setMeeting({ ...meeting, staff_name: e.target.value })} className="w-full rounded-lg border px-3 py-2">
+                      <option value="">{"Ch\u01b0a ph\u00e2n c\u00f4ng"}</option>
+                      {employeeOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                  </label>
                 </div>
                 <Input
                   label="Địa điểm"

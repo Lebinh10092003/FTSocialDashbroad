@@ -804,6 +804,17 @@ def _write_employee(request, profile=None):
     return profile, None
 
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def assignable_staff(request):
+    """Active employees available for assigning work-calendar roles."""
+    rows = UserProfile.objects.filter(employment_status="ACTIVE").order_by("name", "email")
+    return Response([
+        {"name": profile.name or profile.email.split("@", 1)[0], "email": profile.email}
+        for profile in rows
+    ])
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsManagerOrAdmin])
 def manage_users(request):

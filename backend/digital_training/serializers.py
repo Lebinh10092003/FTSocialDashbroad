@@ -232,7 +232,7 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
         fields = [
             "id", "title", "session_number", "date", "start_time", "end_time", "partner", "partner_id", "partner_name",
             "class_group_id", "class_group_name", "category", "contents", "attendees", "location",
-            "status", "notes", "staff_name", "has_materials", "created_at", "updated_at",
+            "status", "notes", "staff_name", "instructor_name", "support_staff_name", "has_materials", "created_at", "updated_at",
         ]
 
     def get_partner_name(self, obj):
@@ -261,6 +261,18 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
             validated_data["contents"] = [validated_data["category"]]
         return validated_data
 
+    def _sync_staff_summary(self, validated_data):
+        instructor = validated_data.get("instructor_name", getattr(self.instance, "instructor_name", ""))
+        support = validated_data.get("support_staff_name", getattr(self.instance, "support_staff_name", ""))
+        if "instructor_name" in validated_data or "support_staff_name" in validated_data:
+            parts = []
+            if instructor:
+                parts.append(f"Gi\u1ea3ng vi\u00ean: {instructor}")
+            if support:
+                parts.append(f"H\u1ed7 tr\u1ee3: {support}")
+            validated_data["staff_name"] = " \u00b7 ".join(parts)
+        return validated_data
+
     def _sync_partner_from_class(self, validated_data):
         training_class = validated_data.get("training_class")
         if training_class:
@@ -271,7 +283,7 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
         return validated_data
 
     def create(self, validated_data):
-        validated_data = self._sync_partner_from_class(self._sync_primary_category(self._mark_past_session_completed(validated_data)))
+        validated_data = self._sync_partner_from_class(self._sync_staff_summary(self._sync_primary_category(self._mark_past_session_completed(validated_data))))
         training_class = validated_data.get("training_class")
         if training_class and not validated_data.get("session_number"):
             last_number = training_class.sessions.aggregate(Max("session_number"))["session_number__max"] or 0
@@ -279,7 +291,7 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        return super().update(instance, self._sync_partner_from_class(self._sync_primary_category(self._mark_past_session_completed(validated_data))))
+        return super().update(instance, self._sync_partner_from_class(self._sync_staff_summary(self._sync_primary_category(self._mark_past_session_completed(validated_data)))))
 
 
 class TrainingLeadSerializer(serializers.ModelSerializer):
