@@ -281,7 +281,7 @@ def _shuffle_options(question, rng, target_index):
     return item
 
 
-def generate_variants_from_import(questions, variant_count=5, questions_per_variant=20, seed=None, structure=None):
+def generate_variants_from_import(questions, variant_count=5, questions_per_variant=20, seed=None, structure=None, topic_config=None):
     try:
         variant_count = int(variant_count)
         questions_per_variant = int(questions_per_variant)
@@ -308,6 +308,84 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
             f"không đủ để tạo đề {questions_per_variant} câu."
         )
 
+    def normalize_knowledge(value):
+        normalized = str(value or "").strip().casefold()
+        if normalized in {"lý thuyết", "ly thuyet", "theory"}:
+            return "theory"
+        if normalized in {"thực hành", "thuc hanh", "practice"}:
+            return "practice"
+        return normalized
+
+    def normalize_difficulty(value):
+        normalized = str(value or "").strip().casefold()
+        if normalized in {"dễ", "de", "easy"}:
+            return "easy"
+        if normalized in {"trung bình", "trung binh", "medium"}:
+            return "medium"
+        if normalized in {"khó", "kho", "hard"}:
+            return "hard"
+        return normalized
+
+    topic_rules = []
+    seen_topics = set()
+    for config in topic_config or []:
+        if not isinstance(config, dict):
+            raise ValueError("Cấu hình chủ đề không hợp lệ.")
+        try:
+            total = int(config.get("total") or 0)
+            theory = int(config.get("theory") or 0)
+            practice = int(config.get("practice") or 0)
+            easy = int(config.get("easy") or 0)
+            medium = int(config.get("medium") or 0)
+            hard = int(config.get("hard") or 0)
+        except (TypeError, ValueError):
+            raise ValueError("Số câu trong cơ cấu chủ đề phải là số nguyên.")
+        if total <= 0:
+            continue
+        category = str(config.get("category") or "").strip().casefold()
+        if not category:
+            raise ValueError("Vui lòng chọn một chủ đề hợp lệ.")
+        if category in seen_topics:
+            raise ValueError("Một chủ đề chỉ được cấu hình một lần.")
+        if min(theory, practice, easy, medium, hard) < 0:
+            raise ValueError("Số câu trong cơ cấu chủ đề không được âm.")
+        if theory + practice != total or easy + medium + hard != total:
+            raise ValueError("Tổng Lý thuyết + Thực hành và tổng Dễ + Trung bình + Khó phải bằng số câu của từng chủ đề.")
+        seen_topics.add(category)
+        topic_rules.append({
+            "category": category,
+            "count": total,
+            "knowledge": {"theory": theory, "practice": practice},
+            "difficulty": {"easy": easy, "medium": medium, "hard": hard},
+        })
+
+    def topic_cell_plan(candidates, rule):
+        cells = {
+            (knowledge, difficulty): [item for item in candidates if normalize_knowledge(item.get("knowledge_type")) == knowledge and normalize_difficulty(item.get("difficulty")) == difficulty]
+            for knowledge in ("theory", "practice")
+            for difficulty in ("easy", "medium", "hard")
+        }
+        plan = {}
+        difficulties = ("easy", "medium", "hard")
+
+        def assign(index, theory_left):
+            if index == len(difficulties):
+                return theory_left == 0
+            difficulty = difficulties[index]
+            requested = rule["difficulty"][difficulty]
+            minimum = max(0, requested - len(cells[("practice", difficulty)]))
+            maximum = min(requested, len(cells[("theory", difficulty)]), theory_left)
+            for theory_count in range(maximum, minimum - 1, -1):
+                practice_count = requested - theory_count
+                plan[("theory", difficulty)] = theory_count
+                plan[("practice", difficulty)] = practice_count
+                if assign(index + 1, theory_left - theory_count):
+                    return True
+            return False
+
+        if not assign(0, rule["knowledge"]["theory"]):
+            raise ValueError("Ngân hàng không đủ câu theo tổ hợp Lý thuyết/Thực hành và độ khó đã chọn cho một chủ đề.")
+        return plan
     structured_rules = []
     for rule in structure or []:
         try:
@@ -333,6 +411,13 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
             and (not rule["difficulty"] or str(question.get("difficulty") or "").strip().casefold() == rule["difficulty"])
         )
 
+    if topic_rules and sum(rule["count"] for rule in topic_rules) != questions_per_variant:
+        raise ValueError("Tổng số câu của các chủ đề phải bằng số câu mỗi mã đề.")
+    for rule in topic_rules:
+        available = [question for question in unique_questions if str(question.get("category") or "").strip().casefold() == rule["category"]]
+        if len(available) < rule["count"]:
+            raise ValueError("Ngân hàng không đủ số câu cho chủ đề đã chọn.")
+        topic_cell_plan(available, rule)
     if structured_rules and sum(rule["count"] for rule in structured_rules) != questions_per_variant:
         raise ValueError("Tổng số câu trong cơ cấu loại/kiểu câu hỏi/độ khó phải bằng số câu mỗi mã đề.")
     for rule in structured_rules:
@@ -376,7 +461,31 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
     for variant_index in range(1, variant_count + 1):
         selected = []
         selected_ids = set()
-        if structured_rules:
+        if topic_rules:
+            for rule in topic_rules:
+                candidates = [
+                    question for question in unique_questions
+                    if str(question["id"]) not in selected_ids
+                    and str(question.get("category") or "").strip().casefold() == rule["category"]
+                ]
+                plan = topic_cell_plan(candidates, rule)
+                for difficulty in ("easy", "medium", "hard"):
+                    for knowledge in ("theory", "practice"):
+                        count = plan[(knowledge, difficulty)]
+                        ranked = [
+                            question for question in candidates
+                            if str(question["id"]) not in selected_ids
+                            and normalize_knowledge(question.get("knowledge_type")) == knowledge
+                            and normalize_difficulty(question.get("difficulty")) == difficulty
+                        ]
+                        rng.shuffle(ranked)
+                        ranked.sort(key=lambda question: usage[str(question["id"])])
+                        if len(ranked) < count:
+                            raise ValueError("Ngân hàng không đủ câu không trùng cho cơ cấu chủ đề trong một mã đề.")
+                        for question in ranked[:count]:
+                            selected.append(question)
+                            selected_ids.add(str(question["id"]))
+        elif structured_rules:
             for rule in structured_rules:
                 ranked = [
                     question for question in unique_questions
@@ -442,6 +551,7 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
             "source_question_count": len(unique_questions),
             "seed": seed,
             "structure": structured_rules,
+            "topic_config": topic_rules,
         },
     }
 

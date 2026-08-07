@@ -28,7 +28,7 @@ const cssPx = (value: string | null | undefined, fallback = 0) => {
 function inferImportedEmailSettings(documentNode: Document): Partial<EmailSettings> {
   const body = documentNode.body;
   const candidates = Array.from(body.querySelectorAll('table')).filter(table => {
-    const width = table.getAttribute('width') || table.style.width || table.style.maxWidth;
+    const width = table.style.maxWidth || table.getAttribute('width') || table.style.width;
     const numericWidth = cssPx(width, 0);
     return numericWidth >= 320 && numericWidth <= 1200 && !/%/.test(width || '');
   });

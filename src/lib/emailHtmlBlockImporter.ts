@@ -229,6 +229,42 @@ export function importHtmlToEmailBlocks(html: string, seed = Date.now()): EmailH
     visible: true,
   });
 
+  const customTableRowBlock = (table: HTMLTableElement, row: HTMLTableRowElement): EmailBlock => {
+    // Do not copy the outer email card's background/shadow/radius onto every
+    // preserved row. Only retain the table mechanics the row needs to render.
+    const preservedTable = documentNode.createElement('table');
+    for (const attribute of ['role', 'width', 'cellpadding', 'cellspacing', 'border', 'align']) {
+      const value = table.getAttribute(attribute);
+      if (value !== null) preservedTable.setAttribute(attribute, value);
+    }
+    preservedTable.style.width = table.style.width;
+    preservedTable.style.maxWidth = table.style.maxWidth;
+    preservedTable.style.tableLayout = table.style.tableLayout;
+    preservedTable.style.borderCollapse = table.style.borderCollapse;
+    preservedTable.style.borderSpacing = table.style.borderSpacing;
+    preservedTable.innerHTML = `<tbody>${row.outerHTML}</tbody>`;
+    customBlockCount += 1;
+    return {
+      id: nextId('custom-html'),
+      type: 'custom-html',
+      content: { variant: 'style-1', html: preservedTable.outerHTML },
+      styles: blockStyles(row, 0),
+      visible: true,
+    };
+  };
+
+  const rowNeedsExactHtml = (row: HTMLTableRowElement) => {
+    const elements = [row, ...Array.from(row.querySelectorAll<HTMLElement>('*'))];
+    const hasUnsupportedBackground = elements.some((element) => {
+      const background = `${element.style.background} ${element.style.backgroundImage}`.toLowerCase();
+      return background.includes('gradient') || background.includes('url(');
+    });
+    // Nested presentation tables are the usual email-client technique for
+    // cards, CTA buttons and multi-column layouts. Keep the complete row as
+    // Custom HTML so parent-cell styling is not lost during conversion.
+    return hasUnsupportedBackground || row.querySelector('table') !== null;
+  };
+
   const tableBlocks = (table: HTMLTableElement, depth: number): EmailBlock[] => {
     const rows = Array.from(table.rows).filter(row => row.closest('table') === table);
     const rowCells = rows.map(row => Array.from(row.cells));
@@ -247,6 +283,8 @@ export function importHtmlToEmailBlocks(html: string, seed = Date.now()): EmailH
       if (!cells.length) {
         const height = px(row.getAttribute('height') || row.style.height, 0);
         if (height > 4) result.push({ id: nextId('spacer'), type: 'spacer', content: {}, styles: { height: clamp(height, 4, 160) }, visible: true });
+      } else if (rowNeedsExactHtml(row)) {
+        result.push(customTableRowBlock(table, row));
       } else if (cells.length >= 2 && cells.length <= 4) {
         result.push(columnsBlock(cells, table));
       } else {
@@ -363,7 +401,7 @@ export function importHtmlToEmailBlocks(html: string, seed = Date.now()): EmailH
   }
 
   const fixedWidthTables = Array.from(documentNode.body.querySelectorAll('table')).filter(table => {
-    const explicitWidth = table.getAttribute('width') || table.style.width || table.style.maxWidth;
+    const explicitWidth = table.style.maxWidth || table.getAttribute('width') || table.style.width;
     const numericWidth = px(explicitWidth, 0);
     return numericWidth >= 320 && numericWidth <= 1200 && !/%/.test(explicitWidth || '');
   });

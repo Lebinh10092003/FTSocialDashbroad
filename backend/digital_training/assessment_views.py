@@ -198,13 +198,19 @@ def assessment_import_preview(request):
             except (TypeError, ValueError):
                 return _assessment_error("So nguoi tham gia hoac so nguoi tren moi ma de khong hop le.")
             structure = request.data.get("structure") or []
+            topic_config = request.data.get("topic_config") or []
             if isinstance(structure, str):
                 try:
                     structure = json.loads(structure)
                 except json.JSONDecodeError:
-                    return _assessment_error("Cơ cấu chủ đề/độ khó không đúng định dạng JSON.")
-            if not isinstance(structure, list):
-                return _assessment_error("Cơ cấu chủ đề/độ khó phải là một danh sách.")
+                    return _assessment_error("Cơ cấu câu hỏi không đúng định dạng JSON.")
+            if isinstance(topic_config, str):
+                try:
+                    topic_config = json.loads(topic_config)
+                except json.JSONDecodeError:
+                    return _assessment_error("Cơ cấu chủ đề không đúng định dạng JSON.")
+            if not isinstance(structure, list) or not isinstance(topic_config, list):
+                return _assessment_error("Cơ cấu đề phải là một danh sách.")
             requested_variant_count = request.data.get("variant_count")
             if requested_variant_count not in (None, ""):
                 try:
@@ -219,6 +225,7 @@ def assessment_import_preview(request):
                 request.data.get("questions_per_variant", 20),
                 request.data.get("seed"),
                 structure,
+                topic_config,
             )
             result.update(generated)
             result["generation_config"].update({
