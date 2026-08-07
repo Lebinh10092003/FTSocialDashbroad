@@ -559,11 +559,13 @@ function FormSection({
 }
 function CreateScheduleMenu({
   onTraining,
-  onMeeting,
+  onNewMeeting,
+  onExistingMeeting,
   onOther,
 }: {
   onTraining: () => void;
-  onMeeting: () => void;
+  onNewMeeting: () => void;
+  onExistingMeeting: () => void;
   onOther: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -593,10 +595,17 @@ function CreateScheduleMenu({
           </button>
           <button
             type="button"
-            onClick={() => select(onMeeting)}
+            onClick={() => select(onNewMeeting)}
             className="w-full rounded-lg px-3 py-2.5 text-left text-sm font-bold hover:bg-sky-50"
           >
             Gặp Khách hàng mới
+          </button>
+          <button
+            type="button"
+            onClick={() => select(onExistingMeeting)}
+            className="w-full rounded-lg px-3 py-2.5 text-left text-sm font-bold hover:bg-sky-50"
+          >
+            Gặp Khách hàng hiện tại
           </button>
           <button
             type="button"
@@ -4058,7 +4067,8 @@ export default function DigitalTraining({
                         {!isGuest && (
                           <CreateScheduleMenu
                             onTraining={() => openTraining(today())}
-                            onMeeting={() => openMeeting(today())}
+                            onNewMeeting={() => openMeeting(today())}
+                            onExistingMeeting={() => openMeeting(today())}
                             onOther={() => openOther(today())}
                           />
                         )}
@@ -4139,7 +4149,8 @@ export default function DigitalTraining({
                       {!isGuest && (
                         <CreateScheduleMenu
                           onTraining={() => openTraining(today())}
-                          onMeeting={() => openMeeting(today())}
+                          onNewMeeting={() => openMeeting(today())}
+                            onExistingMeeting={() => openMeeting(today())}
                           onOther={() => openOther(today())}
                         />
                       )}
@@ -4550,7 +4561,7 @@ export default function DigitalTraining({
                     <table className="ft-table min-w-[1050px]">
                       <thead><tr><th>Khách hàng mới</th><th>Đầu mối</th><th>Giai đoạn</th><th>Lịch gặp</th><th>Lịch gần nhất</th><th>Ghi chú</th><th aria-label="Thao tác"></th></tr></thead>
                       <tbody>
-                        {leads.filter(item => !query || [item.name, item.representative, item.phone, item.email, item.address].join(" ").toLocaleLowerCase("vi-VN").includes(query.toLocaleLowerCase("vi-VN"))).map((item) => (
+                        {leads.filter(item => !item.converted_partner && item.stage !== "converted" && (!query || [item.name, item.representative, item.phone, item.email, item.address].join(" ").toLocaleLowerCase("vi-VN").includes(query.toLocaleLowerCase("vi-VN")))).map((item) => (
                           <tr key={item.id}>
                             <td><b>{item.name}</b><span className="block text-xs text-slate-500">{item.lead_type || "Chưa phân loại"}</span></td>
                             <td><b>{item.representative || "—"}</b><span className="block text-xs text-slate-500">{[item.representative_position, item.phone, item.email].filter(Boolean).join(" · ") || "Chưa cập nhật"}</span></td>
@@ -4561,7 +4572,7 @@ export default function DigitalTraining({
                             <td><div className="flex items-center justify-end gap-2">{!isGuest && <><button type="button" onClick={() => scheduleLeadMeeting(item)} className="ft-btn ft-btn-secondary whitespace-nowrap">Lên lịch gặp</button><button type="button" onClick={() => { setEditingLead(item); setLeadDraft({ name: item.name, lead_type: item.lead_type || "", address: item.address || "", representative: item.representative || "", representative_position: item.representative_position || "", phone: item.phone || "", email: item.email || "", stage: item.stage || "discussion", notes: item.notes || "" }); setModal("lead"); }} className="ft-btn ft-btn-secondary"><Pencil className="h-4 w-4" /></button>{!item.converted_partner && <button type="button" onClick={() => setConvertLead(item)} className="ft-btn border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 whitespace-nowrap">Chuyển thành khách hàng</button>}</>}</div></td>
                           </tr>
                         ))}
-                        {!leads.length && <tr><td colSpan={7} className="py-10 text-center text-slate-500">Chưa có khách hàng mới. Hãy thêm đầu mối hoặc tạo từ lịch gặp đầu tiên.</td></tr>}
+                        {!leads.some(item => !item.converted_partner && item.stage !== "converted") && <tr><td colSpan={7} className="py-10 text-center text-slate-500">Chưa có khách hàng mới. Hãy thêm đầu mối hoặc tạo từ lịch gặp đầu tiên.</td></tr>}
                       </tbody>
                     </table>
                   </div>
