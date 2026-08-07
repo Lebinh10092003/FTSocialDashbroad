@@ -125,6 +125,7 @@ export default function ProductManagement({
   view,
   onOpenPartnerDetail,
   onScheduleNegotiation,
+  onCreatePartner,
 }: {
   partners: ProductPartner[];
   idToken: string;
@@ -132,6 +133,7 @@ export default function ProductManagement({
   view: ProductView;
   onOpenPartnerDetail?: (partnerId: number) => void;
   onScheduleNegotiation?: (partnerId: number, productId: number) => void;
+  onCreatePartner?: () => void;
 }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [subscriptions, setSubscriptions] = useState<ProductSubscription[]>([]);
@@ -395,7 +397,7 @@ export default function ProductManagement({
       <header className="rounded-2xl border bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div><p className="text-xs font-bold uppercase tracking-wide text-blue-600">{view === "allocation" ? "Khách hàng và sản phẩm đang dùng" : "Danh mục và mức sử dụng"}</p><h1 className="mt-1 text-2xl font-extrabold">{view === "allocation" ? "Khách hàng hiện tại" : "Sản phẩm & dịch vụ"}</h1><p className="mt-2 text-sm text-slate-500">{view === "allocation" ? "Theo dõi đầu mối, số lượng và hạn sử dụng của từng sản phẩm theo khách hàng." : "Quản lý danh mục và theo dõi mức sử dụng sản phẩm, dịch vụ."}</p></div>
-          <div className="flex flex-wrap gap-2"><button onClick={() => void load()} className="ft-btn ft-btn-secondary"><RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />Làm mới</button>{!isGuest && <button onClick={() => openProduct()} className="ft-primary"><PackagePlus className="h-4 w-4" />Thêm mới</button>}</div>
+          <div className="flex flex-wrap gap-2"><button onClick={() => void load()} className="ft-btn ft-btn-secondary"><RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />Làm mới</button>{!isGuest && <button onClick={() => { if (view === "allocation") onCreatePartner?.(); else openProduct(); }} className="ft-primary"><PackagePlus className="h-4 w-4" />Thêm mới</button>}</div>
         </div>
 
       </header>

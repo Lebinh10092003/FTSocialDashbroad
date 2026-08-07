@@ -4561,6 +4561,7 @@ export default function DigitalTraining({
                   view={productView}
                   onOpenPartnerDetail={(partnerId) => { openPartnerDetail("partners", partnerId); void load(); }}
                   onScheduleNegotiation={(partnerId, productId) => { const partner = partners.find((item) => item.id === partnerId); if (partner) schedulePartnerMeeting(partner, productId); }}
+                  onCreatePartner={() => { setEditingPartner(null); setPd(newPartnerDraft()); setModal("partner"); }}
                 />
               )}
               {tab === "finance" && canViewFinance && (
