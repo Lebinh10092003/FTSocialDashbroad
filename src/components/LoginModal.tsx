@@ -1,5 +1,5 @@
-import React from 'react';
-import { LogIn, X } from 'lucide-react';
+import React, { useState } from 'react';
+import { Eye, EyeOff, LogIn, X } from 'lucide-react';
 
 type Props = {
   open: boolean;
@@ -24,6 +24,7 @@ export default function LoginModal({
   loading,
   error,
 }: Props) {
+  const [showPassword, setShowPassword] = useState(false);
   if (!open) return null;
 
   return (
@@ -60,15 +61,15 @@ export default function LoginModal({
 
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-slate-400 tracking-wider uppercase pl-1">Mật khẩu</label>
-            <input
+            <div className="relative"><input
               value={password}
               onChange={event => setPassword(event.target.value)}
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               placeholder="••••••••"
               autoComplete="current-password"
-              className="ft-input"
+              className="ft-input pr-10"
               required
-            />
+            /><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-blue-700">{showPassword ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}</button></div>
           </div>
 
           {error && (

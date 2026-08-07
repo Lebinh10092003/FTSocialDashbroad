@@ -760,7 +760,7 @@ def _write_employee(request, profile=None):
             return None, Response({"error": "Nhân viên không thể tự là người quản lý của mình."}, status=status.HTTP_400_BAD_REQUEST)
 
     if profile is None:
-        password = password or 'Fermat@123'
+        password = password or 'Ft@12345'
         if not password:
             return None, Response({"error": "Vui lòng đặt mật khẩu khởi tạo."}, status=status.HTTP_400_BAD_REQUEST)
         try:
@@ -819,6 +819,7 @@ def manage_users(request):
     total = rows.count()
     start = (page - 1) * page_size
     results = [_user_payload(item) for item in rows[start:start + page_size]]
+    _ensure_default_departments()
     return Response({
         "results": results,
         "total": total,
