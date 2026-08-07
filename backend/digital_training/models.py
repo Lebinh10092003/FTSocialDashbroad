@@ -90,6 +90,18 @@ class TrainingProductSubscription(models.Model):
             models.UniqueConstraint(fields=["partner", "product"], name="unique_product_subscription_per_partner"),
         ]
 
+class TrainingProductOpportunity(models.Model):
+    STATUS_CHOICES = [("negotiating", "Negotiating"), ("on_hold", "On hold"), ("won", "Won"), ("lost", "Lost")]
+    partner = models.ForeignKey(TrainingPartner, on_delete=models.CASCADE, related_name="product_opportunities")
+    product = models.ForeignKey(TrainingProduct, on_delete=models.PROTECT, related_name="opportunities")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="negotiating")
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["partner__name", "-updated_at", "-id"]
+
 
 class TrainingFinanceEntry(models.Model):
     ENTRY_TYPE_CHOICES = [("income", "Income"), ("expense", "Expense")]
@@ -209,6 +221,8 @@ class TrainingCustomerMeeting(models.Model):
 
     title = models.CharField(max_length=255)
     lead = models.ForeignKey(TrainingLead, null=True, blank=True, on_delete=models.SET_NULL, related_name="meetings")
+    partner = models.ForeignKey(TrainingPartner, null=True, blank=True, on_delete=models.SET_NULL, related_name="customer_meetings")
+    opportunity = models.ForeignKey(TrainingProductOpportunity, null=True, blank=True, on_delete=models.SET_NULL, related_name="meetings")
     schedule_type = models.CharField(max_length=20, choices=SCHEDULE_TYPES, default="meeting")
     activity_type = models.CharField(max_length=100, blank=True)
     customer_type = models.CharField(max_length=100, blank=True)

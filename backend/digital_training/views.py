@@ -1,4 +1,4 @@
-from rest_framework import status
+﻿from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from authentication.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
@@ -12,8 +12,8 @@ from authentication.permissions import IsAuthenticated, IsManagerOrAdmin
 from authentication.models import UserProfile
 from examination.models import LogNote
 from .completion_service import complete_past_training_schedules
-from .models import TrainingClass, TrainingCustomerMeeting, TrainingFinanceEntry, TrainingLead, TrainingMaterial, TrainingPartner, TrainingProduct, TrainingProductSubscription, TrainingSession, TrainingSurvey
-from .serializers import TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingFinanceEntrySerializer, TrainingLeadSerializer, TrainingMaterialSerializer, TrainingPartnerSerializer, TrainingProductSerializer, TrainingProductSubscriptionSerializer, TrainingSessionSerializer, TrainingSurveySerializer
+from .models import TrainingClass, TrainingCustomerMeeting, TrainingFinanceEntry, TrainingLead, TrainingMaterial, TrainingPartner, TrainingProduct, TrainingProductOpportunity, TrainingProductSubscription, TrainingSession, TrainingSurvey
+from .serializers import TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingFinanceEntrySerializer, TrainingLeadSerializer, TrainingMaterialSerializer, TrainingPartnerSerializer, TrainingProductOpportunitySerializer, TrainingProductSerializer, TrainingProductSubscriptionSerializer, TrainingSessionSerializer, TrainingSurveySerializer
 
 
 def _can_manage(request):
@@ -155,19 +155,24 @@ def training_session_detail(request, pk):
 def training_customer_meetings(request):
     if request.method == "GET":
         complete_past_training_schedules()
-    return _crud_collection(request, TrainingCustomerMeeting.objects.all(), TrainingCustomerMeetingSerializer, "cuộc gặp khách hàng")
+    return _crud_collection(request, TrainingCustomerMeeting.objects.select_related("lead", "partner", "opportunity__product").all(), TrainingCustomerMeetingSerializer, "cuộc gặp khách hàng")
 
 
 @api_view(["GET", "PATCH", "DELETE"])
 @permission_classes([IsAuthenticatedOrReadOnly])
 def training_customer_meeting_detail(request, pk):
-    return _crud_detail(request, TrainingCustomerMeeting.objects.all(), TrainingCustomerMeetingSerializer, pk, "cuộc gặp khách hàng")
+    return _crud_detail(request, TrainingCustomerMeeting.objects.select_related("lead", "partner", "opportunity__product").all(), TrainingCustomerMeetingSerializer, pk, "cuộc gặp khách hàng")
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def training_leads(request):
+    if request.method == "POST" and not request.data.get("allow_existing_partner"):
+        name = str(request.data.get("name") or "").strip()
+        partner = TrainingPartner.objects.filter(name__iexact=name).first() if name else None
+        if partner:
+            subscriptions = TrainingProductSubscription.objects.filter(partner=partner).select_related("product")
+            return Response({"error": "Duplicate existing customer.", "duplicate_partner": TrainingPartnerSerializer(partner, context={"request": request}).data, "subscriptions": TrainingProductSubscriptionSerializer(subscriptions, many=True, context={"request": request}).data}, status=status.HTTP_409_CONFLICT)
     return _crud_collection(request, TrainingLead.objects.select_related("converted_partner").all(), TrainingLeadSerializer, "khách hàng mới")
-
 
 @api_view(["GET", "PATCH", "DELETE"])
 @permission_classes([IsAuthenticated])
@@ -282,6 +287,20 @@ def training_product_subscriptions(request):
 def training_product_subscription_detail(request, pk):
     queryset = TrainingProductSubscription.objects.select_related("partner", "product").all()
     return _crud_detail(request, queryset, TrainingProductSubscriptionSerializer, pk, "đăng ký sản phẩm")
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticatedOrReadOnly])
+def training_product_opportunities(request):
+    queryset = TrainingProductOpportunity.objects.select_related("partner", "product").all()
+    return _crud_collection(request, queryset, TrainingProductOpportunitySerializer, "product opportunity")
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAuthenticatedOrReadOnly])
+def training_product_opportunity_detail(request, pk):
+    queryset = TrainingProductOpportunity.objects.select_related("partner", "product").all()
+    return _crud_detail(request, queryset, TrainingProductOpportunitySerializer, pk, "product opportunity")
 
 
 @api_view(["GET", "POST"])

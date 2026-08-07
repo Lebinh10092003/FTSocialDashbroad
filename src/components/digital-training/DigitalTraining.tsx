@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   BadgeDollarSign,
@@ -193,6 +193,8 @@ type Lead = {
   staff_name?: string;
   notes: string;
 };
+type ProductOption = { id: number; name: string; active: boolean };
+type ProductOpportunity = { id: number; partner: number; partner_name: string; product: number; product_name: string; status: "negotiating" | "on_hold" | "won" | "lost"; notes: string; meeting_count: number };
 type CalendarItem = {
   id: string | number;
   title: string;
@@ -1724,6 +1726,8 @@ export default function DigitalTraining({
     [meetings, setMeetings] = useState<CustomerMeeting[]>([]),
     [partners, setPartners] = useState<Partner[]>([]),
     [partnerProductSubscriptions, setPartnerProductSubscriptions] = useState<ProductSubscription[]>([]),
+    [productCatalog, setProductCatalog] = useState<ProductOption[]>([]),
+    [productOpportunities, setProductOpportunities] = useState<ProductOpportunity[]>([]),
     [leads, setLeads] = useState<Lead[]>([]),
     [classes, setClasses] = useState<TrainingClass[]>([]),
     [materials, setMaterials] = useState<Material[]>([]),
@@ -1859,6 +1863,10 @@ export default function DigitalTraining({
         const productSubscriptionResponse = await fetch("/api/digital-training/product-subscriptions", { headers: auth() });
         if (!productSubscriptionResponse.ok) throw Error("Could not load product subscriptions.");
         const productSubscriptionRows = await productSubscriptionResponse.json();
+        const [productRows, opportunityRows] = await Promise.all([
+          fetch("/api/digital-training/products", { headers: auth() }).then(async (r) => { if (!r.ok) throw Error("Kh�ng th? t?i danh m?c s?n ph?m."); return r.json(); }),
+          fetch("/api/digital-training/product-opportunities", { headers: auth() }).then(async (r) => { if (!r.ok) throw Error("Kh�ng th? t?i co h?i s?n ph?m."); return r.json(); }),
+        ]);
         const endpoints = [
           "customer-meetings",
           ...(isGuest ? [] : ["leads"]),
@@ -1878,6 +1886,8 @@ export default function DigitalTraining({
         );
         setSessions(sessionRows);
         setPartnerProductSubscriptions(productSubscriptionRows);
+        setProductCatalog(productRows);
+        setProductOpportunities(opportunityRows);
         const leadOffset = isGuest ? 0 : 1;
         setMeetings(list[0]);
         setLeads(isGuest ? [] : list[1]);
@@ -2098,6 +2108,8 @@ export default function DigitalTraining({
       staff_name: item.staff_name || "",
       notes: item.notes || "",
       lead: item.lead ? String(item.lead) : "",
+      partner: item.partner ? String(item.partner) : "",
+      product: "",
     });
     setModal(item.schedule_type === "other" ? "other" : "meeting");
   };
@@ -2225,10 +2237,18 @@ export default function DigitalTraining({
   const saveLead = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!can()) return;
-    try {
+    let leadPayload: any = leadDraft;
+    if (!editingLead) {
+      const duplicate = partners.find((item) => item.name.trim().toLocaleLowerCase("vi-VN") === leadDraft.name.trim().toLocaleLowerCase("vi-VN"));
+      if (duplicate) {
+        const services = partnerProductSubscriptions.filter((item) => item.partner === duplicate.id).map((item) => `${item.product_name}: ${productSubscriptionStatus(item.effective_status)}${item.expires_at ? ` (${showDate(item.expires_at)})` : ""}`).join("\n") || "Ch\u01b0a ghi nh\u1eadn d\u1ecbch v\u1ee5 \u0111ang s\u1eed d\u1ee5ng.";
+        if (window.confirm(`\u0110\u00e3 c\u00f3 kh\u00e1ch h\u00e0ng \"${duplicate.name}\".\n${services}\n\nOK: m\u1edf h\u1ed3 s\u01a1 \u0111\u1ec3 c\u1eadp nh\u1eadt / t\u1ea1o l\u1ecbch g\u1eb7p.\nCancel: v\u1eabn l\u01b0u \u0111\u00e2y l\u00e0 kh\u00e1ch h\u00e0ng kh\u00e1c.`)) { setModal(null); go("partners", duplicate.id); return; }
+        leadPayload = { ...leadDraft, allow_existing_partner: true };
+      }
+    }    try {
       const saved = editingLead
         ? await patch(`leads/${editingLead.id}`, leadDraft)
-        : await post("leads", leadDraft);
+        : await post("leads", leadPayload);
       setModal(null);
       setEditingLead(null);
       await load();
@@ -2261,6 +2281,11 @@ export default function DigitalTraining({
       email: lead.email || "",
       date: today(), start_time: "", end_time: "", location: lead.address || "", content: "", status: "planned", staff_name: "", notes: lead.notes || "", lead: String(lead.id),
     });
+    setModal("meeting");
+  };
+  const schedulePartnerMeeting = (item: Partner) => {
+    setEditingMeeting(null);
+    setMeeting({ title: `G\u1eb7p ${item.name}`, schedule_type: "meeting", activity_type: "", customer_type: item.partner_type || "", representative: item.contact_person || "", phone: item.phone || "", email: item.email || "", date: today(), start_time: "", end_time: "", location: item.address || "", content: "", status: "planned", staff_name: "", notes: "", lead: "", partner: String(item.id), product: "" });
     setModal("meeting");
   };
   const saveSession = async (e: React.FormEvent) => {
@@ -2306,6 +2331,8 @@ export default function DigitalTraining({
         schedule_type: "meeting" as const,
         activity_type: "",
         lead: meeting.lead ? Number(meeting.lead) : null,
+        partner: meeting.partner ? Number(meeting.partner) : null,
+        product: meeting.product ? Number(meeting.product) : null,
       };
       const saved = editingMeeting
         ? await patch(`customer-meetings/${editingMeeting.id}`, payload)
@@ -5100,7 +5127,7 @@ export default function DigitalTraining({
                             )}
                           {!isGuest && (
                             <>
-                              <button
+                              <button onClick={() => schedulePartnerMeeting(partner)} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-800"><CalendarDays className="mr-2 inline h-4 w-4" />Th�m l?ch g?p</button>                              <button
                                 onClick={() => openPartnerEditor(partner)}
                                 className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-bold text-sky-800"
                               >
@@ -5189,7 +5216,8 @@ export default function DigitalTraining({
                       </div>
                       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                         {partner.planned_sessions > 0 && <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-4"><b>{"T\u1eadp hu\u1ea5n"}</b><p className="mt-2 text-sm">{"S\u1ed1 bu\u1ed5i \u0111\u0103ng k\u00fd: "}{partner.planned_sessions}</p><p className="mt-1 text-sm">{"\u0110\u00e3 th\u1ef1c hi\u1ec7n: "}{partner.completed_sessions || 0}</p></div>}
-                        {partnerProducts.map((item) => <div key={item.id} className="rounded-xl border p-4"><b>{item.product_name}</b><p className="mt-2 text-sm">{"SL: "}{item.quantity}{" - "}{productSubscriptionStatus(item.effective_status)}</p><p className="mt-1 text-sm">{"H\u1ea1n s\u1eed d\u1ee5ng: "}{item.expires_at ? showDate(item.expires_at) : "Ch\u01b0a c\u00f3 h\u1ea1n"}</p>{item.starts_at && <p className="mt-1 text-xs text-slate-500">{"B\u1eaft \u0111\u1ea7u: "}{showDate(item.starts_at)}</p>}{item.notes && <p className="mt-2 whitespace-pre-wrap border-t pt-2 text-xs text-slate-600">{"Ghi ch\u00fa: "}{item.notes}</p>}</div>)}
+                                                {productOpportunities.filter((item) => item.partner === partner.id).map((item) => <div key={`opportunity-${item.id}`} className="rounded-xl border border-amber-200 bg-amber-50/50 p-4"><b>{item.product_name}</b><p className="mt-2 text-sm font-bold text-amber-800">{({ negotiating: "�ang thuong th?o", on_hold: "T?m d?ng", won: "�� k�", lost: "Kh�ng k�" } as Record<string, string>)[item.status]}</p><p className="mt-1 text-xs text-slate-600">{item.meeting_count} l?ch g?p li�n quan</p></div>)}
+{partnerProducts.map((item) => <div key={item.id} className="rounded-xl border p-4"><b>{item.product_name}</b><p className="mt-2 text-sm">{"SL: "}{item.quantity}{" - "}{productSubscriptionStatus(item.effective_status)}</p><p className="mt-1 text-sm">{"H\u1ea1n s\u1eed d\u1ee5ng: "}{item.expires_at ? showDate(item.expires_at) : "Ch\u01b0a c\u00f3 h\u1ea1n"}</p>{item.starts_at && <p className="mt-1 text-xs text-slate-500">{"B\u1eaft \u0111\u1ea7u: "}{showDate(item.starts_at)}</p>}{item.notes && <p className="mt-2 whitespace-pre-wrap border-t pt-2 text-xs text-slate-600">{"Ghi ch\u00fa: "}{item.notes}</p>}</div>)}
                         {!partner.planned_sessions && !partnerProducts.length && <p className="text-sm text-slate-500">{"Ch\u01b0a c\u00f3 s\u1ea3n ph\u1ea9m \u0111\u0103ng k\u00fd."}</p>}
                       </div>
                     </article>
@@ -6036,6 +6064,12 @@ export default function DigitalTraining({
                   </select>
                 </label>
                                 <label>
+                  <span className="mb-1 block text-sm font-bold">{"Kh\u00e1ch h\u00e0ng hi\u1ec7n t\u1ea1i"}</span>
+                  <select value={meeting.partner} onChange={(event) => { const selectedPartner = partners.find(item => item.id === Number(event.target.value)); setMeeting({ ...meeting, partner: event.target.value, lead: "", title: meeting.title || (selectedPartner ? `G\u1eb7p ${selectedPartner.name}` : ""), customer_type: meeting.customer_type || selectedPartner?.partner_type || "", representative: meeting.representative || selectedPartner?.contact_person || "", phone: meeting.phone || selectedPartner?.phone || "", email: meeting.email || selectedPartner?.email || "", location: meeting.location || selectedPartner?.address || "" }); }} className="w-full rounded-lg border px-3 py-2"><option value="">{"Kh\u00f4ng g\u1eafn kh\u00e1ch h\u00e0ng hi\u1ec7n t\u1ea1i"}</option>{partners.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+                  <small className="mt-1 block text-xs text-slate-500">{"L\u1ecbch g\u1eb7p \u0111\u01b0\u1ee3c l\u01b0u trong h\u1ed3 s\u01a1 kh\u00e1ch h\u00e0ng n\u00e0y."}</small>
+                </label>
+                {meeting.partner && <label><span className="mb-1 block text-sm font-bold">{"S\u1ea3n ph\u1ea9m \u0111ang trao \u0111\u1ed5i"}</span><select value={meeting.product} onChange={(event) => setMeeting({ ...meeting, product: event.target.value })} className="w-full rounded-lg border px-3 py-2"><option value="">{"Ch\u01b0a g\u1eafn s\u1ea3n ph\u1ea9m"}</option>{productCatalog.filter(item => item.active).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small className="mt-1 block text-xs text-amber-700">{"S\u1ea3n ph\u1ea9m \u0111\u01b0\u1ee3c ghi l\u00e0 \u0111ang th\u01b0\u01a1ng th\u1ea3o, ch\u01b0a t\u00ednh l\u00e0 \u0111ang s\u1eed d\u1ee5ng."}</small></label>}
+                <label>
                   <span className="mb-1 block text-sm font-bold">Liên kết khách hàng mới</span>
                   <select value={meeting.lead} onChange={(event) => { const selectedLead = leads.find(item => item.id === Number(event.target.value)); setMeeting({ ...meeting, lead: event.target.value, title: meeting.title || (selectedLead ? `Gặp ${selectedLead.name}` : ""), customer_type: meeting.customer_type || selectedLead?.lead_type || "", representative: meeting.representative || selectedLead?.representative || "", phone: meeting.phone || selectedLead?.phone || "", email: meeting.email || selectedLead?.email || "", location: meeting.location || selectedLead?.address || "" }); }} className="w-full rounded-lg border px-3 py-2">
                     <option value="">Không gắn khách hàng mới</option>

@@ -18,6 +18,7 @@ from .models import (
     TrainingMaterial,
     TrainingPartner,
     TrainingProduct,
+    TrainingProductOpportunity,
     TrainingProductSubscription,
     TrainingSession,
     TrainingSurvey,
@@ -309,14 +310,30 @@ class TrainingLeadSerializer(serializers.ModelSerializer):
             "title": item.title,
         }
 
+class TrainingProductOpportunitySerializer(serializers.ModelSerializer):
+    partner_name = serializers.CharField(source="partner.name", read_only=True)
+    product_name = serializers.CharField(source="product.name", read_only=True)
+    meeting_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TrainingProductOpportunity
+        fields = ["id", "partner", "partner_name", "product", "product_name", "status", "notes", "meeting_count", "created_at", "updated_at"]
+
+    def get_meeting_count(self, obj):
+        return obj.meetings.count()
+
+
 class TrainingCustomerMeetingSerializer(serializers.ModelSerializer):
     date = serializers.DateField(source="meeting_date")
     lead_name = serializers.CharField(source="lead.name", read_only=True)
+    partner_name = serializers.CharField(source="partner.name", read_only=True)
+    product = serializers.PrimaryKeyRelatedField(queryset=TrainingProduct.objects.filter(active=True), write_only=True, required=False, allow_null=True)
+    product_name = serializers.SerializerMethodField()
 
     class Meta:
         model = TrainingCustomerMeeting
         fields = [
-            "id", "title", "lead", "lead_name", "schedule_type", "activity_type", "customer_type", "representative", "phone", "email", "date",
+            "id", "title", "lead", "lead_name", "partner", "partner_name", "opportunity", "product", "product_name", "schedule_type", "activity_type", "customer_type", "representative", "phone", "email", "date",
             "start_time", "end_time", "location", "content", "status", "staff_name", "notes", "created_at", "updated_at",
         ]
 
@@ -326,7 +343,32 @@ class TrainingCustomerMeetingSerializer(serializers.ModelSerializer):
         status = attrs.get("status", getattr(self.instance, "status", "planned"))
         if status == "planned" and schedule_has_ended(meeting_date, end_time):
             attrs["status"] = "completed"
+        partner = attrs.get("partner", getattr(self.instance, "partner", None))
+        if attrs.get("product") and not partner:
+            raise serializers.ValidationError({"product": "H?y ch?n kh?ch h?ng hi?n t?i tru?c khi ch?n s?n ph?m thuong th?o."})
+        if attrs.get("lead") and partner:
+            raise serializers.ValidationError({"partner": "M?t l?ch g?p ch? g?n kh?ch h?ng m?i ho?c kh?ch h?ng hi?n t?i."})
         return attrs
+
+    def _set_opportunity(self, validated_data):
+        product = validated_data.pop("product", None)
+        if not product:
+            return validated_data
+        partner = validated_data.get("partner") or getattr(self.instance, "partner", None)
+        opportunity = TrainingProductOpportunity.objects.filter(partner=partner, product=product, status__in={"negotiating", "on_hold"}).order_by("-updated_at", "-id").first()
+        if not opportunity:
+            opportunity = TrainingProductOpportunity.objects.create(partner=partner, product=product)
+        validated_data["opportunity"] = opportunity
+        return validated_data
+
+    def create(self, validated_data):
+        return super().create(self._set_opportunity(validated_data))
+
+    def update(self, instance, validated_data):
+        return super().update(instance, self._set_opportunity(validated_data))
+
+    def get_product_name(self, obj):
+        return obj.opportunity.product.name if obj.opportunity_id else ""
 
 class TrainingMaterialSerializer(serializers.ModelSerializer):
     file_url = serializers.SerializerMethodField()
