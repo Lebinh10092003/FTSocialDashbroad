@@ -2295,9 +2295,9 @@ export default function DigitalTraining({
     });
     setModal("meeting");
   };
-  const schedulePartnerMeeting = (item: Partner) => {
+  const schedulePartnerMeeting = (item: Partner, productId?: number) => {
     setEditingMeeting(null);
-    setMeeting({ title: `G\u1eb7p ${item.name}`, schedule_type: "meeting", activity_type: "", customer_type: item.partner_type || "", representative: item.contact_person || "", phone: item.phone || "", email: item.email || "", date: today(), start_time: "", end_time: "", location: item.address || "", content: "", status: "planned", staff_name: "", notes: "", lead: "", partner: String(item.id), product: "" });
+    setMeeting({ title: `G\u1eb7p ${item.name}`, schedule_type: "meeting", activity_type: "", customer_type: item.partner_type || "", representative: item.contact_person || "", phone: item.phone || "", email: item.email || "", date: today(), start_time: "", end_time: "", location: item.address || "", content: "", status: "planned", staff_name: "", notes: "", lead: "", partner: String(item.id), product: productId ? String(productId) : "" });
     setModal("meeting");
   };
   const saveSession = async (e: React.FormEvent) => {
@@ -4516,6 +4516,7 @@ export default function DigitalTraining({
                   isGuest={isGuest}
                   view={productView}
                   onOpenPartnerDetail={(partnerId) => { openPartnerDetail("partners", partnerId); void load(); }}
+                  onScheduleNegotiation={(partnerId, productId) => { const partner = partners.find((item) => item.id === partnerId); if (partner) schedulePartnerMeeting(partner, productId); }}
                 />
               )}
               {tab === "finance" && canViewFinance && (

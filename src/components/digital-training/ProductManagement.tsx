@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { appDialog } from "../AppDialog";
 import { matchesSearch } from "../../lib/searchText";
 import {
@@ -114,6 +114,7 @@ const emptySubscription = () => ({
   starts_at: "",
   expires_at: "",
   status: "active",
+  add_meeting: false,
   notes: "",
 });
 
@@ -123,12 +124,14 @@ export default function ProductManagement({
   isGuest,
   view,
   onOpenPartnerDetail,
+  onScheduleNegotiation,
 }: {
   partners: ProductPartner[];
   idToken: string;
   isGuest: boolean;
   view: ProductView;
   onOpenPartnerDetail?: (partnerId: number) => void;
+  onScheduleNegotiation?: (partnerId: number, productId: number) => void;
 }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [subscriptions, setSubscriptions] = useState<ProductSubscription[]>([]);
@@ -270,6 +273,7 @@ export default function ProductManagement({
       starts_at: item.starts_at || "",
       expires_at: item.expires_at || "",
       status: item.status,
+      add_meeting: false,
       notes: item.notes || "",
     } : { ...emptySubscription(), partner: String(partnerId), product: String(productId) });
     setSubscriptionOpen(true);
@@ -280,33 +284,32 @@ export default function ProductManagement({
     event.preventDefault();
     setBusy(true);
     setNotice("");
+    const isNegotiation = subscriptionDraft.status === "negotiating";
     try {
       const response = await fetch(
-        `/api/digital-training/product-subscriptions${subscriptionDraft.id ? `/${subscriptionDraft.id}` : ""}`,
+        isNegotiation ? "/api/digital-training/product-opportunities" : `/api/digital-training/product-subscriptions${subscriptionDraft.id ? `/${subscriptionDraft.id}` : ""}`,
         {
-          method: subscriptionDraft.id ? "PATCH" : "POST",
+          method: isNegotiation ? "POST" : subscriptionDraft.id ? "PATCH" : "POST",
           headers: { ...auth, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            partner: Number(subscriptionDraft.partner),
-            product: Number(subscriptionDraft.product),
-            quantity: Number(subscriptionDraft.quantity),
-            starts_at: subscriptionDraft.starts_at || null,
-            expires_at: subscriptionDraft.expires_at || null,
-            status: subscriptionDraft.status,
-            notes: subscriptionDraft.notes,
+          body: JSON.stringify(isNegotiation ? {
+            partner: Number(subscriptionDraft.partner), product: Number(subscriptionDraft.product), status: "negotiating", notes: subscriptionDraft.notes,
+          } : {
+            partner: Number(subscriptionDraft.partner), product: Number(subscriptionDraft.product), quantity: Number(subscriptionDraft.quantity), starts_at: subscriptionDraft.starts_at || null, expires_at: subscriptionDraft.expires_at || null, status: subscriptionDraft.status, notes: subscriptionDraft.notes,
           }),
         },
       );
       if (!response.ok) throw new Error(await apiError(response));
+      const shouldSchedule = isNegotiation && subscriptionDraft.add_meeting;
+      const partnerId = Number(subscriptionDraft.partner), productId = Number(subscriptionDraft.product);
       setSubscriptionOpen(false);
       await load();
+      if (shouldSchedule) onScheduleNegotiation?.(partnerId, productId);
     } catch (error: any) {
       setNotice(String(error?.message || error));
     } finally {
       setBusy(false);
     }
   };
-
   const deleteSubscription = async () => {
     if (!subscriptionDraft.id) return;
     const confirmed = await appDialog.confirm("Xóa đăng ký sản phẩm này?", {
@@ -422,7 +425,7 @@ export default function ProductManagement({
 
       {columnPickerOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4"><div className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between gap-3"><div><h2 className="text-xl font-extrabold">{"Ch\u1ecdn c\u1ed9t s\u1ea3n ph\u1ea9m"}</h2><p className="mt-1 text-sm text-slate-500">{"Ch\u1ec9 c\u1ed9t \u0111\u00e3 ch\u1ecdn m\u1edbi hi\u1ec7n tr\u00ean b\u1ea3ng. L\u1ef1a ch\u1ecdn \u0111\u01b0\u1ee3c ghi nh\u1edb cho t\u00e0i kho\u1ea3n n\u00e0y."}</p></div><button type="button" onClick={() => setColumnPickerOpen(false)}><X className="h-5 w-5" /></button></div><div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => persistColumnIds(candidateProducts.map((product) => product.id))} className="ft-btn ft-btn-secondary">{"Hi\u1ec7n t\u1ea5t c\u1ea3"}</button><button type="button" onClick={resetRecommendedColumns} className="ft-btn ft-btn-secondary">{"Ch\u1ecdn theo \u0111\u1ec1 xu\u1ea5t"}</button></div><div className="mt-4 grid gap-2 sm:grid-cols-2">{candidateProducts.map((product) => { const checked = productColumns.some((item) => item.id === product.id); return <label key={product.id} className="flex cursor-pointer items-center gap-3 rounded-xl border p-3 hover:border-blue-300"><input type="checkbox" checked={checked} onChange={() => { const base = savedColumnIds === null ? productColumns.map((item) => item.id) : savedColumnIds; persistColumnIds(checked ? base.filter((id) => id !== product.id) : [...base, product.id]); }} /><span><b className="block text-sm">{product.name}</b><span className="text-xs text-slate-500">{product.description || ""}</span></span></label>; })}{!candidateProducts.length && <p className="py-6 text-sm text-slate-500">{"Ch\u01b0a c\u00f3 s\u1ea3n ph\u1ea9m \u0111\u1ec3 ch\u1ecdn."}</p>}</div><div className="mt-6 flex justify-end"><button type="button" onClick={() => setColumnPickerOpen(false)} className="ft-primary">{"\u0110\u00f3ng"}</button></div></div></div>}
       {otherProductsPartner && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4"><div className="max-h-[calc(100vh-2rem)] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between gap-3"><div><h2 className="text-xl font-extrabold">{"S\u1ea3n ph\u1ea9m kh\u00e1c"}</h2><p className="mt-1 text-sm text-slate-500">{otherProductsPartner.name}</p></div><button type="button" onClick={() => setOtherProductsPartnerId(null)}><X className="h-5 w-5" /></button></div><div className="mt-5 space-y-3">{(otherProductsByPartner.get(otherProductsPartner.id) || []).map(({ product, subscription, trainingSessions }) => <div key={product.id} className="rounded-xl border p-4"><div className="flex items-start justify-between gap-3"><div><b>{product.name}</b><p className="mt-1 text-xs text-slate-500">{product.description}</p></div>{!isGuest && subscription && <button type="button" onClick={() => openSubscription(otherProductsPartner.id, product.id, subscription)} className="ft-btn ft-btn-secondary"><Pencil className="h-4 w-4" />{"S\u1eeda"}</button>}</div><p className="mt-3 text-sm font-semibold">{trainingSessions > 0 ? String(trainingSessions) + " bu\u1ed5i" : "SL: " + String(subscription?.quantity || 0)}</p>{subscription && <p className="mt-1 text-xs text-slate-500">{"Tr\u1ea1ng th\u00e1i:"} {statusNames[subscription.effective_status]} {"\u00b7 H\u1ea1n:"} {showDate(subscription.expires_at)}</p>}</div>)}</div><div className="mt-6 flex justify-end"><button type="button" onClick={() => setOtherProductsPartnerId(null)} className="ft-primary">{"\u0110\u00f3ng"}</button></div></div></div>}
-            {subscriptionOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4"><form onSubmit={saveSubscription} className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between gap-3"><div><h2 className="text-xl font-extrabold">{subscriptionDraft.id ? "Cập nhật đăng ký" : "Đăng ký sản phẩm"}</h2><p className="mt-1 text-sm text-slate-500">Thiết lập số lượng, thời hạn và trạng thái sử dụng.</p></div><button type="button" onClick={() => setSubscriptionOpen(false)}><X className="h-5 w-5" /></button></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><label><span className="mb-1 block text-sm font-bold">Khách hàng *</span><select required disabled={!!subscriptionDraft.id} value={subscriptionDraft.partner} onChange={(event) => setSubscriptionDraft({ ...subscriptionDraft, partner: event.target.value })} className="ft-input disabled:bg-slate-100"><option value="">Chọn khách hàng</option>{partners.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span className="mb-1 block text-sm font-bold">Sản phẩm *</span><select required disabled={!!subscriptionDraft.id} value={subscriptionDraft.product} onChange={(event) => setSubscriptionDraft({ ...subscriptionDraft, product: event.target.value })} className="ft-input disabled:bg-slate-100"><option value="">Chọn sản phẩm</option>{productList.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span className="mb-1 block text-sm font-bold">Số lượng *</span><input required type="number" min="1" className="ft-input" value={subscriptionDraft.quantity} onChange={(event) => setSubscriptionDraft({ ...subscriptionDraft, quantity: event.target.value })} /></label><label><span className="mb-1 block text-sm font-bold">Trạng thái</span><select className="ft-input" value={subscriptionDraft.status} onChange={(event) => setSubscriptionDraft({ ...subscriptionDraft, status: event.target.value })}><option value="active">Đang sử dụng</option><option value="paused">Tạm dừng</option><option value="cancelled">Đã hủy</option></select></label><label><span className="mb-1 block text-sm font-bold">Ngày bắt đầu</span><input type="date" className="ft-input" value={subscriptionDraft.starts_at} onChange={(event) => setSubscriptionDraft({ ...subscriptionDraft, starts_at: event.target.value })} /></label><label><span className="mb-1 block text-sm font-bold">Hạn sử dụng</span><input type="date" className="ft-input" value={subscriptionDraft.expires_at} onChange={(event) => setSubscriptionDraft({ ...subscriptionDraft, expires_at: event.target.value })} /></label><label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Ghi chú</span><textarea className="ft-input min-h-24" value={subscriptionDraft.notes} onChange={(event) => setSubscriptionDraft({ ...subscriptionDraft, notes: event.target.value })} /></label></div>{notice && <p className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{notice}</p>}<div className="mt-6 flex justify-between gap-3">{subscriptionDraft.id && <button type="button" onClick={() => void deleteSubscription()} className="ft-btn border-rose-200 text-rose-700"><Trash2 className="h-4 w-4" />Xóa đăng ký</button>}<div className="ml-auto flex gap-2"><button type="button" onClick={() => setSubscriptionOpen(false)} className="ft-btn ft-btn-secondary">Hủy</button><button disabled={busy} className="ft-primary">Lưu đăng ký</button></div></div></form></div>}
+            {subscriptionOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4"><form onSubmit={saveSubscription} className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between gap-3"><div><h2 className="text-xl font-extrabold">{subscriptionDraft.id ? "Cập nhật đăng ký" : "Đăng ký sản phẩm"}</h2><p className="mt-1 text-sm text-slate-500">Thiết lập số lượng, thời hạn và trạng thái sử dụng.</p></div><button type="button" onClick={() => setSubscriptionOpen(false)}><X className="h-5 w-5" /></button></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><label><span className="mb-1 block text-sm font-bold">Khách hàng *</span><select required disabled={!!subscriptionDraft.id} value={subscriptionDraft.partner} onChange={(event) => setSubscriptionDraft({ ...subscriptionDraft, partner: event.target.value })} className="ft-input disabled:bg-slate-100"><option value="">Chọn khách hàng</option>{partners.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span className="mb-1 block text-sm font-bold">Sản phẩm *</span><select required disabled={!!subscriptionDraft.id} value={subscriptionDraft.product} onChange={(event) => setSubscriptionDraft({ ...subscriptionDraft, product: event.target.value })} className="ft-input disabled:bg-slate-100"><option value="">Chọn sản phẩm</option>{productList.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span className="mb-1 block text-sm font-bold">Số lượng *</span><input required type="number" min="1" className="ft-input" value={subscriptionDraft.quantity} onChange={(event) => setSubscriptionDraft({ ...subscriptionDraft, quantity: event.target.value })} /></label><label><span className="mb-1 block text-sm font-bold">Trạng thái</span><select className="ft-input" value={subscriptionDraft.status} onChange={(event) => setSubscriptionDraft({ ...subscriptionDraft, status: event.target.value })}><option value="active">Đang sử dụng</option><option value="negotiating">Đang thương thảo</option><option value="paused">Tạm dừng</option><option value="cancelled">Đã hủy</option></select></label>{subscriptionDraft.status === "negotiating" && <label className="sm:col-span-2 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900"><input type="checkbox" checked={subscriptionDraft.add_meeting} onChange={(event) => setSubscriptionDraft({ ...subscriptionDraft, add_meeting: event.target.checked })} className="h-4 w-4" />Thêm lịch hẹn sau khi lưu</label>}<label><span className="mb-1 block text-sm font-bold">Ngày bắt đầu</span><input type="date" className="ft-input" value={subscriptionDraft.starts_at} onChange={(event) => setSubscriptionDraft({ ...subscriptionDraft, starts_at: event.target.value })} /></label><label><span className="mb-1 block text-sm font-bold">Hạn sử dụng</span><input type="date" className="ft-input" value={subscriptionDraft.expires_at} onChange={(event) => setSubscriptionDraft({ ...subscriptionDraft, expires_at: event.target.value })} /></label><label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Ghi chú</span><textarea className="ft-input min-h-24" value={subscriptionDraft.notes} onChange={(event) => setSubscriptionDraft({ ...subscriptionDraft, notes: event.target.value })} /></label></div>{notice && <p className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{notice}</p>}<div className="mt-6 flex justify-between gap-3">{subscriptionDraft.id && <button type="button" onClick={() => void deleteSubscription()} className="ft-btn border-rose-200 text-rose-700"><Trash2 className="h-4 w-4" />Xóa đăng ký</button>}<div className="ml-auto flex gap-2"><button type="button" onClick={() => setSubscriptionOpen(false)} className="ft-btn ft-btn-secondary">Hủy</button><button disabled={busy} className="ft-primary">Lưu đăng ký</button></div></div></form></div>}
       {productOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4">
         <form onSubmit={saveProduct} className="max-h-[calc(100vh-2rem)] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
           <div className="flex items-start justify-between"><div><h2 className="text-xl font-extrabold">{productDraft.id ? "Cập nhật danh mục" : "Thêm sản phẩm hoặc dịch vụ"}</h2><p className="mt-1 text-sm text-slate-500">Thông tin danh mục được dùng chung cho phân bổ và thống kê.</p></div><button type="button" onClick={() => setProductOpen(false)}><X className="h-5 w-5" /></button></div>
