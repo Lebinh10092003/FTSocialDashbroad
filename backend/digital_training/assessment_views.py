@@ -168,8 +168,8 @@ def assessment_import_preview(request):
     import_mode = str(request.data.get("import_mode") or "prepared").strip()
     try:
         if uploaded:
-            if not uploaded.name.lower().endswith(".xlsx"):
-                return _assessment_error("Vui lòng tải file .xlsx.")
+            if not uploaded.name.lower().endswith((".xlsx", ".xlsm")):
+                return _assessment_error("Vui lòng tải file .xlsx hoặc .xlsm.")
             if uploaded.size > 10 * 1024 * 1024:
                 return _assessment_error("File XLSX không được vượt quá 10 MB.")
             content = uploaded.read()
@@ -199,6 +199,8 @@ def assessment_import_preview(request):
                 return _assessment_error("So nguoi tham gia hoac so nguoi tren moi ma de khong hop le.")
             structure = request.data.get("structure") or []
             topic_config = request.data.get("topic_config") or []
+            knowledge_config = request.data.get("knowledge_config") or {}
+            score_config = request.data.get("score_config") or {}
             if isinstance(structure, str):
                 try:
                     structure = json.loads(structure)
@@ -209,8 +211,18 @@ def assessment_import_preview(request):
                     topic_config = json.loads(topic_config)
                 except json.JSONDecodeError:
                     return _assessment_error("Cơ cấu chủ đề không đúng định dạng JSON.")
-            if not isinstance(structure, list) or not isinstance(topic_config, list):
-                return _assessment_error("Cơ cấu đề phải là một danh sách.")
+            for config_name, config_value in (("knowledge_config", knowledge_config), ("score_config", score_config)):
+                if isinstance(config_value, str):
+                    try:
+                        parsed = json.loads(config_value)
+                    except json.JSONDecodeError:
+                        return _assessment_error("Cấu hình tạo đề không đúng định dạng JSON.")
+                    if config_name == "knowledge_config":
+                        knowledge_config = parsed
+                    else:
+                        score_config = parsed
+            if not isinstance(structure, list) or not isinstance(topic_config, list) or not isinstance(knowledge_config, dict) or not isinstance(score_config, dict):
+                return _assessment_error("Cấu hình tạo đề không hợp lệ.")
             requested_variant_count = request.data.get("variant_count")
             if requested_variant_count not in (None, ""):
                 try:
@@ -226,6 +238,8 @@ def assessment_import_preview(request):
                 request.data.get("seed"),
                 structure,
                 topic_config,
+                knowledge_config,
+                score_config,
             )
             result.update(generated)
             result["generation_config"].update({

@@ -79,6 +79,7 @@ type Preview = {
   errors: string[];
   warnings: string[];
   import_mode: "prepared" | "auto_generate";
+  analysis_only?: boolean;
   source_question_count?: number;
   bank_questions?: any[];
   available_groups?: string[];
@@ -161,7 +162,10 @@ export default function TrainingAssessmentsAdmin({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [bankFilters, setBankFilters] = useState({ category: "", knowledge_type: "", type: "", difficulty: "" });
-  const [topicConfigs, setTopicConfigs] = useState<Record<string, { total: string; theory: string; practice: string; easy: string; medium: string; hard: string }>>({});
+  const [topicConfigs, setTopicConfigs] = useState<Record<string, { total: string }>>({});
+  const [knowledgeCounts, setKnowledgeCounts] = useState({ theory: "10", practice: "10" });
+  const [scoreConfig, setScoreConfig] = useState({ theory: "1", practice: "3" });
+  const [analysisReady, setAnalysisReady] = useState(false);
   const [structureDirty, setStructureDirty] = useState(false);
   // List filters
   const [filterText, setFilterText] = useState("");
@@ -231,12 +235,23 @@ export default function TrainingAssessmentsAdmin({
     });
     return Array.from(rows.values()).sort((a, b) => a.category.localeCompare(b.category, "vi"));
   }, [bankQuestions]);
-  const topicConfigPayload = topicRows.map((row) => {
-    const config = topicConfigs[row.category] || { total: "", theory: "", practice: "", easy: "", medium: "", hard: "" };
-    return { category: row.category === "Không chủ đề" ? "" : row.category, total: Number(config.total || 0), theory: Number(config.theory || 0), practice: Number(config.practice || 0), easy: Number(config.easy || 0), medium: Number(config.medium || 0), hard: Number(config.hard || 0) };
-  }).filter((row) => row.total > 0);
+  const questionsPerVariantCount = Math.max(1, Math.min(200, Number.parseInt(questionsPerVariant, 10) || 1));
+  const topicConfigPayload = topicRows.map((row) => ({
+    category: row.category === "Không chủ đề" ? "" : row.category,
+    total: Number(topicConfigs[row.category]?.total || 0),
+  })).filter((row) => row.category && row.total > 0);
   const topicConfigTotal = topicConfigPayload.reduce((sum, row) => sum + row.total, 0);
-  const topicConfigInvalid = topicConfigPayload.some((row) => row.theory + row.practice !== row.total || row.easy + row.medium + row.hard !== row.total);
+  const topicConfigInvalid = topicConfigTotal !== questionsPerVariantCount;
+  const knowledgeConfigPayload = {
+    theory: Number(knowledgeCounts.theory || 0),
+    practice: Number(knowledgeCounts.practice || 0),
+  };
+  const knowledgeConfigInvalid = knowledgeConfigPayload.theory < 0 || knowledgeConfigPayload.practice < 0 || knowledgeConfigPayload.theory + knowledgeConfigPayload.practice !== questionsPerVariantCount;
+  const scoreConfigPayload = {
+    theory: Number(scoreConfig.theory),
+    practice: Number(scoreConfig.practice),
+  };
+  const scoreConfigInvalid = !Number.isFinite(scoreConfigPayload.theory) || !Number.isFinite(scoreConfigPayload.practice) || scoreConfigPayload.theory < 0 || scoreConfigPayload.practice < 0;
   const bankFilterOptions = (field: keyof typeof bankFilters) => Array.from(new Set(bankQuestions.map((item) => String(item[field] || "")).filter(Boolean))).sort();
   const filteredBankQuestions = bankQuestions.filter((item) => Object.entries(bankFilters).every(([field, value]) => !value || String(item[field] || "") === value));
   const partnerOptions = useMemo(() => Array.from(new Set(items.map((item) => item.partner_name).filter(Boolean))).sort(), [items]);
@@ -259,57 +274,83 @@ export default function TrainingAssessmentsAdmin({
     setVariantCount("1");
     setPreview(null);
     setTopicConfigs({});
+    setKnowledgeCounts({ theory: "10", practice: "10" });
+    setScoreConfig({ theory: "1", practice: "3" });
+    setAnalysisReady(false);
     setStructureDirty(false);
     setNotice("");
     setScreen("create");
   };
 
   const importQuestions = async () => {
+    const shouldAnalyse = importMode === "auto_generate" && !analysisReady;
+    if (!shouldAnalyse && importMode === "auto_generate") {
+      if (!topicConfigPayload.length) {
+        setNotice("Hãy chọn ít nhất một chủ đề và số câu cho từng chủ đề.");
+        return;
+      }
+      if (topicConfigInvalid || knowledgeConfigInvalid) {
+        setNotice("Tổng số câu theo chủ đề và tổng Lý thuyết + Thực hành đều phải bằng số câu mỗi đề.");
+        return;
+      }
+      if (scoreConfigInvalid) {
+        setNotice("Điểm mỗi câu Lý thuyết/Thực hành phải là số không âm.");
+        return;
+      }
+    }
     setBusy(true);
     setNotice("");
     try {
+      const requestMode = shouldAnalyse ? "prepared" : importMode;
       let response: Response;
       if (sourceMode === "xlsx") {
-        if (!file) throw new Error("Vui lòng chọn file XLSX.");
+        if (!file) throw new Error("Vui lòng chọn file XLSX hoặc XLSM.");
         const data = new FormData();
         data.append("file", file);
-        data.append("import_mode", importMode);
+        data.append("import_mode", requestMode);
         data.append("variant_count", String(normalizedVariantCount));
         data.append("audience_group", draft.audience_group);
-        if (importMode === "auto_generate") {
-          data.append("questions_per_variant", String(topicConfigTotal || Number(questionsPerVariant)));
+        if (!shouldAnalyse && importMode === "auto_generate") {
+          data.append("questions_per_variant", String(questionsPerVariantCount));
           data.append("topic_config", JSON.stringify(topicConfigPayload));
+          data.append("knowledge_config", JSON.stringify(knowledgeConfigPayload));
+          data.append("score_config", JSON.stringify(scoreConfigPayload));
         }
-        response = await fetch("/api/digital-training/assessments/import-preview", {
-          method: "POST",
-          headers: auth,
-          body: data,
-        });
+        response = await fetch("/api/digital-training/assessments/import-preview", { method: "POST", headers: auth, body: data });
       } else {
-        if (!sheetUrl.trim()) throw new Error("Vui lòng nhập đường dẫn Google Sheet.");
+        if (!sheetUrl.trim()) throw new Error("Vui lòng nhập đường dẫn Google Sheet hoặc Google Drive.");
         response = await fetch("/api/digital-training/assessments/import-preview", {
           method: "POST",
           headers: { ...auth, "Content-Type": "application/json" },
           body: JSON.stringify({
             google_sheet_url: sheetUrl.trim(),
-            import_mode: importMode,
+            import_mode: requestMode,
             variant_count: normalizedVariantCount,
-            questions_per_variant: topicConfigTotal || Number(questionsPerVariant),
+            questions_per_variant: questionsPerVariantCount,
             audience_group: draft.audience_group,
-            topic_config: topicConfigPayload,
+            topic_config: !shouldAnalyse && importMode === "auto_generate" ? topicConfigPayload : [],
+            knowledge_config: !shouldAnalyse && importMode === "auto_generate" ? knowledgeConfigPayload : {},
+            score_config: !shouldAnalyse && importMode === "auto_generate" ? scoreConfigPayload : {},
           }),
         });
       }
       if (!response.ok) throw new Error(await errorText(response));
-      setPreview(await response.json());
-      setStructureDirty(false);
+      const imported: Preview = await response.json();
+      if (shouldAnalyse) {
+        const bank = imported.bank_questions || imported.questions || [];
+        setPreview({ ...imported, import_mode: "auto_generate", analysis_only: true, questions: [], variants: [], question_count: 0, source_question_count: bank.length, bank_questions: bank });
+        setTopicConfigs(Object.fromEntries(Array.from(new Set(bank.map((item: any) => String(item.category || "").trim()).filter(Boolean))).map((category) => [category, { total: "0" }])));
+        setAnalysisReady(true);
+      } else {
+        setPreview(imported);
+        setStructureDirty(false);
+      }
     } catch (error: any) {
       setNotice(String(error?.message || error));
     } finally {
       setBusy(false);
     }
   };
-
   const createAssessment = async () => {
     if (!preview || preview.errors.length) return;
     if (structureDirty) {
@@ -601,7 +642,7 @@ export default function TrainingAssessmentsAdmin({
           <div className="mt-5 grid gap-3 md:grid-cols-2">
             <button
               type="button"
-              onClick={() => { setImportMode("prepared"); setPreview(null); setTopicConfigs({}); setStructureDirty(false); }}
+              onClick={() => { setImportMode("prepared"); setPreview(null); setTopicConfigs({}); setAnalysisReady(false); setStructureDirty(false); }}
               className={`rounded-2xl border-2 p-4 text-left transition ${importMode === "prepared" ? "border-blue-600 bg-blue-50" : "border-slate-200 bg-white hover:border-blue-200"}`}
             >
               <span className="flex items-center gap-2 font-extrabold text-[#001e40]"><Layers3 className="h-5 w-5 text-blue-600" />Nhập 4–5 đề soạn sẵn</span>
@@ -609,7 +650,7 @@ export default function TrainingAssessmentsAdmin({
             </button>
             <button
               type="button"
-              onClick={() => { setImportMode("auto_generate"); setPreview(null); setTopicConfigs({}); setStructureDirty(false); }}
+              onClick={() => { setImportMode("auto_generate"); setPreview(null); setTopicConfigs({}); setAnalysisReady(false); setStructureDirty(false); }}
               className={`rounded-2xl border-2 p-4 text-left transition ${importMode === "auto_generate" ? "border-emerald-600 bg-emerald-50" : "border-slate-200 bg-white hover:border-emerald-200"}`}
             >
               <span className="flex items-center gap-2 font-extrabold text-[#001e40]"><Shuffle className="h-5 w-5 text-emerald-600" />Tự động sinh đề từ file nhập</span>
@@ -621,7 +662,7 @@ export default function TrainingAssessmentsAdmin({
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Tên bài *</span><input className="ft-input" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Bài kiểm tra cuối học phần" /></label>
                 <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Đơn vị / phân lớp *</span><select className="ft-input" value={draft.target} onChange={(event) => setDraft({ ...draft, target: event.target.value })}><option value="">Chọn đơn vị hoặc phân lớp</option>{targets.map((target) => <option key={target.value} value={target.value}>{target.label}</option>)}</select><small className="mt-1 block text-slate-500">Mỗi đơn vị/phân lớp chỉ có một khảo sát kết thúc tập huấn và một link công khai.</small></label>
-                {(preview?.available_groups || []).length > 0 && <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Nhóm đối tượng trong ngân hàng *</span><select className="ft-input" value={draft.audience_group} onChange={(event) => { setDraft({ ...draft, audience_group: event.target.value }); setPreview(null); }}><option value="">Chọn nhóm đối tượng</option>{(preview?.available_groups || []).map((group) => <option key={group} value={group}>{group}</option>)}</select><small className="mt-1 block text-slate-500">Sau khi chọn nhóm, bấm đọc lại dữ liệu để tạo đúng câu hỏi.</small></label>}
+                {(preview?.available_groups || []).length > 0 && <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Nhóm đối tượng trong ngân hàng *</span><select className="ft-input" value={draft.audience_group} onChange={(event) => { setDraft({ ...draft, audience_group: event.target.value }); setPreview(null); setAnalysisReady(false); }}><option value="">Chọn nhóm đối tượng</option>{(preview?.available_groups || []).map((group) => <option key={group} value={group}>{group}</option>)}</select><small className="mt-1 block text-slate-500">Sau khi chọn nhóm, bấm đọc lại dữ liệu để tạo đúng câu hỏi.</small></label>}
                 <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Google Sheet đầu ra của đợt thi</span><input type="url" className="ft-input" value={draft.output_sheet_url} onChange={(event) => setDraft({ ...draft, output_sheet_url: event.target.value })} placeholder="https://docs.google.com/spreadsheets/d/..." /><small className="mt-1 block text-slate-500">Dùng file riêng của khách hàng; hệ thống tạo các trang Tổng quan, Phân đề, Đề, Bài làm và Nhật ký xóa.</small></label>
                 <fieldset className="sm:col-span-2 rounded-xl border bg-slate-50 p-4"><legend className="px-2 text-sm font-extrabold text-slate-800">Nơi lưu tệp bài làm trên Google Drive</legend><label><span className="mb-1 block text-sm font-bold">ID thư mục gốc</span><input className="ft-input bg-white" value={draft.drive_folder_id} onChange={(event) => setDraft({ ...draft, drive_folder_id: event.target.value })} placeholder="Ví dụ: 1AbC... lấy từ URL thư mục Drive" /></label><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="flex items-start gap-2 rounded-lg border bg-white p-3 text-sm"><input type="checkbox" className="mt-1" checked={draft.create_customer_folder} onChange={(event) => setDraft({ ...draft, create_customer_folder: event.target.checked })} /><span><b className="block">Tạo thư mục theo khách hàng</b><span className="text-xs text-slate-500">Mặc định dùng tên đơn vị đã chọn.</span></span></label><label className="flex items-start gap-2 rounded-lg border bg-white p-3 text-sm"><input type="checkbox" className="mt-1" checked={draft.create_participant_folder} onChange={(event) => setDraft({ ...draft, create_participant_folder: event.target.checked })} /><span><b className="block">Mỗi người một thư mục</b><span className="text-xs text-slate-500">Tránh lẫn tệp giữa các bài làm.</span></span></label>{draft.create_customer_folder && <label><span className="mb-1 block text-xs font-bold">Tên thư mục khách hàng (không bắt buộc)</span><input className="ft-input bg-white" value={draft.customer_folder_name} onChange={(event) => setDraft({ ...draft, customer_folder_name: event.target.value })} placeholder="Để trống để dùng tên đơn vị" /></label>}{draft.create_participant_folder && <label><span className="mb-1 block text-xs font-bold">Mẫu tên thư mục người làm</span><input className="ft-input bg-white font-mono text-sm" value={draft.participant_folder_template} onChange={(event) => setDraft({ ...draft, participant_folder_template: event.target.value })} /><small className="mt-1 block text-slate-500">Biến: {"{participant_code}"}, {"{respondent_name}"}, {"{email}"}, {"{phone}"}, {"{variant}"}.</small></label>}</div></fieldset>
                 <label><span className="mb-1 block text-sm font-bold">Thời gian làm bài (phút)</span><input type="number" min="1" max="480" className="ft-input" value={draft.duration_minutes} onChange={(event) => setDraft({ ...draft, duration_minutes: event.target.value })} /></label>
@@ -635,14 +676,14 @@ export default function TrainingAssessmentsAdmin({
             <div className="rounded-2xl border bg-slate-50 p-5">
               <h3 className="font-extrabold">{importMode === "auto_generate" ? "File câu hỏi nguồn" : "Nguồn các mã đề"}</h3>
               {importMode === "auto_generate" && <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                <label><span className="mb-1 block text-xs font-bold text-emerald-900">Số mã đề</span><input type="number" min="1" max="200" className="ft-input bg-white" value={variantCount} onChange={(event) => { setVariantCount(event.target.value); setPreview(null); setTopicConfigs({}); setStructureDirty(false); }} /><small className="mt-1 block text-[11px] text-emerald-800">Chọn từ 1 đến 200 mã đề.</small></label>
+                <label><span className="mb-1 block text-xs font-bold text-emerald-900">Số mã đề</span><input type="number" min="1" max="200" className="ft-input bg-white" value={variantCount} onChange={(event) => { setVariantCount(event.target.value); setPreview(null); setTopicConfigs({}); setAnalysisReady(false); setStructureDirty(false); }} /><small className="mt-1 block text-[11px] text-emerald-800">Chọn từ 1 đến 200 mã đề.</small></label>
               </div>}
               <div className="mt-3 grid grid-cols-2 rounded-xl bg-slate-200 p-1 text-sm font-bold">
-                <button onClick={() => { setSourceMode("xlsx"); setPreview(null); setTopicConfigs({}); setStructureDirty(false); }} className={`rounded-lg px-3 py-2 ${sourceMode === "xlsx" ? "bg-white shadow-sm" : ""}`}>Tệp XLSX</button>
-                <button onClick={() => { setSourceMode("google_sheet"); setPreview(null); setTopicConfigs({}); setStructureDirty(false); }} className={`rounded-lg px-3 py-2 ${sourceMode === "google_sheet" ? "bg-white shadow-sm" : ""}`}>Google Sheet</button>
+                <button onClick={() => { setSourceMode("xlsx"); setPreview(null); setTopicConfigs({}); setAnalysisReady(false); setStructureDirty(false); }} className={`rounded-lg px-3 py-2 ${sourceMode === "xlsx" ? "bg-white shadow-sm" : ""}`}>Tệp XLSX</button>
+                <button onClick={() => { setSourceMode("google_sheet"); setPreview(null); setTopicConfigs({}); setAnalysisReady(false); setStructureDirty(false); }} className={`rounded-lg px-3 py-2 ${sourceMode === "google_sheet" ? "bg-white shadow-sm" : ""}`}>Google Sheet / Drive</button>
               </div>
-              {sourceMode === "xlsx" ? <label className="mt-4 flex cursor-pointer flex-col items-center rounded-xl border-2 border-dashed border-slate-300 bg-white p-6 text-center"><FileSpreadsheet className="h-9 w-9 text-emerald-600" /><b className="mt-2">{file?.name || "Chọn file .xlsx"}</b><span className="mt-1 text-xs text-slate-500">{importMode === "prepared" ? "Một file chứa toàn bộ 4–5 sheet đề" : "Một sheet chứa các câu hỏi nguồn"} · Tối đa 10 MB</span><input type="file" accept=".xlsx" className="hidden" onChange={(event) => { setFile(event.target.files?.[0] || null); setPreview(null); }} /></label> : <label className="mt-4 block"><span className="mb-1 block text-sm font-bold">Đường dẫn Google Sheet</span><input className="ft-input" value={sheetUrl} onChange={(event) => { setSheetUrl(event.target.value); setPreview(null); }} placeholder="https://docs.google.com/spreadsheets/d/..." /><small className="mt-2 block text-slate-500">Sheet cần bật “Bất kỳ ai có đường liên kết đều có thể xem”. Hệ thống đọc toàn bộ các tab.</small></label>}
-              <button disabled={busy} onClick={importQuestions} className="ft-primary mt-4 w-full justify-center"><Upload className="h-4 w-4" />{importMode === "auto_generate" ? (preview ? "Sinh lại các mã đề" : "Đọc file và tự động sinh đề") : "Đọc và kiểm tra dữ liệu"}</button>
+              {sourceMode === "xlsx" ? <label className="mt-4 flex cursor-pointer flex-col items-center rounded-xl border-2 border-dashed border-slate-300 bg-white p-6 text-center"><FileSpreadsheet className="h-9 w-9 text-emerald-600" /><b className="mt-2">{file?.name || "Chọn file .xlsx hoặc .xlsm"}</b><span className="mt-1 text-xs text-slate-500">{importMode === "prepared" ? "Một file chứa toàn bộ 4–5 sheet đề" : "Một ngân hàng có thể gồm nhiều sheet/nhóm câu hỏi"} · Tối đa 10 MB</span><input type="file" accept=".xlsx,.xlsm" className="hidden" onChange={(event) => { setFile(event.target.files?.[0] || null); setPreview(null); setAnalysisReady(false); }} /></label> : <label className="mt-4 block"><span className="mb-1 block text-sm font-bold">Đường dẫn Google Sheet / Google Drive</span><input className="ft-input" value={sheetUrl} onChange={(event) => { setSheetUrl(event.target.value); setPreview(null); setAnalysisReady(false); }} placeholder="https://docs.google.com/... hoặc https://drive.google.com/file/d/..." /><small className="mt-2 block text-slate-500">Nguồn cần bật quyền xem qua liên kết. Hệ thống đọc toàn bộ các tab/nhóm câu hỏi.</small></label>}
+              <button disabled={busy} onClick={importQuestions} className="ft-primary mt-4 w-full justify-center"><Upload className="h-4 w-4" />{importMode === "auto_generate" ? (!analysisReady ? "Phân tích ngân hàng câu hỏi" : preview?.analysis_only ? "Sinh các mã đề theo cấu hình" : "Sinh lại các mã đề") : "Đọc và kiểm tra dữ liệu"}</button>
               {preview && <div className="mt-4 space-y-3">
                 <div className={`grid gap-2 ${preview.import_mode === "auto_generate" ? "grid-cols-3" : "grid-cols-2"}`}>
                   {preview.import_mode === "auto_generate" && <div className="rounded-lg bg-white p-3"><b className="text-xl">{preview.source_question_count}</b><span className="block text-xs text-slate-500">câu trong file nguồn</span></div>}
@@ -650,17 +691,14 @@ export default function TrainingAssessmentsAdmin({
                   <div className="rounded-lg bg-white p-3"><b className="text-xl">{preview.question_count}</b><span className="block text-xs text-slate-500">câu sau khi chia</span></div>
                 </div>
                 <div className="flex flex-wrap gap-2">{preview.variants.map((variant) => <span key={variant.name} className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-800">{variant.name}: {variant.question_count} câu</span>)}</div>
-                {preview.import_mode === "auto_generate" && !!topicRows.length && <div className="rounded-xl border bg-white p-3">
-                  <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-extrabold uppercase text-slate-500">Cơ cấu đề theo chủ đề</p><p className="mt-1 text-xs text-slate-500">Nhập số câu cho chủ đề muốn chọn. Trong mỗi chủ đề, tổng Lý thuyết + Thực hành và Dễ + Trung bình + Khó phải bằng số câu của chủ đề.</p></div><b className={`text-sm ${topicConfigInvalid ? "text-rose-600" : "text-emerald-700"}`}>{topicConfigTotal || "Chưa chọn"}{topicConfigTotal ? " câu/mã đề" : ""}</b></div>
-                  <div className="mt-3 max-h-[34rem] space-y-3 overflow-y-auto">{topicRows.map((row) => {
-                    const config = topicConfigs[row.category] || { total: "", theory: "", practice: "", easy: "", medium: "", hard: "" };
-                    const update = (field: keyof typeof config, value: string) => { setTopicConfigs((current) => ({ ...current, [row.category]: { ...config, [field]: value } })); setStructureDirty(true); };
-                    return <div key={row.category} className="rounded-xl border bg-slate-50 p-3"><div className="mb-2 flex items-center justify-between gap-3"><b className="text-sm">{row.category}</b><span className="text-[11px] text-slate-500">Ngân hàng: {row.available} câu</span></div><div className="grid grid-cols-3 gap-2"><label><span className="block text-[11px] font-bold">Số câu</span><input type="number" min="0" max={row.available} className="ft-input bg-white" value={config.total} placeholder="0" onChange={(event) => update("total", event.target.value)} /></label><label><span className="block text-[11px] font-bold">Lý thuyết</span><input type="number" min="0" max={row.theory} className="ft-input bg-white" value={config.theory} placeholder={`Tối đa ${row.theory}`} onChange={(event) => update("theory", event.target.value)} /></label><label><span className="block text-[11px] font-bold">Thực hành</span><input type="number" min="0" max={row.practice} className="ft-input bg-white" value={config.practice} placeholder={`Tối đa ${row.practice}`} onChange={(event) => update("practice", event.target.value)} /></label><label><span className="block text-[11px] font-bold">Dễ</span><input type="number" min="0" max={row.easy} className="ft-input bg-white" value={config.easy} placeholder={`Tối đa ${row.easy}`} onChange={(event) => update("easy", event.target.value)} /></label><label><span className="block text-[11px] font-bold">Trung bình</span><input type="number" min="0" max={row.medium} className="ft-input bg-white" value={config.medium} placeholder={`Tối đa ${row.medium}`} onChange={(event) => update("medium", event.target.value)} /></label><label><span className="block text-[11px] font-bold">Khó</span><input type="number" min="0" max={row.hard} className="ft-input bg-white" value={config.hard} placeholder={`Tối đa ${row.hard}`} onChange={(event) => update("hard", event.target.value)} /></label></div></div>;
-                  })}</div>
-                  {topicConfigInvalid && <p className="mt-2 text-xs font-bold text-rose-700">Các tổng phân bổ chưa khớp số câu đã chọn.</p>}
-                  {structureDirty && <p className="mt-2 text-xs font-bold text-amber-700">Đã đổi cơ cấu. Bấm Sinh lại các mã đề để áp dụng.</p>}
-                </div>}
-                {!!bankQuestions.length && <button type="button" onClick={() => setScreen("bank")} className="ft-btn ft-btn-secondary w-full justify-center"><FileSpreadsheet className="h-4 w-4" />Mở trang ngân hàng câu hỏi ({bankQuestions.length})</button>}
+                {importMode === "auto_generate" && analysisReady && !!topicRows.length && <div className="rounded-xl border border-emerald-200 bg-white p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-extrabold uppercase text-emerald-700">Thiết lập đề</p><h4 className="mt-1 font-extrabold text-slate-900">Chọn câu hỏi theo ngân hàng của đơn vị</h4><p className="mt-1 text-xs text-slate-500">Bước 1: chọn chủ đề và số câu. Bước 2: hệ thống lấy đúng cơ cấu Lý thuyết/Thực hành, rồi đặt điểm mặc định theo loại câu.</p></div><b className={`rounded-full px-3 py-1 text-xs ${topicConfigInvalid || knowledgeConfigInvalid || scoreConfigInvalid ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{questionsPerVariantCount} câu/mã đề</b></div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-3"><label><span className="mb-1 block text-xs font-bold">Số câu mỗi đề *</span><input type="number" min="1" max="200" className="ft-input" value={questionsPerVariant} onChange={(event) => { setQuestionsPerVariant(event.target.value); setStructureDirty(true); }} /></label><label><span className="mb-1 block text-xs font-bold">Câu Lý thuyết *</span><input type="number" min="0" className="ft-input" value={knowledgeCounts.theory} onChange={(event) => { setKnowledgeCounts({ ...knowledgeCounts, theory: event.target.value }); setStructureDirty(true); }} /></label><label><span className="mb-1 block text-xs font-bold">Câu Thực hành *</span><input type="number" min="0" className="ft-input" value={knowledgeCounts.practice} onChange={(event) => { setKnowledgeCounts({ ...knowledgeCounts, practice: event.target.value }); setStructureDirty(true); }} /></label></div>
+                  <div className="mt-3 grid gap-3 rounded-xl bg-slate-50 p-3 md:grid-cols-2"><label><span className="mb-1 block text-xs font-bold">Điểm mỗi câu Lý thuyết</span><input type="number" min="0" step="0.25" className="ft-input bg-white" value={scoreConfig.theory} onChange={(event) => { setScoreConfig({ ...scoreConfig, theory: event.target.value }); setStructureDirty(true); }} /></label><label><span className="mb-1 block text-xs font-bold">Điểm mỗi câu Thực hành</span><input type="number" min="0" step="0.25" className="ft-input bg-white" value={scoreConfig.practice} onChange={(event) => { setScoreConfig({ ...scoreConfig, practice: event.target.value }); setStructureDirty(true); }} /></label></div>
+                  <div className="mt-4"><div className="flex items-center justify-between gap-2"><b className="text-sm">Chủ đề áp dụng cho đơn vị này</b><span className="text-xs text-slate-500">Tổng đã chọn: {topicConfigTotal}/{questionsPerVariantCount} câu</span></div><div className="mt-2 grid gap-2 sm:grid-cols-2">{topicRows.filter((row) => row.category !== "Không chủ đề").map((row) => { const total = topicConfigs[row.category]?.total || "0"; return <label key={row.category} className="flex items-center gap-3 rounded-xl border bg-slate-50 p-3"><input type="number" min="0" max={row.available} className="ft-input w-20 bg-white text-center" value={total} onChange={(event) => { setTopicConfigs((current) => ({ ...current, [row.category]: { total: event.target.value } })); setStructureDirty(true); }} /><span><b className="block text-sm">{row.category}</b><span className="text-xs text-slate-500">Ngân hàng: {row.available} câu · LT {row.theory} · TH {row.practice}</span></span></label>; })}</div></div>
+                  {(topicConfigInvalid || knowledgeConfigInvalid || scoreConfigInvalid) && <p className="mt-3 rounded-lg bg-rose-50 p-2 text-xs font-bold text-rose-700">Tổng số câu theo chủ đề và tổng Lý thuyết + Thực hành phải đều bằng {questionsPerVariantCount}; điểm phải là số không âm.</p>}
+                  {structureDirty && <p className="mt-2 text-xs font-bold text-amber-700">Đã đổi cấu hình. Bấm “Sinh các mã đề theo cấu hình” để áp dụng.</p>}
+                </div>}                {!!bankQuestions.length && <button type="button" onClick={() => setScreen("bank")} className="ft-btn ft-btn-secondary w-full justify-center"><FileSpreadsheet className="h-4 w-4" />Mở trang ngân hàng câu hỏi ({bankQuestions.length})</button>}
                 {preview.warnings.map((warning) => <p key={warning} className="rounded-lg bg-amber-50 p-2 text-xs text-amber-800">{warning}</p>)}
                 {preview.errors.map((error) => <p key={error} className="rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{error}</p>)}
                 {!preview.errors.length && <div className="max-h-96 space-y-2 overflow-y-auto rounded-xl border bg-white p-2">
@@ -705,7 +743,7 @@ export default function TrainingAssessmentsAdmin({
           {notice && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{notice}</p>}
           <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
             <label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={draft.status === "published"} onChange={(event) => setDraft({ ...draft, status: event.target.checked ? "published" : "draft" })} />Phát hành ngay sau khi tạo</label>
-            <button disabled={busy || !preview || preview.errors.length > 0 || structureDirty} onClick={createAssessment} className="ft-primary disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}Tạo khảo sát kết thúc</button>
+            <button disabled={busy || !preview || preview.analysis_only || preview.errors.length > 0 || structureDirty} onClick={createAssessment} className="ft-primary disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}Tạo khảo sát kết thúc</button>
           </div>
         </div>
       </section>

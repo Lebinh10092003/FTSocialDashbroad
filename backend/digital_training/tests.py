@@ -741,6 +741,42 @@ class TrainingAssessmentTests(TestCase):
             counts = Counter((item["knowledge_type"], item["type"], item["difficulty"]) for item in questions)
             self.assertEqual(counts[("Theory", "short_answer", "Easy")], 2)
             self.assertEqual(counts[("Practice", "practical_submission", "Hard")], 2)
+    def test_import_generation_applies_topics_knowledge_counts_and_points(self):
+        source_questions = []
+        for category in ("Kỹ năng cơ bản", "Nghiệp vụ"):
+            for knowledge_type, question_type in (("Theory", "short_answer"), ("Practice", "practical_submission")):
+                for index in range(1, 5):
+                    source_questions.append({
+                        "id": f"{category}-{knowledge_type}-{index}",
+                        "type": question_type,
+                        "text": f"{category} {knowledge_type} question {index}",
+                        "options": [],
+                        "correct_answers": ["ok"],
+                        "points": 9,
+                        "required": True,
+                        "category": category,
+                        "knowledge_type": knowledge_type,
+                    })
+
+        result = generate_variants_from_import(
+            source_questions,
+            variant_count=2,
+            questions_per_variant=4,
+            seed=7,
+            topic_config=[
+                {"category": "Kỹ năng cơ bản", "total": 2},
+                {"category": "Nghiệp vụ", "total": 2},
+            ],
+            knowledge_config={"theory": 2, "practice": 2},
+            score_config={"theory": 1, "practice": 3},
+        )
+
+        for variant in result["variants"]:
+            questions = [item for item in result["questions"] if item["variant"] == variant["name"]]
+            self.assertEqual(Counter(item["category"] for item in questions), Counter({"Kỹ năng cơ bản": 2, "Nghiệp vụ": 2}))
+            self.assertEqual(Counter(item["knowledge_type"] for item in questions), Counter({"Theory": 2, "Practice": 2}))
+            self.assertEqual({item["points"] for item in questions if item["knowledge_type"] == "Theory"}, {1})
+            self.assertEqual({item["points"] for item in questions if item["knowledge_type"] == "Practice"}, {3})
     def test_xlsx_parser_uses_sheet_names_for_prepared_variants(self):
         workbook = Workbook()
         first = workbook.active
