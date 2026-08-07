@@ -53,6 +53,7 @@ export const EMAIL_RENDER_CONTRACTS: Record<BlockType, EmailRenderContract> = {
   divider: native('Đường phân cách giữ cùng độ dày, kiểu nét và màu.'),
   spacer: native('Khoảng trắng giữ cùng chiều cao.'),
   signature: native('Chữ ký giữ cùng rich text và typography.'),
+  'signature-builder': native('Trình tạo chữ ký dùng cùng logo, thông tin, liên kết và kích thước trong canvas và email.'),
   'social-links': native('Liên kết giữ cùng nhãn, URL và căn lề.'),
   section: shared('Nền, màu tương phản, padding, viền và typography dùng chung.'),
   columns: shared('Kích thước ô, gap, nền, viền và màu tương phản dùng chung.'),

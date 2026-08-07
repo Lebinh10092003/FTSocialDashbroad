@@ -440,6 +440,34 @@ export function generateEmailHtml(
 `;
       }
 
+      case 'signature-builder': {
+        const width = Math.max(320, Math.min(900, Number(content.width) || 650));
+        const logoWidth = Math.max(48, Math.min(320, Number(content.logoWidth) || 150));
+        const padding = Math.max(0, Math.min(48, Number(content.padding) || 18));
+        const accent = content.accentColor || '#1473D1';
+        const text = content.textColor || '#28323D';
+        const titleSize = Math.max(12, Math.min(48, Number(content.titleSize) || 22));
+        const bodySize = Math.max(9, Math.min(24, Number(content.bodySize) || 12));
+        const socialDefinitions = [
+          ['Facebook', 'Facebook', 'facebookUrl', 'showFacebook'],
+          ['LinkedIn', 'in', 'linkedInUrl', 'showLinkedIn'],
+          ['YouTube', '▶', 'youtubeUrl', 'showYoutube'],
+          ['Instagram', '◎', 'instagramUrl', 'showInstagram'],
+          [content.otherLabel || 'Kênh khác', '•', 'otherUrl', 'showOther'],
+        ];
+        const socialLinks = socialDefinitions.filter(([, , urlKey, visibleKey]) => content[visibleKey] !== false && content[urlKey]);
+        socialLinks.forEach(([, , urlKey]) => checkLinkUrl(content[urlKey], 'Liên kết chữ ký'));
+        const details = [
+          content.phone ? `Điện thoại: ${rep(content.phone)}` : '',
+          content.email ? `Email: ${rep(content.email)}` : '',
+          content.website ? `Website: ${rep(content.website)}` : '',
+          content.address ? `Địa chỉ: ${rep(content.address)}` : '',
+        ].filter(Boolean).join('<br>');
+        const socials = socialLinks.length ? `<tr><td style="padding-top:10px;font-family:${fontFamily};font-size:${bodySize}px;line-height:1.4;">${socialLinks.map(([label, mark, urlKey]) => `<a href="${rep(content[urlKey])}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin:0 8px 4px 0;color:${accent};text-decoration:none;font-weight:bold;"><span style="display:inline-block;min-width:18px;height:18px;line-height:18px;margin-right:4px;border-radius:9px;background:${accent};color:#ffffff;text-align:center;font-size:10px;">${mark}</span>${rep(label)}</a>`).join('')}</td></tr>` : '';
+        const logo = content.logoUrl ? `<td width="${Math.min(220, logoWidth + 36)}" valign="middle" align="center" style="width:${Math.min(220, logoWidth + 36)}px;padding:${padding}px;border-right:1px solid #d9e2ef;"><img src="${rep(content.logoUrl)}" alt="${rep(content.logoAlt || 'Logo')}" width="${logoWidth}" style="display:block;width:${logoWidth}px;max-width:100%;height:auto;border:0;margin:0 auto;"></td>` : '';
+        const divider = content.logoUrl ? '' : `border-left:0;`;
+        return `<table role="presentation" class="ft-email-block ft-email-signature-builder" width="${width}" border="0" cellspacing="0" cellpadding="0" style="width:100%;max-width:${width}px;border-collapse:collapse;border-top:5px solid ${accent};border-bottom:6px solid ${accent};margin-top:${marginTop}px;margin-bottom:${marginBottom}px;"><tr>${logo}<td valign="top" style="${divider}padding:${padding}px;font-family:${fontFamily};color:${text};"><div style="font-size:${titleSize}px;line-height:1.2;font-weight:700;letter-spacing:.2px;color:${accent};text-transform:uppercase;">${rep(content.fullName || '')}</div><div style="padding-top:5px;font-size:${Math.max(10, bodySize + 1)}px;line-height:1.4;color:${text};">${rep(content.jobTitle || '')}</div><div style="padding-top:6px;font-size:${Math.max(10, bodySize + 1)}px;line-height:1.4;font-weight:700;color:${accent};text-transform:uppercase;">${rep(content.company || '')}</div><div style="margin:10px 0 9px;border-top:1px solid #d9e2ef;font-size:1px;line-height:1px;">&nbsp;</div><div style="font-size:${bodySize}px;line-height:1.65;color:${text};">${details}</div><table role="presentation" border="0" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">${socials}</table></td></tr></table>`;
+      }
       case 'signature': {
         const rawHtml = content.html || '';
         const fontSize = content.fontSize || 14;
@@ -729,7 +757,11 @@ export function generateEmailHtml(
         plainTextLines.push(`\n--- LƯU Ý ---\n${rep(text)}\n-------------`);
         break;
       }
-      case 'signature': {
+      case 'signature-builder': {
+        const details = [content.fullName, content.jobTitle, content.company, content.phone, content.email, content.website, content.address].filter(Boolean).join('\n');
+        if (details) plainTextLines.push(`\n${rep(details)}`);
+        break;
+      }      case 'signature': {
         const text = (content.html || '').replace(/<[^>]+>/g, '\n').trim();
         plainTextLines.push(`\nCHỮ KÝ:\n${rep(text)}`);
         break;

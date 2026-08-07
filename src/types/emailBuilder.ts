@@ -13,6 +13,7 @@ export type BlockType =
   | 'divider'
   | 'spacer'
   | 'signature'
+  | 'signature-builder'
   | 'social-links'
   | 'section' | 'columns' | 'image-text' | 'data-table' | 'testimonial' | 'callout'
   | 'gallery' | 'video' | 'feature-list' | 'product-card' | 'product-grid' | 'pricing-table'

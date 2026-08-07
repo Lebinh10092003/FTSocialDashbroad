@@ -1,6 +1,6 @@
 import React, { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { appDialog } from './components/AppDialog';
-import { BadgeDollarSign, CalendarCheck, ChartColumnBig, ClipboardList, FileCheck2, GraduationCap, Mail, QrCode, ShieldUser } from 'lucide-react';
+import { BadgeDollarSign, CalendarCheck, ChartColumnBig, ClipboardList, FileCheck2, GraduationCap, Mail, PenLine, QrCode, ShieldUser } from 'lucide-react';
 
 import { Channel, UserRole } from './types';
 import Sidebar from './components/social-dashboard/Sidebar';
@@ -32,6 +32,7 @@ const Sync = lazyWithRecovery(() => import('./components/social-dashboard/Sync')
 const Config = lazyWithRecovery(() => import('./components/social-dashboard/Config'));
 const AccountManagement = lazyWithRecovery(() => import('./components/social-dashboard/AccountManagement'));
 const EmailTemplateBuilder = lazyWithRecovery(() => import('./components/email-builder/EmailTemplateBuilder'));
+const SignatureBuilder = lazyWithRecovery(() => import('./components/email-builder/SignatureBuilder'));
 const FinanceWorkspace = lazyWithRecovery(() => import('./components/digital-training/FinanceWorkspace'));
 const ExaminationModule = lazyWithRecovery(() => import('./components/ExaminationModule'));
 const DigitalTraining = lazyWithRecovery(() => import('./components/digital-training/DigitalTraining'));
@@ -40,7 +41,7 @@ const TrainingAssessmentWorkspace = lazyWithRecovery(() => import('./components/
 const QRCodeGenerator = lazyWithRecovery(() => import('./components/QRCodeGenerator'));
 const Attendance = lazyWithRecovery(() => import('./components/Attendance'));
 
-type ViewMode = 'workspace' | 'social-dashboard' | 'email-builder' | 'examination' | 'digital-training' | 'finance-report' | 'training-assessments' | 'training-assessment-public' | 'qr-generator' | 'attendance' | 'account-management';
+type ViewMode = 'workspace' | 'social-dashboard' | 'email-builder' | 'signature-builder' | 'examination' | 'digital-training' | 'finance-report' | 'training-assessments' | 'training-assessment-public' | 'qr-generator' | 'attendance' | 'account-management';
 
 const SOCIAL_TABS = ['dashboard', 'media', 'posts', 'sync', 'config'] as const;
 type SocialTab = typeof SOCIAL_TABS[number];
@@ -108,6 +109,7 @@ function getInitialViewMode(): ViewMode {
   if (path.startsWith('/digital-training')) return 'digital-training';
   if (path.startsWith('/social-dashboard')) return 'social-dashboard';
   if (path.startsWith('/finance-report')) return 'finance-report';
+  if (path.startsWith('/signature-builder')) return 'signature-builder';
   if (path.startsWith('/email-builder')) return 'email-builder';
   if (path.startsWith('/examination')) return 'examination';
   if (path.startsWith('/qr-generator')) return 'qr-generator';
@@ -175,7 +177,7 @@ export default function App() {
   const isAccountant = normalisedEmployeeIdentity.includes('ke toan');
   const canViewFinance = !isGuest && (userRole === 'ADMIN' || userRole === 'MANAGER' || isAccountant || normalisedEmployeeIdentity.includes('giam doc') || normalisedEmployeeIdentity.includes('quan ly'));
   const canEditFinance = !isGuest && (userRole === 'ADMIN' || isAccountant);
-  const moduleForView: Partial<Record<ViewMode, string>> = { 'social-dashboard': 'social-dashboard', 'email-builder': 'email-builder', examination: 'examination', 'digital-training': 'digital-training', 'training-assessments': 'digital-training' };
+  const moduleForView: Partial<Record<ViewMode, string>> = { 'social-dashboard': 'social-dashboard', 'email-builder': 'email-builder', 'signature-builder': 'email-builder', examination: 'examination', 'digital-training': 'digital-training', 'training-assessments': 'digital-training' };
   const canAccessView = (mode: ViewMode) => { if (mode === 'qr-generator') return true; if (mode === 'attendance') return !isGuest; if (mode === 'training-assessments') return !isGuest && (userRole === 'ADMIN' || (user.accessModules || []).includes('digital-training')); if (mode === 'account-management') return userRole === 'ADMIN'; if (mode === 'finance-report') return canViewFinance; if (isGuest) return !!moduleForView[mode]; return userRole === 'ADMIN' || (!!moduleForView[mode] && (user.accessModules || []).includes(moduleForView[mode]!)); };
   const googleAccessToken = null;
 
@@ -435,6 +437,13 @@ export default function App() {
         icon: Mail,
       },
       {
+        mode: 'signature-builder',
+        title: 'Trình tạo chữ ký',
+        description: 'Tạo chữ ký email có logo, thông tin liên hệ và các kênh mạng xã hội.',
+        gradient: 'from-[#1473D1] to-[#00A4BD]',
+        icon: PenLine,
+      },
+      {
         mode: 'qr-generator',
         title: 'Trình tạo mã QR',
         description: 'Tạo QR đi thẳng tới form khảo sát, tài liệu hoặc bất kỳ đường dẫn nào.',
@@ -620,6 +629,12 @@ export default function App() {
     );
   }
 
+  if (viewMode === 'signature-builder' && !canAccessView('signature-builder')) return null;
+
+  if (viewMode === 'signature-builder') {
+    return <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp Trình tạo chữ ký...</div>}><SignatureBuilder onBackToWorkspace={() => setViewMode('workspace')} onOpenEmailBuilder={() => setViewMode('email-builder')} /></Suspense>;
+  }
+
   if (viewMode === 'email-builder' && !canAccessView('email-builder')) return null;
 
   if (viewMode === 'email-builder') {
@@ -635,6 +650,7 @@ export default function App() {
             userRole={userRole}
             photoURL={user.photoURL}
             userEmail={user.email}
+            onOpenSignatureBuilder={() => setViewMode('signature-builder')}
           />
         </Suspense>
         {loginModal}{profileModal}

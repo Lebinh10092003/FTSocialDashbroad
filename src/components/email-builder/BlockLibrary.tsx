@@ -128,6 +128,7 @@ const getBlockVisuals = (id: string) => {
       border: 'hover:border-orange-200', 
       glow: 'hover:shadow-orange-100/80 hover:shadow-lg' 
     },
+    'signature-builder': { bg: 'hover:bg-orange-50/50', iconBg: 'bg-orange-100/60 text-orange-600', text: 'group-hover:text-orange-700', border: 'hover:border-orange-200', glow: 'hover:shadow-orange-100/80 hover:shadow-lg' },
     'social-links': { 
       bg: 'hover:bg-teal-50/50', 
       iconBg: 'bg-teal-100/60 text-teal-600', 

@@ -62,6 +62,7 @@ interface EmailTemplateBuilderProps {
   userRole?: string | null;
   photoURL?: string | null;
   userEmail?: string | null;
+  onOpenSignatureBuilder: () => void;
 }
 
 function sortEmailTemplates(templates: EmailTemplate[]): EmailTemplate[] {
@@ -77,7 +78,7 @@ export default function EmailTemplateBuilder(props: EmailTemplateBuilderProps) {
   return <EmailBuilderDialogProvider><EmailTemplateBuilderContent {...props} /></EmailBuilderDialogProvider>;
 }
 
-function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogout, isGuest, userName, userRole, photoURL, userEmail }: EmailTemplateBuilderProps) {
+function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogout, isGuest, userName, userRole, photoURL, userEmail, onOpenSignatureBuilder }: EmailTemplateBuilderProps) {
   const dialog = useEmailBuilderDialog();
   // 1. Storage & State Management
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
@@ -410,6 +411,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
       case 'divider': return 'Đường kẻ';
       case 'spacer': return 'Khoảng trắng';
       case 'signature': return 'Chữ ký';
+      case 'signature-builder': return 'Trình tạo chữ ký';
       case 'social-links': return 'Mạng xã hội';
       default: return 'Email';
     }
@@ -927,6 +929,12 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
               />
               Tải tệp mẫu
             </label>
+            <button
+              onClick={onOpenSignatureBuilder}
+              className="px-4 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50 border border-blue-200 rounded-xl cursor-pointer transition-all"
+            >
+              Trình tạo chữ ký
+            </button>
 <button
               onClick={handleCreateTemplate}
               className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer transition-all"
