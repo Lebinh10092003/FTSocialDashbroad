@@ -486,7 +486,8 @@ def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url,
             current_value = clean_txt(current)
             next_value = clean_txt(incoming_value)
             can_write = next_value and (update_mode == 'replace-nonempty' or not current_value)
-            if can_write and current_value != next_value:
+            same_percentage = field.endswith('.scoreRate') and format_sheet_percentage(current_value) == format_sheet_percentage(next_value)
+            if can_write and current_value != next_value and not same_percentage:
                 changed_fields.append(field)
                 changes.append({'field': field, 'label': label, 'current': current_value, 'next': next_value})
 

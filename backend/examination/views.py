@@ -33,6 +33,7 @@ from .sync import (
     remote_sheet_fingerprint,
     output_sheet_export_preview,
     sync_single_sheet,
+    format_sheet_percentage,
 )
 
 
@@ -165,6 +166,10 @@ def audit_display_value(field, value):
         items = [item for item in items if item != 'chưa có thông tin']
         return '; '.join(items) or 'chưa có thông tin'
     text = str(value).strip()
+    if field == 'scoreRate':
+        # Decimal separators differ between Sheet locales. This only replaces
+        # the separator; all decimal digits remain untouched.
+        return format_sheet_percentage(text) or 'chưa có thông tin'
     if re.fullmatch(r'\d{4}-\d{2}-\d{2}', text):
         return datetime.strptime(text, '%Y-%m-%d').strftime('%d/%m/%Y')
     return text or 'chưa có thông tin'
@@ -1816,6 +1821,8 @@ def round_result_detail(request, pk):
     for payload_field, model_field in fields.items():
         if payload_field in data:
             value = str(data[payload_field] or '').strip()
+            if payload_field == 'scoreRate':
+                value = format_sheet_percentage(value)
             setattr(item, model_field, normalize_eligibility(value) if payload_field == 'eligibility' else value)
     requested_round_id = str(data.get('roundId') or item.round_id or '').strip()
     if 'roomId' in data:

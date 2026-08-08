@@ -1016,6 +1016,21 @@ class SessionOutputSheetTests(TestCase):
         self.assertEqual(row[round_start + 2], '09/08/2026')
         self.assertEqual(row[round_start + 11], '97,14%')
         self.assertEqual(format_sheet_percentage('97,14%'), '97,14%')
+        self.assertEqual(format_sheet_percentage('77.1400%'), '77,1400%')
+
+    def test_percentage_separator_is_not_a_data_change_or_rounding(self):
+        from .sync import format_sheet_percentage
+        from .views import audit_values
+
+        self.assertEqual(format_sheet_percentage('77.1400%'), '77,1400%')
+        self.assertEqual(
+            audit_values(
+                {'scoreRate': '77.1400%'},
+                {'scoreRate': '77,1400%'},
+                {'scoreRate': 'Tỷ lệ điểm'},
+            ),
+            '',
+        )
 
     def test_unmatched_sheet_row_is_blocked_with_exact_row_and_identity(self):
         from .sync import _aligned_export_rows
