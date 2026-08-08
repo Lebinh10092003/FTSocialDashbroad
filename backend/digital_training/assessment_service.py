@@ -281,7 +281,7 @@ def _shuffle_options(question, rng, target_index):
     return item
 
 
-def generate_variants_from_import(questions, variant_count=5, questions_per_variant=20, seed=None, structure=None, topic_config=None, knowledge_config=None, score_config=None):
+def generate_variants_from_import(questions, variant_count=5, questions_per_variant=20, seed=None, structure=None, topic_config=None, knowledge_config=None, score_config=None, difficulty_config=None):
     try:
         variant_count = int(variant_count)
         questions_per_variant = int(questions_per_variant)
@@ -351,6 +351,20 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
             if points < 0 or points > 1000:
                 raise ValueError("Điểm mỗi câu phải từ 0 đến 1000.")
             score_rule[knowledge] = points
+
+    if difficulty_config and not isinstance(difficulty_config, dict):
+        raise ValueError("Cau hinh Do de khong hop le.")
+    difficulty_rule = None
+    if difficulty_config:
+        try:
+            easy_total = int(difficulty_config.get("easy") or 0)
+            medium_total = int(difficulty_config.get("medium") or 0)
+            hard_total = int(difficulty_config.get("hard") or 0)
+        except (TypeError, ValueError):
+            raise ValueError("So cau De/Trung binh/Kho phai la so nguyen.")
+        if min(easy_total, medium_total, hard_total) < 0 or easy_total + medium_total + hard_total != questions_per_variant:
+            raise ValueError("Tong De + Trung binh + Kho phai bang so cau moi de.")
+        difficulty_rule = {"easy": easy_total, "medium": medium_total, "hard": hard_total}
 
     topic_rules = []
     seen_topics = set()
@@ -462,6 +476,12 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
         available = [question for question in unique_questions if matches_structure_rule(question, rule)]
         if len(available) < rule["count"]:
             raise ValueError("Ngân hàng không đủ câu cho một dòng cơ cấu loại/kiểu câu hỏi/độ khó.")
+
+    if difficulty_rule:
+        for difficulty, count in difficulty_rule.items():
+            available = len([item for item in unique_questions if normalize_difficulty(item.get("difficulty")) == difficulty])
+            if available < count:
+                raise ValueError(f"Ngan hang khong du {difficulty} cho co cau da chon.")
 
     seed = int(seed) if seed not in (None, "") else secrets.randbits(63)
     rng = random.Random(seed)
@@ -604,6 +624,40 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
             rng.shuffle(remaining)
             remaining.sort(key=lambda question: usage[str(question["id"])])
             selected.extend(remaining[:questions_per_variant - len(selected)])
+        if difficulty_rule:
+            selected_counts = Counter(normalize_difficulty(question.get("difficulty")) for question in selected)
+            for target_difficulty in ("easy", "medium", "hard"):
+                while selected_counts[target_difficulty] < difficulty_rule[target_difficulty]:
+                    replacement = None
+                    for source_difficulty in ("easy", "medium", "hard"):
+                        if selected_counts[source_difficulty] <= difficulty_rule[source_difficulty]:
+                            continue
+                        for selected_index, selected_question in enumerate(selected):
+                            if normalize_difficulty(selected_question.get("difficulty")) != source_difficulty:
+                                continue
+                            candidates = [
+                                question for question in unique_questions
+                                if str(question["id"]) not in selected_ids
+                                and normalize_difficulty(question.get("difficulty")) == target_difficulty
+                                and str(question.get("category") or "").strip().casefold() == str(selected_question.get("category") or "").strip().casefold()
+                                and normalize_knowledge(question.get("knowledge_type")) == normalize_knowledge(selected_question.get("knowledge_type"))
+                            ]
+                            if candidates:
+                                rng.shuffle(candidates)
+                                candidates.sort(key=lambda question: usage[str(question["id"])])
+                                replacement = (selected_index, candidates[0])
+                                break
+                        if replacement:
+                            break
+                    if not replacement:
+                        raise ValueError("Ngan hang khong du cau theo dong thoi chu de, Ly thuyet/Thuc hanh va do kho da chon.")
+                    selected_index, next_question = replacement
+                    previous_question = selected[selected_index]
+                    selected_ids.remove(str(previous_question["id"]))
+                    selected_ids.add(str(next_question["id"]))
+                    selected[selected_index] = next_question
+                    selected_counts[normalize_difficulty(previous_question.get("difficulty"))] -= 1
+                    selected_counts[target_difficulty] += 1
         rng.shuffle(selected)
 
         for order, source in enumerate(selected, start=1):
@@ -646,6 +700,7 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
             "topic_config": topic_rules,
             "knowledge_config": knowledge_rule or {},
             "score_config": score_rule,
+            "difficulty_config": difficulty_rule or {},
         },
     }
 

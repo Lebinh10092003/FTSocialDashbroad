@@ -13,6 +13,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
+from authentication.models import SystemConfig
 from authentication.permissions import IsAuthenticated
 
 from .assessment_service import (
@@ -41,6 +42,35 @@ from .views import _actor, _can_manage, _forbidden
 
 def _assessment_error(message, code=status.HTTP_400_BAD_REQUEST):
     return Response({"error": message}, status=code)
+
+
+QUESTION_BANK_CONFIG_KEY = "digital_training_question_bank"
+DEFAULT_QUESTION_BANK_URL = "https://drive.google.com/file/d/1Y2iTce6KweClmUWKaen5yeilg6Pes5Ir/view?usp=sharing"
+
+
+def _question_bank_settings():
+    config, _ = SystemConfig.objects.get_or_create(key=QUESTION_BANK_CONFIG_KEY)
+    data = config.data if isinstance(config.data, dict) else {}
+    return config, {"default_url": str(data.get("default_url") or DEFAULT_QUESTION_BANK_URL).strip()}
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsAuthenticated])
+def question_bank_settings(request):
+    if not _can_manage(request):
+        return _forbidden()
+    config, settings = _question_bank_settings()
+    if request.method == "GET":
+        return Response(settings)
+
+    default_url = str(request.data.get("default_url") or "").strip()
+    if not default_url:
+        return _assessment_error("Vui long nhap lien ket ngan hang de thi mac dinh.")
+    if not re.match(r"^https?://", default_url, flags=re.IGNORECASE):
+        return _assessment_error("Lien ket ngan hang de thi phai bat dau bang http:// hoac https://.")
+    config.data = {**(config.data if isinstance(config.data, dict) else {}), "default_url": default_url}
+    config.save(update_fields=["data"])
+    return Response({"default_url": default_url})
 
 
 def _identity_text(value):
@@ -167,6 +197,9 @@ def assessment_import_preview(request):
     google_url = str(request.data.get("google_sheet_url") or "").strip()
     import_mode = str(request.data.get("import_mode") or "prepared").strip()
     try:
+        if import_mode == "auto_generate" and not uploaded and not google_url:
+            _, settings = _question_bank_settings()
+            google_url = settings["default_url"]
         if uploaded:
             if not uploaded.name.lower().endswith((".xlsx", ".xlsm")):
                 return _assessment_error("Vui lòng tải file .xlsx hoặc .xlsm.")
@@ -201,6 +234,7 @@ def assessment_import_preview(request):
             topic_config = request.data.get("topic_config") or []
             knowledge_config = request.data.get("knowledge_config") or {}
             score_config = request.data.get("score_config") or {}
+            difficulty_config = request.data.get("difficulty_config") or {}
             if isinstance(structure, str):
                 try:
                     structure = json.loads(structure)
@@ -211,7 +245,7 @@ def assessment_import_preview(request):
                     topic_config = json.loads(topic_config)
                 except json.JSONDecodeError:
                     return _assessment_error("Cơ cấu chủ đề không đúng định dạng JSON.")
-            for config_name, config_value in (("knowledge_config", knowledge_config), ("score_config", score_config)):
+            for config_name, config_value in (("knowledge_config", knowledge_config), ("score_config", score_config), ("difficulty_config", difficulty_config)):
                 if isinstance(config_value, str):
                     try:
                         parsed = json.loads(config_value)
@@ -219,9 +253,11 @@ def assessment_import_preview(request):
                         return _assessment_error("Cấu hình tạo đề không đúng định dạng JSON.")
                     if config_name == "knowledge_config":
                         knowledge_config = parsed
-                    else:
+                    elif config_name == "score_config":
                         score_config = parsed
-            if not isinstance(structure, list) or not isinstance(topic_config, list) or not isinstance(knowledge_config, dict) or not isinstance(score_config, dict):
+                    else:
+                        difficulty_config = parsed
+            if not isinstance(structure, list) or not isinstance(topic_config, list) or not isinstance(knowledge_config, dict) or not isinstance(score_config, dict) or not isinstance(difficulty_config, dict):
                 return _assessment_error("Cấu hình tạo đề không hợp lệ.")
             requested_variant_count = request.data.get("variant_count")
             if requested_variant_count not in (None, ""):
@@ -240,6 +276,7 @@ def assessment_import_preview(request):
                 topic_config,
                 knowledge_config,
                 score_config,
+                difficulty_config,
             )
             result.update(generated)
             result["generation_config"].update({
@@ -255,8 +292,10 @@ def assessment_import_preview(request):
         return Response(result)
     except ValueError as error:
         return _assessment_error(str(error))
-    except Exception:
-        return _assessment_error("Không thể đọc dữ liệu. Hãy kiểm tra lại cấu trúc file và quyền chia sẻ.")
+    except Exception as error:
+        detail = str(error).strip()
+        message = "Khong the doc du lieu ngan hang. Hay kiem tra cau truc file va quyen chia se."
+        return _assessment_error(f"{message} Chi tiet: {detail}" if detail else message)
 
 
 @api_view(["GET"])

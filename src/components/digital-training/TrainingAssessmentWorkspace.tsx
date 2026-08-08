@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { ArrowLeft, FileCheck2, GraduationCap, Loader2 } from "lucide-react";
+import { ArrowLeft, FileCheck2, GraduationCap, Link2, Loader2 } from "lucide-react";
 
 import AccountMenu from "../AccountMenu";
 import TrainingAssessmentsAdmin from "./TrainingAssessmentsAdmin";
+import QuestionBankSettings from "./QuestionBankSettings";
 
 export default function TrainingAssessmentWorkspace({
   onBackToWorkspace,
@@ -27,6 +28,8 @@ export default function TrainingAssessmentWorkspace({
   const [classes, setClasses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
+  const [activeTab, setActiveTab] = useState<"assessments" | "bank-settings">("assessments");
+  const canManageQuestionBank = userRole === "ADMIN" || userRole === "MANAGER";
 
   useEffect(() => {
     let active = true;
@@ -70,19 +73,19 @@ export default function TrainingAssessmentWorkspace({
         </div>
         {/* Nav */}
         <nav className="flex-1 space-y-1 overflow-y-auto p-4">
-          <div className="ft-nav-item ft-nav-item-active flex items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-sm font-bold">
+          <button onClick={() => setActiveTab("assessments")} className={`ft-nav-item flex w-full items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-left text-sm font-bold ${activeTab === "assessments" ? "ft-nav-item-active" : ""}`}>
             <FileCheck2 className="h-5 w-5 shrink-0" />
             Khảo sát kết thúc tập huấn
-          </div>
-          <button
-            onClick={onOpenDigitalTraining}
-            className="ft-nav-item flex w-full items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-left text-sm font-bold"
-          >
+          </button>
+          {canManageQuestionBank && <button onClick={() => setActiveTab("bank-settings")} className={`ft-nav-item flex w-full items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-left text-sm font-bold ${activeTab === "bank-settings" ? "ft-nav-item-active" : ""}`}>
+            <Link2 className="h-5 w-5 shrink-0" />
+            Set up ngân hàng đề thi
+          </button>}
+          <button onClick={onOpenDigitalTraining} className="ft-nav-item flex w-full items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-left text-sm font-bold">
             <GraduationCap className="h-5 w-5 shrink-0" />
             Mở Đào tạo số
           </button>
-        </nav>
-        {/* Footer */}
+        </nav>        {/* Footer */}
         <div className="ft-sidebar-footer border-t p-4">
           <button
             onClick={onBackToWorkspace}
@@ -111,7 +114,7 @@ export default function TrainingAssessmentWorkspace({
                 Liên kết dữ liệu với Đào tạo số
               </p>
               <h1 className="mt-1 text-2xl font-extrabold text-[#001e40]">
-                Khảo sát kết thúc tập huấn
+                {activeTab === "bank-settings" ? "Set up ngân hàng đề thi" : "Khảo sát kết thúc tập huấn"}
               </h1>
             </div>
             <button onClick={onBackToWorkspace} className="ft-btn ft-btn-secondary md:hidden">
@@ -130,6 +133,8 @@ export default function TrainingAssessmentWorkspace({
             <div className="grid min-h-[50vh] place-items-center text-slate-500">
               <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
             </div>
+          ) : activeTab === "bank-settings" ? (
+            <QuestionBankSettings idToken={idToken} />
           ) : (
             <TrainingAssessmentsAdmin
               idToken={idToken}
