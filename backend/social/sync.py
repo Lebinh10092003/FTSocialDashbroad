@@ -4,7 +4,7 @@ import uuid
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 
-from .models import ApiLog, Channel, DailySnapshot, FollowerSnapshot, Post
+from .models import ApiLog, Channel, ChannelMetricSnapshot, DailySnapshot, FollowerSnapshot, Post
 from .providers import (
     FacebookProvider,
     FacebookRateLimitDeferred,
@@ -224,6 +224,34 @@ class SyncEngine:
                 )
 
             followers = provider.get_followers(channel.id, channel.external_id)
+            metric_since = (
+                timezone.now() - datetime.timedelta(days=DEFAULT_SYNC_DAYS)
+                if channel.metric_history_loaded_at is None
+                else (since or timezone.now() - datetime.timedelta(days=1))
+            )
+            raw_channel_metrics = getattr(provider, "get_channel_metric_insights", lambda *_args, **_kwargs: [])(
+                channel.id,
+                channel.external_id,
+                since=metric_since,
+                until=until,
+            )
+            channel_metric_rows = raw_channel_metrics if isinstance(raw_channel_metrics, list) else []
+            for insight in channel_metric_rows:
+                if not isinstance(insight, dict):
+                    continue
+                insight_date = str(insight.get("snapshot_date") or "").strip()
+                if not insight_date:
+                    continue
+                ChannelMetricSnapshot.objects.update_or_create(
+                    snapshot_key=f"{insight_date}:{channel.id}",
+                    defaults={
+                        "snapshot_date": insight_date,
+                        "channel_id": channel.id,
+                        "views": int(insight.get("views") or 0),
+                        "engagement": int(insight.get("engagement") or 0),
+                        "fetched_at": timezone.now(),
+                    },
+                )
             raw_follower_insights = getattr(provider, "get_follower_insights", lambda *_args, **_kwargs: [])(
                 channel.id,
                 channel.external_id,
@@ -327,6 +355,8 @@ class SyncEngine:
             # Persist independently completed phases before the metric backfill.
             # If the call budget pauses later, follower history is not downloaded again.
             channel.followers_count = followers
+            if channel_metric_rows:
+                channel.metric_history_loaded_at = timezone.now()
             if follower_since and timezone.now() - follower_since >= datetime.timedelta(days=30):
                 channel.follower_history_loaded_at = timezone.now()
             channel.total_posts = Post.objects.filter(
@@ -338,6 +368,7 @@ class SyncEngine:
                     "followers_count",
                     "total_posts",
                     "follower_history_loaded_at",
+                    "metric_history_loaded_at",
                 ]
             )
 
@@ -409,6 +440,8 @@ class SyncEngine:
                     )
 
             channel.followers_count = followers
+            if channel_metric_rows:
+                channel.metric_history_loaded_at = timezone.now()
             if follower_since and timezone.now() - follower_since >= datetime.timedelta(days=30):
                 channel.follower_history_loaded_at = timezone.now()
             if since and timezone.now() - since >= datetime.timedelta(days=364):
@@ -428,6 +461,7 @@ class SyncEngine:
                     "last_sync_at",
                     "last_sync_status",
                     "follower_history_loaded_at",
+                    "metric_history_loaded_at",
                     "initial_sync_completed_at",
                 ]
             )

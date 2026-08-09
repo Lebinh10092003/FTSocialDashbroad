@@ -672,6 +672,57 @@ class FacebookProvider:
 
         return [by_date[key] for key in sorted(by_date)]
 
+    def get_channel_metric_insights(self, channel_id, external_id, since=None, until=None):
+        """Return compact daily Page-level views and engagements."""
+        token = self.get_token(external_id)
+        if token == "fb_mock_token_for_page":
+            return []
+
+        metric_fields = {
+            "page_media_view": "views",
+            "page_post_engagements": "engagement",
+        }
+        start_date = timezone.localtime(since).date() if since else None
+        end_date = timezone.localtime(until).date() if until else None
+        ranges = [(start_date, end_date)]
+        if start_date and end_date:
+            ranges = []
+            range_start = start_date
+            while range_start <= end_date:
+                range_end = min(range_start + datetime.timedelta(days=89), end_date)
+                ranges.append((range_start, range_end))
+                range_start = range_end + datetime.timedelta(days=1)
+
+        by_date = {}
+        for range_start, range_end in ranges:
+            for metric_name, field in metric_fields.items():
+                params = {"metric": metric_name, "period": "day"}
+                if range_start:
+                    params["since"] = range_start.isoformat()
+                if range_end:
+                    params["until"] = range_end.isoformat()
+                try:
+                    payload = fetch_with_retry(
+                        f"https://graph.facebook.com/{self.api_version}/{external_id}/insights",
+                        headers={"Authorization": f"Bearer {token}"},
+                        params=params,
+                    )
+                except requests.RequestException as exc:
+                    logger.warning("Page metric insight %s unavailable for %s: %s", metric_name, external_id, exc)
+                    continue
+                for metric in payload.get("data", []):
+                    for point in metric.get("values", []) or []:
+                        snapshot_date = self._insight_snapshot_date(point.get("end_time"))
+                        if not snapshot_date:
+                            continue
+                        raw_value = point.get("value")
+                        try:
+                            value = int(raw_value.get("value") if isinstance(raw_value, dict) else raw_value)
+                        except (TypeError, ValueError):
+                            continue
+                        by_date.setdefault(snapshot_date, {"snapshot_date": snapshot_date})[field] = value
+        return [by_date[key] for key in sorted(by_date) if "views" in by_date[key] or "engagement" in by_date[key]]
+
     def list_posts(self, channel_id, external_id, since=None, until=None):
         token = self.get_token(external_id)
         if token == "fb_mock_token_for_page":

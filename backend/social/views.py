@@ -12,7 +12,7 @@ from django.utils import timezone
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 import datetime
-from .models import ApiLog, Channel, Post, DailySnapshot, FollowerSnapshot
+from .models import ApiLog, Channel, ChannelMetricSnapshot, Post, DailySnapshot, FollowerSnapshot
 from authentication.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly, IsManagerOrAdmin
 from .sync import SyncEngine
 
@@ -230,19 +230,14 @@ def media_summary_trend(request):
 
     period_end = min(buckets[-1]['end'], today)
     posts = list(Post.objects.filter(channel_id__in=channel_ids, published_at__lte=f"{period_end}T23:59:59.999Z"))
-    snapshots_by_post = {}
-    for snapshot in DailySnapshot.objects.filter(post_key__in=[post.post_key for post in posts], snapshot_date__lte=period_end).order_by('post_key', 'snapshot_date'):
-        snapshots_by_post.setdefault(snapshot.post_key, []).append(snapshot)
+    compact_metrics = list(ChannelMetricSnapshot.objects.filter(
+        channel_id__in=channel_ids,
+        snapshot_date__gte=buckets[0]['start'],
+        snapshot_date__lte=period_end,
+    ).order_by('snapshot_date'))
     follower_by_channel = {}
     for snapshot in FollowerSnapshot.objects.filter(channel_id__in=channel_ids, snapshot_date__lte=period_end).order_by('channel_id', 'snapshot_date'):
         follower_by_channel.setdefault(snapshot.channel_id, []).append(snapshot)
-
-    def metric_value(snapshot, field):
-        if not snapshot:
-            return 0
-        if field == 'views':
-            return getattr(snapshot, 'views', 0) or getattr(snapshot, 'impressions', 0) or getattr(snapshot, 'reach', 0) or 0
-        return getattr(snapshot, 'total_engagement', 0) or 0
 
     def latest_snapshot(snapshots, boundary, inclusive=True):
         result = None
@@ -257,20 +252,14 @@ def media_summary_trend(request):
     for bucket in buckets:
         start, end = bucket['start'], min(bucket['end'], today)
         period_posts = [post for post in posts if start <= str(post.published_at)[:10] <= end]
-        active_posts = [post for post in posts if str(post.published_at)[:10] <= end]
+        period_metrics = [snapshot for snapshot in compact_metrics if start <= snapshot.snapshot_date <= end]
         start_values = {'views': 0, 'engagement': 0, 'postsCount': 0, 'followers': 0}
-        end_values = {'views': 0, 'engagement': 0, 'postsCount': len(period_posts), 'followers': 0}
-
-        for post in active_posts:
-            snapshots = snapshots_by_post.get(post.post_key, [])
-            end_snapshot = latest_snapshot(snapshots, end)
-            # The start boundary is the last observation before the period;
-            # posts published inside this period correctly start from zero.
-            start_snapshot = None if str(post.published_at)[:10] >= start else latest_snapshot(snapshots, start, inclusive=False)
-            start_values['views'] += metric_value(start_snapshot, 'views')
-            start_values['engagement'] += metric_value(start_snapshot, 'engagement')
-            end_values['views'] += metric_value(end_snapshot, 'views')
-            end_values['engagement'] += metric_value(end_snapshot, 'engagement')
+        end_values = {
+            'views': sum(snapshot.views for snapshot in period_metrics),
+            'engagement': sum(snapshot.engagement for snapshot in period_metrics),
+            'postsCount': len(period_posts),
+            'followers': 0,
+        }
 
         for channel_id in channel_ids:
             snapshots = follower_by_channel.get(channel_id, [])
@@ -282,12 +271,13 @@ def media_summary_trend(request):
         trend.append({
             'period': bucket['key'],
             'label': bucket['label'],
-            'views': end_values['views'] - start_values['views'],
-            'engagement': end_values['engagement'] - start_values['engagement'],
+            'views': end_values['views'],
+            'engagement': end_values['engagement'],
             'postsCount': len(period_posts),
             'followers': end_values['followers'] - start_values['followers'],
             'startValues': start_values,
             'endValues': end_values,
+            'metricSource': 'daily_insights' if period_metrics else 'unavailable',
         })
 
     response = Response({'groupBy': group_by, 'trend': trend})

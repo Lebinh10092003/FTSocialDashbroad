@@ -10,7 +10,7 @@ from django.test import TestCase
 from django.utils import timezone
 from openpyxl import load_workbook
 
-from .models import ApiLog, Channel, DailySnapshot, FollowerSnapshot, Post
+from .models import ApiLog, Channel, ChannelMetricSnapshot, DailySnapshot, FollowerSnapshot, Post
 from .providers import FacebookProvider, FacebookRateLimitDeferred, fetch_with_retry
 from .sync import SyncEngine
 from .views import _start_background_sync
@@ -310,6 +310,23 @@ class FacebookPaginationTests(TestCase):
         )
         self.assertTrue(all("access_token" not in call.kwargs["params"] for call in fetch.call_args_list))
     @patch("social.providers.fetch_with_retry")
+    def test_channel_metric_insights_returns_daily_compact_values(self, fetch):
+        fetch.side_effect = [
+            {"data": [{"name": "page_media_view", "values": [{"value": 120, "end_time": "2026-07-22T07:00:00+0000"}]}]},
+            {"data": [{"name": "page_post_engagements", "values": [{"value": 8, "end_time": "2026-07-22T07:00:00+0000"}]}]},
+        ]
+        provider = FacebookProvider()
+        with patch.object(provider, "get_token", return_value="test-token"):
+            rows = provider.get_channel_metric_insights(
+                "channel", "page", since=timezone.now() - timedelta(days=7), until=timezone.now()
+            )
+
+        self.assertEqual(rows, [{"snapshot_date": "2026-07-22", "views": 120, "engagement": 8}])
+        self.assertEqual(
+            [call.kwargs["params"]["metric"] for call in fetch.call_args_list],
+            ["page_media_view", "page_post_engagements"],
+        )
+    @patch("social.providers.fetch_with_retry")
     def test_follower_insights_chunks_a_year_into_90_day_windows(self, fetch):
         fetch.side_effect = [{"data": []}] * 15
         provider = FacebookProvider()
@@ -403,6 +420,7 @@ class SyncQueueTests(TestCase):
         provider.validate_credentials = Mock(return_value=True)
         provider.get_followers = Mock(return_value=10)
         provider.get_follower_insights = Mock(return_value=[])
+        provider.get_channel_metric_insights = Mock(return_value=[])
         provider.list_posts = Mock(return_value=[
             {"id": "post-1", "created_time": now.isoformat(), "post_type": "status"},
             {"id": "post-2", "created_time": now.isoformat(), "post_type": "status"},
@@ -676,8 +694,16 @@ class MediaSummaryTrendTests(TestCase):
             imported_at=now,
             updated_at=now,
         )
-        self._snapshot(self.previous_month_end, views=10, engagement=4)
-        self._snapshot(self.current_day, views=25, engagement=9)
+        ChannelMetricSnapshot.objects.create(
+            snapshot_key=f"{self.channel.id}:{self.previous_month_end.isoformat()}:metrics",
+            snapshot_date=self.previous_month_end.isoformat(), channel_id=self.channel.id,
+            views=10, engagement=4, fetched_at=now,
+        )
+        ChannelMetricSnapshot.objects.create(
+            snapshot_key=f"{self.channel.id}:{self.current_day.isoformat()}:metrics",
+            snapshot_date=self.current_day.isoformat(), channel_id=self.channel.id,
+            views=15, engagement=5, fetched_at=now,
+        )
         FollowerSnapshot.objects.create(
             snapshot_key=f"{self.channel.id}:{self.previous_month_end.isoformat()}",
             snapshot_date=self.previous_month_end.isoformat(),
@@ -711,7 +737,7 @@ class MediaSummaryTrendTests(TestCase):
             fetched_at=timezone.now(),
         )
 
-    def test_monthly_trend_calculates_values_within_each_period(self):
+    def test_monthly_trend_sums_compact_daily_metrics_within_each_period(self):
         response = self.client.get('/api/media-summary/trend', {'groupBy': 'month'})
         self.assertEqual(response.status_code, 200)
         trend = {point['period']: point for point in response.json()['trend']}
@@ -724,6 +750,7 @@ class MediaSummaryTrendTests(TestCase):
         self.assertEqual(trend[previous_period]['followers'], 100)
         self.assertEqual(trend[current_period]['views'], 15)
         self.assertEqual(trend[current_period]['engagement'], 5)
+        self.assertEqual(trend[current_period]['metricSource'], 'daily_insights')
         self.assertEqual(trend[current_period]['postsCount'], 0)
         self.assertEqual(trend[current_period]['followers'], 20)
 

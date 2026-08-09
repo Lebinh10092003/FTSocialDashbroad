@@ -15,6 +15,8 @@ class Channel(models.Model):
     last_data_sync_until = models.DateTimeField(null=True, blank=True)
     last_sync_status = models.CharField(max_length=50, null=True, blank=True)
     follower_history_loaded_at = models.DateTimeField(null=True, blank=True)
+    # Page-level metric history is independently backfilled once and then refreshed daily.
+    metric_history_loaded_at = models.DateTimeField(null=True, blank=True)
     # A channel is not ready for the cheap daily refresh until posts, post
     # metrics and follower history have all been saved for the initial period.
     initial_sync_completed_at = models.DateTimeField(null=True, blank=True)
@@ -90,6 +92,24 @@ class FollowerSnapshot(models.Model):
 
     def __str__(self):
         return f"{self.channel_name} on {self.snapshot_date}"
+
+class ChannelMetricSnapshot(models.Model):
+    """Compact daily Page-level performance history used by period reports."""
+
+    snapshot_key = models.CharField(max_length=255, primary_key=True)
+    snapshot_date = models.CharField(max_length=50)  # yyyy-MM-dd
+    channel_id = models.CharField(max_length=255)
+    views = models.IntegerField(default=0)
+    engagement = models.IntegerField(default=0)
+    fetched_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["channel_id", "snapshot_date"], name="social_channel_metric_date"),
+        ]
+
+    def __str__(self):
+        return f"Channel metrics {self.channel_id} on {self.snapshot_date}"
 
 class ApiLog(models.Model):
     log_id = models.CharField(max_length=255, primary_key=True)
