@@ -711,7 +711,7 @@ class MediaSummaryTrendTests(TestCase):
             fetched_at=timezone.now(),
         )
 
-    def test_monthly_trend_uses_snapshot_values_at_each_period_end(self):
+    def test_monthly_trend_calculates_values_within_each_period(self):
         response = self.client.get('/api/media-summary/trend', {'groupBy': 'month'})
         self.assertEqual(response.status_code, 200)
         trend = {point['period']: point for point in response.json()['trend']}
@@ -720,14 +720,14 @@ class MediaSummaryTrendTests(TestCase):
 
         self.assertEqual(trend[previous_period]['views'], 10)
         self.assertEqual(trend[previous_period]['engagement'], 4)
-        self.assertEqual(trend[previous_period]['postsCount'], 1)
+        self.assertEqual(trend[previous_period]['postsCount'], 0)
         self.assertEqual(trend[previous_period]['followers'], 100)
-        self.assertEqual(trend[current_period]['views'], 25)
-        self.assertEqual(trend[current_period]['engagement'], 9)
-        self.assertEqual(trend[current_period]['postsCount'], 1)
-        self.assertEqual(trend[current_period]['followers'], 120)
+        self.assertEqual(trend[current_period]['views'], 15)
+        self.assertEqual(trend[current_period]['engagement'], 5)
+        self.assertEqual(trend[current_period]['postsCount'], 0)
+        self.assertEqual(trend[current_period]['followers'], 20)
 
-    def test_monthly_trend_uses_first_recorded_metric_as_historical_baseline(self):
+    def test_monthly_trend_returns_zero_without_an_end_snapshot_in_that_period(self):
         published_day = self.previous_month_start - timedelta(days=70)
         baseline_post = Post.objects.create(
             post_key='facebook:trend:baseline', platform='facebook', channel_id=self.channel.id,
@@ -745,8 +745,8 @@ class MediaSummaryTrendTests(TestCase):
         self.assertEqual(response['Cache-Control'], 'no-store, no-cache, must-revalidate')
         trend = {point['period']: point for point in response.json()['trend']}
         period = published_day.strftime('%Y-%m')
-        self.assertEqual(trend[period]['views'], 77)
-        self.assertEqual(trend[period]['engagement'], 11)
+        self.assertEqual(trend[period]['views'], 0)
+        self.assertEqual(trend[period]['engagement'], 0)
 
     def test_quarterly_report_returns_eight_quarters(self):
         response = self.client.get('/api/media-summary/trend', {'groupBy': 'quarter'})

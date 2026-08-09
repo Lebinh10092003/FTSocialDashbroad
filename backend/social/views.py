@@ -187,177 +187,112 @@ def media_summary_trend(request):
     group_by = request.query_params.get('groupBy', 'month')
     platform_filter = request.query_params.get('platform')
     channel_id_filter = request.query_params.get('channelId')
-    
     if platform_filter == 'all':
         platform_filter = None
     if channel_id_filter == 'all':
         channel_id_filter = None
-        
-    # Build list of active channels. The technical Facebook-token placeholder
-    # is not a reportable channel.
+
     channels = Channel.objects.filter(status='active').exclude(external_id='current-facebook-token')
     if platform_filter:
         channels = channels.filter(platform=platform_filter)
     if channel_id_filter:
         channels = channels.filter(id=channel_id_filter)
-        
-    channel_ids = [c.id for c in channels]
-    
-    # Calculate buckets
+    channel_ids = list(channels.values_list('id', flat=True))
+
     now = timezone.now()
+    today = timezone.localdate().isoformat()
     buckets = []
-    
-    # We want 13 months, 8 quarters, or 5 years
     if group_by == 'month':
         for i in range(12, -1, -1):
-            # Calculate offset month
-            year = now.year
-            month = now.month - i
+            year, month = now.year, now.month - i
             while month <= 0:
                 month += 12
                 year -= 1
-            # start/end of that month
-            start_date = f"{year}-{month:02d}-01"
-            # end date: get last day
-            if month == 12:
-                end_date = f"{year}-12-31"
-            else:
-                next_month = datetime.date(year, month + 1, 1)
-                last_day = next_month - datetime.timedelta(days=1)
-                end_date = last_day.strftime('%Y-%m-%d')
-                
-            buckets.append({
-                'key': f"{year}-{month:02d}",
-                'label': f"T{month}/{year}",
-                'start': start_date,
-                'end': end_date
-            })
+            start = f"{year}-{month:02d}-01"
+            end = f"{year}-12-31" if month == 12 else (datetime.date(year, month + 1, 1) - datetime.timedelta(days=1)).isoformat()
+            buckets.append({'key': f"{year}-{month:02d}", 'label': f"T{month}/{year}", 'start': start, 'end': end})
     elif group_by == 'quarter':
         for i in range(7, -1, -1):
-            curr_q = (now.month - 1) // 3
-            # offset quarter
-            q_offset = curr_q - i
-            year = now.year
-            while q_offset < 0:
-                q_offset += 4
+            quarter_offset, year = ((now.month - 1) // 3) - i, now.year
+            while quarter_offset < 0:
+                quarter_offset += 4
                 year -= 1
-            q_num = q_offset + 1
-            start_month = q_offset * 3 + 1
-            start_date = f"{year}-{start_month:02d}-01"
+            quarter = quarter_offset + 1
+            start_month = quarter_offset * 3 + 1
             end_month = start_month + 2
-            if end_month == 12:
-                end_date = f"{year}-12-31"
-            else:
-                next_month = datetime.date(year, end_month + 1, 1)
-                last_day = next_month - datetime.timedelta(days=1)
-                end_date = last_day.strftime('%Y-%m-%d')
-                
-            buckets.append({
-                'key': f"{year}-Q{q_num}",
-                'label': f"Q{q_num}/{year}",
-                'start': start_date,
-                'end': end_date
-            })
-    else: # year
+            start = f"{year}-{start_month:02d}-01"
+            end = f"{year}-12-31" if end_month == 12 else (datetime.date(year, end_month + 1, 1) - datetime.timedelta(days=1)).isoformat()
+            buckets.append({'key': f"{year}-Q{quarter}", 'label': f"Q{quarter}/{year}", 'start': start, 'end': end})
+    else:
         for i in range(4, -1, -1):
-            y = now.year - i
-            buckets.append({
-                'key': str(y),
-                'label': str(y),
-                'start': f"{y}-01-01",
-                'end': f"{y}-12-31"
-            })
-            
-    period_start = buckets[0]['start']
-    period_end = buckets[-1]['end']
-    
-    # A post's lifetime counters can increase after its publication date. The
-    # trend therefore uses each saved metric snapshot at a bucket boundary,
-    # rather than grouping a newer value by the publication month.
-    posts = Post.objects.filter(
-        channel_id__in=channel_ids,
-        published_at__lte=f"{period_end}T23:59:59.999Z"
-    )
+            year = now.year - i
+            buckets.append({'key': str(year), 'label': str(year), 'start': f"{year}-01-01", 'end': f"{year}-12-31"})
 
-    posts_by_bucket = {}
-    for bucket in buckets:
-        posts_by_bucket[bucket['key']] = [
-            post for post in posts if str(post.published_at)[:10] <= bucket['end']
-        ]
-
-    # Each bucket uses the latest snapshot on or before its end date, matching
-    # follower logic. The daily sync now creates the needed current-day rows.
-    post_keys = [post.post_key for post in posts]
+    period_end = min(buckets[-1]['end'], today)
+    posts = list(Post.objects.filter(channel_id__in=channel_ids, published_at__lte=f"{period_end}T23:59:59.999Z"))
     snapshots_by_post = {}
-    for snapshot in DailySnapshot.objects.filter(
-        post_key__in=post_keys,
-        snapshot_date__lte=period_end,
-    ).order_by('post_key', 'snapshot_date'):
+    for snapshot in DailySnapshot.objects.filter(post_key__in=[post.post_key for post in posts], snapshot_date__lte=period_end).order_by('post_key', 'snapshot_date'):
         snapshots_by_post.setdefault(snapshot.post_key, []).append(snapshot)
+    follower_by_channel = {}
+    for snapshot in FollowerSnapshot.objects.filter(channel_id__in=channel_ids, snapshot_date__lte=period_end).order_by('channel_id', 'snapshot_date'):
+        follower_by_channel.setdefault(snapshot.channel_id, []).append(snapshot)
 
-    # Include history before the first bucket so its value is not incorrectly
-    # shown as zero when a follower snapshot was saved earlier.
-    follower_snaps = FollowerSnapshot.objects.filter(
-        channel_id__in=channel_ids,
-        snapshot_date__lte=period_end
-    ).order_by('snapshot_date')
-    
-    # Process follower snapshot trend by bucket
-    follower_by_bucket = {}
-    latest_followers = {}
-    f_index = 0
-    follower_list = list(follower_snaps)
-    
-    for bucket in buckets:
-        while f_index < len(follower_list) and follower_list[f_index].snapshot_date <= bucket['end']:
-            snap = follower_list[f_index]
-            latest_followers[snap.channel_id] = snap.followers_count
-            f_index += 1
-        follower_by_bucket[bucket['key']] = dict(latest_followers)
-        
+    def metric_value(snapshot, field):
+        if not snapshot:
+            return 0
+        if field == 'views':
+            return getattr(snapshot, 'views', 0) or getattr(snapshot, 'impressions', 0) or getattr(snapshot, 'reach', 0) or 0
+        return getattr(snapshot, 'total_engagement', 0) or 0
+
+    def latest_snapshot(snapshots, boundary, inclusive=True):
+        result = None
+        for snapshot in snapshots:
+            if snapshot.snapshot_date < boundary or (inclusive and snapshot.snapshot_date <= boundary):
+                result = snapshot
+            else:
+                break
+        return result
+
     trend = []
     for bucket in buckets:
-        b_end = bucket['end']
+        start, end = bucket['start'], min(bucket['end'], today)
+        period_posts = [post for post in posts if start <= str(post.published_at)[:10] <= end]
+        active_posts = [post for post in posts if str(post.published_at)[:10] <= end]
+        start_values = {'views': 0, 'engagement': 0, 'postsCount': 0, 'followers': 0}
+        end_values = {'views': 0, 'engagement': 0, 'postsCount': len(period_posts), 'followers': 0}
 
-        b_posts = posts_by_bucket[bucket['key']]
-        views_sum = 0
-        engagement_sum = 0
+        for post in active_posts:
+            snapshots = snapshots_by_post.get(post.post_key, [])
+            end_snapshot = latest_snapshot(snapshots, end)
+            # The start boundary is the last observation before the period;
+            # posts published inside this period correctly start from zero.
+            start_snapshot = None if str(post.published_at)[:10] >= start else latest_snapshot(snapshots, start, inclusive=False)
+            start_values['views'] += metric_value(start_snapshot, 'views')
+            start_values['engagement'] += metric_value(start_snapshot, 'engagement')
+            end_values['views'] += metric_value(end_snapshot, 'views')
+            end_values['engagement'] += metric_value(end_snapshot, 'engagement')
 
-        for p in b_posts:
-            snap = None
-            for candidate in snapshots_by_post.get(p.post_key, []):
-                if candidate.snapshot_date > b_end:
-                    break
-                snap = candidate
-            # Historical imports may first record a post's lifetime metrics
-            # after its publication period. Use that first recorded value as a
-            # baseline instead of showing every earlier period as a false zero.
-            # Once normal daily snapshots exist, the latest snapshot at each
-            # period boundary still takes precedence.
-            if snap is None:
-                recorded = snapshots_by_post.get(p.post_key, [])
-                snap = recorded[0] if recorded else None
-            if snap:
-                views_sum += getattr(snap, 'views', 0) or getattr(snap, 'impressions', 0) or getattr(snap, 'reach', 0) or 0
-                engagement_sum += getattr(snap, 'total_engagement', 0) or 0
-                
-        # Followers count
-        followers_map = follower_by_bucket.get(bucket['key'], {})
-        followers_sum = sum(followers_map.values())
-        
+        for channel_id in channel_ids:
+            snapshots = follower_by_channel.get(channel_id, [])
+            start_snapshot = latest_snapshot(snapshots, start, inclusive=False)
+            end_snapshot = latest_snapshot(snapshots, end)
+            start_values['followers'] += getattr(start_snapshot, 'followers_count', 0) or 0
+            end_values['followers'] += getattr(end_snapshot, 'followers_count', 0) or 0
+
         trend.append({
             'period': bucket['key'],
             'label': bucket['label'],
-            'views': views_sum,
-            'engagement': engagement_sum,
-            'postsCount': len(b_posts),
-            'followers': followers_sum
+            'views': end_values['views'] - start_values['views'],
+            'engagement': end_values['engagement'] - start_values['engagement'],
+            'postsCount': len(period_posts),
+            'followers': end_values['followers'] - start_values['followers'],
+            'startValues': start_values,
+            'endValues': end_values,
         })
-        
+
     response = Response({'groupBy': group_by, 'trend': trend})
     response['Cache-Control'] = 'no-store, no-cache, must-revalidate'
     return response
-
 def _build_media_summary(query):
     period_start, period_end = resolve_reporting_period(query)
     platform_filter = query.get('platform')
