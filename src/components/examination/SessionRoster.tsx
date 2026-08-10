@@ -32,6 +32,8 @@ export default function SessionRoster({ session, candidates, toolbar, onOpenCand
   const [saving, setSaving] = useState(false);
   const [roundSection, setRoundSection] = useState<'info' | 'students' | 'rooms'>('info');
   const [occurrenceFilter, setOccurrenceFilter] = useState<Record<string, string>>({});
+  const [roomFilter, setRoomFilter] = useState<Record<string, string>>({});
+  const [assignmentFilter, setAssignmentFilter] = useState<Record<string, string>>({});
   const [roomsByRound, setRoomsByRound] = useState<Record<string, SavedRoom[]>>({});
   const tab = controlledTab ?? localTab;
   const selectTab = (next: RosterTab) => { if (controlledTab === undefined) setLocalTab(next); onTabChange?.(next); };
@@ -52,7 +54,12 @@ export default function SessionRoster({ session, candidates, toolbar, onOpenCand
     return () => { cancelled = true; };
   }, [canEdit, idToken, session.id, session.rounds, session.national, session.nationalDate, session.international, session.internationalDate]);  const rows = useMemo(() => candidates.filter(candidate => candidate.sessionIds?.includes(session.id) || candidate.participations?.some(item => item.sessionId === session.id) || (!candidate.sessionIds?.length && (candidate.contests || '').includes(session.code))).sort(compareSessionCandidates), [candidates, session]);
   const filtered = rows.filter(candidate => { const participation = candidate.participations?.find(item => item.sessionId === session.id); return matchesSearch([candidate.code, candidate.name, candidate.birthDate, candidate.className, candidate.school, candidate.city, ...Object.values(participation?.registration || {}), ...(participation?.rounds || []).flatMap(round => Object.values(round))].join(' '), query); });
-  const entryForRound = (candidate: Candidate, index: number) => candidate.participations?.find(item => item.sessionId === session.id)?.rounds?.[index];
+  const entryForRound = (candidate: Candidate, index: number, occurrenceId = '') => {
+    const participation = candidate.participations?.find(item => item.sessionId === session.id);
+    const round = rounds[index];
+    const matches = (participation?.rounds || []).filter(item => item.roundId === round?.id || (!item.roundId && item.round === round?.name));
+    return (occurrenceId ? matches.find(item => item.occurrenceId === occurrenceId) : matches[0]) || participation?.rounds?.[index];
+  };
   const occurrenceKey = (roundId: string, occurrenceId = '') => `${roundId}:${occurrenceId}`;
   const occurrenceLabel = (round: SessionRound, occurrenceId?: string) => {
     const occurrence = roundOccurrences(round).find(item => item.id === occurrenceId);
@@ -112,14 +119,24 @@ export default function SessionRoster({ session, candidates, toolbar, onOpenCand
     const config = rounds[index];
     const occurrences = config ? roundOccurrences(config) : [];
     const selectedOccurrenceId = occurrenceFilter[config?.id || ''] || (occurrences.length === 1 ? occurrences[0].id : '');
-    const roundRows = filtered.filter(candidate => isEligibleForRound(candidate, index) && (!selectedOccurrenceId || entryForRound(candidate, index)?.occurrenceId === selectedOccurrenceId));
+    const selectedRoomId = roomFilter[config?.id || ''] || '';
+    const selectedAssignment = assignmentFilter[config?.id || ''] || '';
+    const allRoundRows = filtered.filter(candidate => isEligibleForRound(candidate, index));
+    const roomOptions = [...new Map(allRoundRows.map(candidate => {
+      const result = entryForRound(candidate, index, selectedOccurrenceId);
+      return result?.roomId ? [result.roomId, result.roomName || 'Phòng thi'] : null;
+    }).filter(Boolean) as [string, string][]).entries()];
+    const roundRows = allRoundRows.filter(candidate => {
+      const result = entryForRound(candidate, index, selectedOccurrenceId);
+      return Boolean(result) && (!selectedRoomId || result?.roomId === selectedRoomId) && (!selectedAssignment || (selectedAssignment === 'assigned' ? Boolean(result?.roomId) : !result?.roomId));
+    });
     const roomKey = occurrenceKey(config?.id || '', selectedOccurrenceId);
-    const unassignedCount = roundRows.filter(candidate => !entryForRound(candidate, index)?.roomId).length;
+    const unassignedCount = roundRows.filter(candidate => !entryForRound(candidate, index, selectedOccurrenceId)?.roomId).length;
     const activeRoundPage = Math.min(rosterPage, Math.max(1, Math.ceil(roundRows.length / LIST_PAGE_SIZE)));
     const visibleRoundRows = roundRows.slice((activeRoundPage - 1) * LIST_PAGE_SIZE, activeRoundPage * LIST_PAGE_SIZE);
     const activeClass = (active: boolean) => active ? 'rounded-lg bg-[#001e40] px-3 py-2 text-sm font-bold text-white' : 'rounded-lg px-3 py-2 text-sm font-bold text-slate-600';
     return <>
-      {occurrences.length > 1 && <label className="mb-4 block max-w-md"><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Đợt tổ chức</span><select value={selectedOccurrenceId} onChange={event => setOccurrenceFilter(current => ({ ...current, [config.id]: event.target.value }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-[#001e40]"><option value="">Tất cả đợt ({filtered.filter(candidate => isEligibleForRound(candidate, index)).length})</option>{occurrences.map(occurrence => <option key={occurrence.id} value={occurrence.id}>{occurrenceLabel(config, occurrence.id)}</option>)}</select><p className="mt-1 text-xs text-slate-500">Chọn một đợt trước khi áp dụng lịch hoặc phân phòng để không trộn danh sách.</p></label>}
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">{occurrences.length > 1 && <label><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Đợt tổ chức</span><select value={selectedOccurrenceId} onChange={event => setOccurrenceFilter(current => ({ ...current, [config.id]: event.target.value }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-[#001e40]"><option value="">Tất cả đợt ({allRoundRows.length})</option>{occurrences.map(occurrence => <option key={occurrence.id} value={occurrence.id}>{occurrenceLabel(config, occurrence.id)}</option>)}</select></label>}<label><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Phòng thi</span><select value={selectedRoomId} onChange={event => setRoomFilter(current => ({ ...current, [config.id]: event.target.value }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"><option value="">Tất cả phòng</option>{roomOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label><label><span className="mb-1 block text-xs font-bold uppercase text-slate-500">Phân phòng</span><select value={selectedAssignment} onChange={event => setAssignmentFilter(current => ({ ...current, [config.id]: event.target.value }))} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"><option value="">Tất cả trạng thái</option><option value="assigned">Đã phân phòng</option><option value="unassigned">Chưa phân phòng</option></select></label></div>
       <div className="mb-4 flex flex-wrap items-center gap-2 border-b pb-3"><button onClick={() => setRoundSection('info')} className={activeClass(roundSection === 'info')}>Thông tin {config?.name || 'vòng thi'}</button><button onClick={() => setRoundSection('students')} className={activeClass(roundSection === 'students')}>Danh sách thí sinh ({roundRows.length})</button><button onClick={() => setRoundSection('rooms')} className={activeClass(roundSection === 'rooms')}>Phòng thi ({(roomsByRound[roomKey] || []).length}{unassignedCount > 0 ? <> · {unassignedCount} chưa phân</> : null})</button>{canEdit && config && <div className="ml-auto flex flex-wrap items-start justify-end gap-2"><ExamRoomAllocationDialog sessionId={session.id} round={config} occurrenceId={selectedOccurrenceId} candidateCount={roundRows.length} idToken={idToken} onAllocated={(updated, roomList) => handleAllocatedCandidates(updated, config.id, roomList, selectedOccurrenceId)}/><ExamScheduleApplyDialog sessionId={session.id} round={config} occurrenceId={selectedOccurrenceId} candidateCount={roundRows.length} idToken={idToken} onApplied={handleAllocatedCandidates}/><button onClick={() => setRoundEditor({ index, slots: config?.slots?.length ? config.slots.map(slot => ({ ...slot })) : [] })} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-[#001e40]"><Pencil className="h-4 w-4"/>Thay đổi thông tin vòng</button></div>}</div>
       {unassignedCount > 0 && selectedOccurrenceId && <button type="button" onClick={() => setRoundSection('rooms')} className="mb-4 flex w-full items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-left text-sm text-amber-950 hover:bg-amber-100"><span><b>Cảnh báo phân phòng:</b> còn {unassignedCount} thí sinh chưa được phân phòng ở đợt này.</span><span className="shrink-0 font-bold text-amber-800">Xử lý ngay →</span></button>}
       {roundSection === 'info' && <SlotCards config={config}/>} {roundSection === 'students' && <>{searchBox}<RoundTable data={visibleRoundRows} index={index}/><TablePagination total={roundRows.length} page={activeRoundPage} onPageChange={setRosterPage} label="thí sinh"/></>} {roundSection === 'rooms' && config && <RoomRoster config={config} data={roundRows} index={index}/>}</>;
