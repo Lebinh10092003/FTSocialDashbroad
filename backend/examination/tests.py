@@ -1364,6 +1364,29 @@ class SheetCandidateImportPreviewTests(TestCase):
         self.assertEqual(candidate.school, 'Trường mới')
         self.assertEqual(candidate.email, 'keep@example.com')
 
+    def test_overwrite_policy_can_skip_fields_that_are_currently_empty(self):
+        candidate = Candidate.objects.create(
+            id='FT-ISO-003', code='FT-ISO-003', name='Nguyễn Chi', school='Trường cũ',
+            email='', identity='001214000003', sort_key='nguyen-chi',
+        )
+        CandidateParticipation.objects.create(candidate=candidate, session=self.session)
+
+        response = self.client.post('/api/examination/import/candidates', {
+            'sessionId': self.session.id,
+            'source': 'ISO Sheet preview',
+            'updateMode': 'replace-nonempty',
+            'importEmptyValues': False,
+            'records': [{
+                'code': 'FT-ISO-003', 'name': 'Nguyễn Chi', 'identity': '001214000003',
+                'school': 'Trường mới', 'email': 'chi@example.com',
+            }],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        candidate.refresh_from_db()
+        self.assertEqual(candidate.school, 'Trường mới')
+        self.assertEqual(candidate.email, '')
+
     @patch('examination.views.remote_sheet_fingerprint')
     def test_output_import_rejects_a_preview_that_became_stale(self, fingerprint):
         fingerprint.return_value = 'newer-sheet-version'

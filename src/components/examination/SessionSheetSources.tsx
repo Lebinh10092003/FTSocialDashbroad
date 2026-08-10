@@ -17,7 +17,9 @@ export default function SessionSheetSources({ sources, sessionId, sessionLabel, 
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [importingId, setImportingId] = useState<string | null>(null);
   const [importMessage, setImportMessage] = useState('');
-  const [importMode, setImportMode] = useState<'add-only' | 'fill-empty' | 'replace-nonempty'>('fill-empty');
+  const [importNewRecords, setImportNewRecords] = useState(true);
+  const [importEmptyValues, setImportEmptyValues] = useState(true);
+  const [overwriteExistingValues, setOverwriteExistingValues] = useState(true);
   const [removeWebOnlyCandidates, setRemoveWebOnlyCandidates] = useState(false);
   const [exportSelectedCodes, setExportSelectedCodes] = useState<string[]>([]);
   const [importPreview, setImportPreview] = useState<{ source: SheetSource; data: ImportPreview } | null>(null);
@@ -47,7 +49,9 @@ export default function SessionSheetSources({ sources, sessionId, sessionLabel, 
       });
       const preview = await previewResponse.json().catch(() => ({}));
       if (!previewResponse.ok) throw new Error(preview?.error || '\u004b\u0068\u00f4\u006e\u0067 th\u1ec3 \u0111\u1ecdc ngu\u1ed3n d\u1eef li\u1ec7u n\u00e0y.');
-      setImportMode('fill-empty');
+      setImportNewRecords(true);
+      setImportEmptyValues(true);
+      setOverwriteExistingValues(true);
       setRemoveWebOnlyCandidates(false);
       setImportPreview({ source, data: preview as ImportPreview });
     } catch (requestError: any) { setImportMessage(requestError.message || '\u004b\u0068\u00f4\u006e\u0067 th\u1ec3 \u0111\u1ecdc ngu\u1ed3n d\u1eef li\u1ec7u n\u00e0y.'); }
@@ -62,8 +66,8 @@ export default function SessionSheetSources({ sources, sessionId, sessionLabel, 
       const response = await fetch('/api/examination/import/candidates', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken || ''}` },
         body: JSON.stringify({
-          records: data.records || [], source: data.source?.name || source.name || 'Google Sheets',
-          sessionId, sheetId: source.id, sourceFingerprint: data.source?.fingerprint || '', updateMode: importMode, removeSessionCandidateCodes: removeWebOnlyCandidates ? (data.webOnlyRecords || []).map(person => person.code).filter(Boolean) : [],
+          records: selectedImportRecords, source: data.source?.name || source.name || 'Google Sheets',
+          sessionId, sheetId: source.id, sourceFingerprint: data.source?.fingerprint || '', updateMode: selectedUpdateMode, importEmptyValues, removeSessionCandidateCodes: removeWebOnlyCandidates ? (data.webOnlyRecords || []).map(person => person.code).filter(Boolean) : [],
         }),
       });
       const body = await response.json();
@@ -87,6 +91,19 @@ export default function SessionSheetSources({ sources, sessionId, sessionLabel, 
     } catch (requestError: any) { setError(requestError.message || 'Không thể xuất dữ liệu.'); }
     finally { setExportingId(null); }
   };
+  const selectedUpdateMode: 'add-only' | 'fill-empty' | 'replace-nonempty' = overwriteExistingValues ? 'replace-nonempty' : importEmptyValues ? 'fill-empty' : 'add-only';
+  const selectedChange = (change: { current?: string }) => Boolean(change.current) ? overwriteExistingValues : importEmptyValues;
+  const isSelectedRecord = (record: ImportPreview['records'][number]) => {
+    const status = record._preview?.status;
+    if (status === 'new') return importNewRecords;
+    if (status === 'conflict') return true;
+    return (record._preview?.changes || []).some(selectedChange);
+  };
+  const selectedImportRecords = importPreview ? importPreview.data.records.filter(record => record._preview?.status !== 'conflict' && isSelectedRecord(record)) : [];
+  const tableRecords = importPreview ? importPreview.data.records.filter(record => record._preview?.status !== 'unchanged' && isSelectedRecord(record)).slice(0, 250) : [];
+  const selectedChanges = importPreview ? importPreview.data.records.flatMap(record => (record._preview?.changes || []).filter(selectedChange)) : [];
+  const emptyFieldCount = selectedChanges.filter(change => !change.current).length;
+  const overwriteFieldCount = selectedChanges.filter(change => Boolean(change.current)).length;
   return <section className="ft-surface mt-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
 <div>
@@ -181,7 +198,7 @@ export default function SessionSheetSources({ sources, sessionId, sessionLabel, 
 </form>
 </div>}
     {importPreview && <div className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/50 p-4">
-<div className="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white p-6 shadow-2xl">
+<div className="flex max-h-[calc(100vh-1rem)] w-[96vw] max-w-[1600px] flex-col overflow-hidden rounded-2xl bg-white p-7 shadow-2xl">
 <div className="flex items-start justify-between gap-4">
 <div>
 <p className="text-xs font-bold uppercase text-indigo-700">
@@ -195,16 +212,17 @@ export default function SessionSheetSources({ sources, sessionId, sessionLabel, 
 <X className="h-5 w-5" />
 </button>
 </div>
-<div className="mt-4 flex flex-wrap gap-2 text-sm font-bold">
-<span className="rounded-full bg-sky-100 px-3 py-1 text-sky-800">
-{importPreview.data.summary?.new || 0}{' h\u1ed3 s\u01a1 m\u1edbi'}</span>
-<span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-800">
-{importPreview.data.summary?.changed || 0}{' h\u1ed3 s\u01a1 s\u1ebd b\u1ed5 sung'}</span>
-<span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
-{importPreview.data.summary?.unchanged || 0}{' kh\u00f4ng thay \u0111\u1ed5i'}</span>
-{Number(importPreview.data.summary?.webOnly || 0) > 0 && <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-800">
-{importPreview.data.summary?.webOnly}{' ch\u1ec9 c\u00f3 tr\u00ean web'}</span>}{Number(importPreview.data.summary?.conflicts || 0) > 0 && <span className="rounded-full bg-rose-100 px-3 py-1 text-rose-800">
-{importPreview.data.summary?.conflicts}{' ch\u01b0a gh\u00e9p an to\u00e0n'}</span>}</div>
+<div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+<div className="flex flex-wrap items-center justify-between gap-2">
+<div><h4 className="font-extrabold text-slate-900">Chọn dữ liệu được nhập</h4><p className="mt-1 text-sm text-slate-600">Bỏ chọn một loại thì các thay đổi đó biến mất khỏi bảng và không được ghi vào hệ thống.</p></div>
+<span className="rounded-full bg-slate-200 px-3 py-1 text-sm font-bold text-slate-700">{selectedImportRecords.length}{' hồ sơ đang chọn'}</span>
+</div>
+<div className="mt-3 grid gap-3 lg:grid-cols-3">
+<label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 ${importNewRecords ? 'border-sky-400 bg-sky-50' : 'border-slate-200 bg-white'}`}><input type="checkbox" checked={importNewRecords} onChange={event => setImportNewRecords(event.target.checked)} className="mt-1 h-4 w-4" /><span><b className="block text-sky-950">Tạo hồ sơ mới · {importPreview.data.summary?.new || 0}</b><small className="text-slate-600">Thêm các thí sinh chưa có trên hệ thống.</small></span></label>
+<label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 ${importEmptyValues ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 bg-white'}`}><input type="checkbox" checked={importEmptyValues} onChange={event => setImportEmptyValues(event.target.checked)} className="mt-1 h-4 w-4" /><span><b className="block text-emerald-950">Điền các ô còn trống · {emptyFieldCount}</b><small className="text-slate-600">Chỉ thêm dữ liệu vào trường đang để trống.</small></span></label>
+<label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 ${overwriteExistingValues ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-white'}`}><input type="checkbox" checked={overwriteExistingValues} onChange={event => setOverwriteExistingValues(event.target.checked)} className="mt-1 h-4 w-4" /><span><b className="block text-amber-950">Cập nhật dữ liệu đang có · {overwriteFieldCount}</b><small className="text-slate-600">Thay giá trị hiện có bằng giá trị trong Sheet.</small></span></label>
+</div>
+</div>
 {Number(importPreview.data.summary?.webOnly || 0) > 0 && <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
 <b>
 {'C\u00f3 th\u00ed sinh tr\u00ean web nh\u01b0ng ch\u01b0a c\u00f3 d\u00f2ng kh\u1edbp tr\u00ean Sheet.'}</b>
@@ -213,19 +231,19 @@ export default function SessionSheetSources({ sources, sessionId, sessionLabel, 
 {person.code ? `${person.code} · ` : ''}{person.name || 'Ch\u01b0a c\u00f3 t\u00ean'}{person.identity ? ` · CCCD: ${person.identity}` : ''}</p>)}</div>
 </div>}{Number(importPreview.data.summary?.conflicts || 0) > 0 && <div className="mt-4 rounded-xl border border-rose-300 bg-rose-50 p-3 text-sm font-semibold text-rose-800">
 {'C\u00f3 d\u00f2ng ch\u01b0a gh\u00e9p an to\u00e0n. H\u1ec7 th\u1ed1ng kh\u00f4ng nh\u1eadp \u0111\u1ec3 tr\u00e1nh ghi nh\u1ea7m h\u1ed3 s\u01a1; h\u00e3y b\u1ed5 sung m\u00e3 h\u1ed3 s\u01a1 ho\u1eb7c th\u00f4ng tin \u0111\u1ecbnh danh tr\u00ean Sheet r\u1ed3i xem tr\u01b0\u1edbc l\u1ea1i.'}</div>}<div className="mt-4 min-h-0 flex-1 overflow-auto rounded-xl border">
-<table className="w-full min-w-[920px] table-fixed text-sm">
+<table className="w-full min-w-[1200px] table-fixed text-sm">
 <thead className="sticky top-0 bg-slate-50 text-left">
 <tr>
-<th className="w-24 p-3">
+<th className="w-28 p-3">
 {'D\u00f2ng Sheet'}</th>
-<th className="w-64 p-3">
+<th className="w-80 p-3">
 {'H\u1ed3 s\u01a1'}</th>
 <th className="p-3">
 {'Thay \u0111\u1ed5i s\u1ebd nh\u1eadp'}</th>
 </tr>
 </thead>
 <tbody>
-{importPreview.data.records.filter(record => record._preview?.status !== 'unchanged').slice(0, 250).map(record => { const preview = record._preview; const changes = preview?.changes || []; return <tr key={`${preview?.sourceRow}-${record.code || record.name}`} className={`border-t align-top ${preview?.status === 'conflict' ? 'bg-rose-50' : ''}`}>
+{tableRecords.map(record => { const preview = record._preview; const changes = (preview?.changes || []).filter(selectedChange); return <tr key={`${preview?.sourceRow}-${record.code || record.name}`} className={`border-t align-top ${preview?.status === 'conflict' ? 'bg-rose-50' : ''}`}>
 <td className="p-3 font-bold">
 {preview?.sourceRow || '\u2014'}</td>
 <td className="break-words p-3">
@@ -238,7 +256,8 @@ export default function SessionSheetSources({ sources, sessionId, sessionLabel, 
 {preview?.status === 'new' ? <span className="font-semibold text-sky-700">
 {'T\u1ea1o h\u1ed3 s\u01a1 v\u00e0 d\u1eef li\u1ec7u k\u1ef3 thi m\u1edbi'}</span> : preview?.status === 'conflict' ? <span className="font-semibold text-rose-700">
 {'Ch\u01b0a gh\u00e9p \u0111\u01b0\u1ee3c v\u1edbi h\u1ed3 s\u01a1 an to\u00e0n'}</span> : changes.length ? <ul className="space-y-1">
-{changes.map(change => <li key={change.field}>
+{changes.map(change => <li key={change.field} className={`flex flex-wrap items-center gap-1 rounded-md px-2 py-1 ${change.current ? 'bg-amber-50 text-amber-950' : 'bg-emerald-50 text-emerald-950'}`}>
+<span className={`rounded px-1.5 py-0.5 text-[10px] font-extrabold uppercase ${change.current ? 'bg-amber-200 text-amber-900' : 'bg-emerald-200 text-emerald-900'}`}>{change.current ? 'Ghi đè' : 'Điền trống'}</span>
 <b>
 {change.label || change.field}:</b> <span className="text-slate-500">
 {change.current || '\u0074r\u1ed1ng'}</span>
@@ -251,15 +270,10 @@ export default function SessionSheetSources({ sources, sessionId, sessionLabel, 
 </tr>; })}</tbody>
 </table>
 </div>
-{importPreview.data.records.filter(record => record._preview?.status !== 'unchanged').length > 250 && <p className="mt-2 text-xs text-slate-500">
-{'Ch\u1ec9 hi\u1ec3n th\u1ecb 250 d\u00f2ng c\u00f3 thay \u0111\u1ed5i \u0111\u1ea7u ti\u00ean.'}</p>}<div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-sm">
-<label className="font-bold text-indigo-950">Cách nhập</label>
-<select value={importMode} onChange={event => setImportMode(event.target.value as 'add-only' | 'fill-empty' | 'replace-nonempty')} className="mt-2 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2">
-<option value="add-only">Chỉ nhập thêm thí sinh chưa có</option>
-<option value="fill-empty">Nhập mới và chỉ bổ sung trường web đang trống</option>
-<option value="replace-nonempty">Ghi đè các trường có dữ liệu theo Sheet</option>
-</select>
-<p className="mt-2 text-xs text-indigo-800">Không xóa thí sinh chỉ có trên web trong bất kỳ lựa chọn nào.</p>
+{tableRecords.length > 250 && <p className="mt-2 text-xs text-slate-500">
+{'Chỉ hiển thị 250 dòng thay đổi đầu tiên.'}</p>}<div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-sm">
+<p className="font-bold text-indigo-950">Bảng chỉ hiển thị các thay đổi đang được chọn.</p>
+<p className="mt-1 text-xs text-indigo-800">Màu xanh là điền vào ô đang trống; màu vàng là ghi đè giá trị đã có. Không có lựa chọn nào tự xóa dữ liệu.</p>
 {Number(importPreview.data.summary?.webOnly || 0) > 0 && <label className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-950">
 <input type="checkbox" checked={removeWebOnlyCandidates} onChange={event => setRemoveWebOnlyCandidates(event.target.checked)} />
 <span>
@@ -269,7 +283,7 @@ export default function SessionSheetSources({ sources, sessionId, sessionLabel, 
 <div className="mt-6 flex justify-end gap-3">
 <button onClick={() => setImportPreview(null)} className="rounded-lg border px-4 py-2 text-sm font-bold">
 {'H\u1ee7y'}</button>
-<button disabled={importingId === importPreview.source.id || Number(importPreview.data.summary?.conflicts || 0) > 0} onClick={confirmImport} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
+<button disabled={importingId === importPreview.source.id || selectedImportRecords.length === 0 || Number(importPreview.data.summary?.conflicts || 0) > 0} onClick={confirmImport} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
 {importingId === importPreview.source.id ? '\u0110ang nh\u1eadp\u2026' : 'X\u00e1c nh\u1eadn nh\u1eadp d\u1eef li\u1ec7u'}</button>
 </div>
 </div>

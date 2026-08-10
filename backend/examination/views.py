@@ -493,7 +493,7 @@ def ensure_examination_seed():
                 'sort_key': f"{cand_data['name'].lower()}_{cand_data['identity'] or cand_data['id']}"
             }
         )
-def merge_exam_history(existing, incoming, session_id='', source='', update_mode='replace-nonempty'):
+def merge_exam_history(existing, incoming, session_id='', source='', update_mode='replace-nonempty', import_empty_values=True):
     rows = [item for item in (existing or []) if isinstance(item, dict)]
     index = {}
     for position, item in enumerate(rows):
@@ -513,6 +513,10 @@ def merge_exam_history(existing, incoming, session_id='', source='', update_mode
             if update_mode == 'fill-empty':
                 for field, value in clean.items():
                     if not str(rows[index[key]].get(field) or '').strip():
+                        rows[index[key]][field] = value
+            elif not import_empty_values:
+                for field, value in clean.items():
+                    if str(rows[index[key]].get(field) or '').strip():
                         rows[index[key]][field] = value
             else:
                 rows[index[key]].update(clean)
@@ -561,14 +565,14 @@ def occurrence_id_from_round(round_config, occurrence_id='', exam_date=''):
     return ''
 
 
-def upsert_participation_history(candidate, session_id, history, source='', registration=None, update_mode='replace-nonempty'):
+def upsert_participation_history(candidate, session_id, history, source='', registration=None, update_mode='replace-nonempty', import_empty_values=True):
     """Store a source tab as one session and each populated round independently."""
     if not session_id:
         return None
     session = ExamSession.objects.filter(id=session_id).first()
     if not session:
         return None
-    participation, _ = CandidateParticipation.objects.get_or_create(
+    participation, participation_created = CandidateParticipation.objects.get_or_create(
         candidate=candidate,
         session=session,
         defaults={'source': source or ''},
@@ -585,7 +589,12 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
     }
     for payload_field, model_field in registration_fields.items():
         value = str(registration.get(payload_field) or '').strip()
-        if value and (update_mode != 'fill-empty' or not str(getattr(participation, model_field) or '').strip()):
+        current_value = str(getattr(participation, model_field) or '').strip()
+        can_write = value and (
+            not current_value if update_mode == 'fill-empty'
+            else (import_empty_values or participation_created or bool(current_value))
+        )
+        if can_write:
             setattr(participation, model_field, value)
             updates.append(model_field)
     if registration:
@@ -594,6 +603,12 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
             merged_registration = dict(participation.registration_data or {})
             for key, value in incoming_registration.items():
                 if not str(merged_registration.get(key) or '').strip():
+                    merged_registration[key] = value
+            participation.registration_data = merged_registration
+        elif not import_empty_values and not participation_created:
+            merged_registration = dict(participation.registration_data or {})
+            for key, value in incoming_registration.items():
+                if str(merged_registration.get(key) or '').strip():
                     merged_registration[key] = value
             participation.registration_data = merged_registration
         else:
@@ -644,12 +659,17 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
             if not values.get('round_id'):
                 values['round_id'] = existing_result.round_id
             for model_field in ROUND_FIELD_MAP.values():
-                if not values.get(model_field) or (update_mode == 'fill-empty' and str(getattr(existing_result, model_field) or '').strip()):
+                current_value = str(getattr(existing_result, model_field) or '').strip()
+                if (
+                    not values.get(model_field)
+                    or (update_mode == 'fill-empty' and current_value)
+                    or (update_mode != 'fill-empty' and not import_empty_values and not current_value)
+                ):
                     values[model_field] = getattr(existing_result, model_field)
             for field_name, value in values.items():
                 setattr(existing_result, field_name, value)
             existing_result.save()
-        else:
+        elif import_empty_values or participation_created:
             RoundResult.objects.create(
                 participation=participation,
                 round_name=round_name,
@@ -2292,6 +2312,7 @@ def sheet_import_preview(request):
     session_id = str(data.get('sessionId') or '').strip()
     sheet_tab = str(data.get('sheetTab') or '').strip()
     update_mode = str(data.get('updateMode') or 'replace-nonempty').strip()
+    import_empty_values = bool(data.get('importEmptyValues', True))
     if update_mode not in {'fill-empty', 'replace-nonempty'}:
         return Response({'error': 'Chính sách cập nhật dữ liệu không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
     source_name = 'Google Sheets'
@@ -2325,6 +2346,7 @@ def sheet_import_preview(request):
         preview=True,
         sheet_tab=sheet_tab,
         preview_update_mode=update_mode,
+        preview_import_empty_values=import_empty_values,
     )
     if not result.get('success'):
         return Response({'error': result.get('message') or 'Không thể đọc Google Sheets.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2441,6 +2463,7 @@ def import_candidates(request):
             return Response({'error': 'Danh sách thí sinh cần gỡ khỏi kỳ thi không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
         remove_session_candidate_codes = {str(code or '').strip().upper() for code in remove_session_candidate_codes if str(code or '').strip()}
         update_mode = str(data.get('updateMode') or 'replace-nonempty').strip()
+        import_empty_values = bool(data.get('importEmptyValues', True))
         if update_mode not in {'add-only', 'fill-empty', 'replace-nonempty'}:
             return Response({'error': 'Chính sách cập nhật dữ liệu không hợp lệ.'}, status=status.HTTP_400_BAD_REQUEST)
         
@@ -2580,13 +2603,16 @@ def import_candidates(request):
                 }
                 previous_session_ids = list(base.session_ids or [])
                 already_in_target_session = session_id in previous_session_ids or CandidateParticipation.objects.filter(candidate=base, session_id=session_id).exists()
-                should_write = lambda current, incoming: bool(incoming) and (update_mode == 'replace-nonempty' or not str(current or '').strip())
+                should_write = lambda current, incoming: bool(incoming) and (
+                    not str(current or '').strip() if update_mode == 'fill-empty'
+                    else (import_empty_values or bool(str(current or '').strip()))
+                )
                 if should_write(base.name, rec_cand['name']): base.name = rec_cand['name']
                 for model_field in ('school', 'class_name', 'city', 'ward', 'nationality', 'grade', 'achievement', 'highest_round', 'email', 'parent', 'phone', 'identity', 'address'):
                     incoming_value = rec_cand[model_field]
                     if should_write(getattr(base, model_field), incoming_value):
                         setattr(base, model_field, incoming_value)
-                if rec_cand['birth_date'] and (update_mode == 'replace-nonempty' and should_replace_birth_date(base.birth_date, rec_cand['birth_date']) or update_mode == 'fill-empty' and not base.birth_date):
+                if rec_cand['birth_date'] and should_replace_birth_date(base.birth_date, rec_cand['birth_date']) and should_write(base.birth_date, rec_cand['birth_date']):
                     base.birth_date = rec_cand['birth_date']
 
                 base.contests = merge_contest_codes(base.contests, rec_cand['contests'])
@@ -2595,10 +2621,10 @@ def import_candidates(request):
                     if session_id not in s_ids:
                         s_ids.append(session_id)
                     base.session_ids = s_ids
-                base.exam_history = merge_exam_history(base.exam_history, rec_cand['exam_history'], session_id, source, update_mode)
+                base.exam_history = merge_exam_history(base.exam_history, rec_cand['exam_history'], session_id, source, update_mode, import_empty_values)
                 base.updated = ts_vn
                 base.save()
-                upsert_participation_history(base, session_id, rec_cand['exam_history'], source, rec_cand['registration'], update_mode)
+                upsert_participation_history(base, session_id, rec_cand['exam_history'], source, rec_cand['registration'], update_mode, import_empty_values)
 
                 after_values = {
                     field: getattr(base, field)
@@ -2649,11 +2675,11 @@ def import_candidates(request):
                     address=rec_cand['address'],
                     birth_date=rec_cand['birth_date'],
                     session_ids=s_ids,
-                    exam_history=merge_exam_history([], rec_cand['exam_history'], session_id, source, update_mode),
+                    exam_history=merge_exam_history([], rec_cand['exam_history'], session_id, source, update_mode, True),
                     updated=ts_vn,
                     sort_key=f"{rec_cand['name'].lower()}_{rec_cand['identity'] or code}"
                 )
-                upsert_participation_history(new_c, session_id, rec_cand['exam_history'], source, rec_cand['registration'], update_mode)
+                upsert_participation_history(new_c, session_id, rec_cand['exam_history'], source, rec_cand['registration'], update_mode, True)
                 existing.append(new_c)
                 existing_codes_set.add(code)
                 created += 1

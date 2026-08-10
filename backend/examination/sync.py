@@ -462,7 +462,7 @@ def sync_candidate_payload(candidate):
     }
 
 
-def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url, sheet_tab='', source_row_offset=1, update_mode='replace-nonempty'):
+def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url, sheet_tab='', source_row_offset=1, update_mode='replace-nonempty', import_empty_values=True):
     existing = list(Candidate.objects.all())
     # Compare against memberships in this session, not every historic profile.
     session_candidates = list(Candidate.objects.filter(participations__session_id=session_id).distinct()) if session_id else []
@@ -500,7 +500,10 @@ def build_sheet_preview(incoming, headers, columns, raw, session_id, source_url,
         def add_change(field, label, current, incoming_value):
             current_value = clean_txt(current)
             next_value = clean_txt(incoming_value)
-            can_write = next_value and (update_mode == 'replace-nonempty' or not current_value)
+            can_write = next_value and (
+                not current_value if update_mode == 'fill-empty'
+                else (import_empty_values or bool(current_value))
+            )
             same_percentage = field.endswith('.scoreRate') and format_sheet_percentage(current_value) == format_sheet_percentage(next_value)
             if can_write and current_value != next_value and not same_percentage:
                 changed_fields.append(field)
@@ -1355,7 +1358,7 @@ def public_sheet_fingerprint(spreadsheet_url, sheet_tab=''):
     raise ValueError(str(last_error or 'Kh?ng ??c ???c CSV c?ng khai c?a Google Sheet.'))
 
 
-def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None, preview=False, sheet_tab='', preview_update_mode='replace-nonempty'):
+def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None, preview=False, sheet_tab='', preview_update_mode='replace-nonempty', preview_import_empty_values=True):
     def update_state(data):
         if sheet_doc_id:
             try:
@@ -1465,7 +1468,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
                 raise Exception('Mỗi lần chỉ được xử lý tối đa 1.000 hồ sơ. Hãy chia tab nguồn thành nhiều đợt nhỏ hơn.')
         if not incoming:
             if preview:
-                result = build_sheet_preview([], header_row, col, raw, session_id, spreadsheet_url, sheet_tab, header_index + 2, preview_update_mode)
+                result = build_sheet_preview([], header_row, col, raw, session_id, spreadsheet_url, sheet_tab, header_index + 2, preview_update_mode, preview_import_empty_values)
                 result['sessionId'] = session_id or ''
                 result['timestamp'] = ts_vn
                 result['warnings'].append('Không có hồ sơ hợp lệ nào trong tab đã chọn.')
@@ -1482,7 +1485,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
             }
 
         if preview:
-            result = build_sheet_preview(incoming, header_row, col, raw, session_id, spreadsheet_url, sheet_tab, header_index + 2, preview_update_mode)
+            result = build_sheet_preview(incoming, header_row, col, raw, session_id, spreadsheet_url, sheet_tab, header_index + 2, preview_update_mode, preview_import_empty_values)
             result['sessionId'] = session_id or ''
             result['timestamp'] = ts_vn
             return result
