@@ -522,6 +522,7 @@ def merge_exam_history(existing, incoming, session_id='', source='', update_mode
     return rows
 
 ROUND_FIELD_MAP = {
+    'occurrenceId': 'occurrence_id',
     'eligibility': 'eligibility',
     'sbd': 'sbd',
     'date': 'exam_date',
@@ -538,6 +539,26 @@ ROUND_FIELD_MAP = {
     'result': 'result',
     'note': 'note',
 }
+
+
+def occurrence_id_from_round(round_config, occurrence_id='', exam_date=''):
+    """Resolve a candidate to one declared organisation batch of a round.
+
+    The ID is explicit in new payloads.  Imports that only contain ``Ngày thi``
+    are mapped to a matching configured batch so the old Sheet template remains
+    valid without adding a mandatory column.
+    """
+    explicit = str(occurrence_id or '').strip()
+    if explicit:
+        return explicit
+    date_value = str(exam_date or '').strip()
+    slots = (round_config or {}).get('slots') or []
+    for slot in slots:
+        if isinstance(slot, dict) and date_value and str(slot.get('date') or '').strip() == date_value:
+            return str(slot.get('id') or '').strip()
+    if len(slots) == 1 and isinstance(slots[0], dict):
+        return str(slots[0].get('id') or '').strip()
+    return ''
 
 
 def upsert_participation_history(candidate, session_id, history, source='', registration=None, update_mode='replace-nonempty'):
@@ -605,8 +626,15 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
             values['eligibility'] = normalize_eligibility(values['eligibility'])
         if values.get('exam_date'):
             values['exam_date'] = parse_dob(values['exam_date']) or values['exam_date']
+        values['occurrence_id'] = occurrence_id_from_round(matching_round, values.get('occurrence_id'), values.get('exam_date'))
         values['raw_data'] = {str(key): value for key, value in item.items() if value not in (None, '')}
-        existing_result = RoundResult.objects.filter(participation=participation, round_name=round_name).first()
+        existing_result = RoundResult.objects.filter(
+            participation=participation,
+            round_id=values['round_id'],
+            occurrence_id=values['occurrence_id'],
+        ).first() if values['round_id'] and values['occurrence_id'] else None
+        if not existing_result:
+            existing_result = RoundResult.objects.filter(participation=participation, round_name=round_name, occurrence_id=values['occurrence_id']).first()
         if not existing_result and values.get('round_id'):
             existing_result = RoundResult.objects.filter(
                 participation=participation,
@@ -811,6 +839,7 @@ def serialize_candidate_participations(cand, include_private=True):
             'rounds': [{
                 'id': str(result.id),
                 'roundId': result.round_id, 'round': result.round_name, 'eligibility': result.eligibility, 'sbd': result.sbd,
+                'occurrenceId': result.occurrence_id,
                 'roomId': str(result.exam_room_id or ''), 'roomName': result.room_name,
                 'date': result.exam_date, 'time': result.time_slot, 'mode': result.mode,
                 'location': result.location, 'link': result.link, 'account': result.account if include_private else '', 'password': result.password if include_private else '',
@@ -1420,6 +1449,7 @@ def _serialize_exam_room(room):
     return {
         'id': str(room.id),
         'roundId': room.round_id,
+        'occurrenceId': room.occurrence_id,
         'roundName': room.round_name,
         'commonName': room.common_name,
         'number': room.room_number,
@@ -1446,15 +1476,21 @@ def exam_room_allocation(request, session_id, round_id):
     if not round_config:
         return Response({'error': 'Không tìm thấy vòng thi trong kỳ tổ chức này.'}, status=status.HTTP_404_NOT_FOUND)
     round_name = str(round_config.get('name') or '').strip()
+    occurrence_id = str((request.query_params.get('occurrenceId') if request.method == 'GET' else (request.data or {}).get('occurrenceId')) or '').strip()
+    occurrence_ids = [str(slot.get('id') or '').strip() for slot in (round_config.get('slots') or []) if isinstance(slot, dict) and str(slot.get('id') or '').strip()]
+    if occurrence_id and occurrence_ids and occurrence_id not in occurrence_ids:
+        return Response({'error': 'Đợt tổ chức không thuộc vòng thi đã chọn.'}, status=status.HTTP_400_BAD_REQUEST)
     result_query = RoundResult.objects.filter(
         participation__session=session,
         eligibility=ELIGIBILITY_ELIGIBLE,
     ).filter(
         Q(round_id=str(round_id)) | Q(round_id='', round_name=round_name),
     )
+    if occurrence_id:
+        result_query = result_query.filter(occurrence_id=occurrence_id)
 
     if request.method == 'GET':
-        rooms = list(ExamRoom.objects.filter(session=session).filter(Q(round_id=str(round_id)) | Q(round_name=round_name)))
+        rooms = list(ExamRoom.objects.filter(session=session, occurrence_id=occurrence_id).filter(Q(round_id=str(round_id)) | Q(round_name=round_name)))
         return Response({
             'sessionId': session.id,
             'roundId': str(round_id),
@@ -1551,7 +1587,7 @@ def exam_room_allocation(request, session_id, round_id):
                 'candidateCount': len(locked_results),
                 'capacity': capacity,
             }, status=status.HTTP_409_CONFLICT)
-        previous_rooms = list(ExamRoom.objects.filter(session=session).filter(Q(round_id=str(round_id)) | Q(round_name=round_name)))
+        previous_rooms = list(ExamRoom.objects.filter(session=session, occurrence_id=occurrence_id).filter(Q(round_id=str(round_id)) | Q(round_name=round_name)))
         # Deleting a room only nulls its foreign key. Clear its derived display
         # values too, so an ineligible candidate does not keep a stale room
         # after a reset/reallocation.
@@ -1571,6 +1607,7 @@ def exam_room_allocation(request, session_id, round_id):
             ExamRoom.objects.create(
                 session=session,
                 round_id=str(round_id),
+                occurrence_id=occurrence_id,
                 round_name=round_name,
                 common_name=common_name,
                 room_number=item['number'],
@@ -1592,13 +1629,14 @@ def exam_room_allocation(request, session_id, round_id):
             room = created_rooms[room_index]
             result.exam_room = room
             result.round_id = str(round_id)
+            result.occurrence_id = occurrence_id
             result.room_name = room.label
             result.mode = 'Trực tiếp' if mode == ExamRoom.MODE_IN_PERSON else 'Trực tuyến'
             result.location = f'{room.label}:\n{room.link}' if mode == ExamRoom.MODE_ONLINE else ' · '.join(value for value in [room.label, room.location] if value)
             # A room link identifies where the candidate sits; an optional room exam link is assigned separately.
             if room.exam_link:
                 result.link = room.exam_link
-            update_fields = ['exam_room', 'round_id', 'room_name', 'mode', 'location', 'updated_at']
+            update_fields = ['exam_room', 'round_id', 'occurrence_id', 'room_name', 'mode', 'location', 'updated_at']
             if room.exam_link:
                 update_fields.append('link')
             result.save(update_fields=update_fields)
@@ -1616,6 +1654,7 @@ def exam_room_allocation(request, session_id, round_id):
     return Response({
         'sessionId': session.id,
         'roundId': str(round_id),
+        'occurrenceId': occurrence_id,
         'roundName': round_name,
         'candidateCount': candidate_count,
         'assignedCount': len(locked_results),
@@ -1652,6 +1691,7 @@ def apply_round_slot(request, session_id, round_id):
         selected = slots[requested_index]
     if not selected:
         return Response({'error': 'Không tìm thấy lịch/ca thi đã chọn.'}, status=status.HTTP_404_NOT_FOUND)
+    occurrence_id = str(selected.get('id') or '').strip()
 
     values = {key: str(selected.get(key) or '').strip() for key in ('date', 'time', 'mode', 'link')}
     if not any(values.values()):
@@ -1662,6 +1702,10 @@ def apply_round_slot(request, session_id, round_id):
         participation__session=session,
         eligibility=ELIGIBILITY_ELIGIBLE,
     ).filter(Q(round_id=str(round_id)) | Q(round_id='', round_name=round_name)).select_related('participation__candidate')
+    is_batched_round = len(slots) > 1 and any(str(slot.get('label') or '').strip() for slot in slots if isinstance(slot, dict))
+    if occurrence_id and is_batched_round and results.exclude(occurrence_id='').exists():
+        # A batch action must never overwrite candidates in another batch.
+        results = results.filter(Q(occurrence_id=occurrence_id) | Q(occurrence_id='', exam_date=values['date']))
 
     changed = 0
     candidate_ids = []
@@ -1679,6 +1723,9 @@ def apply_round_slot(request, session_id, round_id):
             if result.round_id != str(round_id):
                 result.round_id = str(round_id)
                 update_fields.append('round_id')
+            if occurrence_id and result.occurrence_id != occurrence_id:
+                result.occurrence_id = occurrence_id
+                update_fields.append('occurrence_id')
             candidate_ids.append(result.participation.candidate_id)
             if update_fields:
                 result.save(update_fields=list(set(update_fields)) + ['updated_at'])
@@ -1695,6 +1742,7 @@ def apply_round_slot(request, session_id, round_id):
     return Response({
         'sessionId': session.id,
         'roundId': str(round_id),
+        'occurrenceId': occurrence_id,
         'roundName': round_name,
         'slotIndex': slot_number - 1,
         'candidateCount': len(candidate_ids),
@@ -1811,7 +1859,7 @@ def round_result_detail(request, pk):
         sync_session_candidate_totals()
         return Response({'candidate': serialize_candidate(candidate)})
     data = request.data or {}
-    before_round = {'roomName': item.room_name, 'eligibility': item.eligibility, 'sbd': item.sbd, 'date': item.exam_date, 'time': item.time_slot, 'mode': item.mode, 'location': item.location, 'link': item.link, 'account': item.account, 'password': item.password, 'attendance': item.attendance, 'score': item.score, 'scoreRate': item.score_rate, 'rank': item.rank, 'result': item.result, 'note': item.note, 'registration': json.dumps(item.participation.registration_data or {}, ensure_ascii=False)}
+    before_round = {'occurrenceId': item.occurrence_id, 'roomName': item.room_name, 'eligibility': item.eligibility, 'sbd': item.sbd, 'date': item.exam_date, 'time': item.time_slot, 'mode': item.mode, 'location': item.location, 'link': item.link, 'account': item.account, 'password': item.password, 'attendance': item.attendance, 'score': item.score, 'scoreRate': item.score_rate, 'rank': item.rank, 'result': item.result, 'note': item.note, 'registration': json.dumps(item.participation.registration_data or {}, ensure_ascii=False)}
     fields = {
         'eligibility': 'eligibility', 'sbd': 'sbd', 'date': 'exam_date', 'time': 'time_slot',
         'mode': 'mode', 'location': 'location', 'link': 'link', 'account': 'account', 'password': 'password',
@@ -1825,6 +1873,13 @@ def round_result_detail(request, pk):
                 value = format_sheet_percentage(value)
             setattr(item, model_field, normalize_eligibility(value) if payload_field == 'eligibility' else value)
     requested_round_id = str(data.get('roundId') or item.round_id or '').strip()
+    requested_occurrence_id = str(data.get('occurrenceId') or item.occurrence_id or '').strip()
+    round_config = _session_round_config(item.participation.session, requested_round_id)
+    if requested_occurrence_id:
+        valid_occurrences = {str(slot.get('id') or '').strip() for slot in ((round_config or {}).get('slots') or []) if isinstance(slot, dict)}
+        if valid_occurrences and requested_occurrence_id not in valid_occurrences:
+            return Response({'error': 'Đợt tổ chức không thuộc vòng thi đã chọn.'}, status=status.HTTP_400_BAD_REQUEST)
+        item.occurrence_id = requested_occurrence_id
     if 'roomId' in data:
         requested_room_id = str(data.get('roomId') or '').strip()
         previous_room = item.exam_room
@@ -1834,8 +1889,11 @@ def round_result_detail(request, pk):
                 return Response({'error': 'Không tìm thấy phòng thi đã chọn.'}, status=status.HTTP_404_NOT_FOUND)
             if requested_round_id and room.round_id != requested_round_id:
                 return Response({'error': 'Phòng thi không thuộc vòng đang chọn.'}, status=status.HTTP_400_BAD_REQUEST)
+            if requested_occurrence_id and room.occurrence_id != requested_occurrence_id:
+                return Response({'error': 'Phòng thi không thuộc đợt tổ chức đang chọn.'}, status=status.HTTP_400_BAD_REQUEST)
             item.exam_room = room
             item.round_id = room.round_id
+            item.occurrence_id = room.occurrence_id
             item.room_name = room.label
             item.mode = 'Trực tiếp' if room.mode == ExamRoom.MODE_IN_PERSON else 'Trực tuyến'
             item.location = f'{room.label}:\n{room.link}' if room.mode == ExamRoom.MODE_ONLINE else ' · '.join(value for value in [room.label, room.location] if value)
@@ -1866,6 +1924,7 @@ def round_result_detail(request, pk):
         if slot_link:
             item.link = slot_link
         item.round_id = requested_round_id
+        item.occurrence_id = requested_slot_id
     registration = data.get('registration') if isinstance(data.get('registration'), dict) else {}
     registration_fields = {
         'subject': 'subject', 'category': 'category', 'registrationMethod': 'registration_method',

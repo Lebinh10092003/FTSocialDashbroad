@@ -29,6 +29,7 @@ type AllocationResponse = {
 type Props = {
   sessionId: string;
   round: SessionRound;
+  occurrenceId?: string;
   candidateCount: number;
   idToken?: string | null;
   onAllocated: (candidates: Candidate[], rooms: SavedRoom[]) => void;
@@ -52,7 +53,7 @@ const normalizeOnlineLink = (value: string) => {
   return /^(?:meet\.google\.com|(?:[a-z0-9-]+\.)?facebook\.com|(?:www\.)?(?:fb\.com|fb\.watch|m\.me))(?:\/|$)/i.test(link) ? `https://${link}` : link;
 };
 
-export default function ExamRoomAllocationDialog({ sessionId, round, candidateCount, idToken, onAllocated }: Props) {
+export default function ExamRoomAllocationDialog({ sessionId, round, occurrenceId, candidateCount, idToken, onAllocated }: Props) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -66,7 +67,7 @@ export default function ExamRoomAllocationDialog({ sessionId, round, candidateCo
   const [maxCandidates, setMaxCandidates] = useState(20);
   const [rooms, setRooms] = useState<RoomDraft[]>([newRoom()]);
 
-  const endpoint = `/api/examination/sessions/${encodeURIComponent(sessionId)}/rounds/${encodeURIComponent(round.id)}/rooms`;
+  const endpoint = `/api/examination/sessions/${encodeURIComponent(sessionId)}/rounds/${encodeURIComponent(round.id)}/rooms${occurrenceId ? `?occurrenceId=${encodeURIComponent(occurrenceId)}` : ''}`;
   const capacity = strategy === 'CAPACITY' ? rooms.length * Math.max(0, maxCandidates) : null;
   const roomCounts = useMemo(() => rooms.map((_, index) => {
     if (!rooms.length) return 0;
@@ -178,6 +179,7 @@ export default function ExamRoomAllocationDialog({ sessionId, round, candidateCo
         method: 'POST',
         headers: authHeaders(idToken),
         body: JSON.stringify({
+          occurrenceId: occurrenceId || '',
           commonName: commonName.trim(),
           mode,
           allocationStrategy: strategy,

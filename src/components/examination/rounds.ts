@@ -1,4 +1,4 @@
-import type { ExaminationSession, SessionRound } from './types';
+import type { ExaminationSession, SessionRound, SessionRoundSlot } from './types';
 
 export function sessionRounds(session: ExaminationSession): SessionRound[] {
   const configured = (session.rounds || []).filter(round => String(round.name || '').trim());
@@ -18,4 +18,13 @@ export function roundDates(round: SessionRound): string[] {
     .map(value => String(value || '').trim())
     .filter(value => /^\d{4}-\d{2}-\d{2}$/.test(value));
   return [...new Set(dates)].sort();
+}
+
+/** A round may run in several distinct organisation batches.  Existing slot
+ * records are the source of truth, so older sessions remain compatible. */
+export function roundOccurrences(round: SessionRound): SessionRoundSlot[] {
+  const slots = (round.slots || []).filter(slot => String(slot.id || '').trim());
+  if (slots.length) return slots;
+  if (round.date || round.label) return [{ id: `${round.id || 'round'}-legacy`, label: round.label, date: round.date }];
+  return [];
 }

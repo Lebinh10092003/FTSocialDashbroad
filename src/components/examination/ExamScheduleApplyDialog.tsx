@@ -5,6 +5,7 @@ import type { Candidate, SessionRound, SessionRoundSlot } from './types';
 type Props = {
   sessionId: string;
   round: SessionRound;
+  occurrenceId?: string;
   candidateCount: number;
   idToken?: string | null;
   onApplied: (candidates: Candidate[]) => void;
@@ -15,8 +16,8 @@ const slotLabel = (slot: SessionRoundSlot, index: number) => {
   return pieces.length ? pieces.join(' \u00b7 ') : `L\u1ecbch / ca ${index + 1}`;
 };
 
-export default function ExamScheduleApplyDialog({ sessionId, round, candidateCount, idToken, onApplied }: Props) {
-  const slots = useMemo(() => (round.slots || []).filter(slot => slot.date || slot.time || slot.mode || slot.link), [round.slots]);
+export default function ExamScheduleApplyDialog({ sessionId, round, occurrenceId, candidateCount, idToken, onApplied }: Props) {
+  const slots = useMemo(() => (round.slots || []).filter(slot => (slot.date || slot.time || slot.mode || slot.link) && (!occurrenceId || slot.id === occurrenceId)), [occurrenceId, round.slots]);
   const [open, setOpen] = useState(false);
   const [slotIndex, setSlotIndex] = useState(0);
   const [applyLink, setApplyLink] = useState(true);

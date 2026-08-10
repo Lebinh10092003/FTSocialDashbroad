@@ -272,6 +272,7 @@ def resolve_column_indices(header):
         idx.setdefault(key, value)
     return idx
 ROUND_HISTORY_FIELD_MAP = {
+    'occurrenceId': 'occurrence_id',
     'eligibility': 'eligibility',
     'sbd': 'sbd',
     'date': 'exam_date',
@@ -288,6 +289,20 @@ ROUND_HISTORY_FIELD_MAP = {
     'result': 'result',
     'note': 'note',
 }
+
+
+def occurrence_id_from_history(round_config, occurrence_id='', exam_date=''):
+    explicit = clean_txt(occurrence_id)
+    if explicit:
+        return explicit
+    date_value = clean_txt(exam_date)
+    slots = (round_config or {}).get('slots') or []
+    for slot in slots:
+        if isinstance(slot, dict) and date_value and clean_txt(slot.get('date')) == date_value:
+            return clean_txt(slot.get('id'))
+    if len(slots) == 1 and isinstance(slots[0], dict):
+        return clean_txt(slots[0].get('id'))
+    return ''
 
 
 def merged_headers(grid, header_index):
@@ -647,7 +662,8 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
         updates.append('registration_data')
     if updates:
         participation.save(update_fields=list(set(updates)) + ['updated_at'])
-    for item in history or []:
+    configured_rounds = [item for item in (session.rounds or []) if isinstance(item, dict)]
+    for position, item in enumerate(history or []):
         if not isinstance(item, dict):
             continue
         round_name = clean_txt(item.get('round'))
@@ -661,17 +677,21 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
             values['eligibility'] = normalize_eligibility(values['eligibility'])
         if values.get('exam_date'):
             values['exam_date'] = parse_dob(values['exam_date']) or values['exam_date']
+        round_config = next((config for config in configured_rounds if clean_txt(config.get('name')).casefold() == round_name.casefold()), configured_rounds[position] if position < len(configured_rounds) else {})
+        values['round_id'] = clean_txt(item.get('roundId')) or clean_txt(round_config.get('id'))
+        values['occurrence_id'] = occurrence_id_from_history(round_config, values.get('occurrence_id'), values.get('exam_date'))
         values['raw_data'] = {str(key): value for key, value in item.items() if value not in (None, '')}
-        existing_result = RoundResult.objects.filter(participation=participation, round_name=round_name).first()
+        existing_result = RoundResult.objects.filter(participation=participation, round_id=values['round_id'], occurrence_id=values['occurrence_id']).first() if values['round_id'] and values['occurrence_id'] else RoundResult.objects.filter(participation=participation, round_name=round_name, occurrence_id=values['occurrence_id']).first()
         if existing_result:
             for model_field in ROUND_HISTORY_FIELD_MAP.values():
                 if not values.get(model_field):
                     values[model_field] = getattr(existing_result, model_field)
-        RoundResult.objects.update_or_create(
-            participation=participation,
-            round_name=round_name,
-            defaults=values,
-        )
+        if existing_result:
+            for key, value in values.items():
+                setattr(existing_result, key, value)
+            existing_result.save()
+        else:
+            RoundResult.objects.create(participation=participation, round_name=round_name, **values)
     return participation
 
 def append_existing_candidate_link_note(candidate, session_id, previous_session_ids):

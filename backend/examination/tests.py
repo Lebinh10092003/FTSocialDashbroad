@@ -1,4 +1,6 @@
 from authentication.models import UserProfile
+from importlib import import_module
+from django.apps import apps as django_apps
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
@@ -7,6 +9,38 @@ from rest_framework.test import APIClient
 from unittest.mock import MagicMock, patch
 
 from .models import Candidate, CandidateParticipation, Competition, ExamRoom, ExamSession, ExaminationSheet, LogNote, RoundResult
+
+
+class AysbcOrganisationBatchMigrationTests(TestCase):
+    def test_consolidation_keeps_both_attempts_of_one_profile(self):
+        canonical, _ = ExamSession.objects.get_or_create(
+            id='aysbc',
+            defaults={'competition_id': 'aysbc', 'code': 'AYSBC', 'name': 'AYSBC', 'parent': 'AYSBC', 'organizer': 'SCSG & MK', 'time': '', 'sort_key': 'aysbc_aysbc'},
+        )
+        legacy = ExamSession.objects.create(
+            id='session-351ba22f9c', competition_id='aysbc', code='AYSBC', name='AYSBC',
+            parent='AYSBC', organizer='SCSG & MK', time='', sort_key='aysbc_session-351ba22f9c',
+        )
+        shared = Candidate.objects.create(id='AYSBC-SHARED', code='AYSBC-SHARED', name='Nguyễn Thị Phúc An', session_ids=[canonical.id, legacy.id], sort_key='shared')
+        june_only = Candidate.objects.create(id='AYSBC-JUNE', code='AYSBC-JUNE', name='Thí sinh tháng 6', session_ids=[legacy.id], sort_key='june')
+        current = CandidateParticipation.objects.create(candidate=shared, session=canonical)
+        source_shared = CandidateParticipation.objects.create(candidate=shared, session=legacy)
+        source_june = CandidateParticipation.objects.create(candidate=june_only, session=legacy)
+        RoundResult.objects.create(participation=current, round_id='legacy-national', round_name='Vòng 1', exam_date='2026-07-26')
+        RoundResult.objects.create(participation=source_shared, round_id='round-final', round_name='Vòng 1', exam_date='2026-06-21')
+        RoundResult.objects.create(participation=source_june, round_id='round-final', round_name='Vòng 1', exam_date='2026-06-21')
+
+        migration = import_module('examination.migrations.0031_round_organization_batches_and_merge_aysbc')
+        migration.consolidate_aysbc(django_apps, None)
+
+        self.assertFalse(ExamSession.objects.filter(id=legacy.id).exists())
+        canonical.refresh_from_db()
+        self.assertEqual([slot['id'] for slot in canonical.rounds[0]['slots']], ['aysbc-national-final-2026-06', 'aysbc-national-final-2026-07'])
+        results = RoundResult.objects.filter(participation__candidate=shared, participation__session=canonical)
+        self.assertEqual(results.count(), 2)
+        self.assertEqual(set(results.values_list('occurrence_id', flat=True)), {'aysbc-national-final-2026-06', 'aysbc-national-final-2026-07'})
+        june_only.refresh_from_db()
+        self.assertEqual(june_only.session_ids, [canonical.id])
 
 
 class ExistingSessionRoundBackfillTests(TestCase):

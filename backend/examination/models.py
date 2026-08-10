@@ -113,6 +113,7 @@ class ExamRoom(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     session = models.ForeignKey(ExamSession, on_delete=models.CASCADE, related_name='exam_rooms')
     round_id = models.CharField(max_length=255)
+    occurrence_id = models.CharField(max_length=255, blank=True, default='', db_index=True)
     round_name = models.CharField(max_length=255)
     common_name = models.CharField(max_length=255)
     room_number = models.CharField(max_length=100)
@@ -132,8 +133,8 @@ class ExamRoom(models.Model):
         ordering = ['position', 'room_number']
         constraints = [
             models.UniqueConstraint(
-                fields=['session', 'round_id', 'room_number'],
-                name='unique_exam_room_number_per_round',
+                fields=['session', 'round_id', 'occurrence_id', 'room_number'],
+                name='unique_exam_room_number_per_occurrence',
             ),
         ]
 
@@ -146,6 +147,7 @@ class RoundResult(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     participation = models.ForeignKey(CandidateParticipation, on_delete=models.CASCADE, related_name='round_results')
     round_id = models.CharField(max_length=255, blank=True, default='', db_index=True)
+    occurrence_id = models.CharField(max_length=255, blank=True, default='', db_index=True)
     round_name = models.CharField(max_length=255)
     exam_room = models.ForeignKey(ExamRoom, on_delete=models.SET_NULL, null=True, blank=True, related_name='assignments')
     room_name = models.CharField(max_length=500, blank=True, default='')
@@ -170,7 +172,7 @@ class RoundResult(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=['participation', 'round_name'], name='unique_round_per_participation'),
+            models.UniqueConstraint(fields=['participation', 'round_id', 'round_name', 'occurrence_id'], name='unique_round_occurrence_per_participation'),
         ]
         ordering = ['round_name']
 
