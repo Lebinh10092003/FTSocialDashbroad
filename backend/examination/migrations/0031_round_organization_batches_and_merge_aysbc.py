@@ -110,8 +110,12 @@ def consolidate_aysbc(apps, schema_editor):
         for result in RoundResult.objects.filter(participation__session_id=canonical.id).iterator():
             result.round_id = FINAL_ROUND_ID
             result.round_name = 'Vòng Chung kết Quốc gia'
-            result.occurrence_id = occurrence_for_result(result)
-            result.save(update_fields=['round_id', 'round_name', 'occurrence_id'])
+            # The canonical AYSBC session is the July cohort.  A few rows in
+            # its Sheet had a stale June date, so session membership (not that
+            # stale cell) determines the organisation batch.
+            result.occurrence_id = JULY_OCCURRENCE_ID
+            result.exam_date = '2026-07-26'
+            result.save(update_fields=['round_id', 'round_name', 'occurrence_id', 'exam_date'])
 
         if legacy:
             Blueprint.objects.filter(session_id=legacy.id).update(session_id=canonical.id)
@@ -152,7 +156,8 @@ def consolidate_aysbc(apps, schema_editor):
                 for result in RoundResult.objects.filter(participation_id=source.id).iterator():
                     result.round_id = FINAL_ROUND_ID
                     result.round_name = 'Vòng Chung kết Quốc gia'
-                    result.occurrence_id = occurrence_for_result(result) or JUNE_OCCURRENCE_ID
+                    result.occurrence_id = JUNE_OCCURRENCE_ID
+                    result.exam_date = '2026-06-21'
                     collision = RoundResult.objects.filter(
                         participation_id=target.id,
                         round_id=result.round_id,
@@ -167,7 +172,7 @@ def consolidate_aysbc(apps, schema_editor):
                         result.delete()
                     else:
                         result.participation_id = target.id
-                        result.save(update_fields=['participation', 'round_id', 'round_name', 'occurrence_id'])
+                        result.save(update_fields=['participation', 'round_id', 'round_name', 'occurrence_id', 'exam_date'])
                 source.delete()
 
             for candidate in Candidate.objects.all().iterator():
