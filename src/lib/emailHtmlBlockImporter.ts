@@ -259,10 +259,22 @@ export function importHtmlToEmailBlocks(html: string, seed = Date.now()): EmailH
       const background = `${element.style.background} ${element.style.backgroundImage}`.toLowerCase();
       return background.includes('gradient') || background.includes('url(');
     });
+    const ownerTable = row.closest('table');
+    const hasInlineVisualComponent = Array.from(row.querySelectorAll<HTMLElement>('div, span')).some((element) => {
+      // A card inside a nested table is handled by that table's own row. It
+      // must not make the outer email wrapper opaque as a whole.
+      if (element.closest('table') !== ownerTable) return false;
+      const display = element.style.display.toLowerCase();
+      const hasBoxStyle = Boolean(
+        element.style.background || element.style.backgroundColor || element.style.padding
+        || element.style.border || element.style.borderRadius || element.style.boxShadow,
+      );
+      return hasBoxStyle && (display === 'inline-block' || element.tagName.toLowerCase() === 'div');
+    });
     // Nested presentation tables are the usual email-client technique for
     // cards, CTA buttons and multi-column layouts. Keep the complete row as
     // Custom HTML so parent-cell styling is not lost during conversion.
-    return hasUnsupportedBackground || row.querySelector('table') !== null;
+    return hasUnsupportedBackground || hasInlineVisualComponent || row.querySelector('table') !== null;
   };
 
   const tableBlocks = (table: HTMLTableElement, depth: number): EmailBlock[] => {
@@ -281,8 +293,22 @@ export function importHtmlToEmailBlocks(html: string, seed = Date.now()): EmailH
     rows.forEach((row, rowIndex) => {
       const cells = Array.from(row.cells).filter(cell => meaningful(cell.textContent) || cell.querySelector('img, hr, table'));
       if (!cells.length) {
-        const height = px(row.getAttribute('height') || row.style.height, 0);
-        if (height > 4) result.push({ id: nextId('spacer'), type: 'spacer', content: {}, styles: { height: clamp(height, 4, 160) }, visible: true });
+        const decorativeCell = Array.from(row.cells).find(cell => Boolean(cell.style.background || cell.style.backgroundColor || cell.getAttribute('bgcolor')));
+        if (decorativeCell) {
+          // An empty coloured row is usually a visual divider (such as the
+          // orange bar above the AYSBC card), not a blank spacer. A native
+          // divider keeps its 7px height; rendering this tiny row in an iframe
+          // would otherwise give it a large Custom HTML viewport.
+          const height = clamp(px(decorativeCell.style.height || row.style.height || row.getAttribute('height'), 1), 1, 24);
+          const color = decorativeCell.style.backgroundColor || decorativeCell.getAttribute('bgcolor') || '#e2e8f0';
+          result.push({
+            id: nextId('divider'), type: 'divider', content: {},
+            styles: { marginTop: 0, marginBottom: 0, thickness: height, color, borderStyle: 'solid' }, visible: true,
+          });
+        } else {
+          const height = px(row.getAttribute('height') || row.style.height || row.cells[0]?.style.height, 0);
+          if (height > 4) result.push({ id: nextId('spacer'), type: 'spacer', content: {}, styles: { height: clamp(height, 4, 160) }, visible: true });
+        }
       } else if (rowNeedsExactHtml(row)) {
         result.push(customTableRowBlock(table, row));
       } else if (cells.length >= 2 && cells.length <= 4) {

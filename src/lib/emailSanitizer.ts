@@ -189,7 +189,11 @@ export function sanitizeCustomHtml(html: string): string {
       else el.removeAttribute('style');
     }
     if (el.tagName.toLowerCase() === 'table') {
-      htmlElement.style.maxWidth = '100%';
+      // Keep an authored finite max-width (for example the 680px email card).
+      // Replacing it with 100% makes every nested presentation table look like
+      // a page wrapper, which prevents the HTML importer from finding the
+      // actual email container to split into editable blocks.
+      if (!htmlElement.style.maxWidth) htmlElement.style.maxWidth = '100%';
       if (!el.parentElement?.closest('table')) {
         htmlElement.classList.add('ft-email-rich-table');
         htmlElement.style.width = '100%';

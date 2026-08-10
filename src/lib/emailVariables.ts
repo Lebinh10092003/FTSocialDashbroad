@@ -96,6 +96,32 @@ export function replaceVariables(
     const replacement = useMock ? v.defaultValue : `{{${v.key}}}`;
     result = result.replace(regex, replacement);
   });
+
+  // A template imported from HTML can contain merge tags that have not yet
+  // been added to the global variable picker.  In the real sent/exported
+  // email those tags must remain untouched, but Preview's mock-data mode
+  // should still be useful and must not leave a half-filled email behind.
+  if (useMock) {
+    result = result.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_match, rawKey: string) => {
+      const key = rawKey.trim();
+      const normalized = key
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/đ/g, 'd');
+
+      if (normalized.includes('ho ten') || normalized.includes('ten hoc sinh')) return 'Nguyễn Minh An';
+      if (normalized.includes('ngay sinh')) return '15/08/2014';
+      if (normalized.includes('khoi')) return '5';
+      if (normalized.includes('truong')) return 'Trường Tiểu học Fermat';
+      if (normalized.includes('ngay du thi') || normalized.includes('ngay thi')) return '25/10/2026';
+      if (normalized.includes('email')) return 'minhan@example.com';
+      if (normalized.includes('diem')) return '95';
+      if (normalized.includes('giai')) return 'Giải Vàng';
+
+      return `Dữ liệu mẫu: ${key}`;
+    });
+  }
   
   return result;
 }
