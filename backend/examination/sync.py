@@ -1256,6 +1256,42 @@ def export_session_to_google_sheet(sheet, google_access_token=None, export_mode=
     }
 
 
+def canonical_import_sheet_url(spreadsheet_url, sheet_tab=''):
+    """Point a tab-selected import at that tab's stable gid before CSV export.
+
+    The Google Visualization endpoint with ``sheet=...`` can return a pivoted
+    result for some complex tabs.  Reading the tab by gid through the regular
+    export endpoint always preserves the spreadsheet grid (rows stay rows).
+    """
+    requested_tab = clean_txt(sheet_tab)
+    spreadsheet_id = extract_spreadsheet_id(spreadsheet_url)
+    if not requested_tab or not spreadsheet_id:
+        return spreadsheet_url
+    try:
+        config = SystemConfig.objects.filter(key='main').first()
+        config_data = config.data if config else {}
+        saved_token = config.last_google_access_token if config else None
+        service = build_sheets_service(saved_token, config_data or {})
+        metadata = service.spreadsheets().get(
+            spreadsheetId=spreadsheet_id,
+            fields='sheets(properties(sheetId,title))',
+        ).execute()
+        target = next(
+            (
+                item.get('properties', {})
+                for item in metadata.get('sheets', [])
+                if clean_txt(item.get('properties', {}).get('title')) == requested_tab
+            ),
+            None,
+        )
+        if target and target.get('sheetId') is not None:
+            return f'https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit?gid={target["sheetId"]}'
+    except Exception:
+        # Keep the configured URL as a fallback for public-only sheets.
+        pass
+    return spreadsheet_url
+
+
 def get_google_sheet_csv_urls(spreadsheet_url, sheet_tab=''):
     parsed_source = urllib.parse.urlparse(clean_txt(spreadsheet_url))
     if parsed_source.scheme != 'https' or parsed_source.hostname != 'docs.google.com' or not parsed_source.path.startswith('/spreadsheets/'):
@@ -1280,7 +1316,12 @@ def get_google_sheet_csv_urls(spreadsheet_url, sheet_tab=''):
         gid_match = re.search(r'[?&#]gid=([0-9]+)', spreadsheet_url)
         gid_param = f"&gid={gid_match.group(1)}" if gid_match else ''
 
-        if clean_txt(sheet_tab):
+        if clean_txt(sheet_tab) and gid_match:
+            # Prefer the grid export. Unlike gviz?sheet=..., this does not
+            # pivot a tab whose headers/merged cells are complex.
+            urls.append(f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv{gid_param}")
+            urls.append(f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv{gid_param}")
+        elif clean_txt(sheet_tab):
             encoded_tab = urllib.parse.quote(clean_txt(sheet_tab), safe='')
             urls.append(f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={encoded_tab}")
         else:
@@ -1294,6 +1335,7 @@ def get_google_sheet_csv_urls(spreadsheet_url, sheet_tab=''):
 
 def public_sheet_fingerprint(spreadsheet_url, sheet_tab=''):
     """Fingerprint the exact public CSV used by the import preview."""
+    spreadsheet_url = canonical_import_sheet_url(spreadsheet_url, sheet_tab)
     last_error = None
     for csv_url in get_google_sheet_csv_urls(spreadsheet_url, sheet_tab):
         try:
@@ -1327,6 +1369,7 @@ def sync_single_sheet(spreadsheet_url, ts_vn, sheet_doc_id=None, session_id=None
                 pass
 
     try:
+        spreadsheet_url = canonical_import_sheet_url(spreadsheet_url, sheet_tab)
         candidate_urls = get_google_sheet_csv_urls(spreadsheet_url, sheet_tab)
         if not candidate_urls:
             raise Exception('Đường dẫn Google Sheets không hợp lệ.')

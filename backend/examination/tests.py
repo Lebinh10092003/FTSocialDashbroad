@@ -1300,7 +1300,26 @@ class SheetCandidateImportPreviewTests(TestCase):
         self.assertIn('VÒNG 2 – VÒNG QUỐC TẾ', response.data['mapping']['roundGroups'])
         self.assertEqual(Candidate.objects.count(), 0)
         requested_url = mock_get.call_args.args[0]
-        self.assertIn('sheet=SCO%20-%20ISO', requested_url)
+        self.assertIn('export?format=csv&gid=1114066817', requested_url)
+
+    @patch('examination.sync.build_sheets_service')
+    def test_preview_resolves_selected_tab_to_gid_before_reading_csv(self, build_service):
+        from .sync import canonical_import_sheet_url, get_google_sheet_csv_urls
+
+        build_service.return_value.spreadsheets.return_value.get.return_value.execute.return_value = {
+            'sheets': [
+                {'properties': {'sheetId': 3, 'title': 'SCO - ISO'}},
+                {'properties': {'sheetId': 1396296876, 'title': 'SCO - IEO'}},
+            ]
+        }
+
+        resolved = canonical_import_sheet_url(
+            'https://docs.google.com/spreadsheets/d/example/edit', 'SCO - IEO',
+        )
+        urls = get_google_sheet_csv_urls(resolved, 'SCO - IEO')
+
+        self.assertIn('gid=1396296876', resolved)
+        self.assertTrue(urls[0].endswith('export?format=csv&gid=1396296876'))
 
     def test_fill_empty_policy_preserves_existing_values_and_adds_missing_values(self):
         Candidate.objects.create(
