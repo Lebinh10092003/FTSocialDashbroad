@@ -50,6 +50,91 @@ def normalize_online_room_link(value):
     return f'https://{link}' if host == 'meet.google.com' or is_facebook_host else link
 
 
+def sheet_room_details(location, mode=''):
+    """Turn the Sheet's ``Địa điểm/Phòng thi`` cell into one stable room.
+
+    Official source tabs keep the room name and, for online rounds, the meeting
+    link in a single cell.  A free-text location is useful in the candidate
+    history, but the rooms screen needs an ``ExamRoom`` relation as well.
+    """
+    raw_location = str(location or '').strip()
+    if not raw_location:
+        return None
+    lines = [line.strip() for line in raw_location.splitlines() if line.strip()]
+    label = next((line.rstrip(':').strip() for line in lines if not re.match(r'^https?://', line, re.I)), '')
+    if not label:
+        return None
+    link_match = re.search(r'https?://[^\s<>]+', raw_location, re.I)
+    room_link = normalize_online_room_link(link_match.group(0)) if link_match else ''
+    normalized_mode = ''.join(
+        character for character in unicodedata.normalize('NFD', str(mode or '').casefold())
+        if unicodedata.category(character) != 'Mn'
+    )
+    is_online = bool(room_link) or 'truc tuyen' in normalized_mode or 'online' in normalized_mode
+    return {
+        'label': label[:500],
+        # The label is more legible than a generated ID and remains stable on
+        # later imports, so the same Sheet room is reused rather than duplicated.
+        'room_number': label[:100],
+        'link': room_link,
+        'mode': ExamRoom.MODE_ONLINE if is_online else ExamRoom.MODE_IN_PERSON,
+        'location': '' if is_online else raw_location[:1000],
+    }
+
+
+def ensure_sheet_room_assignment(result):
+    """Create/reuse the room named by the source Sheet and attach this result.
+
+    A manually allocated room always wins.  This makes Sheet imports safe to
+    rerun without unexpectedly replacing a coordinator's later room decision.
+    """
+    if result.exam_room_id or not result.round_id:
+        return False
+    details = sheet_room_details(result.location, result.mode)
+    if not details:
+        return False
+    session = result.participation.session
+    room, created = ExamRoom.objects.get_or_create(
+        session=session,
+        round_id=result.round_id,
+        occurrence_id=result.occurrence_id or '',
+        room_number=details['room_number'],
+        defaults={
+            'round_name': result.round_name,
+            'common_name': 'Phòng từ Google Sheet',
+            'label': details['label'],
+            'mode': details['mode'],
+            'location': details['location'],
+            'link': details['link'],
+            'allocation_strategy': ExamRoom.STRATEGY_BALANCED,
+            'position': ExamRoom.objects.filter(
+                session=session,
+                round_id=result.round_id,
+                occurrence_id=result.occurrence_id or '',
+            ).count(),
+            'created_by': 'Google Sheet import',
+        },
+    )
+    updates = []
+    if result.exam_room_id != room.id:
+        result.exam_room = room
+        updates.append('exam_room')
+    if result.room_name != room.label:
+        result.room_name = room.label
+        updates.append('room_name')
+    if updates:
+        result.save(update_fields=updates + ['updated_at'])
+    return created or bool(updates)
+
+
+def backfill_sheet_room_assignments(session=None):
+    """Repair older imports whose room cell was saved without a room relation."""
+    results = RoundResult.objects.filter(exam_room__isnull=True).exclude(location='').select_related('participation__session')
+    if session is not None:
+        results = results.filter(participation__session=session)
+    return sum(1 for result in results.iterator() if ensure_sheet_room_assignment(result))
+
+
 def describe_rounds(rounds):
     """Describe every configured round and its concrete days/slots for audit logs."""
     if not isinstance(rounds, list):
@@ -669,12 +754,14 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
             for field_name, value in values.items():
                 setattr(existing_result, field_name, value)
             existing_result.save()
+            ensure_sheet_room_assignment(existing_result)
         elif import_empty_values or participation_created:
-            RoundResult.objects.create(
+            saved_result = RoundResult.objects.create(
                 participation=participation,
                 round_name=round_name,
                 **values,
             )
+            ensure_sheet_room_assignment(saved_result)
     # A new registration always enters the first configured round so it is visible and manageable in the round roster.
     if not participation.round_results.exists():
         first_round = next((str(item.get('name') or '').strip() for item in (session.rounds or []) if isinstance(item, dict) and item.get('name')), 'Vòng 1')

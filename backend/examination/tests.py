@@ -589,6 +589,37 @@ class ExamRoomAllocationTests(TestCase):
         self.assertEqual(result.round_id, 'round-1')
         self.assertEqual(result.sbd, 'ROOM-UPDATED')
 
+    def test_sheet_location_creates_room_and_assigns_candidate_automatically(self):
+        from .views import upsert_participation_history
+
+        candidate = Candidate.objects.get(id='ROOM-001')
+        location = 'ISO 2026 – International Final Round Room 03:\nhttps://meet.google.com/mka-jxig-ade'
+        upsert_participation_history(candidate, self.session.id, [{
+            'roundId': 'round-1',
+            'round': 'Vòng 1',
+            'mode': 'Trực tuyến',
+            'location': location,
+        }])
+
+        result = RoundResult.objects.get(participation__candidate=candidate, round_id='round-1')
+        self.assertIsNotNone(result.exam_room)
+        self.assertEqual(result.room_name, 'ISO 2026 – International Final Round Room 03')
+        self.assertEqual(result.exam_room.mode, ExamRoom.MODE_ONLINE)
+        self.assertEqual(result.exam_room.link, 'https://meet.google.com/mka-jxig-ade')
+
+        other_candidate = Candidate.objects.get(id='ROOM-002')
+        upsert_participation_history(other_candidate, self.session.id, [{
+            'roundId': 'round-1',
+            'round': 'Vòng 1',
+            'mode': 'Trực tuyến',
+            'location': location,
+        }])
+        self.assertEqual(ExamRoom.objects.count(), 1)
+        self.assertEqual(
+            RoundResult.objects.get(participation__candidate=other_candidate, round_id='round-1').exam_room_id,
+            result.exam_room_id,
+        )
+
 
     def test_room_counts_and_manual_updates_use_only_the_two_eligibility_states(self):
         result = RoundResult.objects.get(participation__candidate_id='ROOM-001')
