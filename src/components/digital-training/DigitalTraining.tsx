@@ -212,6 +212,7 @@ type CalendarItem = {
   end_time?: string | null;
   location?: string | null;
   staff_name?: string | null;
+  content?: string | null;
   status: "unscheduled" | "planned" | "completed" | "cancelled";
   kind?: "training" | "meeting" | "other";
 };
@@ -302,6 +303,7 @@ type WorkActivity = {
   location: string;
   status: "unscheduled" | "planned" | "completed" | "cancelled";
   staffName: string;
+  attendees?: number;
   instructorName?: string;
   supportStaffName?: string;
 };
@@ -844,6 +846,8 @@ function ProductSelect({
   options = [],
   allowCustom = false,
   disabled = false,
+  placeholder = "Chọn sản phẩm",
+  searchPlaceholder = "Tìm hoặc nhập sản phẩm...",
 }: {
   label: string;
   value: string[];
@@ -851,6 +855,8 @@ function ProductSelect({
   options?: string[];
   allowCustom?: boolean;
   disabled?: boolean;
+  placeholder?: string;
+  searchPlaceholder?: string;
 }) {
   const [open, setOpen] = useState(false),
     [query, setQuery] = useState("");
@@ -910,7 +916,7 @@ function ProductSelect({
             </span>
           ))
         ) : (
-          <span className="text-slate-400">Chọn sản phẩm</span>
+          <span className="text-slate-400">{placeholder}</span>
         )}
       </div>
       {open && !disabled && (
@@ -919,7 +925,7 @@ function ProductSelect({
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Tìm hoặc nhập sản phẩm..."
+            placeholder={searchPlaceholder}
             className="mb-2 w-full rounded-lg border px-3 py-2 text-sm"
           />
           {visible.map((item) => (
@@ -1159,6 +1165,7 @@ export function Calendar({
   ) => {
     const details = [
       item.staff_name?.trim() ? `Phụ trách: ${item.staff_name.trim()}` : "",
+      item.content?.trim() ? `Nội dung: ${item.content.trim()}` : "",
       item.location?.trim() ? `Địa điểm: ${item.location.trim()}` : "",
     ].filter(Boolean);
     const label = [`${showTime(item)} · ${item.title}`, ...details].join(" · ");
@@ -1194,7 +1201,7 @@ export function Calendar({
         </span>
         {variant === "week"
           ? details.map((detail) => (
-              <span key={detail} className="dt-calendar-event-meta">
+              <span key={detail} className={`dt-calendar-event-meta${detail.startsWith("Nội dung:") ? " dt-calendar-event-content" : ""}`}>
                 {detail}
               </span>
             ))
@@ -1664,6 +1671,10 @@ function WorkScheduleDetail({
               <p>
                 <b className="block text-xs uppercase text-slate-500">{"Nh\u00e2n vi\u00ean h\u1ed7 tr\u1ee3"}</b>
                 {activity.supportStaffName || "\u2014"}
+              </p>
+              <p>
+                <b className="block text-xs uppercase text-slate-500">Số người tham gia</b>
+                {(activity.attendees || 0).toLocaleString("vi-VN")}
               </p>
             </>
           ) : (
@@ -3144,6 +3155,7 @@ export default function DigitalTraining({
         staffName: item.staff_name || "",
         instructorName: item.instructor_name || "",
         supportStaffName: item.support_staff_name || "",
+        attendees: item.attendees,
       })),
       ...meetings.map((item) => {
         const isOther = item.schedule_type === "other",
@@ -3186,13 +3198,10 @@ export default function DigitalTraining({
   );
   const employeeOptions = useMemo(
     () =>
-      Array.from(
-        new Set([
-          ...employees.map((item) => item.name.trim()),
-          ...workActivities.map((item) => item.staffName.trim()),
-        ].filter(Boolean)),
-      ).sort((a, b) => a.localeCompare(b, "vi")),
-    [employees, workActivities],
+      Array.from(new Set(employees.map((item) => item.name.trim()).filter(Boolean))).sort(
+        (a, b) => a.localeCompare(b, "vi"),
+      ),
+    [employees],
   );
   const sessionStaffOptions = useMemo(
     () =>
@@ -3833,14 +3842,16 @@ export default function DigitalTraining({
       ) ||
       (!groupSessions(group, partnerId).some((x) => x.session_number) &&
         groupSessions(group, partnerId)[index - 1]);
-    if (item)
+    if (item) {
+      const attendeeLabel = item.attendees ? ` · ${item.attendees.toLocaleString("vi-VN")} người` : "";
       return item.status === "completed"
-        ? `Đã hoàn thành: ${showDate(item.date || undefined)}`
+        ? `Đã hoàn thành: ${showDate(item.date || undefined)}${attendeeLabel}`
         : item.status === "cancelled"
-          ? `Đã hủy: ${showDate(item.date || undefined)}`
+          ? `Đã hủy: ${showDate(item.date || undefined)}${attendeeLabel}`
           : item.status === "unscheduled"
             ? "Chưa có lịch"
-            : `Đã lên lịch: ${showDate(item.date || undefined)}`;
+            : `Đã lên lịch: ${showDate(item.date || undefined)}${attendeeLabel}`;
+    }
     return index <= group.planned_sessions ? "Chưa có lịch" : "";
   };
   const sessionCellType = (
@@ -4109,7 +4120,10 @@ export default function DigitalTraining({
                     mode={mode}
                     onModeChange={setMode}
                     sessions={[
-                      ...sessions,
+                      ...sessions.map((item) => ({
+                        ...item,
+                        content: (item.contents || []).join("\n") || item.category,
+                      })),
                       ...meetings.map((item) => ({
                         id: `${item.schedule_type === "other" ? "other" : "meeting"}-${item.id}`,
                         title: item.title,
@@ -4118,6 +4132,7 @@ export default function DigitalTraining({
                         end_time: item.end_time,
                         location: item.location,
                         staff_name: item.staff_name,
+                        content: item.content,
                         status: item.status,
                         kind:
                           item.schedule_type === "other"
@@ -5184,7 +5199,8 @@ export default function DigitalTraining({
                             )}
                           {!isGuest && (
                             <>
-                              <button onClick={() => schedulePartnerMeeting(partner)} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-800"><CalendarDays className="mr-2 inline h-4 w-4" />Th�m l?ch g?p</button>                              <button
+                              <button onClick={() => schedulePartnerMeeting(partner)} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-800"><CalendarDays className="mr-2 inline h-4 w-4" />Thêm lịch gặp KH</button>
+                              <button
                                 onClick={() => openPartnerEditor(partner)}
                                 className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-bold text-sky-800"
                               >
@@ -6041,13 +6057,14 @@ export default function DigitalTraining({
                     value={sd.location}
                     onChange={(e) => setSd({ ...sd, location: e.target.value })}
                   />
-                  <label>
-                    <span className="mb-1 block text-sm font-bold">{"Gi\u1ea3ng vi\u00ean"}</span>
-                    <select value={sd.instructor_name} onChange={(e) => setSd({ ...sd, instructor_name: e.target.value })} className="w-full rounded-lg border px-3 py-2">
-                      <option value="">{"Ch\u1ecdn gi\u1ea3ng vi\u00ean"}</option>
-                      {employeeOptions.map((name) => <option key={name} value={name}>{name}</option>)}
-                    </select>
-                  </label>
+                  <ProductSelect
+                    label="Giảng viên"
+                    value={sd.instructor_name.split(", ").filter(Boolean)}
+                    onChange={(instructors) => setSd({ ...sd, instructor_name: instructors.join(", ") })}
+                    options={employeeOptions}
+                    placeholder="Chọn một hoặc nhiều nhân viên"
+                    searchPlaceholder="Tìm nhân viên..."
+                  />
                   <label>
                     <span className="mb-1 block text-sm font-bold">{"Nh\u00e2n vi\u00ean h\u1ed7 tr\u1ee3"}</span>
                     <select value={sd.support_staff_name} onChange={(e) => setSd({ ...sd, support_staff_name: e.target.value })} className="w-full rounded-lg border px-3 py-2">

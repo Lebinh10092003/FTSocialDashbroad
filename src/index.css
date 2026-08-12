@@ -1119,6 +1119,12 @@ body {
 .dt-calendar-cell.is-drop-target:hover {
   background: #dbeafe;
 }
+.dt-calendar-event-content {
+  overflow:visible;
+  text-overflow:clip;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+}
 
 /* Cross-module resilience: keyboard focus, long data and narrow viewports. */
 :where(button, a, input, select, textarea, [role=button]):focus-visible {
