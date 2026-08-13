@@ -681,17 +681,6 @@ def public_attempt(request, token):
             "reviewed_question_ids": [str(item) for item in reviewed if str(item) in allowed_ids][:500] if isinstance(reviewed, list) else [],
         }
     if request.data.get("submit"):
-        required_missing = [
-            str(question.get("id"))
-            for question in public_questions(attempt.assessment, attempt.variant)
-            if question.get("required") and not _has_answer(
-                question, attempt.answers.get(str(question.get("id"))),
-            )
-        ]
-        if required_missing:
-            return _assessment_error(
-                f"Còn {len(required_missing)} câu bắt buộc chưa trả lời.",
-            )
         grade_attempt(attempt)
         attempt.status = "submitted"
         attempt.submitted_at = timezone.now()

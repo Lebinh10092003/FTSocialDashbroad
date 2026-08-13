@@ -367,7 +367,7 @@ class TrainingAssessmentTests(TestCase):
         self.assertEqual(response.data["status"], "submitted")
         self.assertEqual(float(response.data["score"]), 1)
 
-    def test_server_rejects_submission_with_required_questions_unanswered(self):
+    def test_server_allows_submission_with_required_questions_unanswered(self):
         start = self.client.post(
             f"/api/training-assessments/{self.assessment.public_slug}/start",
             {"respondent_name": "Nguyễn A", "email": "missing@example.test"},
@@ -379,8 +379,8 @@ class TrainingAssessmentTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400, response.data)
-        self.assertIn("câu bắt buộc", response.data["error"])
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], "submitted")
 
     def test_required_matching_question_must_have_every_pair(self):
         self.assessment.questions = [{
@@ -409,8 +409,8 @@ class TrainingAssessmentTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400, response.data)
-        self.assertIn("câu bắt buộc", response.data["error"])
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], "submitted")
 
     def test_expired_attempt_returns_timed_out_payload_instead_of_save_error(self):
         start = self.client.post(
@@ -819,6 +819,8 @@ class TrainingAssessmentTests(TestCase):
             questions = [item for item in result["questions"] if item["variant"] == variant["name"]]
             self.assertEqual(len(questions), 40)
             self.assertEqual(Counter(item["knowledge_type"] for item in questions), Counter({"Theory": 35, "Practice": 5}))
+            self.assertTrue(all(item["knowledge_type"] == "Theory" for item in questions[:35]))
+            self.assertTrue(all(item["knowledge_type"] == "Practice" for item in questions[35:]))
             for category, theory_total, practice_total in rules:
                 group = [item for item in questions if item["category"] == category]
                 self.assertEqual(len(group), theory_total + practice_total)

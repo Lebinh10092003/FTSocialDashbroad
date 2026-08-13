@@ -81,6 +81,13 @@ def _question_type(value):
     return normalized
 
 
+def _is_practical_question(question):
+    return (
+        _key(question.get("knowledge_type")) in {"thuchanh", "practice", "practical"}
+        or _question_type(question.get("type")) in {"practical_submission", "file_upload"}
+    )
+
+
 def _bool(value, default=True):
     if value in (None, ""):
         return default
@@ -664,7 +671,13 @@ def generate_variants_from_import(questions, variant_count=5, questions_per_vari
                     selected[selected_index] = next_question
                     selected_counts[normalize_difficulty(previous_question.get("difficulty"))] -= 1
                     selected_counts[target_difficulty] += 1
-        rng.shuffle(selected)
+        # Keep the knowledge check first, then put hands-on work together at the
+        # end of every generated version. Both sections stay randomized.
+        theory_questions = [question for question in selected if not _is_practical_question(question)]
+        practice_questions = [question for question in selected if _is_practical_question(question)]
+        rng.shuffle(theory_questions)
+        rng.shuffle(practice_questions)
+        selected = theory_questions + practice_questions
 
         for order, source in enumerate(selected, start=1):
             source_id = str(source["id"])
@@ -748,7 +761,16 @@ def public_questions(assessment, variant):
                 "media_file_id", "answer_image_url", "category", "difficulty",
             )
         })
-    return sorted(result, key=lambda item: (item.get("order") or 0, item.get("id") or ""))
+    # Existing assessments are also presented theory-first. This keeps the new
+    # experience consistent without rewriting stored question data.
+    return sorted(
+        result,
+        key=lambda item: (
+            _is_practical_question(item),
+            item.get("order") or 0,
+            item.get("id") or "",
+        ),
+    )
 
 
 def _answer_text(value):
