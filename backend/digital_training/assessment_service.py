@@ -146,10 +146,16 @@ def parse_assessment_workbook(content, source_name=""):
             canonical = _column_name(cell.value)
             if canonical and canonical not in columns:
                 columns[canonical] = index
-        for row_number in range(header_row + 1, sheet.max_row + 1):
+        # Read-only worksheets are forward-only.  Calling ``sheet.cell`` for
+        # every field restarts the stream repeatedly, which makes a modest
+        # Google workbook take minutes to parse.  Consume each source row once.
+        for row_number, row_values in enumerate(
+            sheet.iter_rows(min_row=header_row + 1, values_only=True),
+            start=header_row + 1,
+        ):
             def value(name):
                 column = columns.get(name)
-                return sheet.cell(row_number, column).value if column else None
+                return row_values[column - 1] if column and column <= len(row_values) else None
 
             text = str(value("text") or "").strip()
             if not text:
