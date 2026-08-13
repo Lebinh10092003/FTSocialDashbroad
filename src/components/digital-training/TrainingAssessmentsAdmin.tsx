@@ -133,17 +133,19 @@ const questionTypeLabels: Record<string, string> = {
   practical_submission: "Điền đáp án / nộp sản phẩm",
   file_upload: "Tải tệp",
 };
-const DEFAULT_QUESTION_BANK_URL = "https://drive.google.com/file/d/1Y2iTce6KweClmUWKaen5yeilg6Pes5Ir/view?usp=sharing";
+const DEFAULT_QUESTION_BANK_URL = "https://docs.google.com/spreadsheets/d/1zdlpFOO7p93DuQbXpRhvG4xi89u6L7O-2O1UqBaAV3c/edit?usp=sharing";
 type QuestionBankSettings = { default_url: string };
 export default function TrainingAssessmentsAdmin({
   idToken,
   sessions,
   classes,
+  partners,
   isGuest,
 }: {
   idToken: string;
   sessions: any[];
   classes: any[];
+  partners: any[];
   isGuest: boolean;
 }) {
   const [items, setItems] = useState<Assessment[]>([]);
@@ -226,6 +228,24 @@ export default function TrainingAssessmentsAdmin({
       }));
     return [...classTargets, ...sessionTargets];
   }, [classes, sessions]);
+
+  const selectedTargetPartner = useMemo(() => {
+    const [targetType, targetId] = draft.target.split(":");
+    const partnerId = targetType === "class"
+      ? classes.find((item) => String(item.id) === targetId)?.partner
+      : sessions.find((item) => String(item.id) === targetId)?.partner_id;
+    return partners.find((item) => String(item.id) === String(partnerId)) || null;
+  }, [classes, draft.target, partners, sessions]);
+  const audienceGroupOptions = useMemo(() => Array.from(new Set(
+    partners.map((partner) => String(partner.partner_subtype || "").trim()).filter(Boolean),
+  )).sort((left, right) => left.localeCompare(right, "vi")), [partners]);
+  const audienceGroupForTarget = (target: string) => {
+    const [targetType, targetId] = target.split(":");
+    const partnerId = targetType === "class"
+      ? classes.find((item) => String(item.id) === targetId)?.partner
+      : sessions.find((item) => String(item.id) === targetId)?.partner_id;
+    return String(partners.find((item) => String(item.id) === String(partnerId))?.partner_subtype || "").trim();
+  };
 
   const normalizedVariantCount = Math.max(1, Math.min(200, Number.parseInt(variantCount, 10) || 1));
   const bankQuestions = preview?.bank_questions || [];
@@ -321,8 +341,6 @@ export default function TrainingAssessmentsAdmin({
     setStructureDirty(false);
     setNotice("");
     setScreen("create");
-    // Nhóm đối tượng là tên các sheet trong ngân hàng; nạp ngay để ô chọn có dữ liệu.
-    void loadQuestionBank(bankSettings.default_url.trim());
   };
 
   const importQuestions = async () => {
@@ -720,7 +738,7 @@ export default function TrainingAssessmentsAdmin({
             </button>
             <button
               type="button"
-              onClick={() => { setImportMode("auto_generate"); setPreview(null); setTopicConfigs({}); setStructureDirty(false); void loadQuestionBank(bankUrl); }}
+              onClick={() => { setImportMode("auto_generate"); setPreview(null); setTopicConfigs({}); setStructureDirty(false); }}
               className={`rounded-2xl border-2 p-4 text-left transition ${importMode === "auto_generate" ? "border-emerald-600 bg-emerald-50" : "border-slate-200 bg-white hover:border-emerald-200"}`}
             >
               <span className="flex items-center gap-2 font-extrabold text-[#001e40]"><Shuffle className="h-5 w-5 text-emerald-600" />Sinh đề từ ngân hàng chuẩn</span>
@@ -731,8 +749,8 @@ export default function TrainingAssessmentsAdmin({
             <div className="space-y-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Tên bài *</span><input className="ft-input" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Bài kiểm tra cuối học phần" /></label>
-                <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Đơn vị / phân lớp *</span><select className="ft-input" value={draft.target} onChange={(event) => setDraft({ ...draft, target: event.target.value })}><option value="">Chọn đơn vị hoặc phân lớp</option>{targets.map((target) => <option key={target.value} value={target.value}>{target.label}</option>)}</select><small className="mt-1 block text-slate-500">Mỗi đơn vị/phân lớp chỉ có một khảo sát kết thúc tập huấn và một link công khai.</small></label>
-                {importMode === "auto_generate" ? <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Nhóm đối tượng *</span><select className="ft-input" disabled={busy || !(preview?.available_groups || []).length} value={draft.audience_group} onChange={(event) => { setDraft({ ...draft, audience_group: event.target.value }); setTopicConfigs({}); setStructureDirty(true); }}><option value="">{busy ? "Đang tải danh sách nhóm..." : (preview?.available_groups || []).length ? "Chọn nhóm đối tượng" : "Chưa tìm thấy nhóm đối tượng"}</option>{(preview?.available_groups || []).map((group) => <option key={group} value={group}>{group}</option>)}</select><small className="mt-1 block text-slate-500">{busy ? "Đang đọc các sheet trong ngân hàng câu hỏi..." : (preview?.available_groups || []).length ? "Dùng ngay các sheet chuẩn của ngân hàng FermatTech; không cần phân tích lại file." : "Hãy kiểm tra liên kết hoặc bấm Đọc / cập nhật ngân hàng để tải lại."}</small></label> : (preview?.available_groups || []).length > 0 && <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Nhóm đối tượng trong ngân hàng *</span><select className="ft-input" value={draft.audience_group} onChange={(event) => { setDraft({ ...draft, audience_group: event.target.value }); setPreview(null); }}><option value="">Chọn nhóm đối tượng</option>{(preview?.available_groups || []).map((group) => <option key={group} value={group}>{group}</option>)}</select></label>}
+                <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Đơn vị / phân lớp *</span><select className="ft-input" value={draft.target} onChange={(event) => { const target = event.target.value; setDraft({ ...draft, target, audience_group: audienceGroupForTarget(target) }); setTopicConfigs({}); setStructureDirty(true); }}><option value="">Chọn đơn vị hoặc phân lớp</option>{targets.map((target) => <option key={target.value} value={target.value}>{target.label}</option>)}</select><small className="mt-1 block text-slate-500">Mỗi đơn vị/phân lớp chỉ có một khảo sát kết thúc tập huấn và một link công khai.</small></label>
+                {importMode === "auto_generate" ? <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Nhóm đối tượng *</span><select className="ft-input" disabled={!audienceGroupOptions.length} value={draft.audience_group} onChange={(event) => { setDraft({ ...draft, audience_group: event.target.value }); setTopicConfigs({}); setStructureDirty(true); }}><option value="">{audienceGroupOptions.length ? "Chọn nhóm đối tượng" : "Chưa có phân loại khách hàng"}</option>{audienceGroupOptions.map((group) => <option key={group} value={group}>{group}</option>)}</select><small className="mt-1 block text-slate-500">{selectedTargetPartner?.partner_subtype ? `Đã tự mapping theo phân loại khách hàng: ${selectedTargetPartner.partner_subtype}.` : "Chọn nhóm theo phân loại khách hàng. Google Sheet chỉ được đọc khi bấm Đọc / cập nhật ngân hàng hoặc tạo đề."}</small></label> : (preview?.available_groups || []).length > 0 && <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Nhóm đối tượng trong ngân hàng *</span><select className="ft-input" value={draft.audience_group} onChange={(event) => { setDraft({ ...draft, audience_group: event.target.value }); setPreview(null); }}><option value="">Chọn nhóm đối tượng</option>{(preview?.available_groups || []).map((group) => <option key={group} value={group}>{group}</option>)}</select></label>}
                 <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Google Sheet đầu ra của đợt thi</span><input type="url" className="ft-input" value={draft.output_sheet_url} onChange={(event) => setDraft({ ...draft, output_sheet_url: event.target.value })} placeholder="https://docs.google.com/spreadsheets/d/..." /><small className="mt-1 block text-slate-500">Dùng file riêng của khách hàng; hệ thống tạo các trang Tổng quan, Phân đề, Đề, Bài làm và Nhật ký xóa.</small></label>
                 <fieldset className="sm:col-span-2 rounded-xl border bg-slate-50 p-4"><legend className="px-2 text-sm font-extrabold text-slate-800">Nơi lưu tệp bài làm trên Google Drive</legend><label><span className="mb-1 block text-sm font-bold">ID thư mục gốc</span><input className="ft-input bg-white" value={draft.drive_folder_id} onChange={(event) => setDraft({ ...draft, drive_folder_id: event.target.value })} placeholder="Ví dụ: 1AbC... lấy từ URL thư mục Drive" /></label><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="flex items-start gap-2 rounded-lg border bg-white p-3 text-sm"><input type="checkbox" className="mt-1" checked={draft.create_customer_folder} onChange={(event) => setDraft({ ...draft, create_customer_folder: event.target.checked })} /><span><b className="block">Tạo thư mục theo khách hàng</b><span className="text-xs text-slate-500">Mặc định dùng tên đơn vị đã chọn.</span></span></label><label className="flex items-start gap-2 rounded-lg border bg-white p-3 text-sm"><input type="checkbox" className="mt-1" checked={draft.create_participant_folder} onChange={(event) => setDraft({ ...draft, create_participant_folder: event.target.checked })} /><span><b className="block">Mỗi người một thư mục</b><span className="text-xs text-slate-500">Tránh lẫn tệp giữa các bài làm.</span></span></label>{draft.create_customer_folder && <label><span className="mb-1 block text-xs font-bold">Tên thư mục khách hàng (không bắt buộc)</span><input className="ft-input bg-white" value={draft.customer_folder_name} onChange={(event) => setDraft({ ...draft, customer_folder_name: event.target.value })} placeholder="Để trống để dùng tên đơn vị" /></label>}{draft.create_participant_folder && <label><span className="mb-1 block text-xs font-bold">Mẫu tên thư mục người làm</span><input className="ft-input bg-white font-mono text-sm" value={draft.participant_folder_template} onChange={(event) => setDraft({ ...draft, participant_folder_template: event.target.value })} /><small className="mt-1 block text-slate-500">Biến: {"{participant_code}"}, {"{respondent_name}"}, {"{email}"}, {"{phone}"}, {"{variant}"}.</small></label>}</div></fieldset>
                 <label><span className="mb-1 block text-sm font-bold">Thời gian làm bài (phút)</span><input type="number" min="1" max="480" className="ft-input" value={draft.duration_minutes} onChange={(event) => setDraft({ ...draft, duration_minutes: event.target.value })} /></label>

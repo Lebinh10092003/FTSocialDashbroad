@@ -26,6 +26,7 @@ export default function TrainingAssessmentWorkspace({
 }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [classes, setClasses] = useState<any[]>([]);
+  const [partners, setPartners] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [activeTab, setActiveTab] = useState<"assessments" | "bank-settings">("assessments");
@@ -37,18 +38,21 @@ export default function TrainingAssessmentWorkspace({
     Promise.all([
       fetch("/api/digital-training/sessions", { headers }),
       fetch("/api/digital-training/classes", { headers }),
+      fetch("/api/digital-training/partners", { headers }),
     ])
-      .then(async ([sessionResponse, classResponse]) => {
-        if (!sessionResponse.ok || !classResponse.ok) {
+      .then(async ([sessionResponse, classResponse, partnerResponse]) => {
+        if (!sessionResponse.ok || !classResponse.ok || !partnerResponse.ok) {
           throw new Error("Không thể tải dữ liệu liên kết từ Đào tạo số.");
         }
-        const [sessionData, classData] = await Promise.all([
+        const [sessionData, classData, partnerData] = await Promise.all([
           sessionResponse.json(),
           classResponse.json(),
+          partnerResponse.json(),
         ]);
         if (active) {
           setSessions(sessionData);
           setClasses(classData);
+          setPartners(partnerData);
         }
       })
       .catch((error) => active && setNotice(String(error?.message || error)))
@@ -140,6 +144,7 @@ export default function TrainingAssessmentWorkspace({
               idToken={idToken}
               sessions={sessions}
               classes={classes}
+              partners={partners}
               isGuest={false}
             />
           )}

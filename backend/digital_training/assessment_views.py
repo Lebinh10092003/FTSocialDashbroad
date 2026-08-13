@@ -45,7 +45,7 @@ def _assessment_error(message, code=status.HTTP_400_BAD_REQUEST):
 
 
 QUESTION_BANK_CONFIG_KEY = "digital_training_question_bank"
-DEFAULT_QUESTION_BANK_URL = "https://drive.google.com/file/d/1Y2iTce6KweClmUWKaen5yeilg6Pes5Ir/view?usp=sharing"
+DEFAULT_QUESTION_BANK_URL = "https://docs.google.com/spreadsheets/d/1zdlpFOO7p93DuQbXpRhvG4xi89u6L7O-2O1UqBaAV3c/edit?usp=sharing"
 
 
 def _question_bank_settings():
