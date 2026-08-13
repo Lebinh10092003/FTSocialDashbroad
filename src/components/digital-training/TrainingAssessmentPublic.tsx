@@ -101,9 +101,12 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
   const [reviewedIds, setReviewedIds] = useState<string[]>([]);
   const [reviewMode, setReviewMode] = useState(false);
   const submittingRef = useRef(false);
+  const hydratingAttemptRef = useRef(false);
   const storageKey = `ft-training-assessment:${slug}`;
 
   const restoreAttempt = (body: any) => {
+    // State populated while opening/resuming an attempt is already persisted.
+    hydratingAttemptRef.current = true;
     setAttempt(body);
     setAssessment(body.assessment);
     setAnswers(body.answers || {});
@@ -209,6 +212,10 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
 
   useEffect(() => {
     if (!attempt?.access_token || attempt.status !== "in_progress") return;
+    if (hydratingAttemptRef.current) {
+      hydratingAttemptRef.current = false;
+      return;
+    }
     setSaveState("Có thay đổi chưa lưu");
     const timer = window.setTimeout(() => void save(false), 900);
     return () => window.clearTimeout(timer);
