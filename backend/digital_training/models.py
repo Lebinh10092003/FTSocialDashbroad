@@ -306,7 +306,7 @@ class TrainingAssessment(models.Model):
     storage_config = models.JSONField(default=dict, blank=True)
     audience_group = models.CharField(max_length=255, blank=True)
     participants = models.JSONField(default=list, blank=True)
-    max_people_per_variant = models.PositiveIntegerField(default=8)
+    max_people_per_variant = models.PositiveIntegerField(default=12)
     sync_status = models.CharField(max_length=20, default="pending")
     sync_error = models.TextField(blank=True)
     created_by = models.CharField(max_length=255, blank=True)

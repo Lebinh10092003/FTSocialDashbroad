@@ -227,7 +227,7 @@ def assessment_import_preview(request):
         if import_mode == "auto_generate" and not result["errors"]:
             try:
                 participant_count = max(0, int(request.data.get("participant_count") or 0))
-                max_people = max(1, int(request.data.get("max_people_per_variant") or 8))
+                max_people = max(1, int(request.data.get("max_people_per_variant") or 12))
             except (TypeError, ValueError):
                 return _assessment_error("So nguoi tham gia hoac so nguoi tren moi ma de khong hop le.")
             structure = request.data.get("structure") or []

@@ -777,6 +777,53 @@ class TrainingAssessmentTests(TestCase):
             self.assertEqual(Counter(item["knowledge_type"] for item in questions), Counter({"Theory": 2, "Practice": 2}))
             self.assertEqual({item["points"] for item in questions if item["knowledge_type"] == "Theory"}, {1})
             self.assertEqual({item["points"] for item in questions if item["knowledge_type"] == "Practice"}, {3})
+
+    def test_import_generation_honors_per_topic_practical_requirements(self):
+        rules = [
+            ("BNDC", 6, 0),
+            ("Gemini và trợ lý Gems", 11, 1),
+            ("NotebookLM", 5, 1),
+            ("Gems trong Google Workspace", 10, 2),
+            ("Tùy biến", 3, 1),
+        ]
+        source_questions = []
+        for category, theory_total, practice_total in rules:
+            for knowledge_type, count in (("Theory", theory_total), ("Practice", practice_total)):
+                for index in range(count):
+                    source_questions.append({
+                        "id": f"{category}-{knowledge_type}-{index}",
+                        "type": "practical_submission" if knowledge_type == "Practice" else "short_answer",
+                        "text": f"{category} {knowledge_type} question {index}",
+                        "options": [],
+                        "correct_answers": ["ok"],
+                        "points": 1,
+                        "required": True,
+                        "category": category,
+                        "knowledge_type": knowledge_type,
+                    })
+
+        result = generate_variants_from_import(
+            source_questions,
+            variant_count=5,
+            questions_per_variant=40,
+            seed=20260813,
+            topic_config=[
+                {"category": category, "total": theory_total + practice_total, "theory": theory_total, "practice": practice_total}
+                for category, theory_total, practice_total in rules
+            ],
+            knowledge_config={"theory": 35, "practice": 5},
+        )
+
+        self.assertEqual(len(result["variants"]), 5)
+        for variant in result["variants"]:
+            questions = [item for item in result["questions"] if item["variant"] == variant["name"]]
+            self.assertEqual(len(questions), 40)
+            self.assertEqual(Counter(item["knowledge_type"] for item in questions), Counter({"Theory": 35, "Practice": 5}))
+            for category, theory_total, practice_total in rules:
+                group = [item for item in questions if item["category"] == category]
+                self.assertEqual(len(group), theory_total + practice_total)
+                self.assertEqual(Counter(item["knowledge_type"] for item in group), Counter({"Theory": theory_total, "Practice": practice_total}))
+
     def test_xlsx_parser_uses_sheet_names_for_prepared_variants(self):
         workbook = Workbook()
         first = workbook.active

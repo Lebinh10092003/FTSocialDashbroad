@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { appDialog } from "../AppDialog";
 import {
   ArrowLeft,
@@ -94,7 +94,7 @@ type Preview = {
 const emptyDraft = () => ({
   title: "",
   target: "",
-  duration_minutes: "30",
+  duration_minutes: "120",
   attempt_limit: "1",
   opens_at: "",
   closes_at: "",
@@ -106,8 +106,6 @@ const emptyDraft = () => ({
   drive_folder_id: "",
   create_customer_folder: true,
   create_participant_folder: true,
-  customer_folder_name: "",
-  participant_folder_template: "{participant_code} - {respondent_name}",
 });
 
 
@@ -167,7 +165,8 @@ export default function TrainingAssessmentsAdmin({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [bankFilters, setBankFilters] = useState({ category: "", knowledge_type: "", type: "", difficulty: "" });
-  const [topicConfigs, setTopicConfigs] = useState<Record<string, { total: string }>>({});
+  const [topicConfigs, setTopicConfigs] = useState<Record<string, { total: string; theory: string; practice: string }>>({});
+  const appliedPracticeDistribution = useRef("");
   const [knowledgeCounts, setKnowledgeCounts] = useState({ theory: "10", practice: "10" });
   const [scoreConfig, setScoreConfig] = useState({ theory: "1", practice: "3" });
   const [difficultyCounts, setDifficultyCounts] = useState({ easy: "0", medium: "0", hard: "0" });
@@ -269,12 +268,46 @@ export default function TrainingAssessmentsAdmin({
   }, [selectedBankQuestions]);
   const topicRows = parsedTopicRows;
   const questionsPerVariantCount = Math.max(1, Math.min(200, Number.parseInt(questionsPerVariant, 10) || 1));
+  const distributePracticeAcrossTopics = (practiceValue: string, current: Record<string, { total: string; theory: string; practice: string }>) => {
+    let remaining = Math.max(0, Number.parseInt(practiceValue, 10) || 0);
+    const next = { ...current };
+    const eligible = topicRows.filter((row) => Number(current[row.category]?.total || 0) > 0 && row.practice > 0);
+    for (const row of eligible) {
+      const config = current[row.category] || { total: "0", theory: "0", practice: "0" };
+      next[row.category] = { ...config, practice: "0", theory: config.total };
+    }
+    while (remaining > 0) {
+      let assigned = false;
+      for (const row of eligible) {
+        const config = next[row.category];
+        const total = Number(config.total || 0);
+        const practice = Number(config.practice || 0);
+        if (practice >= total || practice >= row.practice) continue;
+        const nextPractice = practice + 1;
+        next[row.category] = { ...config, practice: String(nextPractice), theory: String(total - nextPractice) };
+        remaining -= 1;
+        assigned = true;
+        if (!remaining) break;
+      }
+      if (!assigned) break;
+    }
+    return next;
+  };
+  const practiceDistributionSignature = `${knowledgeCounts.practice}|${topicRows.map((row) => `${row.category}:${topicConfigs[row.category]?.total || 0}:${row.practice}`).join("|")}`;
+  useEffect(() => {
+    if (practiceDistributionSignature === appliedPracticeDistribution.current) return;
+    appliedPracticeDistribution.current = practiceDistributionSignature;
+    setTopicConfigs((current) => distributePracticeAcrossTopics(knowledgeCounts.practice, current));
+  }, [practiceDistributionSignature]);
   const topicConfigPayload = topicRows.map((row) => ({
     category: row.category === "Không chủ đề" ? "" : row.category,
     total: Number(topicConfigs[row.category]?.total || 0),
+    theory: Number(topicConfigs[row.category]?.theory || 0),
+    practice: Number(topicConfigs[row.category]?.practice || 0),
   })).filter((row) => row.category && row.total > 0);
   const topicConfigTotal = topicConfigPayload.reduce((sum, row) => sum + row.total, 0);
   const topicConfigInvalid = topicConfigTotal !== questionsPerVariantCount;
+  const topicKnowledgeConfigInvalid = topicConfigPayload.some((row) => row.theory < 0 || row.practice < 0 || row.theory + row.practice !== row.total);
   const knowledgeConfigPayload = {
     theory: Number(knowledgeCounts.theory || 0),
     practice: Number(knowledgeCounts.practice || 0),
@@ -349,7 +382,7 @@ export default function TrainingAssessmentsAdmin({
         setNotice("Vui lòng chọn nhóm đối tượng của khách hàng.");
         return;
       }
-      if (!topicConfigPayload.length || topicConfigInvalid || knowledgeConfigInvalid || difficultyConfigInvalid) {
+      if (!topicConfigPayload.length || topicConfigInvalid || topicKnowledgeConfigInvalid || knowledgeConfigInvalid || difficultyConfigInvalid) {
         setNotice("Chọn chủ đề; tổng số câu theo chủ đề và tổng Lý thuyết + Thực hành phải bằng số câu mỗi đề.");
         return;
       }
@@ -422,7 +455,7 @@ export default function TrainingAssessmentsAdmin({
         setNotice("Vui lòng chọn nhóm đối tượng của khách hàng.");
         return;
       }
-      if (!topicConfigPayload.length || topicConfigInvalid || knowledgeConfigInvalid || difficultyConfigInvalid) {
+      if (!topicConfigPayload.length || topicConfigInvalid || topicKnowledgeConfigInvalid || knowledgeConfigInvalid || difficultyConfigInvalid) {
         setNotice("Chọn chủ đề; tổng số câu theo chủ đề và tổng Lý thuyết + Thực hành phải bằng số câu mỗi đề.");
         return;
       }
@@ -486,10 +519,8 @@ export default function TrainingAssessmentsAdmin({
         output_sheet_url: draft.output_sheet_url.trim(),
         drive_folder_id: draft.drive_folder_id.trim(),
         storage_config: {
-          create_customer_folder: draft.create_customer_folder,
-          create_participant_folder: draft.create_participant_folder,
-          customer_folder_name: draft.customer_folder_name.trim(),
-          participant_folder_template: draft.participant_folder_template.trim(),
+          create_customer_folder: true,
+          create_participant_folder: true,
         },
         audience_group: draft.audience_group,
         participants: [],
@@ -752,7 +783,7 @@ export default function TrainingAssessmentsAdmin({
                 <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Đơn vị / phân lớp *</span><select className="ft-input" value={draft.target} onChange={(event) => { const target = event.target.value; setDraft({ ...draft, target, audience_group: audienceGroupForTarget(target) }); setTopicConfigs({}); setStructureDirty(true); }}><option value="">Chọn đơn vị hoặc phân lớp</option>{targets.map((target) => <option key={target.value} value={target.value}>{target.label}</option>)}</select><small className="mt-1 block text-slate-500">Mỗi đơn vị/phân lớp chỉ có một khảo sát kết thúc tập huấn và một link công khai.</small></label>
                 {importMode === "auto_generate" ? <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Nhóm đối tượng *</span><select className="ft-input" disabled={!audienceGroupOptions.length} value={draft.audience_group} onChange={(event) => { setDraft({ ...draft, audience_group: event.target.value }); setTopicConfigs({}); setStructureDirty(true); }}><option value="">{audienceGroupOptions.length ? "Chọn nhóm đối tượng" : "Chưa có phân loại khách hàng"}</option>{audienceGroupOptions.map((group) => <option key={group} value={group}>{group}</option>)}</select><small className="mt-1 block text-slate-500">{selectedTargetPartner?.partner_subtype ? `Đã tự mapping theo phân loại khách hàng: ${selectedTargetPartner.partner_subtype}.` : "Chọn nhóm theo phân loại khách hàng. Google Sheet chỉ được đọc khi bấm Đọc / cập nhật ngân hàng hoặc tạo đề."}</small></label> : (preview?.available_groups || []).length > 0 && <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Nhóm đối tượng trong ngân hàng *</span><select className="ft-input" value={draft.audience_group} onChange={(event) => { setDraft({ ...draft, audience_group: event.target.value }); setPreview(null); }}><option value="">Chọn nhóm đối tượng</option>{(preview?.available_groups || []).map((group) => <option key={group} value={group}>{group}</option>)}</select></label>}
                 <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Google Sheet đầu ra của đợt thi</span><input type="url" className="ft-input" value={draft.output_sheet_url} onChange={(event) => setDraft({ ...draft, output_sheet_url: event.target.value })} placeholder="https://docs.google.com/spreadsheets/d/..." /><small className="mt-1 block text-slate-500">Dùng file riêng của khách hàng; hệ thống tạo các trang Tổng quan, Phân đề, Đề, Bài làm và Nhật ký xóa.</small></label>
-                <fieldset className="sm:col-span-2 rounded-xl border bg-slate-50 p-4"><legend className="px-2 text-sm font-extrabold text-slate-800">Nơi lưu tệp bài làm trên Google Drive</legend><label><span className="mb-1 block text-sm font-bold">ID thư mục gốc</span><input className="ft-input bg-white" value={draft.drive_folder_id} onChange={(event) => setDraft({ ...draft, drive_folder_id: event.target.value })} placeholder="Ví dụ: 1AbC... lấy từ URL thư mục Drive" /></label><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="flex items-start gap-2 rounded-lg border bg-white p-3 text-sm"><input type="checkbox" className="mt-1" checked={draft.create_customer_folder} onChange={(event) => setDraft({ ...draft, create_customer_folder: event.target.checked })} /><span><b className="block">Tạo thư mục theo khách hàng</b><span className="text-xs text-slate-500">Mặc định dùng tên đơn vị đã chọn.</span></span></label><label className="flex items-start gap-2 rounded-lg border bg-white p-3 text-sm"><input type="checkbox" className="mt-1" checked={draft.create_participant_folder} onChange={(event) => setDraft({ ...draft, create_participant_folder: event.target.checked })} /><span><b className="block">Mỗi người một thư mục</b><span className="text-xs text-slate-500">Tránh lẫn tệp giữa các bài làm.</span></span></label>{draft.create_customer_folder && <label><span className="mb-1 block text-xs font-bold">Tên thư mục khách hàng (không bắt buộc)</span><input className="ft-input bg-white" value={draft.customer_folder_name} onChange={(event) => setDraft({ ...draft, customer_folder_name: event.target.value })} placeholder="Để trống để dùng tên đơn vị" /></label>}{draft.create_participant_folder && <label><span className="mb-1 block text-xs font-bold">Mẫu tên thư mục người làm</span><input className="ft-input bg-white font-mono text-sm" value={draft.participant_folder_template} onChange={(event) => setDraft({ ...draft, participant_folder_template: event.target.value })} /><small className="mt-1 block text-slate-500">Biến: {"{participant_code}"}, {"{respondent_name}"}, {"{email}"}, {"{phone}"}, {"{variant}"}.</small></label>}</div></fieldset>
+                <fieldset className="sm:col-span-2 rounded-xl border bg-slate-50 p-4"><legend className="px-2 text-sm font-extrabold text-slate-800">Nơi lưu tệp bài làm trên Google Drive</legend><label><span className="mb-1 block text-sm font-bold">ID thư mục gốc</span><input className="ft-input bg-white" value={draft.drive_folder_id} onChange={(event) => setDraft({ ...draft, drive_folder_id: event.target.value })} placeholder="Ví dụ: 1AbC... lấy từ URL thư mục Drive" /></label><p className="mt-2 text-xs text-slate-500">Hệ thống tự tạo thư mục theo khách hàng và theo họ tên người làm; nếu trùng tên sẽ thêm email để không lẫn tệp.</p></fieldset>
                 <label><span className="mb-1 block text-sm font-bold">Thời gian làm bài (phút)</span><input type="number" min="1" max="480" className="ft-input" value={draft.duration_minutes} onChange={(event) => setDraft({ ...draft, duration_minutes: event.target.value })} /></label>
                 <label><span className="mb-1 block text-sm font-bold">Số lượt tối đa/người</span><input type="number" min="1" max="20" className="ft-input" value={draft.attempt_limit} onChange={(event) => setDraft({ ...draft, attempt_limit: event.target.value })} /></label>
                 <label><span className="mb-1 block text-sm font-bold">Mở từ</span><input type="datetime-local" className="ft-input" value={draft.opens_at} onChange={(event) => setDraft({ ...draft, opens_at: event.target.value })} /></label>
@@ -771,7 +802,7 @@ export default function TrainingAssessmentsAdmin({
                 </div>
                 {bankSource === "default" ? <p className="break-all text-xs text-emerald-800">{bankSettings.default_url || "Chua cau hinh lien ket mac dinh."}</p> : <label><span className="mb-1 block text-xs font-bold text-emerald-900">Lien ket Google Sheet / Drive</span><input className="ft-input bg-white" value={sheetUrl} onChange={(event) => { setSheetUrl(event.target.value); setPreview(null); }} placeholder="https://docs.google.com/... hoac https://drive.google.com/file/d/..." /></label>}
                 <div className="grid gap-3 sm:grid-cols-2"><button type="button" disabled={busy} onClick={refreshQuestionBank} className="ft-btn ft-btn-secondary justify-center"><RefreshCw className="h-4 w-4" />Đọc / cập nhật ngân hàng</button><label><span className="mb-1 block text-xs font-bold text-emerald-900">Số mã đề</span><input type="number" min="1" max="200" className="ft-input bg-white" value={variantCount} onChange={(event) => { setVariantCount(event.target.value); setStructureDirty(true); }} /></label></div>
-              </div>}          {importMode === "auto_generate" && <><div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/40 p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-extrabold uppercase text-emerald-700">Thiết lập đề từ ngân hàng</p><h3 className="mt-1 text-lg font-extrabold">Chủ đề, loại câu và độ khó</h3><p className="mt-1 text-sm text-slate-600">Số liệu dưới đây được tính từ lần đọc ngân hàng gần nhất. Khi bấm tạo, hệ thống đọc lại file và kiểm tra đúng cơ cấu này.</p></div><b className="rounded-full bg-white px-3 py-1 text-xs text-emerald-700">{draft.audience_group || "Chưa chọn nhóm"}</b></div><div className="mt-4 grid gap-3 md:grid-cols-3"><label><span className="mb-1 block text-xs font-bold">Số câu mỗi đề *</span><input type="number" min="1" max="200" className="ft-input bg-white" value={questionsPerVariant} onChange={(event) => { setQuestionsPerVariant(event.target.value); setStructureDirty(true); }} /></label><label><span className="mb-1 block text-xs font-bold">Câu Lý thuyết *</span><input type="number" min="0" className="ft-input bg-white" value={knowledgeCounts.theory} onChange={(event) => { setKnowledgeCounts({ ...knowledgeCounts, theory: event.target.value }); setStructureDirty(true); }} /></label><label><span className="mb-1 block text-xs font-bold">Câu Thực hành *</span><input type="number" min="0" className="ft-input bg-white" value={knowledgeCounts.practice} onChange={(event) => { setKnowledgeCounts({ ...knowledgeCounts, practice: event.target.value }); setStructureDirty(true); }} /></label></div><div className="mt-3 grid gap-3 md:grid-cols-3"><label><span className="mb-1 block text-xs font-bold">Cau De *</span><input type="number" min="0" className="ft-input bg-white" value={difficultyCounts.easy} onChange={(event) => { setDifficultyCounts({ ...difficultyCounts, easy: event.target.value }); setStructureDirty(true); }} /></label><label><span className="mb-1 block text-xs font-bold">Câu Trung bình *</span><input type="number" min="0" className="ft-input bg-white" value={difficultyCounts.medium} onChange={(event) => { setDifficultyCounts({ ...difficultyCounts, medium: event.target.value }); setStructureDirty(true); }} /></label><label><span className="mb-1 block text-xs font-bold">Câu Khó *</span><input type="number" min="0" className="ft-input bg-white" value={difficultyCounts.hard} onChange={(event) => { setDifficultyCounts({ ...difficultyCounts, hard: event.target.value }); setStructureDirty(true); }} /></label></div><div className="mt-3 grid gap-3 md:grid-cols-2"><label><span className="mb-1 block text-xs font-bold">Điểm mỗi câu Lý thuyết</span><input type="number" min="0" step="0.25" className="ft-input bg-white" value={scoreConfig.theory} onChange={(event) => { setScoreConfig({ ...scoreConfig, theory: event.target.value }); setStructureDirty(true); }} /></label><label><span className="mb-1 block text-xs font-bold">Điểm mỗi câu Thực hành</span><input type="number" min="0" step="0.25" className="ft-input bg-white" value={scoreConfig.practice} onChange={(event) => { setScoreConfig({ ...scoreConfig, practice: event.target.value }); setStructureDirty(true); }} /></label></div><div className="mt-4"><div className="flex items-center justify-between gap-2"><b className="text-sm">Chủ đề áp dụng</b><span className="text-xs text-slate-500">Tổng đã chọn: {topicConfigTotal}/{questionsPerVariantCount} cau</span></div>{draft.audience_group ? <div className="mt-2 grid gap-2 sm:grid-cols-2">{topicRows.map((row) => { const total = topicConfigs[row.category]?.total || "0"; return <label key={row.category} className="flex items-center gap-3 rounded-xl border bg-white p-3"><input type="number" min="0" max={row.available} className="ft-input w-20 text-center" value={total} onChange={(event) => { setTopicConfigs((current) => ({ ...current, [row.category]: { total: event.target.value } })); setStructureDirty(true); }} /><span><b className="block text-sm">{row.category}</b><span className="text-xs text-slate-500">{row.available} cau · LT {row.theory} · TH {row.practice} · De {row.easy} · TB {row.medium} · Kho {row.hard}</span></span></label>; })}</div> : <p className="mt-2 text-sm text-slate-500">Bấm Đọc / cập nhật ngân hàng, sau đó chọn nhóm đối tượng để hiện số liệu thật.</p>}</div>{(topicConfigInvalid || knowledgeConfigInvalid || difficultyConfigInvalid || scoreConfigInvalid) && <p className="mt-3 rounded-lg bg-rose-50 p-2 text-xs font-bold text-rose-700">Tong chu de, Ly thuyet + Thuc hanh va De + Trung binh + Kho deu phai bang {questionsPerVariantCount}; diem khong am.</p>}</div><div className="mt-4 space-y-3"><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={draft.status === "published"} onChange={(event) => setDraft({ ...draft, status: event.target.checked ? "published" : "draft" })} />Phát hành ngay sau khi tạo</label><button disabled={busy} onClick={createAssessment} className="ft-primary w-full justify-center disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}Tạo khảo sát kết thúc</button></div></>}              {importMode === "prepared" && <div className="mt-3 grid grid-cols-2 rounded-xl bg-slate-200 p-1 text-sm font-bold">
+              </div>}          {importMode === "auto_generate" && <><div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/40 p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-extrabold uppercase text-emerald-700">Thiết lập đề từ ngân hàng</p><h3 className="mt-1 text-lg font-extrabold">Chủ đề, loại câu và độ khó</h3><p className="mt-1 text-sm text-slate-600">Số liệu dưới đây được tính từ lần đọc ngân hàng gần nhất. Khi bấm tạo, hệ thống đọc lại file và kiểm tra đúng cơ cấu này.</p></div><b className="rounded-full bg-white px-3 py-1 text-xs text-emerald-700">{draft.audience_group || "Chưa chọn nhóm"}</b></div><div className="mt-4 grid gap-3 md:grid-cols-3"><label><span className="mb-1 block text-xs font-bold">Số câu mỗi đề *</span><input type="number" min="1" max="200" className="ft-input bg-white" value={questionsPerVariant} onChange={(event) => { setQuestionsPerVariant(event.target.value); setStructureDirty(true); }} /></label><label><span className="mb-1 block text-xs font-bold">Câu Lý thuyết *</span><input type="number" min="0" className="ft-input bg-white" value={knowledgeCounts.theory} onChange={(event) => { setKnowledgeCounts({ ...knowledgeCounts, theory: event.target.value }); setStructureDirty(true); }} /></label><label><span className="mb-1 block text-xs font-bold">Câu Thực hành *</span><input type="number" min="0" className="ft-input bg-white" value={knowledgeCounts.practice} onChange={(event) => { setKnowledgeCounts({ ...knowledgeCounts, practice: event.target.value }); setStructureDirty(true); }} /></label></div><div className="mt-3 grid gap-3 md:grid-cols-3"><label><span className="mb-1 block text-xs font-bold">Câu Dễ *</span><input type="number" min="0" className="ft-input bg-white" value={difficultyCounts.easy} onChange={(event) => { setDifficultyCounts({ ...difficultyCounts, easy: event.target.value }); setStructureDirty(true); }} /></label><label><span className="mb-1 block text-xs font-bold">Câu Trung bình *</span><input type="number" min="0" className="ft-input bg-white" value={difficultyCounts.medium} onChange={(event) => { setDifficultyCounts({ ...difficultyCounts, medium: event.target.value }); setStructureDirty(true); }} /></label><label><span className="mb-1 block text-xs font-bold">Câu Khó *</span><input type="number" min="0" className="ft-input bg-white" value={difficultyCounts.hard} onChange={(event) => { setDifficultyCounts({ ...difficultyCounts, hard: event.target.value }); setStructureDirty(true); }} /></label></div><div className="mt-3 grid gap-3 md:grid-cols-2"><label><span className="mb-1 block text-xs font-bold">Điểm mỗi câu Lý thuyết</span><input type="number" min="0" step="0.25" className="ft-input bg-white" value={scoreConfig.theory} onChange={(event) => { setScoreConfig({ ...scoreConfig, theory: event.target.value }); setStructureDirty(true); }} /></label><label><span className="mb-1 block text-xs font-bold">Điểm mỗi câu Thực hành</span><input type="number" min="0" step="0.25" className="ft-input bg-white" value={scoreConfig.practice} onChange={(event) => { setScoreConfig({ ...scoreConfig, practice: event.target.value }); setStructureDirty(true); }} /></label></div><div className="mt-4"><div className="flex items-center justify-between gap-2"><b className="text-sm">Chủ đề áp dụng</b><span className="text-xs text-slate-500">Tổng đã chọn: {topicConfigTotal}/{questionsPerVariantCount} câu</span></div>{draft.audience_group ? <div className="mt-2 grid gap-2">{topicRows.map((row) => { const config = topicConfigs[row.category] || { total: "0", theory: "0", practice: "0" }; return <div key={row.category} className="grid gap-3 rounded-xl border bg-white p-3 sm:grid-cols-[minmax(0,1fr)_88px_88px_88px]"><span><b className="block text-sm">{row.category}</b><span className="text-xs text-slate-500">Có {row.available} câu · LT {row.theory} · TH {row.practice} · Dễ {row.easy} · TB {row.medium} · Khó {row.hard}</span></span><label><span className="mb-1 block text-[11px] font-bold text-slate-500">TỔNG</span><input aria-label={`Tổng câu ${row.category}`} type="number" min="0" max={row.available} className="ft-input text-center" value={config.total} onChange={(event) => { setTopicConfigs((current) => ({ ...current, [row.category]: { ...config, total: event.target.value } })); setStructureDirty(true); }} /></label><label><span className="mb-1 block text-[11px] font-bold text-slate-500">LÝ THUYẾT</span><input aria-label={`Lý thuyết ${row.category}`} type="number" min="0" max={row.theory} className="ft-input text-center" value={config.theory} onChange={(event) => { setTopicConfigs((current) => ({ ...current, [row.category]: { ...config, theory: event.target.value } })); setStructureDirty(true); }} /></label><label><span className="mb-1 block text-[11px] font-bold text-slate-500">THỰC HÀNH</span><input aria-label={`Thực hành ${row.category}`} type="number" min="0" max={row.practice} className="ft-input text-center" value={config.practice} onChange={(event) => { setTopicConfigs((current) => ({ ...current, [row.category]: { ...config, practice: event.target.value } })); setStructureDirty(true); }} /></label></div>; })}</div> : <p className="mt-2 text-sm text-slate-500">Bấm Đọc / cập nhật ngân hàng, sau đó chọn nhóm đối tượng để hiện số liệu thật.</p>}</div>{(topicConfigInvalid || topicKnowledgeConfigInvalid || knowledgeConfigInvalid || difficultyConfigInvalid || scoreConfigInvalid) && <p className="mt-3 rounded-lg bg-rose-50 p-2 text-xs font-bold text-rose-700">Mỗi chủ đề phải có Tổng = Lý thuyết + Thực hành; tổng chủ đề, Lý thuyết + Thực hành và Dễ + Trung bình + Khó đều phải bằng {questionsPerVariantCount}; điểm không âm.</p>}</div><div className="mt-4 space-y-3"><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={draft.status === "published"} onChange={(event) => setDraft({ ...draft, status: event.target.checked ? "published" : "draft" })} />Phát hành ngay sau khi tạo</label><button disabled={busy} onClick={createAssessment} className="ft-primary w-full justify-center disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}Tạo khảo sát kết thúc</button></div></>}              {importMode === "prepared" && <div className="mt-3 grid grid-cols-2 rounded-xl bg-slate-200 p-1 text-sm font-bold">
                 <button onClick={() => { setSourceMode("xlsx"); setPreview(null); setTopicConfigs({}); setStructureDirty(false); }} className={`rounded-lg px-3 py-2 ${sourceMode === "xlsx" ? "bg-white shadow-sm" : ""}`}>Tệp XLSX</button>
                 <button onClick={() => { setSourceMode("google_sheet"); setPreview(null); setTopicConfigs({}); setStructureDirty(false); }} className={`rounded-lg px-3 py-2 ${sourceMode === "google_sheet" ? "bg-white shadow-sm" : ""}`}>Google Sheet / Drive</button>
               </div>}

@@ -545,7 +545,7 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
     def validate_storage_config(self, value):
         if not isinstance(value, dict):
             raise serializers.ValidationError("Cấu hình lưu trữ không hợp lệ.")
-        participant_template = str(value.get("participant_folder_template") or "{participant_code} - {respondent_name}")
+        participant_template = str(value.get("participant_folder_template") or "{respondent_name}")
         allowed = {"{participant_code}", "{respondent_name}", "{email}", "{phone}", "{variant}"}
         tokens = {"{" + item + "}" for item in re.findall(r"\{([^{}]+)\}", participant_template)}
         if not tokens.issubset(allowed):

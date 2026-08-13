@@ -836,6 +836,22 @@ def _drive_child_folder(service, parent_id, name):
     return created["id"]
 
 
+def _participant_folder_name(service, parent_id, attempt):
+    """Keep the simple full-name folder until another participant has that name."""
+    full_name = _safe_drive_name(attempt.respondent_name, "Người làm")
+    query_name = full_name.replace(chr(39), chr(92) + chr(39))
+    existing = service.files().list(
+        q=f"'{parent_id}' in parents and name = '{query_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+        fields="files(id)",
+        pageSize=1,
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+    ).execute().get("files", [])
+    if not existing:
+        return full_name
+    return _safe_drive_name(f"{full_name} - {attempt.email or attempt.participant_code}", full_name)
+
+
 def upload_assessment_file_to_drive(uploaded, assessment, attempt, question_id=""):
     raw = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
     if not raw:
@@ -855,18 +871,7 @@ def upload_assessment_file_to_drive(uploaded, assessment, attempt, question_id="
         )
         folder_id = _drive_child_folder(service, folder_id, customer_name)
     if config.get("create_participant_folder", True):
-        template = str(config.get("participant_folder_template") or "{participant_code} - {respondent_name}")
-        values = {
-            "participant_code": attempt.participant_code,
-            "respondent_name": attempt.respondent_name,
-            "email": attempt.email,
-            "phone": attempt.phone,
-            "variant": attempt.variant,
-        }
-        try:
-            participant_name = template.format(**values)
-        except (KeyError, ValueError):
-            participant_name = f"{attempt.participant_code} - {attempt.respondent_name}"
+        participant_name = _participant_folder_name(service, folder_id, attempt)
         folder_id = _drive_child_folder(service, folder_id, participant_name)
     uploaded.seek(0)
     media = MediaIoBaseUpload(
