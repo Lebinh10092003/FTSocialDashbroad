@@ -3,7 +3,8 @@ import { FileSpreadsheet, Link2, Loader2, RefreshCw, Save } from "lucide-react";
 
 type QuestionBankSettings = { default_url: string };
 type BankQuestion = { audience_group?: string; category?: string; knowledge_type?: string; difficulty?: string };
-type BankPreview = { bank_questions?: BankQuestion[]; source_name?: string; synced_at?: string; errors?: string[] };
+type BankInventoryTopic = { name: string; total: number; theory: number; practice: number; easy: number; medium: number; hard: number };
+type BankPreview = { bank_questions?: BankQuestion[]; source_name?: string; synced_at?: string; inventory?: { sheets?: Array<{ name: string; topics?: BankInventoryTopic[] }> }; errors?: string[] };
 type BankSummaryRow = { group: string; category: string; total: number; theory: number; practice: number; easy: number; medium: number; hard: number };
 
 const errorText = async (response: Response) => {
@@ -21,10 +22,16 @@ export default function QuestionBankSettings({ idToken }: { idToken: string }) {
   const [notice, setNotice] = useState("");
   const [bankError, setBankError] = useState("");
   const [bankQuestions, setBankQuestions] = useState<BankQuestion[]>([]);
+  const [bankInventory, setBankInventory] = useState<BankPreview["inventory"]>({ sheets: [] });
   const [bankSource, setBankSource] = useState("");
   const [readAt, setReadAt] = useState("");
   const auth = { Authorization: `Bearer ${idToken}` };
   const summaryRows = useMemo(() => {
+    const cachedRows = (bankInventory?.sheets || []).flatMap((sheet) => (sheet.topics || []).map((topic) => ({
+      group: sheet.name, category: topic.name, total: topic.total, theory: topic.theory,
+      practice: topic.practice, easy: topic.easy, medium: topic.medium, hard: topic.hard,
+    })));
+    if (cachedRows.length) return cachedRows.sort((a, b) => a.group.localeCompare(b.group, "vi") || a.category.localeCompare(b.category, "vi"));
     const rows = new Map<string, BankSummaryRow>();
     bankQuestions.forEach((question) => {
       const group = String(question.audience_group || "Chưa phân nhóm").trim() || "Chưa phân nhóm";
@@ -45,6 +52,7 @@ export default function QuestionBankSettings({ idToken }: { idToken: string }) {
   }, [bankQuestions]);
   const applyBank = (preview: BankPreview, url: string) => {
     setBankQuestions(preview.bank_questions || []);
+    setBankInventory(preview.inventory || { sheets: [] });
     setBankSource(preview.source_name || url.trim());
     setReadAt(preview.synced_at ? new Date(preview.synced_at).toLocaleString("vi-VN") : new Date().toLocaleString("vi-VN"));
   };
@@ -99,7 +107,7 @@ export default function QuestionBankSettings({ idToken }: { idToken: string }) {
       {notice && <p className={`mt-4 rounded-xl p-3 text-sm ${notice.startsWith("Đã") ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{notice}</p>}
     </div>
     <section className="overflow-hidden rounded-2xl border bg-white shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b p-5"><div className="flex items-start gap-3"><span className="rounded-xl bg-blue-100 p-3 text-blue-700"><FileSpreadsheet className="h-6 w-6" /></span><div><h2 className="text-lg font-extrabold text-[#001e40]">Mô tả ngân hàng đề thi</h2><p className="mt-1 text-sm text-slate-500">{bankSource ? `${bankQuestions.length} câu · ${summaryRows.length} chủ đề` : "Đồng bộ ngân hàng để lập chỉ mục dữ liệu."}{readAt ? ` · cập nhật ${readAt}` : ""}</p></div></div><button disabled={syncing || busy} onClick={() => void syncBank()} className="ft-btn ft-btn-secondary disabled:opacity-50">{syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}Đồng bộ từ Google Sheet</button></div>
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b p-5"><div className="flex items-start gap-3"><span className="rounded-xl bg-blue-100 p-3 text-blue-700"><FileSpreadsheet className="h-6 w-6" /></span><div><h2 className="text-lg font-extrabold text-[#001e40]">Mô tả ngân hàng đề thi</h2><p className="mt-1 text-sm text-slate-500">{bankSource ? `${summaryRows.reduce((sum, row) => sum + row.total, 0)} câu · ${summaryRows.length} chủ đề` : "Đồng bộ ngân hàng để lập chỉ mục dữ liệu."}{readAt ? ` · cập nhật ${readAt}` : ""}</p></div></div><button disabled={syncing || busy} onClick={() => void syncBank()} className="ft-btn ft-btn-secondary disabled:opacity-50">{syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}Đồng bộ từ Google Sheet</button></div>
       {syncing ? <div className="grid min-h-52 place-items-center text-sm text-slate-500"><span className="inline-flex items-center gap-2"><Loader2 className="h-5 w-5 animate-spin text-blue-600" />Đang đồng bộ ngân hàng…</span></div> : bankError ? <p className="m-5 rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{bankError}</p> : summaryRows.length ? <div className="overflow-x-auto"><table className="ft-table min-w-[920px]"><thead><tr><th>Sheet / nhóm</th><th>Chủ đề</th><th>Tổng câu</th><th>Lý thuyết</th><th>Thực hành</th><th>Dễ</th><th>Trung bình</th><th>Khó</th></tr></thead><tbody>{summaryRows.map((row) => <tr key={`${row.group}-${row.category}`}><td><b>{row.group}</b></td><td>{row.category}</td><td className="font-bold">{row.total}</td><td>{row.theory}</td><td>{row.practice}</td><td>{row.easy}</td><td>{row.medium}</td><td>{row.hard}</td></tr>)}</tbody></table></div> : <div className="p-8 text-center text-sm text-slate-500">Chưa có chỉ mục ngân hàng để mô tả.</div>}
     </section>
   </section>;

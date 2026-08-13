@@ -133,7 +133,7 @@ const questionTypeLabels: Record<string, string> = {
 };
 const DEFAULT_QUESTION_BANK_URL = "https://docs.google.com/spreadsheets/d/1zdlpFOO7p93DuQbXpRhvG4xi89u6L7O-2O1UqBaAV3c/edit?usp=sharing";
 type QuestionBankSettings = { default_url: string };
-type CachedQuestionBank = Preview & { synced_at?: string; inventory?: { sheets?: Array<{ name: string }> } };
+type CachedQuestionBank = Preview & { synced_at?: string; inventory?: { sheets?: Array<{ name: string; topics?: Array<{ name: string; total: number; theory: number; practice: number; easy: number; medium: number; hard: number }> }> } };
 export default function TrainingAssessmentsAdmin({
   idToken,
   sessions,
@@ -279,6 +279,16 @@ export default function TrainingAssessmentsAdmin({
   const bankQuestions = preview?.bank_questions || [];
   const selectedBankQuestions = bankQuestions.filter((item) => !draft.audience_group || String(item.audience_group || "").trim().toLocaleLowerCase() === draft.audience_group.trim().toLocaleLowerCase());
   const parsedTopicRows = useMemo(() => {
+    const cachedSheet = (preview as CachedQuestionBank | null)?.inventory?.sheets?.find((sheet) => String(sheet.name || "").trim().toLocaleLowerCase() === draft.audience_group.trim().toLocaleLowerCase());
+    if (cachedSheet?.topics?.length) return cachedSheet.topics.map((topic) => ({
+      category: topic.name,
+      available: Number(topic.total || 0),
+      theory: Number(topic.theory || 0),
+      practice: Number(topic.practice || 0),
+      easy: Number(topic.easy || 0),
+      medium: Number(topic.medium || 0),
+      hard: Number(topic.hard || 0),
+    })).sort((a, b) => a.category.localeCompare(b.category, "vi"));
     const rows = new Map<string, { category: string; available: number; theory: number; practice: number; easy: number; medium: number; hard: number }>();
     selectedBankQuestions.forEach((item) => {
       const category = String(item.category || "").trim() || "Không chủ đề";
@@ -430,7 +440,6 @@ export default function TrainingAssessmentsAdmin({
           headers: { ...auth, "Content-Type": "application/json" },
           body: JSON.stringify({
             google_sheet_url: bankUrl,
-            use_cached: bankSource === "default",
             import_mode: "auto_generate",
             variant_count: normalizedVariantCount,
             questions_per_variant: questionsPerVariantCount,
@@ -504,7 +513,6 @@ export default function TrainingAssessmentsAdmin({
           headers: { ...auth, "Content-Type": "application/json" },
           body: JSON.stringify({
             google_sheet_url: bankUrl,
-            use_cached: bankSource === "default",
             import_mode: "auto_generate",
             variant_count: normalizedVariantCount,
             questions_per_variant: questionsPerVariantCount,

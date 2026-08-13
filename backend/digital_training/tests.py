@@ -883,7 +883,7 @@ class TrainingAssessmentImportPreviewTests(TestCase):
         self.assertEqual(len(response.data["variants"]), 3)
         self.assertEqual(response.data["generation_config"]["variant_count"], 3)
 
-    def test_cached_question_bank_generates_without_downloading_google_sheet(self):
+    def test_question_bank_snapshot_stores_inventory_without_question_content(self):
         source_url = "https://docs.google.com/spreadsheets/d/cached-bank/edit"
         question = {
             "id": "cached-1", "question_code": "C1", "type": "short_answer",
@@ -891,31 +891,20 @@ class TrainingAssessmentImportPreviewTests(TestCase):
             "points": 1, "required": True, "audience_group": "THCS",
             "category": "Gemini", "knowledge_type": "Theory", "difficulty": "Easy",
         }
-        TrainingQuestionBankSnapshot.objects.create(
-            source_key="cached-bank", source_url=source_url, source_name=source_url,
-            questions=[question], question_count=1,
-            inventory={"sheets": [{"name": "THCS", "total": 1, "topics": []}]},
-        )
-        with patch("digital_training.assessment_views.fetch_google_sheet") as fetch:
+        parsed = {"questions": [question], "errors": [], "warnings": []}
+        with patch("digital_training.assessment_views.fetch_google_sheet", return_value=b"workbook"), patch(
+            "digital_training.assessment_views.parse_assessment_workbook", return_value=parsed
+        ):
             response = self.client.post(
-                "/api/digital-training/assessments/import-preview",
-                {
-                    "google_sheet_url": source_url,
-                    "use_cached": True,
-                    "import_mode": "auto_generate",
-                    "variant_count": 1,
-                    "questions_per_variant": 1,
-                    "audience_group": "THCS",
-                    "topic_config": [{"category": "Gemini", "total": 1, "theory": 1, "practice": 0}],
-                    "knowledge_config": {"theory": 1, "practice": 0},
-                    "score_config": {"theory": 1, "practice": 3},
-                    "difficulty_config": {"easy": 1, "medium": 0, "hard": 0},
-                },
+                "/api/digital-training/question-bank-snapshot",
+                {"google_sheet_url": source_url},
                 format="json",
             )
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data["source_type"], "question_bank_cache")
-        fetch.assert_not_called()
+        self.assertNotIn("bank_questions", response.data)
+        self.assertEqual(response.data["inventory"]["sheets"][0]["topics"][0]["name"], "Gemini")
+        snapshot = TrainingQuestionBankSnapshot.objects.get(source_key="cached-bank")
+        self.assertFalse(hasattr(snapshot, "questions"))
 
 class TrainingFinancePermissionTests(TestCase):
     def client_for(self, email, role="EMPLOYEE", title_name="", department_name=""):

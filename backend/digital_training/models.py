@@ -287,7 +287,6 @@ class TrainingQuestionBankSnapshot(models.Model):
     source_key = models.CharField(max_length=255, unique=True)
     source_url = models.URLField()
     source_name = models.CharField(max_length=500, blank=True)
-    questions = models.JSONField(default=list, blank=True)
     inventory = models.JSONField(default=dict, blank=True)
     question_count = models.PositiveIntegerField(default=0)
     synced_at = models.DateTimeField(auto_now=True)

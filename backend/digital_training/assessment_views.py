@@ -112,7 +112,6 @@ def _snapshot_response(snapshot):
         "source_type": "question_bank_cache",
         "synced_at": snapshot.synced_at,
         "question_count": snapshot.question_count,
-        "bank_questions": snapshot.questions if isinstance(snapshot.questions, list) else [],
         "available_groups": [str(item.get("name") or "").strip() for item in sheets if str(item.get("name") or "").strip()],
         "inventory": inventory,
         "errors": [],
@@ -166,7 +165,6 @@ def question_bank_snapshot(request):
             defaults={
                 "source_url": source_url,
                 "source_name": source_url,
-                "questions": questions,
                 "inventory": _question_bank_inventory(questions),
                 "question_count": len(questions),
             },
@@ -306,26 +304,10 @@ def assessment_import_preview(request):
     google_url = str(request.data.get("google_sheet_url") or "").strip()
     import_mode = str(request.data.get("import_mode") or "prepared").strip()
     try:
-        use_cached = str(request.data.get("use_cached") or "").strip().lower() in {"1", "true", "yes"}
         if import_mode == "auto_generate" and not uploaded and not google_url:
             _, settings = _question_bank_settings()
             google_url = settings["default_url"]
-        if use_cached:
-            source_key = _question_bank_key(google_url)
-            snapshot = TrainingQuestionBankSnapshot.objects.filter(source_key=source_key).first()
-            if not snapshot:
-                return _assessment_error("Ngân hàng chưa được đồng bộ. Hãy bấm Đồng bộ ngân hàng từ Google Sheet trước khi tạo đề.", status.HTTP_409_CONFLICT)
-            result = {
-                "source_name": snapshot.source_name or snapshot.source_url,
-                "questions": snapshot.questions if isinstance(snapshot.questions, list) else [],
-                "question_count": snapshot.question_count,
-                "errors": [],
-                "warnings": [],
-            }
-            source_questions = result["questions"]
-            source_type = "question_bank_cache"
-            google_url = snapshot.source_url
-        elif uploaded:
+        if uploaded:
             if not uploaded.name.lower().endswith((".xlsx", ".xlsm")):
                 return _assessment_error("Vui lòng tải file .xlsx hoặc .xlsm.")
             if uploaded.size > 10 * 1024 * 1024:
@@ -339,9 +321,8 @@ def assessment_import_preview(request):
             source_type = "google_sheet"
         else:
             return _assessment_error("Vui lòng chọn file XLSX hoặc nhập đường dẫn Google Sheet.")
-        if not use_cached:
-            result = parse_assessment_workbook(content, source_name)
-            source_questions = result["questions"]
+        result = parse_assessment_workbook(content, source_name)
+        source_questions = result["questions"]
         available_groups = sorted({str(item.get("audience_group") or "").strip() for item in source_questions if str(item.get("audience_group") or "").strip()}, key=str.casefold)
         audience_group = str(request.data.get("audience_group") or "").strip()
         if audience_group:
