@@ -230,20 +230,28 @@ export default function TrainingAssessmentsAdmin({
 
   const selectedTargetPartner = useMemo(() => {
     const [targetType, targetId] = draft.target.split(":");
-    const partnerId = targetType === "class"
-      ? classes.find((item) => String(item.id) === targetId)?.partner
-      : sessions.find((item) => String(item.id) === targetId)?.partner_id;
-    return partners.find((item) => String(item.id) === String(partnerId)) || null;
+    const targetItem = targetType === "class"
+      ? classes.find((item) => String(item.id) === targetId)
+      : sessions.find((item) => String(item.id) === targetId);
+    const partnerId = targetType === "class" ? targetItem?.partner : targetItem?.partner_id;
+    const partnerName = targetType === "class" ? targetItem?.partner_name : (targetItem?.partner_name || targetItem?.partner);
+    return partners.find((item) => String(item.id) === String(partnerId))
+      || partners.find((item) => String(item.name || "").trim().toLocaleLowerCase() === String(partnerName || "").trim().toLocaleLowerCase())
+      || null;
   }, [classes, draft.target, partners, sessions]);
   const audienceGroupOptions = useMemo(() => Array.from(new Set(
     partners.map((partner) => String(partner.partner_subtype || "").trim()).filter(Boolean),
   )).sort((left, right) => left.localeCompare(right, "vi")), [partners]);
   const audienceGroupForTarget = (target: string) => {
     const [targetType, targetId] = target.split(":");
-    const partnerId = targetType === "class"
-      ? classes.find((item) => String(item.id) === targetId)?.partner
-      : sessions.find((item) => String(item.id) === targetId)?.partner_id;
-    return String(partners.find((item) => String(item.id) === String(partnerId))?.partner_subtype || "").trim();
+    const targetItem = targetType === "class"
+      ? classes.find((item) => String(item.id) === targetId)
+      : sessions.find((item) => String(item.id) === targetId);
+    const partnerId = targetType === "class" ? targetItem?.partner : targetItem?.partner_id;
+    const partnerName = targetType === "class" ? targetItem?.partner_name : (targetItem?.partner_name || targetItem?.partner);
+    const partner = partners.find((item) => String(item.id) === String(partnerId))
+      || partners.find((item) => String(item.name || "").trim().toLocaleLowerCase() === String(partnerName || "").trim().toLocaleLowerCase());
+    return String(partner?.partner_subtype || "").trim();
   };
 
   const normalizedVariantCount = Math.max(1, Math.min(200, Number.parseInt(variantCount, 10) || 1));

@@ -717,7 +717,7 @@ def google_sheet_export_url(url):
 
 
 def fetch_google_sheet(url):
-    response = requests.get(google_sheet_export_url(url), timeout=25, allow_redirects=True)
+    response = requests.get(google_sheet_export_url(url), timeout=(10, 90), allow_redirects=True)
     if response.status_code != 200:
         raise ValueError("Không thể đọc nguồn câu hỏi. Hãy bật quyền xem qua liên kết.")
     content_type = response.headers.get("Content-Type", "")
