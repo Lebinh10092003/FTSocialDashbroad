@@ -90,6 +90,15 @@ type Preview = {
     seed: number;
   };
 };
+type BankIndex = {
+  source_name?: string;
+  source_type?: string;
+  source_url?: string;
+  synced_at?: string;
+  question_count?: number;
+  available_groups?: string[];
+  inventory?: { sheets?: Array<{ name: string; topics?: Array<{ name: string; total: number; theory: number; practice: number; easy: number; medium: number; hard: number }> }> };
+};
 
 const emptyDraft = () => ({
   title: "",
@@ -162,6 +171,7 @@ export default function TrainingAssessmentsAdmin({
   const [bankSource, setBankSource] = useState<"default" | "other">("default");
   const [bankSettings, setBankSettings] = useState<QuestionBankSettings>({ default_url: DEFAULT_QUESTION_BANK_URL });
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [bankIndex, setBankIndex] = useState<BankIndex | null>(null);
   const [qrUrl, setQrUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -191,7 +201,7 @@ export default function TrainingAssessmentsAdmin({
     const response = await fetch(`/api/digital-training/question-bank-snapshot?google_sheet_url=${encodeURIComponent(url)}`, { headers: auth });
     if (!response.ok) throw new Error(await errorText(response));
     const cached = await response.json() as CachedQuestionBank;
-    setPreview(cached);
+    setBankIndex(cached);
     return cached;
   };
 
@@ -256,8 +266,8 @@ export default function TrainingAssessmentsAdmin({
   }, [classes, draft.target, partners, sessions]);
   const audienceGroupOptions = useMemo(() => Array.from(new Set([
     ...partners.map((partner) => String(partner.partner_subtype || "").trim()),
-    ...(preview?.available_groups || []).map((group) => String(group || "").trim()),
-  ].filter(Boolean))).sort((left, right) => left.localeCompare(right, "vi")), [partners, preview?.available_groups]);
+    ...(bankIndex?.available_groups || []).map((group) => String(group || "").trim()),
+  ].filter(Boolean))).sort((left, right) => left.localeCompare(right, "vi")), [partners, bankIndex?.available_groups]);
   const audienceGroupForTarget = (target: string) => {
     const [targetType, targetId] = target.split(":");
     const targetItem = targetType === "class"
@@ -272,14 +282,14 @@ export default function TrainingAssessmentsAdmin({
     const targetText = [targetItem?.partner_name, targetItem?.partner, targetItem?.title, targetItem?.name]
       .map((value) => String(value || "").trim().toLocaleLowerCase())
       .join(" ");
-    return (preview?.available_groups || []).find((group) => targetText.includes(String(group).trim().toLocaleLowerCase())) || "";
+    return (bankIndex?.available_groups || []).find((group) => targetText.includes(String(group).trim().toLocaleLowerCase())) || "";
   };
 
   const normalizedVariantCount = Math.max(1, Math.min(200, Number.parseInt(variantCount, 10) || 1));
   const bankQuestions = preview?.bank_questions || [];
   const selectedBankQuestions = bankQuestions.filter((item) => !draft.audience_group || String(item.audience_group || "").trim().toLocaleLowerCase() === draft.audience_group.trim().toLocaleLowerCase());
   const parsedTopicRows = useMemo(() => {
-    const cachedSheet = (preview as CachedQuestionBank | null)?.inventory?.sheets?.find((sheet) => String(sheet.name || "").trim().toLocaleLowerCase() === draft.audience_group.trim().toLocaleLowerCase());
+    const cachedSheet = bankIndex?.inventory?.sheets?.find((sheet) => String(sheet.name || "").trim().toLocaleLowerCase() === draft.audience_group.trim().toLocaleLowerCase());
     if (cachedSheet?.topics?.length) return cachedSheet.topics.map((topic) => ({
       category: topic.name,
       available: Number(topic.total || 0),
@@ -304,7 +314,7 @@ export default function TrainingAssessmentsAdmin({
       rows.set(category, row);
     });
     return Array.from(rows.values()).sort((a, b) => a.category.localeCompare(b.category, "vi"));
-  }, [selectedBankQuestions]);
+  }, [bankIndex, selectedBankQuestions]);
   const topicRows = parsedTopicRows;
   const questionsPerVariantCount = Math.max(1, Math.min(200, Number.parseInt(questionsPerVariant, 10) || 1));
   const distributePracticeAcrossTopics = (practiceValue: string, current: Record<string, { total: string; theory: string; practice: string }>) => {
@@ -386,7 +396,7 @@ export default function TrainingAssessmentsAdmin({
         body: JSON.stringify({ google_sheet_url: url }),
       });
       if (!response.ok) throw new Error(await errorText(response));
-      setPreview(await response.json());
+      setBankIndex(await response.json());
       setDraft((current) => ({ ...current, audience_group: "" }));
       setTopicConfigs({});
       setStructureDirty(true);
@@ -405,7 +415,7 @@ export default function TrainingAssessmentsAdmin({
     setImportMode("auto_generate");
     setQuestionsPerVariant("20");
     setVariantCount("1");
-    void loadCachedQuestionBank(bankSettings.default_url).catch(() => setPreview(null));
+    void loadCachedQuestionBank(bankSettings.default_url).catch(() => setBankIndex(null));
     setTopicConfigs({});
     setKnowledgeCounts({ theory: "10", practice: "10" });
     setScoreConfig({ theory: "1", practice: "3" });
@@ -899,7 +909,7 @@ export default function TrainingAssessmentsAdmin({
           {notice && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{notice}</p>}
           {importMode === "prepared" && (<div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
             <label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={draft.status === "published"} onChange={(event) => setDraft({ ...draft, status: event.target.checked ? "published" : "draft" })} />Phát hành ngay sau khi tạo</label>
-            <button disabled={busy || !preview || preview.errors.length > 0 || structureDirty} onClick={createAssessment} className="ft-primary disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}Tạo khảo sát kết thúc</button>
+            <button disabled={busy || (importMode === "prepared" && (!preview || preview.errors.length > 0 || structureDirty))} onClick={createAssessment} className="ft-primary disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}Tạo khảo sát kết thúc</button>
           </div>)}
         </div>
       </section>
