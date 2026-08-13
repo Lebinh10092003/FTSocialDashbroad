@@ -133,6 +133,7 @@ const questionTypeLabels: Record<string, string> = {
 };
 const DEFAULT_QUESTION_BANK_URL = "https://docs.google.com/spreadsheets/d/1zdlpFOO7p93DuQbXpRhvG4xi89u6L7O-2O1UqBaAV3c/edit?usp=sharing";
 type QuestionBankSettings = { default_url: string };
+type CachedQuestionBank = Preview & { synced_at?: string; inventory?: { sheets?: Array<{ name: string }> } };
 export default function TrainingAssessmentsAdmin({
   idToken,
   sessions,
@@ -183,6 +184,15 @@ export default function TrainingAssessmentsAdmin({
     if (!response.ok) throw new Error(await errorText(response));
     const settings = await response.json() as QuestionBankSettings;
     setBankSettings(settings);
+    return settings;
+  };
+
+  const loadCachedQuestionBank = async (url = bankUrl) => {
+    const response = await fetch(`/api/digital-training/question-bank-snapshot?google_sheet_url=${encodeURIComponent(url)}`, { headers: auth });
+    if (!response.ok) throw new Error(await errorText(response));
+    const cached = await response.json() as CachedQuestionBank;
+    setPreview(cached);
+    return cached;
   };
 
   const load = async () => {
@@ -200,7 +210,12 @@ export default function TrainingAssessmentsAdmin({
   };
 
   useEffect(() => {
-    if (idToken) { void load(); void loadBankSettings().catch((error) => setNotice(String(error?.message || error))); }
+    if (idToken) {
+      void load();
+      void loadBankSettings()
+        .then((settings) => loadCachedQuestionBank(settings.default_url))
+        .catch(() => undefined);
+    }
   }, [idToken]);
 
   const publicLink = selected
@@ -239,9 +254,10 @@ export default function TrainingAssessmentsAdmin({
       || partners.find((item) => String(item.name || "").trim().toLocaleLowerCase() === String(partnerName || "").trim().toLocaleLowerCase())
       || null;
   }, [classes, draft.target, partners, sessions]);
-  const audienceGroupOptions = useMemo(() => Array.from(new Set(
-    partners.map((partner) => String(partner.partner_subtype || "").trim()).filter(Boolean),
-  )).sort((left, right) => left.localeCompare(right, "vi")), [partners]);
+  const audienceGroupOptions = useMemo(() => Array.from(new Set([
+    ...partners.map((partner) => String(partner.partner_subtype || "").trim()),
+    ...(preview?.available_groups || []).map((group) => String(group || "").trim()),
+  ].filter(Boolean))).sort((left, right) => left.localeCompare(right, "vi")), [partners, preview?.available_groups]);
   const audienceGroupForTarget = (target: string) => {
     const [targetType, targetId] = target.split(":");
     const targetItem = targetType === "class"
@@ -251,7 +267,12 @@ export default function TrainingAssessmentsAdmin({
     const partnerName = targetType === "class" ? targetItem?.partner_name : (targetItem?.partner_name || targetItem?.partner);
     const partner = partners.find((item) => String(item.id) === String(partnerId))
       || partners.find((item) => String(item.name || "").trim().toLocaleLowerCase() === String(partnerName || "").trim().toLocaleLowerCase());
-    return String(partner?.partner_subtype || "").trim();
+    const subtype = String(partner?.partner_subtype || "").trim();
+    if (subtype) return subtype;
+    const targetText = [targetItem?.partner_name, targetItem?.partner, targetItem?.title, targetItem?.name]
+      .map((value) => String(value || "").trim().toLocaleLowerCase())
+      .join(" ");
+    return (preview?.available_groups || []).find((group) => targetText.includes(String(group).trim().toLocaleLowerCase())) || "";
   };
 
   const normalizedVariantCount = Math.max(1, Math.min(200, Number.parseInt(variantCount, 10) || 1));
@@ -349,10 +370,10 @@ export default function TrainingAssessmentsAdmin({
     setBusy(true);
     setNotice("");
     try {
-      const response = await fetch("/api/digital-training/assessments/import-preview", {
+      const response = await fetch("/api/digital-training/question-bank-snapshot", {
         method: "POST",
         headers: { ...auth, "Content-Type": "application/json" },
-        body: JSON.stringify({ google_sheet_url: url, import_mode: "prepared" }),
+        body: JSON.stringify({ google_sheet_url: url }),
       });
       if (!response.ok) throw new Error(await errorText(response));
       setPreview(await response.json());
@@ -374,7 +395,7 @@ export default function TrainingAssessmentsAdmin({
     setImportMode("auto_generate");
     setQuestionsPerVariant("20");
     setVariantCount("1");
-    setPreview(null);
+    void loadCachedQuestionBank(bankSettings.default_url).catch(() => setPreview(null));
     setTopicConfigs({});
     setKnowledgeCounts({ theory: "10", practice: "10" });
     setScoreConfig({ theory: "1", practice: "3" });
@@ -409,6 +430,7 @@ export default function TrainingAssessmentsAdmin({
           headers: { ...auth, "Content-Type": "application/json" },
           body: JSON.stringify({
             google_sheet_url: bankUrl,
+            use_cached: bankSource === "default",
             import_mode: "auto_generate",
             variant_count: normalizedVariantCount,
             questions_per_variant: questionsPerVariantCount,
@@ -482,6 +504,7 @@ export default function TrainingAssessmentsAdmin({
           headers: { ...auth, "Content-Type": "application/json" },
           body: JSON.stringify({
             google_sheet_url: bankUrl,
+            use_cached: bankSource === "default",
             import_mode: "auto_generate",
             variant_count: normalizedVariantCount,
             questions_per_variant: questionsPerVariantCount,

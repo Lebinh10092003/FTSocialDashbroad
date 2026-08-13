@@ -2,6 +2,7 @@ import json
 import math
 import re
 import secrets
+import unicodedata
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
@@ -32,6 +33,7 @@ from .models import (
     TrainingAssessment,
     TrainingAssessmentAttempt,
     TrainingAssessmentUpload,
+    TrainingQuestionBankSnapshot,
 )
 from .serializers import (
     TrainingAssessmentAttemptSerializer,
@@ -54,6 +56,71 @@ def _question_bank_settings():
     return config, {"default_url": str(data.get("default_url") or DEFAULT_QUESTION_BANK_URL).strip()}
 
 
+def _question_bank_key(url):
+    source = str(url or "").strip()
+    match = re.search(r"/(?:spreadsheets|file)/d/([a-zA-Z0-9_-]+)|[?&]id=([a-zA-Z0-9_-]+)", source)
+    if match:
+        return match.group(1) or match.group(2)
+    return re.sub(r"[^a-z0-9]+", "-", source.casefold()).strip("-")[:255]
+
+
+def _bank_normalized(value):
+    text = unicodedata.normalize("NFD", str(value or "").strip().casefold().replace("đ", "d"))
+    return "".join(char for char in text if unicodedata.category(char) != "Mn")
+
+
+def _question_bank_inventory(questions):
+    sheets = {}
+    for question in questions:
+        sheet_name = str(question.get("audience_group") or "Chưa phân nhóm").strip() or "Chưa phân nhóm"
+        topic_name = str(question.get("category") or "Chưa phân chủ đề").strip() or "Chưa phân chủ đề"
+        sheet = sheets.setdefault(sheet_name, {
+            "name": sheet_name, "total": 0, "theory": 0, "practice": 0,
+            "easy": 0, "medium": 0, "hard": 0, "topics": {},
+        })
+        topic = sheet["topics"].setdefault(topic_name, {
+            "name": topic_name, "total": 0, "theory": 0, "practice": 0,
+            "easy": 0, "medium": 0, "hard": 0,
+        })
+        normalized_knowledge = _bank_normalized(question.get("knowledge_type"))
+        normalized_difficulty = _bank_normalized(question.get("difficulty"))
+        for row in (sheet, topic):
+            row["total"] += 1
+            if normalized_knowledge in {"ly thuyet", "theory"}:
+                row["theory"] += 1
+            elif normalized_knowledge in {"thuc hanh", "practice"}:
+                row["practice"] += 1
+            if normalized_difficulty in {"de", "easy"}:
+                row["easy"] += 1
+            elif normalized_difficulty in {"trung binh", "medium"}:
+                row["medium"] += 1
+            elif normalized_difficulty in {"kho", "hard"}:
+                row["hard"] += 1
+    rows = []
+    for sheet in sheets.values():
+        sheet["topics"] = sorted(sheet["topics"].values(), key=lambda item: _bank_normalized(item["name"]))
+        rows.append(sheet)
+    return {"sheets": sorted(rows, key=lambda item: _bank_normalized(item["name"]))}
+
+
+def _snapshot_response(snapshot):
+    inventory = snapshot.inventory if isinstance(snapshot.inventory, dict) else {}
+    sheets = inventory.get("sheets") if isinstance(inventory.get("sheets"), list) else []
+    return {
+        "source_url": snapshot.source_url,
+        "source_name": snapshot.source_name or snapshot.source_url,
+        "source_type": "question_bank_cache",
+        "synced_at": snapshot.synced_at,
+        "question_count": snapshot.question_count,
+        "bank_questions": snapshot.questions if isinstance(snapshot.questions, list) else [],
+        "available_groups": [str(item.get("name") or "").strip() for item in sheets if str(item.get("name") or "").strip()],
+        "inventory": inventory,
+        "errors": [],
+        "warnings": [],
+        "import_mode": "prepared",
+    }
+
+
 @api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
 def question_bank_settings(request):
@@ -71,6 +138,48 @@ def question_bank_settings(request):
     config.data = {**(config.data if isinstance(config.data, dict) else {}), "default_url": default_url}
     config.save(update_fields=["data"])
     return Response({"default_url": default_url})
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def question_bank_snapshot(request):
+    """Return the cached bank, or explicitly refresh it from Google Sheets."""
+    if not _can_manage(request):
+        return _forbidden()
+    _, settings = _question_bank_settings()
+    source_url = str(request.data.get("google_sheet_url") or request.query_params.get("google_sheet_url") or settings["default_url"]).strip()
+    source_key = _question_bank_key(source_url)
+    snapshot = TrainingQuestionBankSnapshot.objects.filter(source_key=source_key).first()
+    if request.method == "GET":
+        if not snapshot:
+            return _assessment_error("Ngân hàng chưa được đồng bộ. Hãy bấm Đồng bộ ngân hàng từ Google Sheet.", status.HTTP_404_NOT_FOUND)
+        return Response(_snapshot_response(snapshot))
+    if not source_url:
+        return _assessment_error("Vui lòng nhập liên kết ngân hàng đề thi.")
+    try:
+        parsed = parse_assessment_workbook(fetch_google_sheet(source_url), source_url)
+        if parsed.get("errors"):
+            return _assessment_error(parsed["errors"][0])
+        questions = parsed.get("questions") or []
+        snapshot, _ = TrainingQuestionBankSnapshot.objects.update_or_create(
+            source_key=source_key,
+            defaults={
+                "source_url": source_url,
+                "source_name": source_url,
+                "questions": questions,
+                "inventory": _question_bank_inventory(questions),
+                "question_count": len(questions),
+            },
+        )
+        response = _snapshot_response(snapshot)
+        response["warnings"] = parsed.get("warnings") or []
+        return Response(response)
+    except ValueError as error:
+        return _assessment_error(str(error))
+    except Exception as error:
+        detail = str(error).strip()
+        message = "Không thể đồng bộ ngân hàng. Hãy kiểm tra cấu trúc file và quyền chia sẻ."
+        return _assessment_error(f"{message} Chi tiết: {detail}" if detail else message)
 
 
 def _identity_text(value):
@@ -197,10 +306,26 @@ def assessment_import_preview(request):
     google_url = str(request.data.get("google_sheet_url") or "").strip()
     import_mode = str(request.data.get("import_mode") or "prepared").strip()
     try:
+        use_cached = str(request.data.get("use_cached") or "").strip().lower() in {"1", "true", "yes"}
         if import_mode == "auto_generate" and not uploaded and not google_url:
             _, settings = _question_bank_settings()
             google_url = settings["default_url"]
-        if uploaded:
+        if use_cached:
+            source_key = _question_bank_key(google_url)
+            snapshot = TrainingQuestionBankSnapshot.objects.filter(source_key=source_key).first()
+            if not snapshot:
+                return _assessment_error("Ngân hàng chưa được đồng bộ. Hãy bấm Đồng bộ ngân hàng từ Google Sheet trước khi tạo đề.", status.HTTP_409_CONFLICT)
+            result = {
+                "source_name": snapshot.source_name or snapshot.source_url,
+                "questions": snapshot.questions if isinstance(snapshot.questions, list) else [],
+                "question_count": snapshot.question_count,
+                "errors": [],
+                "warnings": [],
+            }
+            source_questions = result["questions"]
+            source_type = "question_bank_cache"
+            google_url = snapshot.source_url
+        elif uploaded:
             if not uploaded.name.lower().endswith((".xlsx", ".xlsm")):
                 return _assessment_error("Vui lòng tải file .xlsx hoặc .xlsm.")
             if uploaded.size > 10 * 1024 * 1024:
@@ -214,8 +339,9 @@ def assessment_import_preview(request):
             source_type = "google_sheet"
         else:
             return _assessment_error("Vui lòng chọn file XLSX hoặc nhập đường dẫn Google Sheet.")
-        result = parse_assessment_workbook(content, source_name)
-        source_questions = result["questions"]
+        if not use_cached:
+            result = parse_assessment_workbook(content, source_name)
+            source_questions = result["questions"]
         available_groups = sorted({str(item.get("audience_group") or "").strip() for item in source_questions if str(item.get("audience_group") or "").strip()}, key=str.casefold)
         audience_group = str(request.data.get("audience_group") or "").strip()
         if audience_group:

@@ -276,6 +276,26 @@ class TrainingSurvey(models.Model):
         ordering = ["-updated_at", "title"]
 
 
+class TrainingQuestionBankSnapshot(models.Model):
+    """A server-side index of a shared question bank.
+
+    Question generation must not depend on downloading a Google workbook on every
+    request.  The snapshot keeps the parsed questions as well as a compact
+    inventory that is displayed to managers before they configure an assessment.
+    """
+
+    source_key = models.CharField(max_length=255, unique=True)
+    source_url = models.URLField()
+    source_name = models.CharField(max_length=500, blank=True)
+    questions = models.JSONField(default=list, blank=True)
+    inventory = models.JSONField(default=dict, blank=True)
+    question_count = models.PositiveIntegerField(default=0)
+    synced_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-synced_at"]
+
+
 class TrainingAssessment(models.Model):
     STATUS_CHOICES = [("draft", "Draft"), ("published", "Published"), ("closed", "Closed")]
     GENERATION_MODE_CHOICES = [("prepared", "Prepared variants"), ("auto_generate", "Auto-generate from import")]

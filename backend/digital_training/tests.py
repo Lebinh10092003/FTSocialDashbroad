@@ -16,7 +16,7 @@ from rest_framework.authtoken.models import Token
 from authentication.models import Department, JobTitle, UserProfile
 from .assessment_service import generate_variants_from_import, parse_assessment_workbook
 from .completion_service import complete_past_training_schedules
-from .models import TrainingAssessment, TrainingClass, TrainingCustomerMeeting, TrainingFinanceEntry, TrainingLead, TrainingPartner, TrainingProduct, TrainingProductSubscription, TrainingSession, TrainingSurvey
+from .models import TrainingAssessment, TrainingClass, TrainingCustomerMeeting, TrainingFinanceEntry, TrainingLead, TrainingPartner, TrainingProduct, TrainingProductSubscription, TrainingQuestionBankSnapshot, TrainingSession, TrainingSurvey
 from .serializers import TrainingAssessmentSerializer, TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingPartnerSerializer, TrainingProductSerializer, TrainingProductSubscriptionSerializer, TrainingSessionSerializer, TrainingSurveySerializer
 
 
@@ -882,6 +882,40 @@ class TrainingAssessmentImportPreviewTests(TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(len(response.data["variants"]), 3)
         self.assertEqual(response.data["generation_config"]["variant_count"], 3)
+
+    def test_cached_question_bank_generates_without_downloading_google_sheet(self):
+        source_url = "https://docs.google.com/spreadsheets/d/cached-bank/edit"
+        question = {
+            "id": "cached-1", "question_code": "C1", "type": "short_answer",
+            "text": "Cached question", "options": [], "correct_answers": ["ok"],
+            "points": 1, "required": True, "audience_group": "THCS",
+            "category": "Gemini", "knowledge_type": "Theory", "difficulty": "Easy",
+        }
+        TrainingQuestionBankSnapshot.objects.create(
+            source_key="cached-bank", source_url=source_url, source_name=source_url,
+            questions=[question], question_count=1,
+            inventory={"sheets": [{"name": "THCS", "total": 1, "topics": []}]},
+        )
+        with patch("digital_training.assessment_views.fetch_google_sheet") as fetch:
+            response = self.client.post(
+                "/api/digital-training/assessments/import-preview",
+                {
+                    "google_sheet_url": source_url,
+                    "use_cached": True,
+                    "import_mode": "auto_generate",
+                    "variant_count": 1,
+                    "questions_per_variant": 1,
+                    "audience_group": "THCS",
+                    "topic_config": [{"category": "Gemini", "total": 1, "theory": 1, "practice": 0}],
+                    "knowledge_config": {"theory": 1, "practice": 0},
+                    "score_config": {"theory": 1, "practice": 3},
+                    "difficulty_config": {"easy": 1, "medium": 0, "hard": 0},
+                },
+                format="json",
+            )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["source_type"], "question_bank_cache")
+        fetch.assert_not_called()
 
 class TrainingFinancePermissionTests(TestCase):
     def client_for(self, email, role="EMPLOYEE", title_name="", department_name=""):

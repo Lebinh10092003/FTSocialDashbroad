@@ -28,6 +28,7 @@ urlpatterns = [
     path("digital-training/surveys/<int:pk>", views.training_survey_detail, name="training_survey_detail"),
     path("digital-training/assessments", assessment_views.assessments, name="training_assessments"),
     path("digital-training/question-bank-settings", assessment_views.question_bank_settings, name="training_question_bank_settings"),
+    path("digital-training/question-bank-snapshot", assessment_views.question_bank_snapshot, name="training_question_bank_snapshot"),
     path("digital-training/assessments/import-preview", assessment_views.assessment_import_preview, name="training_assessment_import_preview"),
     path("digital-training/assessments/<int:pk>", assessment_views.assessment_detail, name="training_assessment_detail"),
     path("digital-training/assessments/<int:pk>/results", assessment_views.assessment_results, name="training_assessment_results"),
