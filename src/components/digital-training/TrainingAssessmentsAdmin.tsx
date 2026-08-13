@@ -177,7 +177,7 @@ export default function TrainingAssessmentsAdmin({
   const [notice, setNotice] = useState("");
   const [bankFilters, setBankFilters] = useState({ category: "", knowledge_type: "", type: "", difficulty: "" });
   const [topicConfigs, setTopicConfigs] = useState<Record<string, { total: string; theory: string; practice: string }>>({});
-  const appliedPracticeDistribution = useRef("");
+  const appliedPracticeCount = useRef("");
   const [knowledgeCounts, setKnowledgeCounts] = useState({ theory: "10", practice: "10" });
   const [scoreConfig, setScoreConfig] = useState({ theory: "1", practice: "3" });
   const [difficultyCounts, setDifficultyCounts] = useState({ easy: "0", medium: "0", hard: "0" });
@@ -342,12 +342,13 @@ export default function TrainingAssessmentsAdmin({
     }
     return next;
   };
-  const practiceDistributionSignature = `${knowledgeCounts.practice}|${topicRows.map((row) => `${row.category}:${topicConfigs[row.category]?.total || 0}:${row.practice}`).join("|")}`;
   useEffect(() => {
-    if (practiceDistributionSignature === appliedPracticeDistribution.current) return;
-    appliedPracticeDistribution.current = practiceDistributionSignature;
+    // Changing the total practical count can use a helpful default. Manual
+    // per-topic values are explicit decisions and must remain untouched.
+    if (knowledgeCounts.practice === appliedPracticeCount.current) return;
+    appliedPracticeCount.current = knowledgeCounts.practice;
     setTopicConfigs((current) => distributePracticeAcrossTopics(knowledgeCounts.practice, current));
-  }, [practiceDistributionSignature]);
+  }, [knowledgeCounts.practice, topicRows]);
   const topicConfigPayload = topicRows.map((row) => ({
     category: row.category === "Không chủ đề" ? "" : row.category,
     total: Number(topicConfigs[row.category]?.total || 0),
