@@ -131,6 +131,18 @@ const statusLabel: Record<string, string> = {
   closed: "Đã đóng",
 };
 
+const toDateTimeLocal = (value?: string | null) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const timezoneOffset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - timezoneOffset).toISOString().slice(0, 16);
+};
+
+const formatScheduleTime = (value?: string | null) => value
+  ? new Date(value).toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" })
+  : "Chưa thiết lập";
+
 const questionTypeLabels: Record<string, string> = {
   single_choice: "Trắc nghiệm",
   multiple_choice: "Trắc nghiệm nhiều đáp án",
@@ -160,6 +172,7 @@ export default function TrainingAssessmentsAdmin({
   const [selected, setSelected] = useState<Assessment | null>(null);
   const [results, setResults] = useState<any[]>([]);
   const [manualScores, setManualScores] = useState<Record<number, string>>({});
+  const [scheduleDraft, setScheduleDraft] = useState({ opens_at: "", closes_at: "" });
   const [screen, setScreen] = useState<"list" | "create" | "detail" | "bank">("list");
   const [draft, setDraft] = useState(emptyDraft);
   const [importMode, setImportMode] = useState<"prepared" | "auto_generate">("prepared");
@@ -592,6 +605,7 @@ export default function TrainingAssessmentsAdmin({
   };
   const openDetail = async (item: Assessment) => {
     setSelected(item);
+    setScheduleDraft({ opens_at: toDateTimeLocal(item.opens_at), closes_at: toDateTimeLocal(item.closes_at) });
     setScreen("detail");
     setNotice("");
     try {
@@ -680,6 +694,32 @@ export default function TrainingAssessmentsAdmin({
       const updated = await response.json();
       setSelected(updated);
       setItems((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (error: any) {
+      setNotice(String(error?.message || error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveSchedule = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch(`/api/digital-training/assessments/${selected.id}`, {
+        method: "PATCH",
+        headers: { ...auth, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          opens_at: scheduleDraft.opens_at ? new Date(scheduleDraft.opens_at).toISOString() : null,
+          closes_at: scheduleDraft.closes_at ? new Date(scheduleDraft.closes_at).toISOString() : null,
+        }),
+      });
+      if (!response.ok) throw new Error(await errorText(response));
+      const updated = await response.json();
+      setSelected(updated);
+      setScheduleDraft({ opens_at: toDateTimeLocal(updated.opens_at), closes_at: toDateTimeLocal(updated.closes_at) });
+      setItems((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setNotice("Đã lưu lịch mở/đóng bài.");
     } catch (error: any) {
       setNotice(String(error?.message || error));
     } finally {
@@ -924,11 +964,12 @@ export default function TrainingAssessmentsAdmin({
         <article className="overflow-hidden rounded-2xl border bg-white shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4 p-6">
             <div><p className="text-xs font-bold uppercase text-blue-600">Khảo sát kết thúc tập huấn</p><h2 className="mt-1 text-2xl font-extrabold">{selected.title}</h2><p className="mt-2 text-sm text-slate-500">{[selected.partner_name, selected.class_name].filter(Boolean).join(" · ")}</p></div>
-            <div className="flex flex-wrap gap-2">{selected.status !== "published" && <button onClick={() => void changeStatus("published")} className="ft-primary"><Send className="h-4 w-4" />Phát hành</button>}{selected.status === "published" && <button onClick={() => void changeStatus("closed")} className="ft-btn ft-btn-secondary">Đóng bài</button>}<button disabled={busy || !selected.output_sheet_url} onClick={() => void prepareOutput()} className="ft-btn ft-btn-secondary"><FileSpreadsheet className="h-4 w-4" />Khởi tạo Sheet đầu ra</button><button aria-label="Xóa bài đánh giá" title="Xóa bài đánh giá" onClick={() => void remove()} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-bold text-rose-700"><Trash2 className="h-4 w-4" /></button></div>
+            <div className="flex flex-wrap gap-2">{selected.status !== "published" && <button disabled={busy} onClick={() => void changeStatus("published")} className="ft-primary"><Send className="h-4 w-4" />{selected.status === "closed" ? "Mở lại bài" : "Phát hành"}</button>}{selected.status === "published" && <button disabled={busy} onClick={() => void changeStatus("closed")} className="ft-btn ft-btn-secondary">Đóng bài</button>}<button disabled={busy || !selected.output_sheet_url} onClick={() => void prepareOutput()} className="ft-btn ft-btn-secondary"><FileSpreadsheet className="h-4 w-4" />Khởi tạo Sheet đầu ra</button><button aria-label="Xóa bài đánh giá" title="Xóa bài đánh giá" onClick={() => void remove()} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-bold text-rose-700"><Trash2 className="h-4 w-4" /></button></div>
           </div>
           <div className="grid gap-5 border-t bg-slate-50 p-6 lg:grid-cols-[minmax(0,1fr)_220px]">
             <div>
               <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-3 py-1 text-xs font-bold ${selected.status === "published" ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-700"}`}>{statusLabel[selected.status]}</span><span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-800">{selected.generation_mode === "auto_generate" ? "Sinh từ ngân hàng chuẩn" : "Đề soạn sẵn"}</span><span className="text-sm text-slate-500">{selected.duration_minutes} phút · tối đa {selected.attempt_limit} lượt/người</span></div>
+              <section className="mt-4 rounded-xl border border-blue-200 bg-blue-50/50 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm font-extrabold text-slate-900">Lịch mở và đóng bài</p><p className="mt-1 text-xs text-slate-600">Mở: <b>{selected.opens_at ? formatScheduleTime(selected.opens_at) : "Ngay khi phát hành"}</b> · Đóng: <b>{selected.closes_at ? formatScheduleTime(selected.closes_at) : "Không hẹn đóng"}</b></p></div><span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold text-blue-800">Có thể chỉnh sửa bất cứ lúc nào</span></div><div className="mt-3 grid gap-3 sm:grid-cols-2"><label><span className="mb-1 block text-xs font-bold text-slate-700">Mở từ</span><input type="datetime-local" className="ft-input bg-white" value={scheduleDraft.opens_at} onChange={(event) => setScheduleDraft((current) => ({ ...current, opens_at: event.target.value }))} /></label><label><span className="mb-1 block text-xs font-bold text-slate-700">Đóng lúc</span><input type="datetime-local" className="ft-input bg-white" value={scheduleDraft.closes_at} onChange={(event) => setScheduleDraft((current) => ({ ...current, closes_at: event.target.value }))} /></label></div><div className="mt-3 flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-slate-600">Để trống giờ mở = mở ngay khi phát hành; để trống giờ đóng = không tự đóng.</p><button disabled={busy} onClick={() => void saveSchedule()} className="ft-btn ft-btn-secondary">Lưu lịch</button></div></section>
               <div className="mt-5 rounded-xl border bg-white p-4"><p className="text-xs font-bold uppercase text-slate-500">Một link dùng chung</p><div className="mt-2 flex gap-2"><input readOnly value={publicLink} className="ft-input font-mono text-sm" /><button onClick={() => void navigator.clipboard.writeText(publicLink)} className="ft-btn ft-btn-secondary shrink-0"><ClipboardCopy className="h-4 w-4" />Sao chép</button><a href={publicLink} target="_blank" rel="noreferrer" className="ft-btn ft-btn-secondary shrink-0"><ExternalLink className="h-4 w-4" /></a></div><p className="mt-2 text-xs text-slate-500">Tất cả người học dùng link này; hệ thống tự chia mã đề có ít lượt nhất.</p></div>
               <div className="mt-4 flex flex-wrap gap-2">{selected.variants.map((variant) => <span key={variant.name} className="rounded-full bg-blue-100 px-3 py-1.5 text-xs font-bold text-blue-800">{variant.name}: {variant.question_count} câu · {selected.variant_distribution[variant.name] || 0} lượt</span>)}</div>
             </div>
