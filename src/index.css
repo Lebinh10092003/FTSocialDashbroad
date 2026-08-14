@@ -1007,6 +1007,7 @@ body {
   }
   .assessment-detail-card > :nth-child(4) {
     grid-column: 1;
+    grid-row: 4;
   }
   .assessment-detail-card > :nth-child(5) {
     grid-column: 2;
