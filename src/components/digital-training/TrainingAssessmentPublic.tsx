@@ -398,15 +398,15 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
     const theoryQuestionCount = Number(assessment.theory_question_count ?? Math.max(0, Number(assessment.question_count || 0) - practicalQuestionCount));
     return (
       <div lang="vi" translate="no" className="notranslate min-h-screen bg-[radial-gradient(circle_at_top_left,#dbeafe,transparent_35%),linear-gradient(180deg,#f8fafc,#eef2ff)] px-4 py-8 text-slate-900">
-        <main className="mx-auto max-w-[72rem]">
-          <header className="mb-5 flex items-center gap-3">
+        <main className="mx-auto w-full max-w-[72rem]">
+          <header className="mb-5 flex flex-wrap items-center gap-3">
             <img src="/logo.png" alt="FermatTech" className="h-9 object-contain" />
             <span className="border-l pl-3 text-sm font-bold text-slate-600">Training Completion Survey</span>
           </header>
           <section className="overflow-hidden rounded-3xl border border-white/80 bg-white shadow-xl shadow-blue-950/10">
-            <div className="bg-gradient-to-br from-[#001e40] via-[#0049a8] to-[#00a77a] px-6 py-8 text-white sm:px-10">
+            <div className="bg-gradient-to-br from-[#001e40] via-[#0049a8] to-[#00a77a] px-5 py-7 text-white sm:px-10 sm:py-8">
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-200">Bài kiểm tra kết thúc tập huấn</p>
-              <h1 className="mt-3 text-3xl font-extrabold leading-tight">{assessment.title}</h1>
+              <h1 className="mt-3 text-2xl font-extrabold leading-tight sm:text-3xl">{assessment.title}</h1>
               <p className="mt-3 text-blue-100">
                 {[assessment.partner_name, assessment.class_name].filter(Boolean).join(" · ")}
               </p>
@@ -416,7 +416,7 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
                 <div className="rounded-xl bg-white/10 p-3"><b>{assessment.variant_count} mã đề</b><span className="block text-xs text-blue-100">Hệ thống tự chia đều</span></div>
               </div>
             </div>
-            <div className="p-6 sm:p-10">
+            <div className="p-5 sm:p-10">
               <div className="mb-6 rounded-2xl border border-blue-200 bg-blue-50/70 p-5 text-sm leading-6 text-slate-800">
                 <b className="block text-base text-[#001e40]">Hướng dẫn làm bài</b>
                 <ul className="mt-3 list-disc space-y-2 pl-5 marker:text-blue-600">
