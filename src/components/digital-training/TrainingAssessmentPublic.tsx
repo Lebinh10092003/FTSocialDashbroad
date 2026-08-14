@@ -387,7 +387,7 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
   if (!attempt) {
     const isOpen = assessment.availability === "open";
     return (
-      <div lang="vi" translate="no" className="min-h-screen bg-[radial-gradient(circle_at_top_left,#dbeafe,transparent_35%),linear-gradient(180deg,#f8fafc,#eef2ff)] px-4 py-8 text-slate-900">
+      <div lang="vi" translate="no" className="notranslate min-h-screen bg-[radial-gradient(circle_at_top_left,#dbeafe,transparent_35%),linear-gradient(180deg,#f8fafc,#eef2ff)] px-4 py-8 text-slate-900">
         <main className="mx-auto max-w-3xl">
           <header className="mb-5 flex items-center gap-3">
             <img src="/logo.png" alt="FermatTech" className="h-9 object-contain" />
@@ -461,7 +461,7 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
   }
 
   return (
-    <div lang="vi" translate="no" className="min-h-screen bg-slate-100 pb-28 text-slate-900">
+    <div lang="vi" translate="no" className="notranslate min-h-screen bg-slate-100 pb-28 text-slate-900">
       <header className="sticky top-0 z-20 border-b bg-white/95 shadow-sm backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
           <div className="min-w-0"><p className="truncate text-sm font-extrabold">Kiểm tra cuối khóa tập huấn - {attempt.respondent_name}</p><p className="text-xs text-slate-500">{assessment.title} · {attempt.variant}</p></div>
