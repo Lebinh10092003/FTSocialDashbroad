@@ -53,6 +53,7 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const promptValueRef = useRef('');
   const request = queue[0] || null;
 
   useEffect(() => {
@@ -68,16 +69,20 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
     if (!request) return;
     if (request.kind === 'alert') request.resolve();
     else if (request.kind === 'confirm') request.resolve(confirmed);
-    else request.resolve(confirmed ? promptValue.trim() : null);
+    else request.resolve(confirmed ? promptValueRef.current.trim() : null);
     setQueue(current => current.slice(1));
-  }, [promptValue, request]);
+  }, [request]);
 
   useEffect(() => {
     if (!request) return;
     const focusedBeforeOpen = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    if (request.kind === 'prompt') setPromptValue(request.defaultValue || '');
+    if (request.kind === 'prompt') {
+      const initialValue = request.defaultValue || '';
+      promptValueRef.current = initialValue;
+      setPromptValue(initialValue);
+    }
     requestAnimationFrame(() => {
       if (request.kind === 'prompt') {
         inputRef.current?.focus();
@@ -154,9 +159,15 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
                 <input
                   ref={inputRef}
                   value={promptValue}
-                  onChange={event => setPromptValue(event.target.value)}
+                  onChange={event => {
+                    promptValueRef.current = event.target.value;
+                    setPromptValue(event.target.value);
+                  }}
                   placeholder={request.placeholder}
                   type={request.inputType || 'text'}
+                  name={'dialog-prompt'}
+                  autoComplete={request.inputType === 'password' ? 'current-password' : 'off'}
+                  autoFocus
                   className={'ft-input'}
                 />
               </form>
