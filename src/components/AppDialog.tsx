@@ -122,6 +122,8 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
       {children}
       {request && (
         <div
+          lang={'vi'}
+          translate={'no'}
           className={'fixed inset-0 z-[12000] grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm'}
           onMouseDown={event => {
             if (event.target === event.currentTarget) settle(false);
