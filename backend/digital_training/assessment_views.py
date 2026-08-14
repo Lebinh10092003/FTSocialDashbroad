@@ -203,6 +203,14 @@ def _availability(assessment):
 
 def _public_assessment(assessment):
     availability, message = _availability(assessment)
+    variants = variants_for(assessment)
+    sample_questions = public_questions(assessment, variants[0]) if variants else []
+    practical_types = {"practical_submission", "file_upload"}
+    practical_question_count = sum(
+        1
+        for question in sample_questions
+        if question.get("type") in practical_types or _bank_normalized(question.get("knowledge_type")) == "thuchanh"
+    )
     return {
         "title": assessment.title,
         "slug": assessment.public_slug,
@@ -215,11 +223,13 @@ def _public_assessment(assessment):
         "attempt_limit": assessment.attempt_limit,
         "opens_at": assessment.opens_at,
         "closes_at": assessment.closes_at,
-        "variant_count": len(variants_for(assessment)),
+        "variant_count": len(variants),
         "question_count": max(
-            (len(public_questions(assessment, variant)) for variant in variants_for(assessment)),
+            (len(public_questions(assessment, variant)) for variant in variants),
             default=0,
         ),
+        "theory_question_count": max(0, len(sample_questions) - practical_question_count),
+        "practical_question_count": practical_question_count,
         "participant_count": len(assessment.participants or []),
         "requires_participant": bool(assessment.participants),
         "audience_group": assessment.audience_group,
@@ -540,6 +550,19 @@ def public_assessment_start(request, slug):
             phone = str(participant.get("phone") or phone).strip()
             organization = str(participant.get("organization") or organization).strip()
             assigned_variant = str(participant.get("variant") or "").strip()
+        missing_fields = []
+        if not name:
+            missing_fields.append("họ và tên")
+        if not email:
+            missing_fields.append("email")
+        if not phone:
+            missing_fields.append("số điện thoại")
+        if not organization:
+            missing_fields.append("đơn vị công tác")
+        if assessment.participants and not participant_code:
+            missing_fields.append("mã người tham gia")
+        if missing_fields:
+            return _assessment_error(f"Vui lòng nhập đầy đủ: {', '.join(missing_fields)}.")
         if not name:
             return _assessment_error("Vui lòng nhập họ và tên.")
         if not email and not phone and not participant_code:

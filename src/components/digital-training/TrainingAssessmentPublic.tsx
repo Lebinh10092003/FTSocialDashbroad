@@ -394,9 +394,11 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
 
   if (!attempt) {
     const isOpen = assessment.availability === "open";
+    const practicalQuestionCount = Number(assessment.practical_question_count || 0);
+    const theoryQuestionCount = Number(assessment.theory_question_count ?? Math.max(0, Number(assessment.question_count || 0) - practicalQuestionCount));
     return (
       <div lang="vi" translate="no" className="notranslate min-h-screen bg-[radial-gradient(circle_at_top_left,#dbeafe,transparent_35%),linear-gradient(180deg,#f8fafc,#eef2ff)] px-4 py-8 text-slate-900">
-        <main className="mx-auto max-w-3xl">
+        <main className="mx-auto max-w-[72rem]">
           <header className="mb-5 flex items-center gap-3">
             <img src="/logo.png" alt="FermatTech" className="h-9 object-contain" />
             <span className="border-l pl-3 text-sm font-bold text-slate-600">Training Completion Survey</span>
@@ -415,12 +417,15 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
               </div>
             </div>
             <div className="p-6 sm:p-10">
-              {assessment.description && <p className="mb-4 leading-7 text-slate-700">{assessment.description}</p>}
-              {assessment.instructions && (
-                <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-                  <b className="block">Hướng dẫn</b>{assessment.instructions}
-                </div>
-              )}
+              <div className="mb-6 rounded-2xl border border-blue-200 bg-blue-50/70 p-5 text-sm leading-6 text-slate-800">
+                <b className="block text-base text-[#001e40]">Hướng dẫn làm bài</b>
+                <ul className="mt-3 list-disc space-y-2 pl-5 marker:text-blue-600">
+                  <li>Bài kiểm tra gồm <b>{theoryQuestionCount} câu trắc nghiệm</b> và <b>{practicalQuestionCount} câu thực hành</b>.</li>
+                  <li>Các câu trắc nghiệm chọn duy nhất một đáp án đúng.</li>
+                  <li>Với câu thực hành, học viên dán đường dẫn tới bài làm hoặc gửi ảnh sản phẩm; ảnh hướng dẫn (nếu có) sẽ hiển thị kèm theo câu hỏi.</li>
+                  <li>Vui lòng điền đầy đủ thông tin và hoàn thành tất cả câu hỏi bắt buộc trước khi nộp bài.</li>
+                </ul>
+              </div>
               {!isOpen ? (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 font-semibold text-amber-900">
                   {assessment.message}
@@ -429,10 +434,10 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
                 <form onSubmit={start} className="grid gap-4 sm:grid-cols-2">
                   {assessment.requires_participant && <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">{"Mã người tham gia *"}</span><input required className="ft-input" value={identity.participant_code} onChange={(event) => setIdentity({ ...identity, participant_code: event.target.value })} placeholder="VD: GV-001" /></label>}
                   <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Họ và tên *</span><input required className="ft-input" value={identity.respondent_name} onChange={(event) => setIdentity({ ...identity, respondent_name: event.target.value })} /></label>
-                  <label><span className="mb-1 block text-sm font-bold">Email</span><input type="email" className="ft-input" value={identity.email} onChange={(event) => setIdentity({ ...identity, email: event.target.value })} /></label>
-                  <label><span className="mb-1 block text-sm font-bold">Số điện thoại</span><input className="ft-input" value={identity.phone} onChange={(event) => setIdentity({ ...identity, phone: event.target.value })} /></label>
-                  <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Đơn vị công tác</span><input className="ft-input" value={identity.organization} onChange={(event) => setIdentity({ ...identity, organization: event.target.value })} /></label>
-                  <p className="sm:col-span-2 text-xs text-slate-500">Nhập email hoặc số điện thoại để hệ thống quản lý số lượt làm. Mã đề được cấp tự động sau khi bắt đầu.</p>
+                  <label><span className="mb-1 block text-sm font-bold">Email *</span><input required type="email" className="ft-input" value={identity.email} onChange={(event) => setIdentity({ ...identity, email: event.target.value })} /></label>
+                  <label><span className="mb-1 block text-sm font-bold">Số điện thoại *</span><input required type="tel" className="ft-input" value={identity.phone} onChange={(event) => setIdentity({ ...identity, phone: event.target.value })} /></label>
+                  <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Đơn vị công tác *</span><input required className="ft-input" value={identity.organization} onChange={(event) => setIdentity({ ...identity, organization: event.target.value })} /></label>
+                  <p className="sm:col-span-2 text-xs text-slate-500">Tất cả các trường có dấu * là bắt buộc. Mã đề được hệ thống cấp tự động sau khi bắt đầu.</p>
                   {message && <p className="sm:col-span-2 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{message}</p>}
                   <button disabled={busy} className="ft-primary sm:col-span-2 sm:justify-center">
                     {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
