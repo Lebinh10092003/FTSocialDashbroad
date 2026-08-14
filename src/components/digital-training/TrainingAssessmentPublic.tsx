@@ -425,6 +425,7 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
                   <li>Với câu thực hành, học viên dán đường dẫn tới bài làm hoặc gửi ảnh sản phẩm; ảnh hướng dẫn (nếu có) sẽ hiển thị kèm theo câu hỏi.</li>
                   <li>Vui lòng điền đầy đủ thông tin và hoàn thành tất cả câu hỏi bắt buộc trước khi nộp bài.</li>
                 </ul>
+                {([assessment.description, assessment.instructions].filter((item) => item && !String(item).includes("Không tải lại trang"))).length > 0 && <div className="mt-4 border-t border-blue-200 pt-4"><b className="block text-sm text-[#001e40]">Lưu ý từ ban tổ chức</b><div className="mt-2 whitespace-pre-wrap text-slate-700">{[assessment.description, assessment.instructions].filter((item) => item && !String(item).includes("Không tải lại trang")).join("\n\n")}</div></div>}
               </div>
               {!isOpen ? (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 font-semibold text-amber-900">
