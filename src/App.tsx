@@ -564,7 +564,7 @@ export default function App() {
     const slug = window.location.pathname.replace(/^\/training-assessment\//, '').split('/')[0];
     return (
       <Suspense fallback={<div className="grid min-h-screen place-items-center bg-slate-50">Đang mở bài đánh giá...</div>}>
-        <TrainingAssessmentPublic slug={slug} />
+        <TrainingAssessmentPublic slug={slug} idToken={idToken || ''} />
       </Suspense>
     );
   }

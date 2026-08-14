@@ -477,6 +477,34 @@ def assessment_results(request, pk):
     return Response(TrainingAssessmentAttemptSerializer(attempts, many=True, context={"request": request}).data)
 
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def assessment_preview(request, slug):
+    if not _can_manage(request):
+        return _forbidden()
+    assessment = _public_assessment_by_slug(slug)
+    if not assessment:
+        return _assessment_error("Không tìm thấy bài kiểm tra.", status.HTTP_404_NOT_FOUND)
+    variants = variants_for(assessment)
+    requested_variant = str(request.query_params.get("variant") or "").strip()
+    variant = requested_variant if requested_variant in variants else (variants[0] if variants else "")
+    role = str(request.query_params.get("role") or "respondent").strip().lower()
+    questions = public_questions(assessment, variant)
+    if role == "creator":
+        raw_by_id = {str(item.get("id") or ""): item for item in assessment.questions if str(item.get("variant") or "Đề 1") == variant}
+        questions = [
+            {**question, "correct_answers": raw_by_id.get(str(question.get("id") or ""), {}).get("correct_answers") or []}
+            for question in questions
+        ]
+    return Response({
+        "assessment": _public_assessment(assessment),
+        "questions": questions,
+        "variant": variant,
+        "variants": variants,
+        "role": role,
+    })
+
+
 @api_view(["PATCH"])
 @permission_classes([IsAuthenticated])
 def assessment_result_grade(request, pk, attempt_pk):

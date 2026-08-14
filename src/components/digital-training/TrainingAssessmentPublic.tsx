@@ -33,6 +33,7 @@ type PublicQuestion = {
   media_file_id?: string;
   category?: string;
   difficulty?: string;
+  correct_answers?: string[];
 };
 
 type AnswerValue = string | string[] | Record<string, string>;
@@ -84,7 +85,11 @@ const mediaPreview = (source = "") => {
   return value.startsWith("http") ? { kind: "link", url: value } : null;
 };
 
-export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
+export default function TrainingAssessmentPublic({ slug, idToken = "" }: { slug: string; idToken?: string }) {
+  const previewRole = new URLSearchParams(window.location.search).get("preview");
+  const isPreview = previewRole === "creator" || previewRole === "respondent";
+  const isCreatorPreview = previewRole === "creator";
+  const previewVariant = new URLSearchParams(window.location.search).get("variant") || "";
   const [assessment, setAssessment] = useState<any>(null);
   const [attempt, setAttempt] = useState<any>(null);
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
@@ -126,6 +131,18 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
     setLoading(true);
     setMessage("");
     try {
+      if (isPreview) {
+        if (!idToken) throw new Error("Hãy đăng nhập bằng tài khoản quản trị để xem trước bài kiểm tra.");
+        const response = await fetch(`/api/digital-training/assessment-previews/${slug}?role=${previewRole}&variant=${encodeURIComponent(previewVariant)}`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
+        if (!response.ok) throw new Error(await apiError(response));
+        const body = await response.json();
+        setAssessment(body.assessment);
+        setAttempt({ status: "in_progress", questions: body.questions || [], variant: body.variant, preview_variants: body.variants || [] });
+        setSaveState("Chế độ demo — không lưu dữ liệu");
+        return;
+      }
       const savedToken = localStorage.getItem(storageKey);
       if (savedToken) {
         const response = await fetch(`/api/training-assessment-attempts/${savedToken}`);
@@ -148,9 +165,13 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
 
   useEffect(() => {
     void load();
-  }, [slug]);
+  }, [slug, idToken, isPreview, previewRole, previewVariant]);
 
   const save = async (submit = false) => {
+    if (isPreview) {
+      setSaveState("Chế độ demo — không lưu hoặc nộp bài");
+      return;
+    }
     if (!attempt?.access_token || attempt.status !== "in_progress") return;
     if (submit && submittingRef.current) return;
     if (submit) submittingRef.current = true;
@@ -186,6 +207,7 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
   };
 
   useEffect(() => {
+    if (isPreview) return;
     if (!attempt?.expires_at || attempt.status !== "in_progress") return;
     const tick = () => {
       const remaining = Math.max(
@@ -198,10 +220,11 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
     tick();
     const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
-  }, [attempt?.expires_at, attempt?.status, answers]);
+  }, [attempt?.expires_at, attempt?.status, answers, isPreview]);
 
   // Re-sync timer when tab regains focus (fix browser background throttling)
   useEffect(() => {
+    if (isPreview) return;
     if (!attempt?.expires_at || attempt.status !== "in_progress") return;
     const handleVisibility = () => {
       if (document.visibilityState !== "visible") return;
@@ -214,9 +237,10 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
     };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, [attempt?.expires_at, attempt?.status]);
+  }, [attempt?.expires_at, attempt?.status, isPreview]);
 
   useEffect(() => {
+    if (isPreview) return;
     if (!attempt?.access_token || attempt.status !== "in_progress") return;
     if (hydratingAttemptRef.current) {
       hydratingAttemptRef.current = false;
@@ -225,9 +249,10 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
     setSaveState("Có thay đổi chưa lưu");
     const timer = window.setTimeout(() => void save(false), 900);
     return () => window.clearTimeout(timer);
-  }, [answers, currentIndex, reviewedIds]);
+  }, [answers, currentIndex, reviewedIds, isPreview]);
 
   useEffect(() => {
+    if (isPreview) return;
     if (!attempt?.access_token || attempt.status !== "in_progress") return;
     const persistBeforeLeaving = () => {
       void fetch('/api/training-assessment-attempts/' + attempt.access_token, {
@@ -245,7 +270,7 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
     };
     window.addEventListener("pagehide", persistBeforeLeaving);
     return () => window.removeEventListener("pagehide", persistBeforeLeaving);
-  }, [attempt?.access_token, attempt?.status, answers, currentIndex, reviewedIds]);
+  }, [attempt?.access_token, attempt?.status, answers, currentIndex, reviewedIds, isPreview]);
 
   const start = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -272,6 +297,10 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
   };
 
   const uploadFile = async (question: PublicQuestion, file?: File) => {
+    if (isPreview) {
+      setMessage("Chế độ xem trước không tải tệp hoặc gửi dữ liệu.");
+      return;
+    }
     if (!file || !attempt?.access_token) return;
     setBusy(true);
     setMessage("");
@@ -372,6 +401,12 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
     }
     return String(value);
   };
+
+  if (!loading && assessment && attempt && isCreatorPreview) {
+    const previewQuestions: PublicQuestion[] = attempt.questions || [];
+    const previewVariants: string[] = attempt.preview_variants || [];
+    return <div lang="vi" translate="no" className="notranslate min-h-screen bg-slate-50 p-4 text-slate-900 sm:p-8"><main className="mx-auto max-w-5xl"><div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-violet-200 bg-violet-50 p-4"><div><p className="text-xs font-bold uppercase tracking-wide text-violet-700">Xem trước · Người tạo</p><h1 className="mt-1 text-xl font-extrabold">{assessment.title}</h1><p className="mt-1 text-sm text-slate-600">Hiển thị đáp án và cấu hình, không tạo lượt làm.</p></div><a href={`/training-assessment/${slug}?preview=respondent&variant=${encodeURIComponent(attempt.variant || "")}`} className="ft-btn ft-btn-secondary">Xem như người trả lời</a></div><div className="mb-5 rounded-2xl border bg-white p-4"><label className="block text-sm font-bold">Mã đề đang xem<select value={attempt.variant || ""} onChange={(event) => { window.location.href = `/training-assessment/${slug}?preview=creator&variant=${encodeURIComponent(event.target.value)}`; }} className="ft-input mt-2">{previewVariants.map((variant) => <option key={variant} value={variant}>{variant}</option>)}</select></label></div><div className="space-y-4">{previewQuestions.map((question, index) => <article key={question.id} className="rounded-2xl border bg-white p-5 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-blue-700">{question.question_code || `Câu ${index + 1}`}</p><div className="mt-2 flex flex-wrap gap-2"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold">{question.type}</span>{question.category && <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-bold text-blue-700">{question.category}</span>}{question.points != null && <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-bold text-amber-800">{question.points} điểm</span>}</div></div></div><h2 className="mt-4 whitespace-pre-wrap text-lg font-bold leading-7">{question.text}</h2>{question.media_url && <a href={question.media_url} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm font-bold text-blue-700 underline">Mở ảnh/tư liệu minh họa</a>}{(question.options || []).length > 0 && <ol className="mt-4 space-y-2">{question.options.map((option) => <li key={option.key} className="rounded-lg border bg-slate-50 px-3 py-2 text-sm"><b>{option.key}.</b> {option.text || option.match_text || "—"}</li>)}</ol>}<div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900"><b>Đáp án:</b> {(question.correct_answers || []).join(", ") || "Cần chấm thủ công / không thiết lập đáp án"}</div></article>)}</div></main></div>;
+  }
 
   if (loading) {
     return (
@@ -481,7 +516,7 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
     <div lang="vi" translate="no" className="notranslate min-h-screen bg-slate-100 pb-28 text-slate-900">
       <header className="sticky top-0 z-20 border-b bg-white/95 shadow-sm backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
-          <div className="min-w-0"><p className="truncate text-sm font-extrabold">Kiểm tra cuối khóa tập huấn - {attempt.respondent_name}</p><p className="text-xs text-slate-500">{assessment.title} · {attempt.variant}</p></div>
+          <div className="min-w-0"><p className="truncate text-sm font-extrabold">{isPreview ? "Xem trước · giao diện người trả lời" : `Kiểm tra cuối khóa tập huấn - ${attempt.respondent_name}`}</p><p className="text-xs text-slate-500">{assessment.title} · {attempt.variant}{isPreview && " · Chế độ demo"}</p></div>
           <div className="flex items-center gap-2">
             <span className="hidden items-center gap-1 text-xs text-slate-500 sm:inline-flex"><Save className="h-3.5 w-3.5" />{saveState}</span>
             <div aria-label={`Còn ${formatCountdown(secondsLeft)}`} className={`flex items-center gap-2 rounded-xl px-3 py-2 font-mono text-lg font-black ${secondsLeft < 300 ? "bg-rose-100 text-rose-700" : "bg-blue-50 text-blue-800"}`}><Clock3 className="h-5 w-5" />{formatCountdown(secondsLeft)}</div>
@@ -494,7 +529,7 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
           <div className="mt-3 grid grid-cols-7 gap-1.5 sm:grid-cols-10 md:grid-cols-4">{questions.map((question, index) => { const answered = isAnswered(question); const reviewed = reviewedIds.includes(question.id); return <button type="button" aria-label={`Câu ${index + 1}: ${answered ? "đã trả lời" : "chưa trả lời"}`} key={question.id} onClick={() => { setCurrentIndex(index); setReviewMode(false); }} className={`relative grid aspect-square place-items-center rounded-xl border text-[11px] font-black transition ${index === currentIndex && !reviewMode ? "border-blue-700 bg-blue-700 text-white ring-2 ring-blue-200" : answered ? "border-emerald-400 bg-emerald-100 text-emerald-900" : "border-blue-300 bg-blue-50 text-blue-800 hover:border-blue-500"}`}>{index + 1}{reviewed && <Bookmark className="absolute -right-1 -top-1 h-3 w-3 fill-amber-400 text-amber-500" />}</button>; })}</div>
           <div className="mt-3 space-y-1.5 border-t pt-3 text-[10px] text-slate-500"><p className="whitespace-nowrap"><span className="mr-2 inline-block h-2.5 w-2.5 rounded-full bg-emerald-200" />Đã trả lời</p><p className="whitespace-nowrap"><span className="mr-2 inline-block h-2.5 w-2.5 rounded-full bg-blue-100 ring-1 ring-blue-300" />Chưa trả lời</p><p className="whitespace-nowrap"><Bookmark className="mr-1 inline h-3 w-3 fill-amber-400 text-amber-500" />Đánh dấu xem lại</p></div>
         </aside>
-        <section className="min-w-0">{message && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{message}</div>}{reviewMode ? <article className="rounded-2xl border bg-white p-5 shadow-sm sm:p-7">
+        <section className="min-w-0">{isPreview && <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900"><b>Chế độ xem trước của người tạo.</b> Đây là giao diện người trả lời để kiểm tra trải nghiệm; mọi thao tác chỉ là mô phỏng, không tạo lượt làm, không lưu tệp và không thể nộp bài.</div>}{message && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{message}</div>}{reviewMode ? <article className="rounded-2xl border bg-white p-5 shadow-sm sm:p-7">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-5">
             <div><p className="text-xs font-bold uppercase tracking-wide text-blue-600">Bước cuối</p><h1 className="mt-1 text-2xl font-extrabold">Rà soát toàn bộ câu trả lời</h1><p className="mt-2 text-sm text-slate-500">Bấm vào một câu để quay lại chỉnh sửa. Bài chỉ được khóa sau khi anh/chị xác nhận nộp.</p></div>
             <button type="button" onClick={() => setReviewMode(false)} className="ft-btn ft-btn-secondary"><ChevronLeft className="h-4 w-4" />Quay lại làm bài</button>
@@ -519,7 +554,7 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
           <div className="mt-8 flex items-center justify-between border-t pt-5"><button disabled={currentIndex === 0} onClick={() => setCurrentIndex((value) => Math.max(0, value - 1))} className="ft-btn ft-btn-secondary disabled:opacity-40"><ChevronLeft className="h-4 w-4" />Câu trước</button><button disabled={currentIndex === questions.length - 1} onClick={() => setCurrentIndex((value) => Math.min(questions.length - 1, value + 1))} className="ft-btn ft-btn-secondary disabled:opacity-40">Câu sau<ChevronRight className="h-4 w-4" /></button></div>
         </article>}</section>
       </main>
-      <footer className="fixed inset-x-0 bottom-0 z-20 border-t bg-white p-3 shadow-[0_-8px_24px_rgba(15,23,42,.08)] sm:p-4"><div className="mx-auto flex max-w-6xl items-center justify-between gap-3"><p className="hidden text-sm text-slate-600 sm:block">{unansweredRequired ? `Còn ${unansweredRequired} câu bắt buộc chưa trả lời — anh/chị vẫn có thể nộp bài.` : "Đã trả lời đủ các câu bắt buộc"}</p><button disabled={busy} onClick={async () => { const detail = unansweredRequired ? `Anh/chị còn ${unansweredRequired} câu bắt buộc chưa trả lời. Các câu này sẽ được nộp ở trạng thái để trống.` : "Anh/chị đã trả lời đủ các câu bắt buộc."; const confirmed = await appDialog.confirm(`${detail} Sau khi nộp, anh/chị không thể sửa câu trả lời.`, { title: "Xác nhận nộp bài", confirmText: "Nộp bài", tone: "warning" }); if (confirmed) void save(true); }} className="ft-primary ml-auto disabled:cursor-not-allowed disabled:opacity-50"><Send className="h-4 w-4" />Nộp bài</button></div></footer>
+      <footer className="fixed inset-x-0 bottom-0 z-20 border-t bg-white p-3 shadow-[0_-8px_24px_rgba(15,23,42,.08)] sm:p-4"><div className="mx-auto flex max-w-6xl items-center justify-between gap-3"><p className="hidden text-sm text-slate-600 sm:block">{isPreview ? "Đây là bản mô phỏng: câu trả lời sẽ không được lưu hoặc nộp." : unansweredRequired ? `Còn ${unansweredRequired} câu bắt buộc chưa trả lời — anh/chị vẫn có thể nộp bài.` : "Đã trả lời đủ các câu bắt buộc"}</p>{isPreview ? <button type="button" disabled className="ft-primary ml-auto cursor-not-allowed opacity-50"><Send className="h-4 w-4" />Chế độ demo — không nộp bài</button> : <button disabled={busy} onClick={async () => { const detail = unansweredRequired ? `Anh/chị còn ${unansweredRequired} câu bắt buộc chưa trả lời. Các câu này sẽ được nộp ở trạng thái để trống.` : "Anh/chị đã trả lời đủ các câu bắt buộc."; const confirmed = await appDialog.confirm(`${detail} Sau khi nộp, anh/chị không thể sửa câu trả lời.`, { title: "Xác nhận nộp bài", confirmText: "Nộp bài", tone: "warning" }); if (confirmed) void save(true); }} className="ft-primary ml-auto disabled:cursor-not-allowed disabled:opacity-50"><Send className="h-4 w-4" />Nộp bài</button>}</div></footer>
       {expandedImageUrl && <div role="dialog" aria-modal="true" aria-label="Ảnh minh họa phóng to" className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/80 p-4" onClick={() => setExpandedImageUrl("")}><div className="relative max-h-full max-w-6xl" onClick={(event) => event.stopPropagation()}><img src={expandedImageUrl} alt="Ảnh minh họa phóng to" className="max-h-[90dvh] max-w-full rounded-2xl bg-white object-contain shadow-2xl" /><button type="button" onClick={() => setExpandedImageUrl("")} className="absolute right-2 top-2 rounded-lg bg-slate-900/80 px-3 py-2 text-sm font-bold text-white">Đóng</button></div></div>}
     </div>
   );
