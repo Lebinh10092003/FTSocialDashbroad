@@ -140,6 +140,7 @@ export default function TrainingAssessmentPublic({ slug, idToken = "" }: { slug:
         const body = await response.json();
         setAssessment(body.assessment);
         setAttempt({ status: "in_progress", questions: body.questions || [], variant: body.variant, preview_variants: body.variants || [] });
+        setSecondsLeft(Number(body.assessment?.duration_minutes || 120) * 60);
         setSaveState("Chế độ demo — không lưu dữ liệu");
         return;
       }
