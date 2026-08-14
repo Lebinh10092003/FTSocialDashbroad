@@ -25,6 +25,7 @@ from .assessment_service import (
     parse_assessment_workbook,
     prepare_assessment_google_sheet,
     public_questions,
+    rebuild_assessment_google_sheet_rows,
     sync_attempt_to_google_sheet,
     upload_assessment_file_to_drive,
     variants_for,
@@ -567,7 +568,8 @@ def assessment_prepare_output(request, pk):
     if not assessment:
         return _assessment_error("Không tìm thấy đợt kiểm tra.", status.HTTP_404_NOT_FOUND)
     try:
-        prepare_assessment_google_sheet(assessment)
+        resources = prepare_assessment_google_sheet(assessment)
+        rebuild_assessment_google_sheet_rows(assessment, resources)
         assessment.sync_status = "ready"
         assessment.sync_error = ""
     except Exception as error:

@@ -968,6 +968,53 @@ def _assessment_output_layout(assessment):
     }
 
 
+def _sheet_question_header(question, index):
+    number = question.get("order") or index
+    code = str(question.get("question_code") or "").strip()
+    question_text = re.sub(r"\s+", " ", str(question.get("text") or "").strip())
+    if len(question_text) > 140:
+        question_text = f"{question_text[:137].rstrip()}..."
+    kind = "Thực hành · link/tệp riêng" if _is_practical_question(question) else "Câu trả lời"
+    identifier = f"{code} · " if code else ""
+    return f"Câu {number} · {kind} · {identifier}{question_text or 'Không có nội dung'}"
+
+
+def _sheet_answer_value(question, value):
+    if _is_practical_question(question) and isinstance(value, dict):
+        product_link = str(value.get("link") or "").strip()
+        evidence_link = str(value.get("upload_url") or "").strip()
+        values = []
+        if product_link:
+            values.append(f"Link sản phẩm: {product_link}")
+        if evidence_link:
+            values.append(f"Tệp minh chứng: {evidence_link}")
+        return "\n".join(values)
+    return _answer_text(value)
+
+
+def _sheet_attempt_row(attempt, questions):
+    status_names = {"in_progress": "Đang làm", "submitted": "Đã nộp", "timed_out": "Hết giờ"}
+    answer_values = [
+        _sheet_answer_value(question, attempt.answers.get(str(question.get("id")), ""))
+        for question in questions
+    ]
+    return [
+        attempt.respondent_name, attempt.email, attempt.phone, attempt.organization, attempt.position,
+        attempt.participant_code, str(attempt.access_token), attempt.variant,
+        status_names.get(attempt.status, attempt.status),
+        attempt.started_at.isoformat() if attempt.started_at else "",
+        attempt.submitted_at.isoformat() if attempt.submitted_at else "",
+        *answer_values,
+        float(attempt.auto_graded_points or 0),
+        float(attempt.practical_score or 0) if attempt.practical_score is not None else "",
+        float(attempt.score or 0),
+        "Cần chấm" if attempt.manual_grading_required else "Đã chấm",
+        "Đã ghi",
+        attempt.synced_at.isoformat() if attempt.synced_at else "",
+        attempt.purge_after.isoformat() if attempt.purge_after else "",
+    ]
+
+
 def prepare_assessment_google_sheet(assessment):
     spreadsheet_id = extract_spreadsheet_id(assessment.output_sheet_url)
     if not spreadsheet_id:
@@ -1005,16 +1052,38 @@ def prepare_assessment_google_sheet(assessment):
         body={"values": overview_values},
     ).execute()
 
+    attempts = list(assessment.attempts.order_by("started_at"))
     attempt_statuses = {}
-    for item in assessment.attempts.order_by("started_at").values("participant_code", "status"):
-        code = str(item.get("participant_code") or "").strip().casefold()
-        if code:
-            attempt_statuses[code] = item.get("status") or ""
+    participant_identities = set()
     status_names = {"in_progress": "Đang làm", "submitted": "Đã nộp", "timed_out": "Hết giờ"}
-    participant_values = [["M\u00e3 ng\u01b0\u1eddi l\u00e0m", "H\u1ecd t\u00ean", "Email", "S\u1ed1 \u0111i\u1ec7n tho\u1ea1i", "Nh\u00f3m", "M\u00e3 \u0111\u1ec1", "Tr\u1ea1ng th\u00e1i"]]
+    participant_values = [["Họ tên", "Email", "Số điện thoại", "Tổ chuyên môn/Phòng ban", "Chức vụ", "Mã người làm", "Mã lượt làm", "Mã đề", "Trạng thái", "Bắt đầu lúc", "Nộp lúc"]]
+    for item in attempts:
+        code = str(item.participant_code or "").strip().casefold()
+        email = str(item.email or "").strip().casefold()
+        phone = str(item.phone or "").strip()
+        participant_identities.update(identity for identity in (f"code:{code}" if code else "", f"email:{email}" if email else "", f"phone:{phone}" if phone else "") if identity)
+        if code:
+            attempt_statuses[code] = item.status or ""
+        participant_values.append([
+            item.respondent_name, item.email, item.phone, item.organization, item.position,
+            item.participant_code, str(item.access_token), item.variant,
+            status_names.get(item.status, item.status),
+            item.started_at.isoformat() if item.started_at else "",
+            item.submitted_at.isoformat() if item.submitted_at else "",
+        ])
     participant_values.extend([
-        [item.get("code", ""), item.get("name", ""), item.get("email", ""), item.get("phone", ""), item.get("group", ""), item.get("variant", ""), status_names.get(attempt_statuses.get(str(item.get("code") or "").strip().casefold(), ""), "Ch\u01b0a l\u00e0m")]
+        [
+            item.get("name", ""), item.get("email", ""), item.get("phone", ""),
+            item.get("organization", item.get("group", "")), item.get("position", ""),
+            item.get("code", ""), "", item.get("variant", ""),
+            status_names.get(attempt_statuses.get(str(item.get("code") or "").strip().casefold(), ""), "Chưa làm"), "", "",
+        ]
         for item in assessment.participants or []
+        if not any(identity and identity in participant_identities for identity in (
+            f"code:{str(item.get('code') or '').strip().casefold()}" if item.get("code") else "",
+            f"email:{str(item.get('email') or '').strip().casefold()}" if item.get("email") else "",
+            f"phone:{str(item.get('phone') or '').strip()}" if item.get("phone") else "",
+        ))
     ])
     service.spreadsheets().values().update(
         spreadsheetId=spreadsheet_id,
@@ -1041,8 +1110,8 @@ def prepare_assessment_google_sheet(assessment):
         ).execute()
 
     for variant, sheet_title in layout["answer_sheets"].items():
-        question_count = len([item for item in assessment.questions if str(item.get("variant") or "") == variant])
-        headers = ["M\u00e3 l\u01b0\u1ee3t l\u00e0m", "M\u00e3 ng\u01b0\u1eddi l\u00e0m", "H\u1ecd t\u00ean", "Email", "M\u00e3 \u0111\u1ec1", "Tr\u1ea1ng th\u00e1i", *[f"C\u00e2u {index}" for index in range(1, question_count + 1)], "\u0110i\u1ec3m t\u1ef1 \u0111\u1ed9ng", "\u0110i\u1ec3m th\u1ef1c h\u00e0nh", "T\u1ed5ng \u0111i\u1ec3m", "Link s\u1ea3n ph\u1ea9m", "File ID minh ch\u1ee9ng", "Tr\u1ea1ng th\u00e1i ch\u1ea5m", "Tr\u1ea1ng th\u00e1i \u0111\u1ed3ng b\u1ed9", "Th\u1eddi \u0111i\u1ec3m ghi Sheet", "H\u1ea1n x\u00f3a d\u1eef li\u1ec7u t\u1ea1m", "S\u1ed1 \u0111i\u1ec7n tho\u1ea1i", "T\u1ed5 chuy\u00ean m\u00f4n/Ph\u00f2ng ban", "Ch\u1ee9c v\u1ee5"]
+        questions = public_questions(assessment, variant)
+        headers = ["Họ tên", "Email", "Số điện thoại", "Tổ chuyên môn/Phòng ban", "Chức vụ", "Mã người làm", "Mã lượt làm", "Mã đề", "Trạng thái", "Bắt đầu lúc", "Nộp lúc", *[_sheet_question_header(question, index) for index, question in enumerate(questions, start=1)], "Điểm tự động", "Điểm thực hành", "Tổng điểm", "Trạng thái chấm", "Trạng thái đồng bộ", "Thời điểm ghi Sheet", "Hạn xóa dữ liệu tạm"]
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
             range=f"'{sheet_title}'!A1",
@@ -1056,6 +1125,22 @@ def prepare_assessment_google_sheet(assessment):
         valueInputOption="RAW",
         body={"values": deletion_headers},
     ).execute()
+    return service, spreadsheet_id, layout
+
+
+def rebuild_assessment_google_sheet_rows(assessment, resources=None):
+    service, spreadsheet_id, layout = resources or prepare_assessment_google_sheet(assessment)
+    for variant, sheet_title in layout["answer_sheets"].items():
+        questions = public_questions(assessment, variant)
+        attempts = assessment.attempts.filter(variant=variant).order_by("started_at")
+        rows = [_sheet_attempt_row(attempt, questions) for attempt in attempts]
+        if rows:
+            service.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"'{sheet_title}'!A2",
+                valueInputOption="RAW",
+                body={"values": rows},
+            ).execute()
     return service, spreadsheet_id, layout
 
 
@@ -1073,35 +1158,14 @@ def append_assessment_deletion_log(attempt, actor, mode, note=""):
     ).execute()
 
 
-def sync_attempt_to_google_sheet(attempt):
-    service, spreadsheet_id, layout = prepare_assessment_google_sheet(attempt.assessment)
-    questions = sorted([
-        item for item in attempt.assessment.questions
-        if str(item.get("variant") or "") == attempt.variant
-    ], key=lambda item: item.get("order") or 0)
-    answer_values = [_answer_text(attempt.answers.get(str(item.get("id")), "")) for item in questions]
-    product_links = []
-    product_file_ids = []
-    for item in questions:
-        value = attempt.answers.get(str(item.get("id")), "")
-        if isinstance(value, dict):
-            product_links.extend(str(value.get(key) or "") for key in ("link", "upload_url") if value.get(key))
-            if value.get("upload_file_id"):
-                product_file_ids.append(str(value["upload_file_id"]))
-    row = [
-        str(attempt.access_token), attempt.participant_code, attempt.respondent_name, attempt.email,
-        attempt.variant, attempt.status, *answer_values, float(attempt.auto_graded_points or 0),
-        float(attempt.practical_score or 0) if attempt.practical_score is not None else "",
-        float(attempt.score or 0), "\n".join(product_links), "\n".join(product_file_ids),
-        "Cần chấm" if attempt.manual_grading_required else "Đã chấm",
-        "Đã ghi", attempt.submitted_at.isoformat() if attempt.submitted_at else "",
-        attempt.purge_after.isoformat() if attempt.purge_after else "",
-        attempt.phone, attempt.organization, attempt.position,
-    ]
+def sync_attempt_to_google_sheet(attempt, resources=None):
+    service, spreadsheet_id, layout = resources or prepare_assessment_google_sheet(attempt.assessment)
+    questions = public_questions(attempt.assessment, attempt.variant)
+    row = _sheet_attempt_row(attempt, questions)
     sheet_title = layout["answer_sheets"][attempt.variant]
     existing = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=f"'{sheet_title}'!A:A",
+        range=f"'{sheet_title}'!G:G",
     ).execute().get("values", [])
     row_number = next(
         (index for index, values in enumerate(existing, start=1) if values and str(values[0]) == str(attempt.access_token)),
