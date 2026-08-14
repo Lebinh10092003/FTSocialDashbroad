@@ -4029,7 +4029,7 @@ export default function DigitalTraining({
                 className="ft-nav-item ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold"
               >
                 <CheckCircle2 className="h-3.5 w-3.5" />
-                Khảo sát kết thúc tập huấn
+                Bài kiểm tra cuối khóa tập huấn
               </button>
             </div>
           )}

@@ -319,7 +319,7 @@ class TrainingAssessmentTests(TestCase):
         )
 
     def test_public_url_uses_partner_and_class_slug(self):
-        self.assertEqual(self.assessment.public_slug, "ubp-giang-vo-lop-2")
+        self.assertEqual(self.assessment.public_slug, "ubp-giang-vo-bai-kiem-tra-cuoi-khoa-tap-huan")
 
     def test_multiple_assessment_rounds_are_allowed_per_partner_class(self):
         serializer = TrainingAssessmentSerializer(data={

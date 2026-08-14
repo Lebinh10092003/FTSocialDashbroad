@@ -71,7 +71,7 @@ export default function TrainingAssessmentWorkspace({
           <div className="min-w-0 border-l border-sky-100 pl-3">
             <b className="block text-xl font-extrabold leading-none">Fermat</b>
             <p className="mt-1 text-[10px] font-extrabold uppercase tracking-[0.12em] text-blue-200">
-              Khảo sát kết thúc tập huấn
+              Bài kiểm tra cuối khóa tập huấn
             </p>
           </div>
         </div>
@@ -79,7 +79,7 @@ export default function TrainingAssessmentWorkspace({
         <nav className="flex-1 space-y-1 overflow-y-auto p-4">
           <button onClick={() => setActiveTab("assessments")} className={`ft-nav-item flex w-full items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-left text-sm font-bold ${activeTab === "assessments" ? "ft-nav-item-active" : ""}`}>
             <FileCheck2 className="h-5 w-5 shrink-0" />
-            Khảo sát kết thúc tập huấn
+            Bài kiểm tra cuối khóa tập huấn
           </button>
           {canManageQuestionBank && <button onClick={() => setActiveTab("bank-settings")} className={`ft-nav-item flex w-full items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-left text-sm font-bold ${activeTab === "bank-settings" ? "ft-nav-item-active" : ""}`}>
             <Link2 className="h-5 w-5 shrink-0" />
@@ -118,7 +118,7 @@ export default function TrainingAssessmentWorkspace({
                 Liên kết dữ liệu với Đào tạo số
               </p>
               <h1 className="mt-1 text-2xl font-extrabold text-[#001e40]">
-                {activeTab === "bank-settings" ? "Set up ngân hàng đề thi" : "Khảo sát kết thúc tập huấn"}
+                {activeTab === "bank-settings" ? "Set up ngân hàng đề thi" : "Bài kiểm tra cuối khóa tập huấn"}
               </h1>
             </div>
             <button onClick={onBackToWorkspace} className="ft-btn ft-btn-secondary md:hidden">

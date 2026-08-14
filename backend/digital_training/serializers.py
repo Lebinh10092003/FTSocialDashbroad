@@ -492,7 +492,18 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
         }
 
     def get_participant_count(self, obj):
-        return len(obj.participants or [])
+        identities = set()
+        for attempt in obj.attempts.only("participant_code", "email", "phone", "respondent_name"):
+            identity = str(attempt.participant_code or "").strip().casefold()
+            if not identity:
+                identity = str(attempt.email or "").strip().casefold()
+            if not identity:
+                identity = re.sub(r"\D", "", str(attempt.phone or ""))
+            if not identity:
+                identity = str(attempt.respondent_name or "").strip().casefold()
+            if identity:
+                identities.add(identity)
+        return len(identities)
 
     def get_sync_counts(self, obj):
         return {

@@ -46,6 +46,19 @@ def _assessment_error(message, code=status.HTTP_400_BAD_REQUEST):
     return Response({"error": message}, status=code)
 
 
+def _public_assessment_by_slug(slug, *, lock=False):
+    queryset = TrainingAssessment.objects.select_related("session", "partner", "training_class")
+    if lock:
+        queryset = queryset.select_for_update()
+    assessment = queryset.filter(public_slug=slug).first()
+    if assessment:
+        return assessment
+    return next(
+        (candidate for candidate in queryset.exclude(public_slug=slug) if slug in (candidate.legacy_public_slugs or [])),
+        None,
+    )
+
+
 QUESTION_BANK_CONFIG_KEY = "digital_training_question_bank"
 DEFAULT_QUESTION_BANK_URL = "https://docs.google.com/spreadsheets/d/1VtV42scPJz_Z5vGkx3dxYretBEJBLGTFfjaj-rD-bbk/edit?usp=drive_link"
 
@@ -539,7 +552,7 @@ def assessment_result_storage(request, pk, attempt_pk):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def public_assessment(request, slug):
-    assessment = TrainingAssessment.objects.select_related("session", "partner", "training_class").filter(public_slug=slug).first()
+    assessment = _public_assessment_by_slug(slug)
     if not assessment:
         return _assessment_error("Đường dẫn bài đánh giá không tồn tại.", status.HTTP_404_NOT_FOUND)
     return Response(_public_assessment(assessment))
@@ -549,7 +562,7 @@ def public_assessment(request, slug):
 @permission_classes([AllowAny])
 def public_assessment_start(request, slug):
     with transaction.atomic():
-        assessment = TrainingAssessment.objects.select_for_update().select_related("session", "partner", "training_class").filter(public_slug=slug).first()
+        assessment = _public_assessment_by_slug(slug, lock=True)
         if not assessment:
             return _assessment_error("Đường dẫn bài đánh giá không tồn tại.", status.HTTP_404_NOT_FOUND)
         availability, message = _availability(assessment)

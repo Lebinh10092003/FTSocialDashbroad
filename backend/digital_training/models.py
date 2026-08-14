@@ -310,6 +310,7 @@ class TrainingAssessment(models.Model):
     attempt_limit = models.PositiveIntegerField(default=1)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
     public_slug = models.SlugField(max_length=255, unique=True, editable=False)
+    legacy_public_slugs = models.JSONField(default=list, blank=True)
     questions = models.JSONField(default=list, blank=True)
     generation_mode = models.CharField(
         max_length=30,
@@ -337,18 +338,17 @@ class TrainingAssessment(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.public_slug:
-            label = " ".join(
-                value for value in [
-                    self.partner.name if self.partner else "",
-                    self.training_class.name if self.training_class else "",
-                ] if value
+            label = self.partner.name if self.partner else (
+                self.training_class.name if self.training_class else ""
             )
             label = label.replace("Đ", "D").replace("đ", "d")
-            candidate = slugify(label) or f"training-assessment-{uuid.uuid4().hex[:8]}"
+            candidate = slugify(f"{label} Bai kiem tra cuoi khoa tap huan") or f"training-assessment-{uuid.uuid4().hex[:8]}"
             if TrainingAssessment.objects.filter(public_slug=candidate).exclude(pk=self.pk).exists():
-                candidate = slugify(f"{label} {self.title}") or candidate
-                if TrainingAssessment.objects.filter(public_slug=candidate).exclude(pk=self.pk).exists():
-                    candidate = f"{candidate}-{uuid.uuid4().hex[:8]}"
+                base = candidate
+                suffix = 2
+                while TrainingAssessment.objects.filter(public_slug=candidate).exclude(pk=self.pk).exists():
+                    candidate = f"{base}-{suffix}"
+                    suffix += 1
             self.public_slug = candidate
         super().save(*args, **kwargs)
 
