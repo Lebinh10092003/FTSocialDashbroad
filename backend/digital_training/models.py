@@ -363,6 +363,7 @@ class TrainingAssessmentAttempt(models.Model):
     organization = models.CharField(max_length=255, blank=True)
     position = models.CharField(max_length=255, blank=True)
     participant_code = models.CharField(max_length=100, blank=True)
+    drive_folder_id = models.CharField(max_length=255, blank=True)
     variant = models.CharField(max_length=100)
     answers = models.JSONField(default=dict, blank=True)
     progress = models.JSONField(default=dict, blank=True)

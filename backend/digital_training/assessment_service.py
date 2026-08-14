@@ -900,19 +900,10 @@ def _drive_child_folder(service, parent_id, name):
 
 
 def _participant_folder_name(service, parent_id, attempt):
-    """Keep the simple full-name folder until another participant has that name."""
+    """Use a stable, human-readable identity from the first upload."""
     full_name = _safe_drive_name(attempt.respondent_name, "Người làm")
-    query_name = full_name.replace(chr(39), chr(92) + chr(39))
-    existing = service.files().list(
-        q=f"'{parent_id}' in parents and name = '{query_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
-        fields="files(id)",
-        pageSize=1,
-        supportsAllDrives=True,
-        includeItemsFromAllDrives=True,
-    ).execute().get("files", [])
-    if not existing:
-        return full_name
-    return _safe_drive_name(f"{full_name} - {attempt.email or attempt.participant_code}", full_name)
+    identifier = str(attempt.email or attempt.participant_code or attempt.access_token).strip()
+    return _safe_drive_name(f"{full_name} - {identifier}", full_name)
 
 
 def upload_assessment_file_to_drive(uploaded, assessment, attempt, question_id=""):
@@ -934,8 +925,13 @@ def upload_assessment_file_to_drive(uploaded, assessment, attempt, question_id="
         )
         folder_id = _drive_child_folder(service, folder_id, customer_name)
     if config.get("create_participant_folder", True):
-        participant_name = _participant_folder_name(service, folder_id, attempt)
-        folder_id = _drive_child_folder(service, folder_id, participant_name)
+        if attempt.drive_folder_id:
+            folder_id = attempt.drive_folder_id
+        else:
+            participant_name = _participant_folder_name(service, folder_id, attempt)
+            folder_id = _drive_child_folder(service, folder_id, participant_name)
+            attempt.drive_folder_id = folder_id
+            attempt.save(update_fields=["drive_folder_id", "updated_at"])
     uploaded.seek(0)
     media = MediaIoBaseUpload(
         io.BytesIO(uploaded.read()),
