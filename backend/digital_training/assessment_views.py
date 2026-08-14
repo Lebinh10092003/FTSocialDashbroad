@@ -448,7 +448,7 @@ def assessment_results(request, pk):
     assessment = TrainingAssessment.objects.filter(pk=pk).first()
     if not assessment:
         return _assessment_error("Không tìm thấy bài đánh giá.", status.HTTP_404_NOT_FOUND)
-    attempts = assessment.attempts.prefetch_related("uploads").all()
+    attempts = assessment.attempts.prefetch_related("uploads").order_by("-started_at")
     return Response(TrainingAssessmentAttemptSerializer(attempts, many=True, context={"request": request}).data)
 
 
