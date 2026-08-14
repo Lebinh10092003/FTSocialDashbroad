@@ -93,6 +93,7 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
     email: "",
     phone: "",
     organization: "",
+    position: "",
     participant_code: "",
   });
   const [loading, setLoading] = useState(true);
@@ -437,7 +438,9 @@ export default function TrainingAssessmentPublic({ slug }: { slug: string }) {
                   <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Họ và tên *</span><input required className="ft-input" value={identity.respondent_name} onChange={(event) => setIdentity({ ...identity, respondent_name: event.target.value })} /></label>
                   <label><span className="mb-1 block text-sm font-bold">Email *</span><input required type="email" className="ft-input" value={identity.email} onChange={(event) => setIdentity({ ...identity, email: event.target.value })} /></label>
                   <label><span className="mb-1 block text-sm font-bold">Số điện thoại *</span><input required type="tel" className="ft-input" value={identity.phone} onChange={(event) => setIdentity({ ...identity, phone: event.target.value })} /></label>
-                  <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Đơn vị công tác *</span><input required className="ft-input" value={identity.organization} onChange={(event) => setIdentity({ ...identity, organization: event.target.value })} /></label>
+                  {assessment.organization_context_value && <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">{assessment.organization_context_label || "Đơn vị"}</span><input readOnly aria-readonly="true" value={assessment.organization_context_value} className="ft-input cursor-default bg-slate-50 text-slate-600" /></label>}
+                  <label><span className="mb-1 block text-sm font-bold">{assessment.organization_field_label || "Đơn vị công tác"} *</span><input required className="ft-input" value={identity.organization} onChange={(event) => setIdentity({ ...identity, organization: event.target.value })} /></label>
+                  <label><span className="mb-1 block text-sm font-bold">Chức vụ *</span><input required className="ft-input" value={identity.position} onChange={(event) => setIdentity({ ...identity, position: event.target.value })} /></label>
                   <p className="sm:col-span-2 text-xs text-slate-500">Tất cả các trường có dấu * là bắt buộc. Mã đề được hệ thống cấp tự động sau khi bắt đầu.</p>
                   {message && <p className="sm:col-span-2 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{message}</p>}
                   <button disabled={busy} className="ft-primary sm:col-span-2 sm:justify-center">

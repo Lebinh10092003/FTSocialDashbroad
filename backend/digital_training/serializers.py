@@ -530,6 +530,7 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
                 "email": str(item.get("email") or "").strip().lower(),
                 "phone": str(item.get("phone") or "").strip(),
                 "organization": str(item.get("organization") or "").strip(),
+                "position": str(item.get("position") or "").strip(),
                 "group": str(item.get("group") or "").strip(),
                 "variant": str(item.get("variant") or "").strip(),
             }
@@ -636,7 +637,7 @@ class TrainingAssessmentAttemptSerializer(serializers.ModelSerializer):
     class Meta:
         model = TrainingAssessmentAttempt
         fields = [
-            "id", "respondent_name", "email", "phone", "organization",
+            "id", "respondent_name", "email", "phone", "organization", "position",
             "participant_code", "variant", "answers", "progress", "score",
             "max_score", "auto_graded_points", "practical_score",
             "manual_grading_required", "status", "sync_status", "sync_error",

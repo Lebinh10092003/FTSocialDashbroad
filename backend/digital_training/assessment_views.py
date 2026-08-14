@@ -201,6 +201,23 @@ def _availability(assessment):
     return "open", ""
 
 
+def _identity_field_context(assessment):
+    partner = assessment.partner
+    source = " ".join([
+        assessment.audience_group or "",
+        partner.partner_type if partner else "",
+        partner.partner_subtype if partner else "",
+        partner.name if partner else "",
+    ])
+    normalized = _bank_normalized(source)
+    is_education = any(marker in normalized for marker in ("tieu hoc", "tieuhoc", "thcs", "thpt", "truong", "giao duc"))
+    return {
+        "organization_field_label": "Tổ chuyên môn" if is_education else "Phòng/ban",
+        "organization_context_label": "Trường" if is_education else "Cơ quan/đơn vị",
+        "organization_context_value": partner.name if partner else "",
+    }
+
+
 def _public_assessment(assessment):
     availability, message = _availability(assessment)
     variants = variants_for(assessment)
@@ -235,6 +252,7 @@ def _public_assessment(assessment):
         "audience_group": assessment.audience_group,
         "availability": availability,
         "message": message,
+        **_identity_field_context(assessment),
     }
 
 
@@ -269,6 +287,15 @@ def assessments(request):
     serializer = TrainingAssessmentSerializer(data=request.data, context={"request": request})
     serializer.is_valid(raise_exception=True)
     item = serializer.save(created_by=_actor(request))
+    if item.output_sheet_url:
+        try:
+            prepare_assessment_google_sheet(item)
+            item.sync_status = "ready"
+            item.sync_error = ""
+        except Exception as error:
+            item.sync_status = "error"
+            item.sync_error = str(error)[:2000]
+        item.save(update_fields=["sync_status", "sync_error", "updated_at"])
     return Response(TrainingAssessmentSerializer(item, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
 
@@ -532,6 +559,7 @@ def public_assessment_start(request, slug):
         email = str(request.data.get("email") or "").strip().lower()
         phone = str(request.data.get("phone") or "").strip()
         organization = str(request.data.get("organization") or "").strip()
+        position = str(request.data.get("position") or "").strip()
         participant_code = str(request.data.get("participant_code") or "").strip()
         assigned_variant = ""
         if assessment.participants:
@@ -549,6 +577,7 @@ def public_assessment_start(request, slug):
             email = str(participant.get("email") or email).strip().lower()
             phone = str(participant.get("phone") or phone).strip()
             organization = str(participant.get("organization") or organization).strip()
+            position = str(participant.get("position") or position).strip()
             assigned_variant = str(participant.get("variant") or "").strip()
         missing_fields = []
         if not name:
@@ -609,6 +638,8 @@ def public_assessment_start(request, slug):
             payload["resumed"] = not reset_performed
             payload["reset_performed"] = reset_performed
             return Response(payload)
+        if not position:
+            return _assessment_error("Vui lòng nhập đầy đủ: chức vụ.")
         if contact_attempts.count() >= assessment.attempt_limit:
             return _assessment_error(f"Bạn đã sử dụng đủ {assessment.attempt_limit} lượt làm bài.")
         variants = variants_for(assessment)
@@ -631,6 +662,7 @@ def public_assessment_start(request, slug):
             email=email,
             phone=phone,
             organization=organization,
+            position=position,
             participant_code=participant_code,
             variant=variant,
             expires_at=expires_at,

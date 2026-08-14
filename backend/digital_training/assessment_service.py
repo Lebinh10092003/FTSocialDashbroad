@@ -123,6 +123,37 @@ def _option_answer_key(value, option_keys):
     return ""
 
 
+def _split_matching_column(value, label_pattern):
+    source = str(value or "").strip()
+    matches = list(re.finditer(label_pattern, source, flags=re.IGNORECASE))
+    if not matches:
+        return []
+    result = []
+    for index, match in enumerate(matches):
+        label = match.group(1).upper()
+        text = source[match.end():matches[index + 1].start() if index + 1 < len(matches) else len(source)].strip()
+        if text:
+            result.append((label, text))
+    return result
+
+
+def _normalized_matching_options(options):
+    """Support banks that place all left/right values in separate CỘT A/B cells."""
+    original = [dict(option) for option in options if isinstance(option, dict)]
+    if not original or all(str(option.get("match_text") or "").strip() for option in original):
+        return original
+    left_source = next((str(option.get("text") or "") for option in original if _key(option.get("text")).startswith("cota")), "")
+    right_source = next((str(option.get("text") or "") for option in original if _key(option.get("text")).startswith("cotb")), "")
+    left_items = _split_matching_column(left_source, r"(?:^|\s)([A-E])\s*[.)]")
+    right_items = _split_matching_column(right_source, r"(?:^|\s)(\d{1,2})\s*[.)]")
+    if len(left_items) < 2 or len(left_items) != len(right_items):
+        return original
+    return [
+        {"key": str(index), "text": left_text, "match_text": right_text}
+        for index, ((_, left_text), (_, right_text)) in enumerate(zip(left_items, right_items), start=1)
+    ]
+
+
 def _header_row(sheet):
     # Some valid XLSX generators omit worksheet ``<dimension>`` metadata.
     # In read-only mode openpyxl then leaves max_row/max_column as None until
@@ -183,6 +214,7 @@ def parse_assessment_workbook(content, source_name=""):
                     pair = re.split(r"\s*(?:=>|→|\|)\s*", option["text"], maxsplit=1)
                     if len(pair) == 2 and all(pair):
                         option["text"], option["match_text"] = pair
+                options = _normalized_matching_options(options)
                 if options and not all(option.get("match_text") for option in options):
                     warnings.append(
                         f"{sheet.title}!{row_number}: nên nhập mỗi cặp ghép theo dạng “vế trái | vế phải” để người làm thấy đủ nội dung."
@@ -753,14 +785,17 @@ def public_questions(assessment, variant):
     for item in assessment.questions:
         if str(item.get("variant") or "Đề 1") != variant:
             continue
-        result.append({
+        question = {
             key: item.get(key)
             for key in (
                 "id", "question_code", "order", "type", "knowledge_type", "text",
                 "options", "points", "required", "image_url", "media_url",
                 "media_file_id", "answer_image_url", "category", "difficulty",
             )
-        })
+        }
+        if question.get("type") == "matching":
+            question["options"] = _normalized_matching_options(question.get("options") or [])
+        result.append(question)
     # Existing assessments are also presented theory-first. This keeps the new
     # experience consistent without rewriting stored question data.
     return sorted(
@@ -1011,7 +1046,7 @@ def prepare_assessment_google_sheet(assessment):
 
     for variant, sheet_title in layout["answer_sheets"].items():
         question_count = len([item for item in assessment.questions if str(item.get("variant") or "") == variant])
-        headers = ["M\u00e3 l\u01b0\u1ee3t l\u00e0m", "M\u00e3 ng\u01b0\u1eddi l\u00e0m", "H\u1ecd t\u00ean", "Email", "M\u00e3 \u0111\u1ec1", "Tr\u1ea1ng th\u00e1i", *[f"C\u00e2u {index}" for index in range(1, question_count + 1)], "\u0110i\u1ec3m t\u1ef1 \u0111\u1ed9ng", "\u0110i\u1ec3m th\u1ef1c h\u00e0nh", "T\u1ed5ng \u0111i\u1ec3m", "Link s\u1ea3n ph\u1ea9m", "File ID minh ch\u1ee9ng", "Tr\u1ea1ng th\u00e1i ch\u1ea5m", "Tr\u1ea1ng th\u00e1i \u0111\u1ed3ng b\u1ed9", "Th\u1eddi \u0111i\u1ec3m ghi Sheet", "H\u1ea1n x\u00f3a d\u1eef li\u1ec7u t\u1ea1m"]
+        headers = ["M\u00e3 l\u01b0\u1ee3t l\u00e0m", "M\u00e3 ng\u01b0\u1eddi l\u00e0m", "H\u1ecd t\u00ean", "Email", "M\u00e3 \u0111\u1ec1", "Tr\u1ea1ng th\u00e1i", *[f"C\u00e2u {index}" for index in range(1, question_count + 1)], "\u0110i\u1ec3m t\u1ef1 \u0111\u1ed9ng", "\u0110i\u1ec3m th\u1ef1c h\u00e0nh", "T\u1ed5ng \u0111i\u1ec3m", "Link s\u1ea3n ph\u1ea9m", "File ID minh ch\u1ee9ng", "Tr\u1ea1ng th\u00e1i ch\u1ea5m", "Tr\u1ea1ng th\u00e1i \u0111\u1ed3ng b\u1ed9", "Th\u1eddi \u0111i\u1ec3m ghi Sheet", "H\u1ea1n x\u00f3a d\u1eef li\u1ec7u t\u1ea1m", "S\u1ed1 \u0111i\u1ec7n tho\u1ea1i", "T\u1ed5 chuy\u00ean m\u00f4n/Ph\u00f2ng ban", "Ch\u1ee9c v\u1ee5"]
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
             range=f"'{sheet_title}'!A1",
@@ -1065,6 +1100,7 @@ def sync_attempt_to_google_sheet(attempt):
         "Cần chấm" if attempt.manual_grading_required else "Đã chấm",
         "Đã ghi", attempt.submitted_at.isoformat() if attempt.submitted_at else "",
         attempt.purge_after.isoformat() if attempt.purge_after else "",
+        attempt.phone, attempt.organization, attempt.position,
     ]
     sheet_title = layout["answer_sheets"][attempt.variant]
     existing = service.spreadsheets().values().get(

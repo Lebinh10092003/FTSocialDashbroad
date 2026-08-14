@@ -592,6 +592,29 @@ class TrainingAssessmentTests(TestCase):
         self.assertEqual(result["questions"][0]["audience_group"], "THPT")
         self.assertTrue(all(item["question_code"] for item in result["questions"]))
 
+    def test_matching_columns_are_expanded_into_pairs(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "THCS"
+        sheet.append(["order", "question type", "question", "option 1", "option 2", "answer"])
+        sheet.append([
+            1, "matching", "Ghép nội dung",
+            "CỘT A A. Thùng rác B. Vai trò Commenter",
+            "CỘT B 1. Khôi phục tệp 2. Chỉ được nhận xét",
+            "1-A|2-B",
+        ])
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+
+        result = parse_assessment_workbook(buffer.getvalue(), "matching-columns.xlsx")
+
+        self.assertEqual(result["errors"], [])
+        options = result["questions"][0]["options"]
+        self.assertEqual(options, [
+            {"key": "1", "text": "Thùng rác", "match_text": "Khôi phục tệp"},
+            {"key": "2", "text": "Vai trò Commenter", "match_text": "Chỉ được nhận xét"},
+        ])
+
     def test_xlsx_parser_supports_variant_column(self):
         workbook = Workbook()
         sheet = workbook.active
