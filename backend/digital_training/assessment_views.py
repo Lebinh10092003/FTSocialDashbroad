@@ -46,6 +46,16 @@ def _assessment_error(message, code=status.HTTP_400_BAD_REQUEST):
     return Response({"error": message}, status=code)
 
 
+def _require_confirmation_password(request):
+    password = str(request.data.get("confirmation_password") or "")
+    if not password:
+        return _assessment_error("Vui lòng nhập mật khẩu để xác nhận thao tác.", status.HTTP_403_FORBIDDEN)
+    django_user = getattr(request, "django_user", None)
+    if django_user is None or not django_user.check_password(password):
+        return _assessment_error("Mật khẩu xác nhận không chính xác.", status.HTTP_403_FORBIDDEN)
+    return None
+
+
 def _public_assessment_by_slug(slug, *, lock=False):
     queryset = TrainingAssessment.objects.select_related("session", "partner", "training_class")
     if lock:
@@ -325,10 +335,10 @@ def assessment_detail(request, pk):
     if request.method == "DELETE":
         active_count = item.attempts.filter(status="in_progress").count()
         if active_count:
-            return _assessment_error(
-                f"Có {active_count} người đang làm bài. Đóng bài trước khi xóa.",
-                status.HTTP_409_CONFLICT,
-            )
+            password_error = _require_confirmation_password(request)
+            if password_error:
+                return password_error
+            item.attempts.filter(status="in_progress").update(status="timed_out", submitted_at=timezone.now())
         total_attempts = item.attempts.count()
         force = str(request.data.get("force") or "").strip().lower() in {"true", "1", "yes"}
         if total_attempts and not force:
@@ -338,6 +348,8 @@ def assessment_detail(request, pk):
             )
         item.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+    if str(request.data.get("status") or "") == "closed":
+        item.attempts.filter(status="in_progress").update(status="timed_out", submitted_at=timezone.now())
     serializer = TrainingAssessmentSerializer(item, data=request.data, partial=True, context={"request": request})
     serializer.is_valid(raise_exception=True)
     updated = serializer.save()
@@ -501,6 +513,25 @@ def assessment_result_grade(request, pk, attempt_pk):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+def assessment_result_kick(request, pk, attempt_pk):
+    if not _can_manage(request):
+        return _forbidden()
+    password_error = _require_confirmation_password(request)
+    if password_error:
+        return password_error
+    attempt = TrainingAssessmentAttempt.objects.filter(pk=attempt_pk, assessment_id=pk).first()
+    if not attempt:
+        return _assessment_error("Không tìm thấy lượt làm bài.", status.HTTP_404_NOT_FOUND)
+    if attempt.status != "in_progress":
+        return _assessment_error("Lượt làm này đã kết thúc.")
+    attempt.status = "timed_out"
+    attempt.submitted_at = timezone.now()
+    attempt.save(update_fields=["status", "submitted_at", "updated_at"])
+    return Response(TrainingAssessmentAttemptSerializer(attempt, context={"request": request}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def assessment_prepare_output(request, pk):
     if not _can_manage(request):
         return _forbidden()
@@ -527,6 +558,9 @@ def assessment_result_storage(request, pk, attempt_pk):
     if not attempt:
         return _assessment_error("Không tìm thấy lượt làm bài.", status.HTTP_404_NOT_FOUND)
     if request.method == "DELETE":
+        password_error = _require_confirmation_password(request)
+        if password_error:
+            return password_error
         if attempt.sync_status != "synced":
             return _assessment_error("Chỉ được xóa dữ liệu tạm sau khi đồng bộ Google Sheets thành công.")
         try:

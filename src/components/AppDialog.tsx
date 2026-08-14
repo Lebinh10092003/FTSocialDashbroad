@@ -11,6 +11,7 @@ type CommonOptions = {
 type PromptOptions = CommonOptions & {
   defaultValue?: string;
   placeholder?: string;
+  inputType?: React.HTMLInputTypeAttribute;
 };
 type DialogRequest =
   | (CommonOptions & { kind: 'alert'; message: string; resolve: () => void })
@@ -155,6 +156,7 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
                   value={promptValue}
                   onChange={event => setPromptValue(event.target.value)}
                   placeholder={request.placeholder}
+                  type={request.inputType || 'text'}
                   className={'ft-input'}
                 />
               </form>

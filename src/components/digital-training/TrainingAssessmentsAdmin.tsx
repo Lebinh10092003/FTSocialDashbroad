@@ -673,10 +673,24 @@ export default function TrainingAssessmentsAdmin({
 
   const updateResultStorage = async (result: any, removeStored = false) => {
     if (!selected) return;
+    let confirmationPassword = "";
+    if (removeStored) {
+      const password = await confirmWithPassword(
+        `Xóa vĩnh viễn lượt làm của ${result.respondent_name}? Dữ liệu đã đồng bộ sẽ không còn hiển thị trong hệ thống.`,
+        "Xóa lượt làm",
+        "Xóa lượt làm",
+      );
+      if (!password) return;
+      confirmationPassword = password;
+    }
     setBusy(true);
     setNotice("");
     try {
-      const response = await fetch(`/api/digital-training/assessments/${selected.id}/results/${result.id}/storage`, { method: removeStored ? "DELETE" : "POST", headers: auth });
+      const response = await fetch(`/api/digital-training/assessments/${selected.id}/results/${result.id}/storage`, {
+        method: removeStored ? "DELETE" : "POST",
+        headers: removeStored ? { ...auth, "Content-Type": "application/json" } : auth,
+        body: removeStored ? JSON.stringify({ confirmation_password: confirmationPassword }) : undefined,
+      });
       if (!response.ok) throw new Error(await errorText(response));
       if (removeStored) setResults((current) => current.filter((item) => item.id !== result.id));
       else {
@@ -690,8 +704,56 @@ export default function TrainingAssessmentsAdmin({
     }
   };
 
+  const confirmWithPassword = async (message: string, title: string, confirmText: string) => {
+    const confirmed = await appDialog.confirm(message, { title, confirmText, tone: "danger" });
+    if (!confirmed) return null;
+    return appDialog.prompt("Nhập mật khẩu tài khoản hiện tại để hoàn tất thao tác.", {
+      title: "Xác nhận bằng mật khẩu",
+      confirmText: "Xác nhận",
+      placeholder: "Mật khẩu hiện tại",
+      inputType: "password",
+      tone: "danger",
+    });
+  };
+
+  const endAttempt = async (result: any) => {
+    if (!selected) return;
+    const password = await confirmWithPassword(
+      `Kết thúc ngay lượt làm của ${result.respondent_name}. Người này sẽ không thể tiếp tục làm hoặc nộp bài.`,
+      "Kết thúc lượt làm",
+      "Kết thúc lượt làm",
+    );
+    if (!password) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch(`/api/digital-training/assessments/${selected.id}/results/${result.id}/kick`, {
+        method: "POST",
+        headers: { ...auth, "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation_password: password }),
+      });
+      if (!response.ok) throw new Error(await errorText(response));
+      const updated = await response.json();
+      setResults((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setSelected((current) => current ? { ...current, submitted_count: current.submitted_count + 1 } : current);
+      setItems((current) => current.map((item) => item.id === selected.id ? { ...item, submitted_count: item.submitted_count + 1 } : item));
+      setNotice(`Đã kết thúc lượt làm của ${result.respondent_name}.`);
+    } catch (error: any) {
+      setNotice(String(error?.message || error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const changeStatus = async (status: Assessment["status"]) => {
     if (!selected) return;
+    if (status === "closed") {
+      const confirmed = await appDialog.confirm(
+        "Đóng bài sẽ kết thúc ngay các lượt làm còn đang mở. Người học sẽ không thể tiếp tục làm bài.",
+        { title: "Đóng bài kiểm tra", confirmText: "Đóng bài", tone: "warning" },
+      );
+      if (!confirmed) return;
+    }
     setBusy(true);
     try {
       const response = await fetch(`/api/digital-training/assessments/${selected.id}`, {
@@ -769,27 +831,24 @@ export default function TrainingAssessmentsAdmin({
 
   const remove = async () => {
     if (!selected) return;
-    // First check if there's data
     const hasAttempts = selected.attempts_count > 0;
-    const hasActive = selected.sync_counts?.pending > 0;
+    const hasActive = results.some((item) => item.status === "in_progress");
     let confirmMsg = `Xóa "${selected.title}" và toàn bộ lượt làm bài?`;
     if (hasActive) {
       confirmMsg = `Bài có lượt đang chờ đồng bộ. Xóa sẽ mất dữ liệu! Tiếp tục?`;
     } else if (hasAttempts) {
       confirmMsg = `Bài có ${selected.submitted_count} lượt đã nộp. Xóa toàn bộ?`;
     }
-    const confirmed = await appDialog.confirm(confirmMsg, {
-      title: "Xóa bài đánh giá",
-      confirmText: "Xóa bài đánh giá",
-      tone: "danger",
-    });
-    if (!confirmed) return;
+    const password = hasActive
+      ? await confirmWithPassword(confirmMsg, "Xóa bài đang có người làm", "Xóa bài và kết thúc lượt làm")
+      : (await appDialog.confirm(confirmMsg, { title: "Xóa bài kiểm tra", confirmText: "Xóa bài kiểm tra", tone: "danger" }) ? "" : null);
+    if (password === null) return;
     setBusy(true);
     try {
       const response = await fetch(`/api/digital-training/assessments/${selected.id}`, {
         method: "DELETE",
         headers: { ...auth, "Content-Type": "application/json" },
-        body: JSON.stringify({ force: true }),
+        body: JSON.stringify({ force: true, confirmation_password: password }),
       });
       if (!response.ok) {
         const errText = await errorText(response);
@@ -1026,7 +1085,7 @@ export default function TrainingAssessmentsAdmin({
           <div className="overflow-x-auto">
             <table className="ft-table min-w-[1420px]">
               <thead><tr><th>STT</th><th>Người học</th><th>Liên hệ</th><th>Tổ chuyên môn/Phòng ban</th><th>Chức vụ</th><th>Mã đề</th><th>Bài thực hành</th><th>Điểm</th><th>Trạng thái</th><th>Bắt đầu lúc</th><th>Nộp lúc</th></tr></thead>
-              <tbody>{results.length ? results.map((item, index) => <tr key={item.id}><td>{index + 1}</td><td><b>{item.respondent_name}</b></td><td>{item.email || item.phone || "—"}</td><td>{item.organization || "—"}</td><td>{item.position || "—"}</td><td>{item.variant}</td><td>{item.uploads?.length ? <div className="space-y-1">{item.uploads.map((upload: any, uploadIndex: number) => <a key={upload.id} href={upload.url} target="_blank" rel="noreferrer" className="block text-xs font-bold text-blue-700 underline">Xem ảnh {uploadIndex + 1}</a>)}</div> : "—"}</td><td>{item.manual_grading_required ? <div className="flex min-w-40 items-center gap-2"><input type="number" min="0" max={Number(item.max_score || 0)} step="0.25" value={manualScores[item.id] ?? ""} onChange={(event) => setManualScores((current) => ({ ...current, [item.id]: event.target.value }))} className="w-20 rounded-lg border px-2 py-1.5 text-sm" aria-label="Tổng điểm sau chấm thủ công" /><span className="text-xs text-slate-500">/ {Number(item.max_score || 0).toLocaleString("vi-VN")}</span><button disabled={busy} onClick={() => void gradeResult(item)} className="rounded-lg bg-blue-600 px-2 py-1.5 text-xs font-bold text-white">Lưu</button></div> : <b>{Number(item.score || 0).toLocaleString("vi-VN")} / {Number(item.max_score || 0).toLocaleString("vi-VN")}</b>}</td><td>{item.status === "submitted" ? "Đã nộp" : item.status === "timed_out" ? "Hết giờ" : "Đang làm"}<div className={`mt-2 text-[11px] font-bold ${item.sync_status === "synced" ? "text-emerald-600" : item.sync_status === "error" ? "text-rose-600" : "text-amber-600"}`}>Sync: {item.sync_status || "pending"}</div><div className="mt-1 flex gap-1">{item.status !== "in_progress" && item.sync_status !== "synced" && <button disabled={busy} onClick={() => void updateResultStorage(item)} className="rounded border px-2 py-1 text-[11px] font-bold">Thử lại</button>}{item.sync_status === "synced" && <button disabled={busy} onClick={async () => { const confirmed = await appDialog.confirm("Xóa dữ liệu tạm đã đồng bộ?", { title: "Xóa dữ liệu tạm", confirmText: "Xóa dữ liệu", tone: "danger" }); if (confirmed) void updateResultStorage(item, true); }} className="rounded border border-rose-200 px-2 py-1 text-[11px] font-bold text-rose-600">Xóa tạm</button>}</div></td><td>{item.started_at ? new Date(item.started_at).toLocaleString("vi-VN") : "—"}</td><td>{item.submitted_at ? new Date(item.submitted_at).toLocaleString("vi-VN") : "—"}</td></tr>) : <tr><td colSpan={11} className="py-10 text-center text-slate-500">Chưa có lượt làm bài.</td></tr>}</tbody>
+              <tbody>{results.length ? results.map((item, index) => <tr key={item.id}><td>{index + 1}</td><td><b>{item.respondent_name}</b></td><td>{item.email || item.phone || "—"}</td><td>{item.organization || "—"}</td><td>{item.position || "—"}</td><td>{item.variant}</td><td>{item.uploads?.length ? <div className="space-y-1">{item.uploads.map((upload: any, uploadIndex: number) => <a key={upload.id} href={upload.url} target="_blank" rel="noreferrer" className="block text-xs font-bold text-blue-700 underline">Xem ảnh {uploadIndex + 1}</a>)}</div> : "—"}</td><td>{item.manual_grading_required ? <div className="flex min-w-40 items-center gap-2"><input type="number" min="0" max={Number(item.max_score || 0)} step="0.25" value={manualScores[item.id] ?? ""} onChange={(event) => setManualScores((current) => ({ ...current, [item.id]: event.target.value }))} className="w-20 rounded-lg border px-2 py-1.5 text-sm" aria-label="Tổng điểm sau chấm thủ công" /><span className="text-xs text-slate-500">/ {Number(item.max_score || 0).toLocaleString("vi-VN")}</span><button disabled={busy} onClick={() => void gradeResult(item)} className="rounded-lg bg-blue-600 px-2 py-1.5 text-xs font-bold text-white">Lưu</button></div> : <b>{Number(item.score || 0).toLocaleString("vi-VN")} / {Number(item.max_score || 0).toLocaleString("vi-VN")}</b>}</td><td>{item.status === "submitted" ? "Đã nộp" : item.status === "timed_out" ? "Hết giờ" : "Đang làm"}<div className={`mt-2 text-[11px] font-bold ${item.sync_status === "synced" ? "text-emerald-600" : item.sync_status === "error" ? "text-rose-600" : "text-amber-600"}`}>Sync: {item.sync_status || "pending"}</div><div className="mt-1 flex flex-wrap gap-1">{item.status === "in_progress" && <button disabled={busy} onClick={() => void endAttempt(item)} className="rounded border border-amber-300 px-2 py-1 text-[11px] font-bold text-amber-800">Kết thúc lượt</button>}{item.status !== "in_progress" && item.sync_status !== "synced" && <button disabled={busy} onClick={() => void updateResultStorage(item)} className="rounded border px-2 py-1 text-[11px] font-bold">Thử lại</button>}{item.sync_status === "synced" && <button disabled={busy} onClick={() => void updateResultStorage(item, true)} className="rounded border border-rose-200 px-2 py-1 text-[11px] font-bold text-rose-600">Xóa lượt</button>}</div></td><td>{item.started_at ? new Date(item.started_at).toLocaleString("vi-VN") : "—"}</td><td>{item.submitted_at ? new Date(item.submitted_at).toLocaleString("vi-VN") : "—"}</td></tr>) : <tr><td colSpan={11} className="py-10 text-center text-slate-500">Chưa có lượt làm bài.</td></tr>}</tbody>
             </table>
           </div>
         </div>
