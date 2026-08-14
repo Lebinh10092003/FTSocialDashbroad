@@ -1061,7 +1061,7 @@ export default function TrainingAssessmentsAdmin({
     return (
       <section className="mt-6 space-y-5">
         <button onClick={() => { setScreen("list"); setSelected(null); }} className="inline-flex items-center gap-2 text-sm font-bold text-slate-600"><ArrowLeft className="h-4 w-4" />Quay lại danh sách</button>
-        <article className="overflow-hidden rounded-2xl border bg-white shadow-sm">
+        <article className="assessment-detail-card overflow-hidden rounded-2xl border bg-white shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4 p-6">
             <div><p className="text-xs font-bold uppercase text-blue-600">Bài kiểm tra cuối khóa tập huấn</p><h2 className="mt-1 text-2xl font-extrabold">{selected.title}</h2><p className="mt-2 text-sm text-slate-500">{[selected.partner_name, selected.class_name].filter(Boolean).join(" · ")}</p></div>
             <div className="flex flex-wrap gap-2">{selected.status !== "published" && <button disabled={busy} onClick={() => void changeStatus("published")} className="ft-primary"><Send className="h-4 w-4" />{selected.status === "closed" ? "Mở lại bài" : "Phát hành"}</button>}{selected.status === "published" && <button disabled={busy} onClick={() => void changeStatus("closed")} className="ft-btn ft-btn-secondary">Đóng bài</button>}<button aria-label="Xóa bài kiểm tra" title="Xóa bài kiểm tra" onClick={() => void remove()} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-bold text-rose-700"><Trash2 className="h-4 w-4" /></button></div>

@@ -995,6 +995,33 @@ body {
 .ft-primary { background: linear-gradient(135deg, #0055DA, #0042AD) !important; box-shadow: 0 4px 14px rgba(0,85,218,.30) !important; color: #fff !important; }
 .ft-primary:hover { background: linear-gradient(135deg, #0042AD, #00358B) !important; box-shadow: 0 6px 18px rgba(0,85,218,.36) !important; }
 .ft-input:focus, .ft-input-wrap:focus-within { border-color: #0055DA !important; box-shadow: 0 0 0 3px rgba(0,85,218,.14) !important; }
+
+/* Put assessment configuration and output controls side by side on wide screens. */
+@media (min-width: 1280px) {
+  .assessment-detail-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(19rem, 25rem);
+  }
+  .assessment-detail-card > :nth-child(-n + 3) {
+    grid-column: 1 / -1;
+  }
+  .assessment-detail-card > :nth-child(4) {
+    grid-column: 1;
+  }
+  .assessment-detail-card > :nth-child(5) {
+    grid-column: 2;
+    grid-row: 4;
+    border-top: 1px solid rgb(226 232 240);
+    padding: 1.5rem 1.5rem 1.5rem 0;
+  }
+  .assessment-detail-card > :nth-child(4) > div,
+  .assessment-detail-card > :nth-child(5) > div {
+    max-width: none;
+  }
+  .assessment-detail-card > :nth-child(5) > div > div {
+    align-items: stretch;
+  }
+}
 .ft-page.active { background:#0055DA; border-color:#0055DA; box-shadow:0 2px 8px rgba(0,85,218,.30); }
 
 /* Unified module navigation keeps the white identity frame, inside a sapphire blue navigation surface. */
