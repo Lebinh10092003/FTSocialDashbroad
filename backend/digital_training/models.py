@@ -1,6 +1,7 @@
 import uuid
 
 from django.db import models
+from django.db.models import Q
 from django.utils.text import slugify
 
 
@@ -176,6 +177,21 @@ class TrainingSession(models.Model):
 
     class Meta:
         ordering = ["session_date", "start_time", "title"]
+        constraints = [
+            # A session without a class belongs directly to its customer.  Class
+            # sessions use a separate constraint because NULL values do not
+            # compare equal in a composite unique constraint on PostgreSQL.
+            models.UniqueConstraint(
+                fields=["partner_ref", "session_number"],
+                condition=Q(training_class__isnull=True, partner_ref__isnull=False),
+                name="unique_partner_session_number",
+            ),
+            models.UniqueConstraint(
+                fields=["training_class", "session_number"],
+                condition=Q(training_class__isnull=False),
+                name="unique_class_session_number",
+            ),
+        ]
 
 
 class TrainingLead(models.Model):

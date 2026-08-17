@@ -229,6 +229,9 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TrainingSession
+        # Duplicate-number validation below gives users a useful Vietnamese
+        # error and accounts for the two nullable ownership fields.
+        validators = []
         fields = [
             "id", "title", "session_number", "date", "start_time", "end_time", "partner", "partner_id", "partner_name",
             "class_group_id", "class_group_name", "category", "contents", "attendees", "location",
@@ -245,6 +248,27 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
         if not isinstance(value, list):
             raise serializers.ValidationError("Nội dung tập huấn phải là danh sách.")
         return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+    def validate(self, attrs):
+        session_number = attrs.get("session_number", getattr(self.instance, "session_number", None))
+        training_class = attrs.get("training_class", getattr(self.instance, "training_class", None))
+        partner = attrs.get("partner_ref", getattr(self.instance, "partner_ref", None))
+        if training_class:
+            partner = training_class.partner
+
+        if session_number and partner:
+            duplicates = TrainingSession.objects.filter(session_number=session_number)
+            if training_class:
+                duplicates = duplicates.filter(training_class=training_class)
+            else:
+                duplicates = duplicates.filter(partner_ref=partner, training_class__isnull=True)
+            if self.instance:
+                duplicates = duplicates.exclude(pk=self.instance.pk)
+            if duplicates.exists():
+                raise serializers.ValidationError({
+                    "session_number": "Khách hàng/lớp này đã có lịch cho buổi này.",
+                })
+        return attrs
 
     def _mark_past_session_completed(self, validated_data):
         session_date = validated_data.get("session_date", getattr(self.instance, "session_date", None))

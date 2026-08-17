@@ -62,6 +62,30 @@ class TrainingSurveySerializerTests(TestCase):
         self.assertEqual(survey.session, self.session)
         self.assertEqual(survey.partner, self.partner)
 
+
+class TrainingSessionNumberTests(TestCase):
+    def test_duplicate_partner_session_number_is_rejected(self):
+        partner = TrainingPartner.objects.create(name="Khách hàng kiểm tra lịch")
+        TrainingSession.objects.create(
+            title="Buổi 6 đã có lịch",
+            partner=partner.name,
+            partner_ref=partner,
+            session_number=6,
+            session_date=date(2026, 8, 14),
+            status="planned",
+        )
+
+        serializer = TrainingSessionSerializer(data={
+            "title": "Buổi 6 bị trùng",
+            "partner_id": partner.pk,
+            "class_group_id": None,
+            "session_number": 6,
+            "status": "unscheduled",
+        })
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("session_number", serializer.errors)
+
 class OtherWorkScheduleSerializerTests(TestCase):
     def test_other_schedule_keeps_its_selected_type(self):
         serializer = TrainingCustomerMeetingSerializer(

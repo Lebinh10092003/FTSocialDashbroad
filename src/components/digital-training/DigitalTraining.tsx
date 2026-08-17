@@ -3827,6 +3827,13 @@ export default function DigitalTraining({
       )
       .sort(
         (a, b) =>
+          // Historical imports may contain duplicate session numbers.  Prefer
+          // the record that has an actual date over a later blank placeholder,
+          // so the progress table remains correct until the server cleans it.
+          Number(Boolean(b.date)) - Number(Boolean(a.date)) ||
+          Number(Boolean(b.start_time)) - Number(Boolean(a.start_time)) ||
+          ({ completed: 3, planned: 2, unscheduled: 1, cancelled: 0 }[b.status] || 0) -
+            ({ completed: 3, planned: 2, unscheduled: 1, cancelled: 0 }[a.status] || 0) ||
           (a.session_number || 999) - (b.session_number || 999) ||
           String(a.date || "").localeCompare(String(b.date || "")) ||
           a.id - b.id,
