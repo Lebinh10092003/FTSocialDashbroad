@@ -94,6 +94,14 @@ def _bank_normalized(value):
     return "".join(char for char in text if unicodedata.category(char) != "Mn")
 
 
+def _accepts_notebooklm_image_upload(question):
+    """Only NotebookLM practical tasks collect a screenshot as evidence."""
+    return (
+        question.get("type") == "practical_submission"
+        and "notebooklm" in _bank_normalized(question.get("category"))
+    )
+
+
 def _question_bank_inventory(questions):
     sheets = {}
     for question in questions:
@@ -885,10 +893,12 @@ def public_attempt_upload(request, token):
     )
     if not question or question.get("type") not in {"file_upload", "practical_submission"}:
         return _assessment_error("Câu thực hành không hợp lệ.")
+    if not _accepts_notebooklm_image_upload(question):
+        return _assessment_error("Chỉ câu thực hành thuộc chủ đề NotebookLM mới cho phép tải ảnh; các câu khác chỉ nhận link chia sẻ.")
     uploaded = request.FILES.get("file")
     if not uploaded:
         return _assessment_error("Vui lòng chọn ảnh.")
-    image_only = question.get("type") == "practical_submission"
+    image_only = True
     maximum_size = 5 if image_only else 10
     if uploaded.size > maximum_size * 1024 * 1024:
         return _assessment_error(f"Tệp không được vượt quá {maximum_size} MB.")
