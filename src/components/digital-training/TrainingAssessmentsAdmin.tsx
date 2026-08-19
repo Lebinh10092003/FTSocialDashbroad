@@ -12,6 +12,7 @@ import {
   Layers3,
   Link2,
   Loader2,
+  Pencil,
   Plus,
   QrCode,
   RefreshCw,
@@ -77,6 +78,7 @@ type Preview = {
   variants: Array<{ name: string; question_count: number }>;
   question_count: number;
   errors: string[];
+  question_errors?: Array<{ source?: string; question_id?: string; question_code?: string; variant?: string; message: string }>;
   warnings: string[];
   import_mode: "prepared" | "auto_generate";
   source_question_count?: number;
@@ -152,6 +154,21 @@ const questionTypeLabels: Record<string, string> = {
   practical_submission: "Điền đáp án / nộp sản phẩm",
   file_upload: "Tải tệp",
 };
+const questionTypes = Object.entries(questionTypeLabels);
+const optionText = (question: any) => (question.options || []).map((option: any) => question.type === "matching"
+  ? `${option.text || ""} | ${option.match_text || ""}`
+  : option.text || "").join("\n");
+const optionsFromText = (type: string, value: string) => value.split("\n").map((line, index) => {
+  const [left, right] = type === "matching" ? line.split(/\s*(?:\||→|=>)\s*/, 2) : [line];
+  return { key: String(index + 1), text: String(left || "").trim(), ...(type === "matching" ? { match_text: String(right || "").trim() } : {}) };
+}).filter((option) => option.text || option.match_text);
+
+function QuestionEditor({ question, onChange, onClose }: { question: any; onChange: (next: any) => void; onClose: () => void }) {
+  const needsOptions = ["single_choice", "multiple_choice", "matching", "ordering"].includes(question.type);
+  return <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50/60 p-4 text-sm">
+    <div className="grid gap-3 sm:grid-cols-2"><label className="sm:col-span-2"><span className="mb-1 block font-bold">Nội dung câu hỏi</span><textarea className="ft-input min-h-20 bg-white" value={question.text || ""} onChange={(event) => onChange({ ...question, text: event.target.value })} /></label><label><span className="mb-1 block font-bold">Dạng câu</span><select className="ft-input bg-white" value={question.type} onChange={(event) => onChange({ ...question, type: event.target.value, options: optionsFromText(event.target.value, optionText(question)) })}>{questionTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span className="mb-1 block font-bold">Điểm</span><input type="number" min="0" step="0.25" className="ft-input bg-white" value={question.points ?? 1} onChange={(event) => onChange({ ...question, points: Number(event.target.value) })} /></label>{needsOptions && <label className="sm:col-span-2"><span className="mb-1 block font-bold">{question.type === "matching" ? "Các cặp ghép (mỗi dòng: vế trái | vế phải)" : "Phương án (mỗi dòng một phương án)"}</span><textarea className="ft-input min-h-28 bg-white" value={optionText(question)} onChange={(event) => onChange({ ...question, options: optionsFromText(question.type, event.target.value) })} /></label>}<label className="sm:col-span-2"><span className="mb-1 block font-bold">Đáp án đúng</span><input className="ft-input bg-white" value={(question.correct_answers || []).join(question.type === "matching" || question.type === "ordering" ? "" : " | ")} onChange={(event) => onChange({ ...question, correct_answers: event.target.value ? (question.type === "matching" || question.type === "ordering" ? [event.target.value] : event.target.value.split(/[|;]/).map((item) => item.trim()).filter(Boolean)) : [] })} placeholder={question.type === "matching" ? "VD: 1-A|2-B" : question.type === "ordering" ? "VD: 3|1|2" : "VD: 1 | 3"} /></label></div><div className="mt-3 flex justify-end"><button type="button" onClick={onClose} className="ft-btn ft-btn-secondary">Đóng chỉnh sửa</button></div>
+  </div>;
+}
 const DEFAULT_QUESTION_BANK_URL = "https://docs.google.com/spreadsheets/d/1zdlpFOO7p93DuQbXpRhvG4xi89u6L7O-2O1UqBaAV3c/edit?usp=sharing";
 type QuestionBankSettings = { default_url: string };
 type CachedQuestionBank = Preview & { synced_at?: string; inventory?: { sheets?: Array<{ name: string; topics?: Array<{ name: string; total: number; theory: number; practice: number; easy: number; medium: number; hard: number }> }> } };
@@ -173,7 +190,7 @@ export default function TrainingAssessmentsAdmin({
   const [results, setResults] = useState<any[]>([]);
   const [manualScores, setManualScores] = useState<Record<number, string>>({});
   const [scheduleDraft, setScheduleDraft] = useState({ opens_at: "", closes_at: "" });
-  const [detailTab, setDetailTab] = useState<"overview" | "settings">("overview");
+  const [detailTab, setDetailTab] = useState<"overview" | "settings" | "questions">("overview");
   const [detailDraft, setDetailDraft] = useState({ duration_minutes: "", attempt_limit: "", description: "", instructions: "" });
   const [screen, setScreen] = useState<"list" | "create" | "detail" | "bank">("list");
   const [draft, setDraft] = useState(emptyDraft);
@@ -186,6 +203,10 @@ export default function TrainingAssessmentsAdmin({
   const [bankSource, setBankSource] = useState<"default" | "other">("default");
   const [bankSettings, setBankSettings] = useState<QuestionBankSettings>({ default_url: DEFAULT_QUESTION_BANK_URL });
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [previewEdited, setPreviewEdited] = useState(false);
+  const [editingPreviewQuestionId, setEditingPreviewQuestionId] = useState("");
+  const [editingQuestionId, setEditingQuestionId] = useState("");
+  const [variantAddCount, setVariantAddCount] = useState("1");
   const [bankIndex, setBankIndex] = useState<BankIndex | null>(null);
   const [qrUrl, setQrUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -442,6 +463,9 @@ export default function TrainingAssessmentsAdmin({
     setScoreConfig({ theory: "1", practice: "3" });
     setDifficultyCounts({ easy: "0", medium: "0", hard: "0" });
     setStructureDirty(false);
+    setPreview(null);
+    setPreviewEdited(false);
+    setEditingPreviewQuestionId("");
     setNotice("");
     setScreen("create");
   };
@@ -498,6 +522,8 @@ export default function TrainingAssessmentsAdmin({
       }
       if (!response.ok) throw new Error(await errorText(response));
       setPreview(await response.json());
+      setPreviewEdited(false);
+      setEditingPreviewQuestionId("");
       setStructureDirty(false);
     } catch (error: any) {
       setNotice(String(error?.message || error));
@@ -512,8 +538,8 @@ export default function TrainingAssessmentsAdmin({
       return;
     }
     if (importMode === "prepared") {
-      if (!preview || preview.errors.length) {
-        setNotice("Vui lòng đọc và kiểm tra dữ liệu đề trước khi tạo.");
+      if (!preview || (preview.errors.length && !previewEdited)) {
+        setNotice("Có lỗi dữ liệu. Bấm Sửa câu ở dòng lỗi, lưu nội dung đã sửa rồi mới tạo bộ đề.");
         return;
       }
       if (structureDirty) {
@@ -610,11 +636,49 @@ export default function TrainingAssessmentsAdmin({
       setBusy(false);
     }
   };
+  const updatePreviewQuestion = (next: any) => {
+    setPreview((current) => current ? { ...current, questions: current.questions.map((item) => item.id === next.id ? next : item) } : current);
+    setPreviewEdited(true);
+  };
+  const updateSavedQuestion = (next: any) => setSelected((current) => current ? { ...current, questions: current.questions.map((item) => item.id === next.id ? next : item) } : current);
+  const saveQuestions = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch(`/api/digital-training/assessments/${selected.id}`, {
+        method: "PATCH", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify({ questions: selected.questions }),
+      });
+      if (!response.ok) throw new Error(await errorText(response));
+      const updated = await response.json();
+      setSelected(updated);
+      setItems((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setEditingQuestionId("");
+      setNotice("Đã lưu thay đổi câu hỏi.");
+    } catch (error: any) { setNotice(String(error?.message || error)); } finally { setBusy(false); }
+  };
+  const addVariants = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch(`/api/digital-training/assessments/${selected.id}/variants`, {
+        method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify({ count: Number(variantAddCount) || 1 }),
+      });
+      if (!response.ok) throw new Error(await errorText(response));
+      const updated = await response.json();
+      setSelected(updated);
+      setItems((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setVariantAddCount("1");
+      setNotice("Đã bổ sung mã đề mới. Các lượt làm đang có vẫn giữ nguyên mã đề cũ.");
+    } catch (error: any) { setNotice(String(error?.message || error)); } finally { setBusy(false); }
+  };
   const openDetail = async (item: Assessment) => {
     setSelected(item);
     setScheduleDraft({ opens_at: toDateTimeLocal(item.opens_at), closes_at: toDateTimeLocal(item.closes_at) });
     setDetailDraft({ duration_minutes: String(item.duration_minutes || 120), attempt_limit: String(item.attempt_limit || 1), description: item.description || "", instructions: item.instructions || "" });
     setDetailTab("overview");
+    setEditingQuestionId("");
     setScreen("detail");
     setNotice("");
     try {
@@ -1007,8 +1071,9 @@ export default function TrainingAssessmentsAdmin({
                 <div className="flex flex-wrap gap-2">{preview.variants.map((variant) => <span key={variant.name} className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-800">{variant.name}: {variant.question_count} câu</span>)}</div>
                                 {!!bankQuestions.length && <button type="button" onClick={() => setScreen("bank")} className="ft-btn ft-btn-secondary w-full justify-center"><FileSpreadsheet className="h-4 w-4" />Mở trang ngân hàng câu hỏi ({bankQuestions.length})</button>}
                 {preview.warnings.map((warning) => <p key={warning} className="rounded-lg bg-amber-50 p-2 text-xs text-amber-800">{warning}</p>)}
-                {preview.errors.map((error) => <p key={error} className="rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{error}</p>)}
-                {!preview.errors.length && <div className="max-h-96 space-y-2 overflow-y-auto rounded-xl border bg-white p-2">
+                {preview.question_errors?.map((error, index) => <div key={`${error.source}-${index}`} className="rounded-lg bg-rose-50 p-3 text-xs text-rose-800"><b>{error.question_code ? `Câu ${error.question_code}` : "Câu hỏi"}{error.variant ? ` · ${error.variant}` : ""}</b>{error.source && <span className="ml-1 text-rose-600">({error.source})</span>}<p className="mt-1">{error.message}</p>{error.question_id && <button type="button" onClick={() => setEditingPreviewQuestionId(error.question_id || "")} className="mt-2 inline-flex items-center gap-1 rounded border border-rose-300 bg-white px-2 py-1 font-bold text-rose-700"><Pencil className="h-3 w-3" />Sửa câu này</button>}</div>)}
+                {!preview.question_errors?.length && preview.errors.map((error) => <p key={error} className="rounded-lg bg-rose-50 p-2 text-xs text-rose-700">{error}</p>)}
+                <div className="max-h-[34rem] space-y-2 overflow-y-auto rounded-xl border bg-white p-2">
                   <p className="px-2 pt-1 text-xs font-extrabold uppercase text-slate-500">Xem trước từng mã đề</p>
                   {preview.variants.map((variant, variantIndex) => <details key={variant.name} open={variantIndex === 0} className="rounded-lg border">
                     <summary className="cursor-pointer px-3 py-2 text-sm font-extrabold text-[#001e40]">{variant.name} · {variant.question_count} câu</summary>
@@ -1018,8 +1083,9 @@ export default function TrainingAssessmentsAdmin({
                         return <li key={q.id} className="rounded-lg border bg-slate-50 p-3 text-xs">
                           <div className="flex items-start justify-between gap-2">
                             <b className="text-slate-800">{q.order}. {q.text}</b>
-                            <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700">{q.points}đ</span>
+                            <span className="flex shrink-0 items-center gap-1"><span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700">{q.points}đ</span><button type="button" aria-label={`Sửa ${q.question_code || `câu ${q.order}`}`} onClick={() => setEditingPreviewQuestionId(q.id)} className="rounded border bg-white p-1 text-blue-700"><Pencil className="h-3 w-3" /></button></span>
                           </div>
+                          {editingPreviewQuestionId === q.id && <QuestionEditor question={q} onChange={updatePreviewQuestion} onClose={() => setEditingPreviewQuestionId("")} />}
                           {q.category && <span className="mt-1 inline-block rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-bold text-violet-700">{q.category}{q.difficulty ? ` · ${q.difficulty}` : ""}</span>}
                           {(q.options || []).length > 0 && <ul className="mt-2 space-y-1">
                             {(q.options || []).map((opt: any) => {
@@ -1043,14 +1109,14 @@ export default function TrainingAssessmentsAdmin({
                       })}
                     </ol>
                   </details>)}
-                </div>}
+                </div>
               </div>}
             </div>
           </div>
           {notice && <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{notice}</p>}
           {importMode === "prepared" && (<div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
             <label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={draft.status === "published"} onChange={(event) => setDraft({ ...draft, status: event.target.checked ? "published" : "draft" })} />Phát hành ngay sau khi tạo</label>
-            <button disabled={busy || (importMode === "prepared" && (!preview || preview.errors.length > 0 || structureDirty))} onClick={createAssessment} className="ft-primary disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}Tạo khảo sát kết thúc</button>
+            <button disabled={busy || (importMode === "prepared" && (!preview || (preview.errors.length > 0 && !previewEdited) || structureDirty))} onClick={createAssessment} className="ft-primary disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}Tạo khảo sát kết thúc</button>
           </div>)}
         </div>
       </section>
@@ -1066,7 +1132,7 @@ export default function TrainingAssessmentsAdmin({
             <div><p className="text-xs font-bold uppercase text-blue-600">Bài kiểm tra cuối khóa tập huấn</p><h2 className="mt-1 text-2xl font-extrabold">{selected.title}</h2><p className="mt-2 text-sm text-slate-500">{[selected.partner_name, selected.class_name].filter(Boolean).join(" · ")}</p></div>
             <div className="flex flex-wrap gap-2">{selected.status !== "published" && <button disabled={busy} onClick={() => void changeStatus("published")} className="ft-primary"><Send className="h-4 w-4" />{selected.status === "closed" ? "Mở lại bài" : "Phát hành"}</button>}{selected.status === "published" && <button disabled={busy} onClick={() => void changeStatus("closed")} className="ft-btn ft-btn-secondary">Đóng bài</button>}<button aria-label="Xóa bài kiểm tra" title="Xóa bài kiểm tra" onClick={() => void remove()} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-bold text-rose-700"><Trash2 className="h-4 w-4" /></button></div>
           </div>
-          <div className="flex gap-2 border-t bg-white px-6 pt-4"><button type="button" onClick={() => setDetailTab("overview")} className={`rounded-lg px-4 py-2 text-sm font-bold ${detailTab === "overview" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>Tổng quan</button><button type="button" onClick={() => setDetailTab("settings")} className={`rounded-lg px-4 py-2 text-sm font-bold ${detailTab === "settings" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>Chi tiết bài kiểm tra</button></div>
+          <div className="flex flex-wrap gap-2 border-t bg-white px-6 pt-4"><button type="button" onClick={() => setDetailTab("overview")} className={`rounded-lg px-4 py-2 text-sm font-bold ${detailTab === "overview" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>Tổng quan</button><button type="button" onClick={() => setDetailTab("questions")} className={`rounded-lg px-4 py-2 text-sm font-bold ${detailTab === "questions" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>Câu hỏi & mã đề</button><button type="button" onClick={() => setDetailTab("settings")} className={`rounded-lg px-4 py-2 text-sm font-bold ${detailTab === "settings" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>Chi tiết bài kiểm tra</button></div>
           <div className={`${detailTab === "overview" ? "grid" : "hidden"} gap-5 border-t bg-slate-50 p-6 lg:grid-cols-[minmax(0,1fr)_220px]`}>
             <div>
               <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-3 py-1 text-xs font-bold ${selected.status === "published" ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-700"}`}>{statusLabel[selected.status]}</span><span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-800">{selected.generation_mode === "auto_generate" ? "Sinh từ ngân hàng chuẩn" : "Đề soạn sẵn"}</span><span className="text-sm text-slate-500">{selected.duration_minutes} phút · tối đa {selected.attempt_limit} lượt/người</span></div>
@@ -1078,6 +1144,7 @@ export default function TrainingAssessmentsAdmin({
             <div className="rounded-xl border bg-white p-3 text-center">{qrUrl ? <img src={qrUrl} alt="QR bài đánh giá" className="mx-auto aspect-square w-full object-contain" /> : <QrCode className="mx-auto h-20 w-20 text-slate-300" />}<a href={qrUrl} download={`qr-${selected.public_slug}.png`} className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-700"><Download className="h-3.5 w-3.5" />Tải QR</a></div>
           </div>
           {detailTab === "settings" && <section className="border-t bg-slate-50 p-6"><div className="mx-auto max-w-4xl rounded-2xl border bg-white p-5 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-blue-600">Cấu hình đã tạo</p><h3 className="mt-1 text-xl font-extrabold">Chi tiết bài kiểm tra</h3><p className="mt-1 text-sm text-slate-500">Chỉnh các thông tin vận hành mà không làm thay đổi câu hỏi hoặc mã đề.</p></div><span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-800">{selected.questions.length} câu · {selected.variants.length} mã đề</span></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><label><span className="mb-1 block text-sm font-bold">Thời gian làm bài (phút)</span><input required type="number" min="1" max="480" className="ft-input" value={detailDraft.duration_minutes} onChange={(event) => setDetailDraft((current) => ({ ...current, duration_minutes: event.target.value }))} /></label><label><span className="mb-1 block text-sm font-bold">Số lượt tối đa/người</span><input required type="number" min="1" max="20" className="ft-input" value={detailDraft.attempt_limit} onChange={(event) => setDetailDraft((current) => ({ ...current, attempt_limit: event.target.value }))} /></label><label><span className="mb-1 block text-sm font-bold">Mở từ</span><input type="datetime-local" className="ft-input" value={scheduleDraft.opens_at} onChange={(event) => setScheduleDraft((current) => ({ ...current, opens_at: event.target.value }))} /></label><label><span className="mb-1 block text-sm font-bold">Đóng lúc</span><input type="datetime-local" className="ft-input" value={scheduleDraft.closes_at} onChange={(event) => setScheduleDraft((current) => ({ ...current, closes_at: event.target.value }))} /></label><label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Mô tả hiển thị cho người làm</span><textarea className="ft-input min-h-20" value={detailDraft.description} onChange={(event) => setDetailDraft((current) => ({ ...current, description: event.target.value }))} /></label><label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Hướng dẫn bổ sung</span><textarea className="ft-input min-h-24" value={detailDraft.instructions} onChange={(event) => setDetailDraft((current) => ({ ...current, instructions: event.target.value }))} /><small className="mt-1 block text-slate-500">Nội dung này được hiển thị sau hướng dẫn chuẩn ở trang bắt đầu bài.</small></label></div><div className="mt-5 grid gap-3 rounded-xl bg-slate-50 p-4 text-sm sm:grid-cols-2"><p><b>Đơn vị / phân lớp:</b> {selected.partner_name || "—"}{selected.class_name ? ` · ${selected.class_name}` : ""}</p><p><b>Nhóm đối tượng:</b> {selected.audience_group || "—"}</p><p><b>Nguồn câu hỏi:</b> {selected.source_name || "—"}</p><p><b>Hình thức tạo:</b> {selected.generation_mode === "auto_generate" ? "Sinh từ ngân hàng chuẩn" : "Đề soạn sẵn"}</p>{selected.question_bank_url && <a href={selected.question_bank_url} target="_blank" rel="noreferrer" className="font-bold text-blue-700 underline">Mở ngân hàng câu hỏi</a>}{selected.output_sheet_url && <a href={selected.output_sheet_url} target="_blank" rel="noreferrer" className="font-bold text-blue-700 underline">Mở Sheet đầu ra</a>}</div>{notice && <p className={`mt-4 rounded-xl p-3 text-sm ${notice.startsWith("Đã") ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-700"}`}>{notice}</p>}<div className="mt-5 flex justify-end"><button disabled={busy} onClick={() => void saveAssessmentDetails()} className="ft-primary">Lưu thay đổi</button></div></div></section>}
+          {detailTab === "questions" && <section className="border-t bg-slate-50 p-6"><div className="mx-auto max-w-5xl space-y-4"><div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-wide text-emerald-700">Bổ sung mã đề</p><h3 className="mt-1 text-lg font-extrabold">Tạo thêm mã đề cho bộ đề đang dùng</h3><p className="mt-1 text-sm text-slate-600">Mã mới lấy cơ cấu từ bộ đề hiện có, đổi thứ tự câu và vị trí đáp án. Các lượt đang làm không bị ảnh hưởng.</p></div><div className="flex items-end gap-2"><label><span className="mb-1 block text-xs font-bold">Số mã mới</span><input type="number" min="1" max="200" className="ft-input w-24 bg-white" value={variantAddCount} onChange={(event) => setVariantAddCount(event.target.value)} /></label><button disabled={busy} onClick={() => void addVariants()} className="ft-primary"><Plus className="h-4 w-4" />Bổ sung mã đề</button></div></div><div className="mt-3 flex flex-wrap gap-2">{selected.variants.map((variant) => <span key={variant.name} className="rounded-full bg-white px-3 py-1 text-xs font-bold text-emerald-800">{variant.name} · {variant.question_count} câu</span>)}</div></div><div className="rounded-2xl border bg-white p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-blue-600">Sửa trực tiếp</p><h3 className="mt-1 text-lg font-extrabold">Câu hỏi trong bộ đề</h3><p className="mt-1 text-sm text-slate-500">Chọn Sửa để chỉnh nội dung, dạng câu, phương án hoặc đáp án rồi lưu lại.</p></div><button disabled={busy} onClick={() => void saveQuestions()} className="ft-primary">Lưu câu hỏi</button></div><div className="mt-4 space-y-3">{selected.questions.slice().sort((a, b) => String(a.variant).localeCompare(String(b.variant), "vi") || Number(a.order) - Number(b.order)).map((question) => <article key={question.id} className="rounded-xl border bg-slate-50 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><span className="rounded-full bg-blue-100 px-2 py-1 text-[11px] font-bold text-blue-800">{question.variant || "Đề 1"}</span><p className="mt-2 font-bold">{question.order}. {question.text || "(Chưa có nội dung)"}</p><p className="mt-1 text-xs text-slate-500">{questionTypeLabels[question.type] || question.type} · {question.points} điểm · {question.question_code || question.id}</p></div><button type="button" onClick={() => setEditingQuestionId(editingQuestionId === question.id ? "" : question.id)} className="ft-btn ft-btn-secondary"><Pencil className="h-4 w-4" />Sửa</button></div>{editingQuestionId === question.id && <QuestionEditor question={question} onChange={updateSavedQuestion} onClose={() => setEditingQuestionId("")} />}</article>)}</div>{notice && <p className={`mt-4 rounded-xl p-3 text-sm ${notice.startsWith("Đã") ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-700"}`}>{notice}</p>}</div></div></section>}
           {detailTab === "settings" && <div className="border-t bg-slate-50 px-6 pb-6"><div className="mx-auto max-w-5xl rounded-xl border border-blue-100 bg-blue-50/60 p-4"><div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-sm font-extrabold text-slate-900">Dữ liệu đầu ra</p><p className="mt-1 text-sm text-slate-600">Mở Sheet tổng hợp hoặc thư mục bài làm; cập nhật Sheet khi cần đồng bộ lại cấu trúc cột và dữ liệu hiện có.</p></div><div className="flex flex-wrap gap-2">{selected.output_sheet_url && <a href={selected.output_sheet_url} target="_blank" rel="noreferrer" className="ft-btn ft-btn-secondary bg-white"><FileSpreadsheet className="h-4 w-4" />Mở Sheet đầu ra<ExternalLink className="h-3.5 w-3.5" /></a>}{driveFolderLink && <a href={driveFolderLink} target="_blank" rel="noreferrer" className="ft-btn ft-btn-secondary bg-white"><Upload className="h-4 w-4" />Mở thư mục bài làm<ExternalLink className="h-3.5 w-3.5" /></a>}<button disabled={busy || !selected.output_sheet_url || selected.sync_status === "ready"} onClick={() => void prepareOutput()} className="ft-btn ft-btn-secondary bg-white" title={selected.sync_status === "ready" ? "Sheet đầu ra đã được khởi tạo" : "Khởi tạo các tab Sheet đầu ra"}><FileSpreadsheet className="h-4 w-4" />{selected.sync_status === "ready" ? "Sheet đầu ra đã sẵn sàng" : "Khởi tạo Sheet đầu ra"}</button>{selected.sync_status === "ready" && <button disabled={busy} onClick={() => void prepareOutput()} className="ft-btn ft-btn-secondary bg-white" title="Cập nhật lại danh sách phân đề, cột câu hỏi và dữ liệu bài làm từ hệ thống"><RefreshCw className="h-4 w-4" />Cập nhật dữ liệu Sheet</button>}</div></div></div></div>}
         </article>
         <div className="grid gap-4 sm:grid-cols-3"><div className="rounded-2xl border bg-white p-5"><Users className="h-5 w-5 text-blue-600" /><b className="mt-3 block text-3xl">{selected.attempts_count}</b><span className="text-sm text-slate-500">Lượt bắt đầu</span></div><div className="rounded-2xl border bg-white p-5"><Check className="h-5 w-5 text-emerald-600" /><b className="mt-3 block text-3xl">{selected.submitted_count}</b><span className="text-sm text-slate-500">Bài đã nộp</span></div><div className="rounded-2xl border bg-white p-5"><BarChart3 className="h-5 w-5 text-amber-600" /><b className="mt-3 block text-3xl">{selected.average_score ?? "—"}{selected.average_score != null && "%"}</b><span className="text-sm text-slate-500">Điểm trung bình</span></div></div>

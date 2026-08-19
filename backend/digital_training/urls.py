@@ -31,6 +31,7 @@ urlpatterns = [
     path("digital-training/question-bank-snapshot", assessment_views.question_bank_snapshot, name="training_question_bank_snapshot"),
     path("digital-training/assessments/import-preview", assessment_views.assessment_import_preview, name="training_assessment_import_preview"),
     path("digital-training/assessments/<int:pk>", assessment_views.assessment_detail, name="training_assessment_detail"),
+    path("digital-training/assessments/<int:pk>/variants", assessment_views.assessment_add_variants, name="training_assessment_add_variants"),
     path("digital-training/assessments/<int:pk>/results", assessment_views.assessment_results, name="training_assessment_results"),
     path("digital-training/assessment-previews/<slug:slug>", assessment_views.assessment_preview, name="training_assessment_preview"),
     path("digital-training/assessments/<int:pk>/results/<int:attempt_pk>", assessment_views.assessment_result_grade, name="training_assessment_result_grade"),

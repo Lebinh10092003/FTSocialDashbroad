@@ -19,6 +19,7 @@ from authentication.permissions import IsAuthenticated
 
 from .assessment_service import (
     append_assessment_deletion_log,
+    append_variants,
     fetch_google_sheet,
     generate_variants_from_import,
     grade_attempt,
@@ -359,6 +360,22 @@ def assessment_detail(request, pk):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+def assessment_add_variants(request, pk):
+    """Append versions only; never reshuffle versions already being used."""
+    if not _can_manage(request):
+        return _forbidden()
+    assessment = TrainingAssessment.objects.filter(pk=pk).first()
+    if not assessment:
+        return _assessment_error("Không tìm thấy bài đánh giá.", status.HTTP_404_NOT_FOUND)
+    try:
+        append_variants(assessment, request.data.get("count", 1))
+    except ValueError as error:
+        return _assessment_error(str(error))
+    return Response(TrainingAssessmentSerializer(assessment, context={"request": request}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def assessment_import_preview(request):
     if not _can_manage(request):
@@ -385,6 +402,24 @@ def assessment_import_preview(request):
         else:
             return _assessment_error("Vui lòng chọn file XLSX hoặc nhập đường dẫn Google Sheet.")
         result = parse_assessment_workbook(content, source_name)
+        # Keep location metadata separate from the concise strings retained for
+        # compatibility. The admin can now jump directly to the faulty row.
+        located_errors = []
+        for message in result.get("errors") or []:
+            match = re.match(r"^(?P<sheet>.+)!(?P<row>\d+):\s*(?P<detail>.+)$", str(message))
+            if not match:
+                located_errors.append({"source": source_name, "message": str(message)})
+                continue
+            source = f"{match.group('sheet')}!{match.group('row')}"
+            question = next((item for item in result.get("questions") or [] if item.get("source") == source), {})
+            located_errors.append({
+                "source": source,
+                "question_id": question.get("id", ""),
+                "question_code": question.get("question_code", ""),
+                "variant": question.get("variant", match.group("sheet")),
+                "message": match.group("detail"),
+            })
+        result["question_errors"] = located_errors
         source_questions = result["questions"]
         available_groups = sorted({str(item.get("audience_group") or "").strip() for item in source_questions if str(item.get("audience_group") or "").strip()}, key=str.casefold)
         audience_group = str(request.data.get("audience_group") or "").strip()

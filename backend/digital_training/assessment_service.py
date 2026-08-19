@@ -239,9 +239,12 @@ def parse_assessment_workbook(content, source_name=""):
                     errors.append(f"{sheet.title}!{row_number}: cần đúng 1 đáp án A–E.")
                 elif question_type == "multiple_choice" and not correct:
                     errors.append(f"{sheet.title}!{row_number}: cần có ít nhất 1 đáp án đúng.")
-            elif question_type in {"short_answer", "matching", "ordering"} and correct_raw:
-                separator = r"[|;]" if question_type == "short_answer" else r"[|]"
-                correct = [part.strip() for part in re.split(separator, correct_raw) if part.strip()]
+            elif question_type == "short_answer" and correct_raw:
+                correct = [part.strip() for part in re.split(r"[|;]", correct_raw) if part.strip()]
+            elif question_type in {"matching", "ordering"} and correct_raw:
+                # The answer is a complete arrangement (for example
+                # ``1-A|2-B`` or ``3|1|2``), not several independent answers.
+                correct = [correct_raw]
             media_file_id, media_url = _drive_reference(value("media_url"))
             answer_image_file_id, answer_image_url = _drive_reference(value("answer_image_url"))
             question = {
@@ -780,6 +783,55 @@ def variants_for(assessment):
     return sorted({str(item.get("variant") or "Đề 1") for item in assessment.questions}, key=str.casefold)
 
 
+def append_variants(assessment, count):
+    """Add usable new versions without changing any question already assigned.
+
+    New attempts can safely receive these versions while attempts already in
+    progress keep their original question IDs and answers.
+    """
+    try:
+        count = int(count)
+    except (TypeError, ValueError):
+        raise ValueError("Số mã đề cần bổ sung không hợp lệ.")
+    if count < 1 or count > 200:
+        raise ValueError("Số mã đề cần bổ sung phải từ 1 đến 200.")
+
+    existing = variants_for(assessment)
+    if not existing:
+        raise ValueError("Bộ đề chưa có câu hỏi để tạo thêm mã đề.")
+    used_names = set(existing)
+    numbers = [int(match.group(1)) for name in used_names if (match := re.fullmatch(r"\s*Đề\s+(\d+)\s*", name, re.IGNORECASE))]
+    next_number = max(numbers, default=0) + 1
+    source_questions = {
+        variant: [item for item in assessment.questions if str(item.get("variant") or "Đề 1") == variant]
+        for variant in existing
+    }
+    appended = []
+    for offset in range(count):
+        while f"Đề {next_number}" in used_names:
+            next_number += 1
+        variant_name = f"Đề {next_number}"
+        template_variant = existing[offset % len(existing)]
+        rng = random.Random(f"{assessment.pk}:{variant_name}")
+        copied = [copy.deepcopy(question) for question in source_questions[template_variant]]
+        rng.shuffle(copied)
+        for order, question in enumerate(copied, start=1):
+            # Shuffle the answer positions for one-choice questions just like
+            # generated variants, then give every copied question a new ID.
+            question = _shuffle_options(question, rng, order - 1)
+            original_id = str(question.get("id") or f"question-{order}")
+            question["id"] = f"{original_id}--v{next_number}"
+            question["question_code"] = f"{str(question.get('question_code') or 'Câu').strip()}-{next_number}"
+            question["variant"] = variant_name
+            question["order"] = order
+            appended.append(question)
+        used_names.add(variant_name)
+        next_number += 1
+    assessment.questions = [*assessment.questions, *appended]
+    assessment.save(update_fields=["questions", "updated_at"])
+    return assessment
+
+
 def public_questions(assessment, variant):
     result = []
     for item in assessment.questions:
@@ -850,7 +902,12 @@ def grade_attempt(attempt):
             else:
                 manual = True
         elif question.get("type") in {"matching", "ordering"}:
-            if correct and _key(answer_text) in {_key(value) for value in correct}:
+            expected_arrangements = {_key(value) for value in correct}
+            # Older imports stored one piece per pair/position. Treat their
+            # concatenation as the same complete arrangement for grading.
+            if len(correct) > 1:
+                expected_arrangements.add(_key(("|" if question.get("type") == "matching" else "-").join(str(value) for value in correct)))
+            if correct and _key(answer_text) in expected_arrangements:
                 score += points
             elif not correct:
                 manual = True

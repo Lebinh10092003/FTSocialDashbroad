@@ -14,7 +14,7 @@ from rest_framework.test import APIClient
 from rest_framework.authtoken.models import Token
 
 from authentication.models import Department, JobTitle, UserProfile
-from .assessment_service import generate_variants_from_import, parse_assessment_workbook
+from .assessment_service import append_variants, generate_variants_from_import, parse_assessment_workbook
 from .completion_service import complete_past_training_schedules
 from .models import TrainingAssessment, TrainingClass, TrainingCustomerMeeting, TrainingFinanceEntry, TrainingLead, TrainingPartner, TrainingProduct, TrainingProductSubscription, TrainingQuestionBankSnapshot, TrainingSession, TrainingSurvey
 from .serializers import TrainingAssessmentSerializer, TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingPartnerSerializer, TrainingProductSerializer, TrainingProductSubscriptionSerializer, TrainingSessionSerializer, TrainingSurveySerializer
@@ -374,6 +374,17 @@ class TrainingAssessmentTests(TestCase):
         counts = Counter(variants)
         self.assertEqual(len(counts), 5)
         self.assertLessEqual(max(counts.values()) - min(counts.values()), 1)
+
+    def test_append_variants_keeps_existing_questions_and_creates_new_ids(self):
+        original_questions = list(self.assessment.questions)
+        append_variants(self.assessment, 2)
+        self.assessment.refresh_from_db()
+
+        self.assertEqual(self.assessment.questions[:len(original_questions)], original_questions)
+        self.assertEqual(len(self.assessment.questions), len(original_questions) + 2)
+        new_questions = self.assessment.questions[len(original_questions):]
+        self.assertEqual({item["variant"] for item in new_questions}, {"Đề 6", "Đề 7"})
+        self.assertTrue(all("--v" in item["id"] for item in new_questions))
 
     def test_submit_is_scored_on_server(self):
         start = self.client.post(
