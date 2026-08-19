@@ -53,6 +53,7 @@ type Modal =
   | "meeting"
   | "other"
   | "partner"
+  | "quick-partner"
   | "lead"
   | "class"
   | "material"
@@ -1862,6 +1863,15 @@ export default function DigitalTraining({
   });
   const [leadDraft, setLeadDraft] = useState({ name: "", lead_type: "", address: "", representative: "", representative_position: "", phone: "", email: "", interested_products: [] as string[], stage: "discussion", notes: "" });
   const [pd, setPd] = useState<PartnerDraft>(newPartnerDraft);
+  const [quickPartner, setQuickPartner] = useState({
+    name: "",
+    partner_type: "",
+    contact_person: "",
+    contact_position: "",
+    phone: "",
+    email: "",
+    address: "",
+  });
   const [renewal, setRenewal] = useState({
     contract_signed_date: "",
     contract_duration: "",
@@ -2366,6 +2376,40 @@ export default function DigitalTraining({
       setNotice(
         editingSession ? "Đã cập nhật lịch tập huấn." : "Đã tạo buổi tập huấn.",
       );
+    } catch (e: any) {
+      setNotice(e.message);
+    }
+  };
+  const openQuickPartner = () => {
+    if (!can()) return;
+    setQuickPartner({
+      name: "",
+      partner_type: "",
+      contact_person: "",
+      contact_position: "",
+      phone: "",
+      email: "",
+      address: "",
+    });
+    setModal("quick-partner");
+  };
+  const saveQuickPartner = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!can()) return;
+    try {
+      const created = await post("partners", quickPartner);
+      setPartners((current) =>
+        [...current, created].sort((a, b) =>
+          a.name.localeCompare(b.name, "vi"),
+        ),
+      );
+      setSd((current) => ({
+        ...current,
+        partner_id: String(created.id),
+        class_group_id: "",
+      }));
+      setModal("session");
+      setNotice("Đã thêm khách hàng mới và chọn cho lịch tập huấn.");
     } catch (e: any) {
       setNotice(e.message);
     }
@@ -5967,24 +6011,36 @@ export default function DigitalTraining({
                     <span className="mb-1 block text-sm font-bold">
                       Khách hàng
                     </span>
-                    <select
-                      value={sd.partner_id}
-                      onChange={(e) =>
-                        setSd({
-                          ...sd,
-                          partner_id: e.target.value,
-                          class_group_id: "",
-                        })
-                      }
-                      className="w-full rounded-lg border px-3 py-2"
-                    >
-                      <option value="">Chọn khách hàng</option>
-                      {partners.map((x) => (
-                        <option key={x.id} value={x.id}>
-                          {x.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex gap-2">
+                      <select
+                        value={sd.partner_id}
+                        onChange={(e) =>
+                          setSd({
+                            ...sd,
+                            partner_id: e.target.value,
+                            class_group_id: "",
+                          })
+                        }
+                        className="min-w-0 flex-1 rounded-lg border px-3 py-2"
+                      >
+                        <option value="">Chọn khách hàng</option>
+                        {partners.map((x) => (
+                          <option key={x.id} value={x.id}>
+                            {x.name}
+                          </option>
+                        ))}
+                      </select>
+                      {!isGuest && (
+                        <button
+                          type="button"
+                          onClick={openQuickPartner}
+                          className="ft-btn ft-btn-secondary shrink-0"
+                        >
+                          <Plus className="h-4 w-4" />
+                          Thêm mới
+                        </button>
+                      )}
+                    </div>
                   </label>
                   <label>
                     <span className="mb-1 block text-sm font-bold">
@@ -6465,7 +6521,105 @@ export default function DigitalTraining({
                 <div className="flex justify-end gap-3"><button type="button" onClick={() => { setModal(null); setEditingLead(null); }} className="rounded-lg border px-4 py-2 text-sm font-bold">Hủy</button><button className="ft-primary">{editingLead ? "Lưu thay đổi" : "Thêm khách hàng mới"}</button></div>
               </form>
             </Dialog>
-          )}          {modal === "partner" && (
+          )}
+          {modal === "quick-partner" && (
+            <Dialog
+              title="Thêm khách hàng mới"
+              onClose={() => setModal("session")}
+            >
+              <form onSubmit={saveQuickPartner} className="grid gap-4">
+                <p className="text-sm text-slate-500">
+                  Thông tin cơ bản. Khách hàng mới sẽ được tự động chọn cho
+                  lịch tập huấn này.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Input
+                    label="Tên khách hàng *"
+                    required
+                    value={quickPartner.name}
+                    onChange={(e) =>
+                      setQuickPartner({ ...quickPartner, name: e.target.value })
+                    }
+                  />
+                  <label>
+                    <span className="mb-1 block text-sm font-bold">
+                      Loại khách hàng *
+                    </span>
+                    <select
+                      required
+                      value={quickPartner.partner_type}
+                      onChange={(e) =>
+                        setQuickPartner({
+                          ...quickPartner,
+                          partner_type: e.target.value,
+                        })
+                      }
+                      className="w-full rounded-lg border px-3 py-2"
+                    >
+                      <option value="">Chọn loại khách hàng</option>
+                      <option>Khối Hành chính công</option>
+                      <option>Khối Giáo dục</option>
+                      <option>Khối Doanh nghiệp</option>
+                      <option>Khác</option>
+                    </select>
+                  </label>
+                  <Input
+                    label="Đại diện"
+                    value={quickPartner.contact_person}
+                    onChange={(e) =>
+                      setQuickPartner({
+                        ...quickPartner,
+                        contact_person: e.target.value,
+                      })
+                    }
+                  />
+                  <Input
+                    label="Chức vụ"
+                    value={quickPartner.contact_position}
+                    onChange={(e) =>
+                      setQuickPartner({
+                        ...quickPartner,
+                        contact_position: e.target.value,
+                      })
+                    }
+                  />
+                  <Input
+                    label="Điện thoại"
+                    value={quickPartner.phone}
+                    onChange={(e) =>
+                      setQuickPartner({ ...quickPartner, phone: e.target.value })
+                    }
+                  />
+                  <Input
+                    label="Email"
+                    type="email"
+                    value={quickPartner.email}
+                    onChange={(e) =>
+                      setQuickPartner({ ...quickPartner, email: e.target.value })
+                    }
+                  />
+                </div>
+                <Input
+                  label="Địa chỉ"
+                  value={quickPartner.address}
+                  onChange={(e) =>
+                    setQuickPartner({ ...quickPartner, address: e.target.value })
+                  }
+                />
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setModal("session")}
+                    className="rounded-lg border px-4 py-2 text-sm font-bold"
+                  >
+                    Hủy
+                  </button>
+                  <button className="ft-primary">Thêm và chọn khách hàng</button>
+                </div>
+              </form>
+            </Dialog>
+          )}
+          {modal === "partner" && (
             <Dialog
               title={
                 editingPartner ? "Chỉnh sửa khách hàng" : "Thêm khách hàng mới"
