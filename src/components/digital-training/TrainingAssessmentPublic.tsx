@@ -31,6 +31,7 @@ type PublicQuestion = {
   image_url?: string;
   media_url?: string;
   media_file_id?: string;
+  media_type?: string;
   category?: string;
   difficulty?: string;
   correct_answers?: string[];
@@ -71,13 +72,21 @@ const formatCountdown = (seconds: number) => {
     .join(":");
 };
 
-const mediaPreview = (source = "", mediaFileId = "") => {
+const mediaPreview = (source = "", mediaFileId = "", mediaType = "") => {
   const value = source.trim();
-  const youtube = value.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]+)/);
+  const iframeSource = value.match(/<iframe[^>]+src=["']([^"']+)["']/i)?.[1]?.replace(/&amp;/g, "") || "";
+  const playable = iframeSource || value;
+  const youtube = playable.match(/(?:youtube(?:-nocookie)?\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/i);
   if (youtube) return { kind: "video", url: `https://www.youtube.com/embed/${youtube[1]}` };
+  if (/^https?:\/\/.+\.(?:mp4|webm|ogg)(?:\?.*)?$/i.test(playable)) return { kind: "video", url: playable };
   // ``media_file_id`` is stored when the source workbook contains a Drive
   // link. It stays usable even when the original link shape changes.
   const driveId = mediaFileId.trim() || value.match(/(?:\/d\/|[?&]id=)([a-zA-Z0-9_-]+)/)?.[1] || "";
+  if (driveId && /video|phim|clip/i.test(mediaType || value)) return {
+    kind: "drive-video",
+    url: `https://drive.google.com/file/d/${driveId}/preview`,
+    openUrl: value || `https://drive.google.com/open?id=${driveId}`,
+  };
   if (driveId) return {
     kind: "drive",
     url: value || `https://drive.google.com/open?id=${driveId}`,
@@ -87,6 +96,9 @@ const mediaPreview = (source = "", mediaFileId = "") => {
   if (/^https?:\/\/.+\.(?:png|jpe?g|gif|webp)(?:\?.*)?$/i.test(value)) return { kind: "image", url: value };
   return value.startsWith("http") ? { kind: "link", url: value } : null;
 };
+
+const isNotebookLmImageQuestion = (question?: PublicQuestion) => question?.type === "practical_submission"
+  && String(question.category || "").toLocaleLowerCase().includes("notebooklm");
 
 export default function TrainingAssessmentPublic({ slug, idToken = "" }: { slug: string; idToken?: string }) {
   const previewRole = new URLSearchParams(window.location.search).get("preview");
@@ -307,6 +319,10 @@ export default function TrainingAssessmentPublic({ slug, idToken = "" }: { slug:
       setMessage("Chế độ xem trước không tải tệp hoặc gửi dữ liệu.");
       return;
     }
+    if (!isNotebookLmImageQuestion(question)) {
+      setMessage("Chỉ câu thực hành thuộc chủ đề NotebookLM mới cho phép tải ảnh; câu này chỉ nhận link chia sẻ.");
+      return;
+    }
     if (!file || !attempt?.access_token) return;
     setBusy(true);
     setMessage("");
@@ -344,9 +360,8 @@ export default function TrainingAssessmentPublic({ slug, idToken = "" }: { slug:
   const questions: PublicQuestion[] = attempt?.questions || [];
   const currentQuestion = questions[currentIndex] || questions[0];
   const mediaReference = String(currentQuestion?.media_url || currentQuestion?.image_url || "").trim();
-  const currentMedia = mediaPreview(mediaReference, String(currentQuestion?.media_file_id || ""));
-  const isNotebookLmImageSubmission = currentQuestion?.type === "practical_submission"
-    && String(currentQuestion?.category || "").toLocaleLowerCase().includes("notebooklm");
+  const currentMedia = mediaPreview(mediaReference, String(currentQuestion?.media_file_id || ""), String(currentQuestion?.media_type || ""));
+  const isNotebookLmImageSubmission = isNotebookLmImageQuestion(currentQuestion);
   const setAnswer = (questionId: string, value: AnswerValue) => setAnswers((current) => ({ ...current, [questionId]: value }));
   useEffect(() => { setMediaLoadError(false); setMediaUseFallback(false); }, [currentQuestion?.id, mediaReference]);
   useEffect(() => {
@@ -540,6 +555,7 @@ export default function TrainingAssessmentPublic({ slug, idToken = "" }: { slug:
           <div className="mt-3 space-y-1.5 border-t pt-3 text-[10px] text-slate-500"><p className="whitespace-nowrap"><span className="mr-2 inline-block h-2.5 w-2.5 rounded-full bg-emerald-200" />Đã trả lời</p><p className="whitespace-nowrap"><span className="mr-2 inline-block h-2.5 w-2.5 rounded-full bg-blue-100 ring-1 ring-blue-300" />Chưa trả lời</p><p className="whitespace-nowrap"><Bookmark className="mr-1 inline h-3 w-3 fill-amber-400 text-amber-500" />Đánh dấu xem lại</p></div>
           </div>
           {(currentMedia?.kind === "image" || currentMedia?.kind === "drive") && <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"><p className="px-1 pb-2 text-xs font-extrabold uppercase tracking-wide text-slate-500">Hình minh họa</p>{mediaLoadError ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900"><b>Tải ảnh lỗi</b><p className="mt-1 text-xs">Kiểm tra quyền xem qua liên kết của tệp ảnh.</p>{currentMedia.kind === "drive" && <a href={currentMedia.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex font-bold text-rose-700 underline">Mở tệp gốc</a>}</div> : <><button type="button" onClick={() => setExpandedImageUrl(currentMedia.kind === "drive" ? (mediaUseFallback ? currentMedia.fallbackImageUrl : currentMedia.imageUrl) : currentMedia.url)} className="group block w-full cursor-zoom-in overflow-hidden rounded-xl bg-slate-50"><img src={currentMedia.kind === "drive" ? (mediaUseFallback ? currentMedia.fallbackImageUrl : currentMedia.imageUrl) : currentMedia.url} alt="Ảnh minh họa cho câu hỏi" onError={() => currentMedia.kind === "drive" && !mediaUseFallback ? setMediaUseFallback(true) : setMediaLoadError(true)} className="max-h-[380px] w-full object-contain transition duration-200 group-hover:scale-[1.01]" /></button><p className="px-1 pt-2 text-center text-xs text-slate-500">Bấm vào ảnh để phóng to</p></>}</section>}
+          {(currentMedia?.kind === "video" || currentMedia?.kind === "drive-video") && <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"><p className="px-1 pb-2 text-xs font-extrabold uppercase tracking-wide text-slate-500">Video minh họa</p><div className="aspect-video overflow-hidden rounded-xl bg-slate-950"><iframe src={currentMedia.url} title="Video minh họa cho câu hỏi" className="h-full w-full" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></div>{currentMedia.kind === "drive-video" && <a href={currentMedia.openUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs font-bold text-blue-700 underline">Mở video trên Drive</a>}</section>}
         </aside>
         <section className="min-w-0">{isPreview && <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900"><b>Chế độ xem trước của người tạo.</b> Đây là giao diện người trả lời để kiểm tra trải nghiệm; mọi thao tác chỉ là mô phỏng, không tạo lượt làm, không lưu tệp và không thể nộp bài.</div>}{message && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{message}</div>}{reviewMode ? <article className="rounded-2xl border bg-white p-5 shadow-sm sm:p-7">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-5">
@@ -556,7 +572,7 @@ export default function TrainingAssessmentPublic({ slug, idToken = "" }: { slug:
         </article> : currentQuestion && <article className="rounded-2xl border bg-white p-5 shadow-sm sm:p-7">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-4"><div><p className="text-xs font-bold uppercase tracking-wide text-blue-600">{currentQuestion.question_code || `Câu ${currentIndex + 1}`}</p><div className="mt-2 flex flex-wrap gap-2">{currentQuestion.knowledge_type && <span className="rounded-full bg-violet-50 px-2 py-1 text-[11px] font-bold text-violet-700">{currentQuestion.knowledge_type}</span>}{currentQuestion.category && <span className="rounded-full bg-blue-50 px-2 py-1 text-[11px] font-bold text-blue-700">{currentQuestion.category}</span>}{currentQuestion.difficulty && <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700">{currentQuestion.difficulty}</span>}</div></div><div className="flex items-center gap-3"><span className="text-xs font-semibold text-slate-500">{currentQuestion.points} điểm</span><button onClick={() => toggleReview(currentQuestion.id)} className={`inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-xs font-bold ${reviewedIds.includes(currentQuestion.id) ? "border-amber-300 bg-amber-50 text-amber-800" : "text-slate-600"}`}><Bookmark className={`h-4 w-4 ${reviewedIds.includes(currentQuestion.id) ? "fill-amber-400" : ""}`} />Xem lại</button></div></div>
           <h1 className="mt-5 whitespace-pre-wrap break-words text-lg font-bold leading-8">{currentQuestion.text}{currentQuestion.required && <span className="ml-1 text-rose-500">*</span>}</h1>
-          {mediaReference && !currentMedia && <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><b>Không thể hiển thị ảnh minh họa</b><p className="mt-1 break-words">Nguồn hiện có: {mediaReference}</p><p className="mt-1 text-xs">Cần dùng URL ảnh hoặc link Google Drive hợp lệ trong cột Ảnh/Video minh họa.</p></div>}{currentMedia?.kind === "video" && <div className="mt-5 aspect-video overflow-hidden rounded-xl border bg-slate-950"><iframe src={currentMedia.url} title="Question media" className="h-full w-full" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></div>}{currentMedia?.kind === "link" && <a href={currentMedia.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700"><PlayCircle className="h-4 w-4" />Mở tài liệu minh họa</a>}
+          {mediaReference && !currentMedia && <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><b>Không thể hiển thị ảnh minh họa</b><p className="mt-1 break-words">Nguồn hiện có: {mediaReference}</p><p className="mt-1 text-xs">Cần dùng URL ảnh hoặc link Google Drive hợp lệ trong cột Ảnh/Video minh họa.</p></div>}{currentMedia?.kind === "link" && <a href={currentMedia.url} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700"><PlayCircle className="h-4 w-4" />Mở tài liệu minh họa</a>}
           {currentQuestion.type === "single_choice" && <div className="mt-6 grid gap-3">{(currentQuestion.options || []).map((option) => <label key={option.key} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition ${answers[currentQuestion.id] === option.key ? "border-blue-500 bg-blue-50 ring-1 ring-blue-500" : "hover:border-slate-400"}`}><input type="radio" name={currentQuestion.id} className="mt-1" checked={answers[currentQuestion.id] === option.key} onChange={() => setAnswer(currentQuestion.id, option.key)} /><b className="text-blue-800">{option.key}.</b><span className="whitespace-pre-wrap">{option.text}</span></label>)}</div>}
           {currentQuestion.type === "multiple_choice" && <div className="mt-6 grid gap-3">{(currentQuestion.options || []).map((option) => { const checked = Array.isArray(answers[currentQuestion.id]) && (answers[currentQuestion.id] as string[]).includes(option.key); return <label key={option.key} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition ${checked ? "border-emerald-500 bg-emerald-50 ring-1 ring-emerald-500" : "hover:border-slate-400"}`}><input type="checkbox" className="mt-1" checked={checked} onChange={() => toggleMultiple(currentQuestion.id, option.key)} /><b className="text-emerald-800">{option.key}.</b><span className="whitespace-pre-wrap">{option.text}</span></label>; })}</div>}
           {currentQuestion.type === "short_answer" && <textarea rows={5} className="ft-input mt-6 resize-y" value={typeof answers[currentQuestion.id] === "string" ? answers[currentQuestion.id] as string : ""} onChange={(event) => setAnswer(currentQuestion.id, event.target.value)} placeholder="Nhập câu trả lời..." />}

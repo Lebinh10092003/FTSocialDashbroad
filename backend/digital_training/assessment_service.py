@@ -38,6 +38,7 @@ COLUMN_ALIASES = {
     "required": {"batbuoc", "required"},
     "explanation": {"giaithich", "huongdan", "explanation"},
     "media_url": {"hinhanh", "anh", "image", "imageurl", "anhvideominhhoa", "anhvideominhhoaneuco", "media", "mediaurl"},
+    "media_type": {"loaiminhhoa", "loaimedia", "mediatype", "kieumedia", "mediaformat"},
     "answer_image_url": {"anhdapan", "anhdapanneuco", "answerimage", "answerimageurl"},
     "category": {"chude", "nhomcau", "nhom", "category", "topic"},
     "difficulty": {"dokho", "mucdo", "difficulty", "level"},
@@ -262,6 +263,7 @@ def parse_assessment_workbook(content, source_name=""):
                 "image_url": media_url,
                 "media_url": media_url,
                 "media_file_id": media_file_id,
+                "media_type": str(value("media_type") or "").strip(),
                 "answer_image_url": answer_image_url,
                 "answer_image_file_id": answer_image_file_id,
                 "knowledge_type": str(value("knowledge_type") or "").strip(),
@@ -842,7 +844,7 @@ def public_questions(assessment, variant):
             for key in (
                 "id", "question_code", "order", "type", "knowledge_type", "text",
                 "options", "points", "required", "image_url", "media_url",
-                "media_file_id", "answer_image_url", "category", "difficulty",
+                "media_file_id", "media_type", "answer_image_url", "category", "difficulty",
             )
         }
         if question.get("type") == "matching":
