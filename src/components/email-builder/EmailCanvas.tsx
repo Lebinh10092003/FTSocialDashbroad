@@ -60,6 +60,59 @@ const escapeEditableText = (text = '') => text
 const stripButtonInnerLinks = (html = '') => html.replace(/<\/?a\b[^>]*>/gi, '');
 const buttonEditableHtml = (html = '', text = '') => stripButtonInnerLinks(editableHtml(html) || escapeEditableText(text));
 
+/**
+ * Custom HTML is rendered in a sandboxed iframe so pasted markup cannot affect
+ * the builder itself.  A normal iframe has a 150px default height, which made
+ * long blocks look clipped and left their internal scrollbar unusable because
+ * the canvas deliberately does not pass pointer events into preview HTML.
+ *
+ * Keep the iframe sandboxed, but make it grow to its document height.  The
+ * surrounding email canvas remains the single, usable vertical scrollbar.
+ */
+function AutoHeightHtmlPreview({ title, html, className = '' }: { title: string; html: string; className?: string }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const resize = React.useCallback(() => {
+    const iframe = iframeRef.current;
+    const documentNode = iframe?.contentDocument;
+    if (!iframe || !documentNode) return;
+    const body = documentNode.body;
+    const root = documentNode.documentElement;
+    const height = Math.max(96, body?.scrollHeight || 0, body?.offsetHeight || 0, root?.scrollHeight || 0, root?.offsetHeight || 0);
+    iframe.style.height = `${height}px`;
+  }, []);
+
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    let observer: ResizeObserver | undefined;
+    const attachResizeObserver = () => {
+      resize();
+      const documentNode = iframe.contentDocument;
+      if (!documentNode || typeof ResizeObserver === 'undefined') return;
+      observer?.disconnect();
+      observer = new ResizeObserver(resize);
+      observer.observe(documentNode.documentElement);
+      if (documentNode.body) observer.observe(documentNode.body);
+    };
+    iframe.addEventListener('load', attachResizeObserver);
+    if (iframe.contentDocument?.readyState === 'complete') attachResizeObserver();
+    return () => {
+      iframe.removeEventListener('load', attachResizeObserver);
+      observer?.disconnect();
+    };
+  }, [html, resize]);
+
+  return <iframe
+    ref={iframeRef}
+    title={title}
+    sandbox="allow-same-origin"
+    scrolling="no"
+    srcDoc={`<!doctype html><html><head><style>html,body{margin:0;padding:0;overflow:hidden}</style></head><body>${html}</body></html>`}
+    className={`pointer-events-none block min-h-24 w-full rounded border bg-white ${className}`}
+  />;
+}
+
 interface EmailCanvasProps {
   blocks: EmailBlock[];
   selectedBlockId: string | null;
@@ -605,7 +658,7 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     const editableField = (field: string, value: unknown, className = '') => <span contentEditable suppressContentEditableWarning onFocus={() => onSelectBlock(block.id)} onBlur={event => update({ [field]: event.currentTarget.innerText.replace(/\r\n?/g, '\n') })} style={{ whiteSpace: 'pre-wrap' }} className={`block min-h-5 cursor-text rounded outline-none focus:bg-blue-50 ${className}`}>{String(value ?? '')}</span>;
     const updateCollectionItem = (key: string, itemIndex: number, patch: Record<string, any>) => update({ [key]: (content[key] || []).map((item: any, currentIndex: number) => currentIndex === itemIndex ? { ...item, ...patch } : item) });
     const removeCollectionItem = (key: string, itemIndex: number) => update({ [key]: (content[key] || []).filter((_: any, currentIndex: number) => currentIndex !== itemIndex) });
-    if (block.type === 'custom-html') return <div className="space-y-2">{selected && <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[10px] leading-4 text-blue-800"><strong>Khối HTML tùy chỉnh.</strong> Canvas chỉ hiển thị bản xem trước; dùng biểu tượng mã HTML trên thanh công cụ để sửa mã, tránh đè lên nội dung email.</div>}<iframe title="Xem trước HTML" sandbox="" srcDoc={`<!doctype html><html><body style="margin:0">${previewCustomHtml(block.id, content.html, content.htmlSanitized === true)}</body></html>`} className="pointer-events-none min-h-24 w-full rounded border bg-white" /></div>;
+    if (block.type === 'custom-html') return <div className="space-y-2">{selected && <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[10px] leading-4 text-blue-800"><strong>Khối HTML tùy chỉnh.</strong> Canvas hiển thị đầy đủ bản xem trước; dùng biểu tượng mã HTML trên thanh công cụ để sửa mã.</div>}<AutoHeightHtmlPreview title="Xem trước HTML" html={previewCustomHtml(block.id, content.html, content.htmlSanitized === true)} /></div>;
     if (block.type === 'gallery') {
       const images: string[] = content.images || ['', ''];
       return <div className="grid grid-cols-2 gap-2">{images.map((url: string, imageIndex: number) => <div key={imageIndex} className="relative space-y-1">{url ? <img src={url} className="h-24 w-full rounded object-cover" alt="" /> : <div className="flex h-24 items-center justify-center rounded bg-slate-100 text-xs text-slate-400">Ảnh {imageIndex + 1}</div>}{selected && <div className="flex gap-1"><input value={url} onChange={event => update({ images: images.map((image, currentIndex) => currentIndex === imageIndex ? event.target.value : image) })} onClick={event => event.stopPropagation()} placeholder="URL ảnh" className="min-w-0 flex-1 rounded border px-2 py-1 text-[9px]" /><button type="button" onClick={event => { event.stopPropagation(); removeCollectionItem('images', imageIndex); }} className="rounded border px-1 text-rose-500"><Trash2 className="h-3 w-3" /></button></div>}</div>)}{selected && images.length < 3 && <button type="button" onClick={event => { event.stopPropagation(); update({ images: [...images, ''] }); }} className="flex h-24 items-center justify-center gap-1 rounded border border-dashed border-blue-300 text-[10px] font-bold text-blue-700"><Plus className="h-4 w-4" />Thêm ảnh</button>}</div>;
@@ -692,24 +745,26 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     };
     const headingFormat = editorFormat(block.id, content.fontSize || 20, content.color || '#0F3A72');
     const paragraphFormat = editorFormat(block.id, content.fontSize || 15, content.color || emailSettings.textColor || '#1E293B');
+    const renderBlockControls = () => <div className={`absolute right-3 top-3 z-30 items-center gap-1 rounded-xl border bg-white p-1 shadow-lg ${selected ? 'flex' : 'hidden group-hover:flex'}`}>
+      <button type="button" draggable onDragStart={event => { event.stopPropagation(); event.dataTransfer.setData('application/x-ft-email-block-id', block.id); event.dataTransfer.effectAllowed = 'move'; }} className="cursor-grab rounded p-1 hover:bg-slate-100" title="Kéo khối"><GripVertical className="h-3.5 w-3.5" /></button>
+      <button type="button" disabled={index === 0} onClick={event => { event.stopPropagation(); onMoveBlock(block.id, 'up'); }} className="rounded p-1 disabled:opacity-20" title="Đưa lên"><ArrowUp className="h-3.5 w-3.5" /></button>
+      <button type="button" disabled={index === siblings.length - 1} onClick={event => { event.stopPropagation(); onMoveBlock(block.id, 'down'); }} className="rounded p-1 disabled:opacity-20" title="Đưa xuống"><ArrowDown className="h-3.5 w-3.5" /></button>
+      <button type="button" onClick={event => { event.stopPropagation(); onDuplicateBlock(block.id); }} className="rounded p-1" title="Nhân bản"><Copy className="h-3.5 w-3.5" /></button>
+      <button type="button" onClick={event => { event.stopPropagation(); onToggleVisibility(block.id); }} className="rounded p-1" title={block.visible ? 'Ẩn khối' : 'Hiện khối'}>{block.visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}</button>
+      <button type="button" onClick={async event => { event.stopPropagation(); if (await dialog.confirm('Bạn có chắc muốn xóa khối này?', { title: 'Xóa khối nội dung', confirmText: 'Xóa khối', danger: true })) onDeleteBlock(block.id); }} className="rounded p-1 text-rose-600" title="Xóa khối"><Trash2 className="h-3.5 w-3.5" /></button>
+    </div>;
 
     if (hasHtmlOverride) return <div key={block.id} data-ft-block-id={block.id} data-ft-block-type={block.type} onClick={event => { event.stopPropagation(); onSelectBlock(block.id); }} className={`group relative rounded-xl transition ${selected ? 'outline outline-2 outline-blue-500 bg-blue-50/5' : 'hover:outline hover:outline-1 hover:outline-slate-300'} ${block.visible ? '' : 'opacity-40'}`} style={{ marginTop: styles.marginTop ?? (block.type === 'divider' ? 0 : 10), marginBottom: styles.marginBottom ?? (block.type === 'divider' ? 0 : 10) }}>
       <div className="absolute -top-3 left-3 z-20 hidden rounded bg-amber-600 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-white group-hover:block">HTML riêng</div>
+      {renderBlockControls()}
       {selected && <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-bold text-amber-800">Block đang dùng HTML riêng. Sửa hoặc khôi phục ở cuối Properties.</div>}
-      <iframe title={`Xem trước HTML của ${TYPE_NAMES[block.type] || 'block'}`} sandbox="" srcDoc={`<!doctype html><html><body style="margin:0;overflow-wrap:anywhere">${previewCustomHtml(`${block.id}:override`, content.htmlOverride, content.htmlOverrideSanitized === true)}</body></html>`} className="pointer-events-none min-h-24 w-full rounded border border-slate-200 bg-white" />
+      <AutoHeightHtmlPreview title={`Xem trước HTML của ${TYPE_NAMES[block.type] || 'block'}`} html={previewCustomHtml(`${block.id}:override`, content.htmlOverride, content.htmlOverrideSanitized === true)} className="border-slate-200" />
     </div>;
 
     return <div key={block.id} data-ft-block-id={block.id} data-ft-block-type={block.type} onClick={event => { event.stopPropagation(); onSelectBlock(block.id); }} onDragOver={event => { const acceptsDrop = event.dataTransfer.types.includes('application/x-ft-email-block-id') || event.dataTransfer.types.includes('application/x-ft-email-block'); if (!acceptsDrop) return; event.preventDefault(); event.stopPropagation(); setRootDragOver(false); event.dataTransfer.dropEffect = event.dataTransfer.types.includes('application/x-ft-email-block-id') ? 'move' : 'copy'; if (block.type === 'section') setDropHint(null); else { const rect = event.currentTarget.getBoundingClientRect(); setDropHint({ blockId: block.id, position: event.clientY < rect.top + rect.height / 2 ? 'before' : 'after' }); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropHint(current => current?.blockId === block.id ? null : current); }} onDrop={event => { const rect = event.currentTarget.getBoundingClientRect(); const position = dropHint?.blockId === block.id ? dropHint.position : event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'; dropInto(event, block, undefined, position); }} className={`group relative rounded-xl transition ${fillHeight ? 'flex h-full flex-col' : ''} ${selected ? 'outline outline-2 outline-blue-500 bg-blue-50/5' : 'hover:outline hover:outline-1 hover:outline-slate-300'} ${block.visible ? '' : 'opacity-40'}`} style={{ marginTop: styles.marginTop ?? (block.type === 'divider' ? 0 : 10), marginBottom: styles.marginBottom ?? (block.type === 'divider' ? 0 : 10) }}>
       {dropHint?.blockId === block.id && <div className={`pointer-events-none absolute inset-x-0 z-40 h-1 rounded-full bg-blue-500 shadow-[0_0_0_3px_rgba(59,130,246,0.18)] ${dropHint.position === 'before' ? '-top-1' : '-bottom-1'}`}><span className="absolute -left-1 -top-1 h-3 w-3 rounded-full bg-blue-500" /></div>}
       <div className="absolute -top-3 left-3 z-20 hidden rounded bg-blue-600 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-white group-hover:block">{TYPE_NAMES[block.type] || block.type}</div>
-      <div className="absolute -top-4 right-3 z-30 hidden items-center gap-1 rounded-xl border bg-white p-1 shadow-lg group-hover:flex">
-        <button type="button" draggable onDragStart={event => { event.stopPropagation(); event.dataTransfer.setData('application/x-ft-email-block-id', block.id); event.dataTransfer.effectAllowed = 'move'; }} className="cursor-grab rounded p-1 hover:bg-slate-100" title="Kéo khối"><GripVertical className="h-3.5 w-3.5" /></button>
-        <button type="button" disabled={index === 0} onClick={event => { event.stopPropagation(); onMoveBlock(block.id, 'up'); }} className="rounded p-1 disabled:opacity-20"><ArrowUp className="h-3.5 w-3.5" /></button>
-        <button type="button" disabled={index === siblings.length - 1} onClick={event => { event.stopPropagation(); onMoveBlock(block.id, 'down'); }} className="rounded p-1 disabled:opacity-20"><ArrowDown className="h-3.5 w-3.5" /></button>
-        <button type="button" onClick={event => { event.stopPropagation(); onDuplicateBlock(block.id); }} className="rounded p-1"><Copy className="h-3.5 w-3.5" /></button>
-        <button type="button" onClick={event => { event.stopPropagation(); onToggleVisibility(block.id); }} className="rounded p-1">{block.visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}</button>
-        <button type="button" onClick={async event => { event.stopPropagation(); if (await dialog.confirm('Bạn có chắc muốn xóa khối này?', { title: 'Xóa khối nội dung', confirmText: 'Xóa khối', danger: true })) onDeleteBlock(block.id); }} className="rounded p-1 text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button>
-      </div>
+      {renderBlockControls()}
       <div className={fillHeight ? 'flex flex-1 flex-col' : undefined}>
         {block.type === 'logo' && <div className="space-y-2">{selected && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-2 py-1.5 text-[10px] font-bold text-blue-800"><input ref={element => { imageInputRefs.current[block.id] = element; }} type="file" accept="image/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) uploadImage(block, file); event.currentTarget.value = ''; }} /><button type="button" onClick={() => imageInputRefs.current[block.id]?.click()} className="inline-flex items-center gap-1 rounded bg-white px-2 py-1.5 shadow"><ImagePlus className="h-3.5 w-3.5" />Đổi logo</button><button type="button" onClick={() => pasteImageUrl(block)} className="inline-flex items-center gap-1 rounded bg-white px-2 py-1.5 shadow"><Link className="h-3.5 w-3.5" />Dán URL</button><label className="inline-flex items-center gap-1">Rộng <input type="number" min={1} max={600} value={Number(content.width) || 120} onChange={event => onUpdateBlockContent(block.id, { ...content, width: Math.max(1, Number(event.target.value) || 1) })} onClick={event => event.stopPropagation()} className="w-16 rounded border bg-white px-1 py-1" />px</label><input value={content.alt || ''} onChange={event => onUpdateBlockContent(block.id, { ...content, alt: event.target.value })} onClick={event => event.stopPropagation()} placeholder="Mô tả logo" className="min-w-24 flex-1 rounded border bg-white px-2 py-1" /></div>}<div className={`flex ${alignClass}`}>{content.url ? <img src={content.url} alt={content.alt || 'Logo'} onClick={() => selected && imageInputRefs.current[block.id]?.click()} style={{ width: Number(content.width) || 120, height: content.height ? Number(content.height) : 'auto' }} className="max-w-full cursor-pointer object-contain" /> : <button type="button" onClick={() => imageInputRefs.current[block.id]?.click()} className="w-full rounded border border-dashed bg-slate-50 p-4 text-center text-xs text-slate-400">Chọn ảnh logo</button>}</div></div>}
         {block.type === 'heading' && <div>{selected && <BlockToolbar onInsertVariableClick={onOpenVariablePicker} onAlignChange={align => onUpdateBlockContent(block.id, { ...content, align })} onFontSizeChange={size => applySelectionFontSize(block, size)} onTextColorChange={color => applySelectionTextColor(block, color)} onLinkChange={url => applySelectionLink(block, url)} onFormatCommand={(command, value = '') => applyEditorCommand(block.id, block.id, command, value, commitHeadingEditor)} activeFontSize={headingFormat.fontSize} activeTextColor={headingFormat.textColor} activeAlign={content.align || 'left'} />}
