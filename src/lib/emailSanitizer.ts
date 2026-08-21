@@ -205,6 +205,21 @@ export function sanitizeCustomHtml(html: string): string {
       htmlElement.style.height = 'auto';
     }
   });
+  // A split Custom HTML fragment can still arrive from an older template with
+  // the original email's dark outer table. That wrapper becomes a separate
+  // block after splitting, so Gmail displays it as a coloured section. A
+  // top-level presentation table is page chrome; retain all child-cell/table
+  // backgrounds but remove its own surface. Authors who truly need a dark
+  // page surface can opt out with data-ft-preserve-root-background="true".
+  Array.from(doc.body.children).forEach(root => {
+    if (root.tagName.toLowerCase() !== 'table' || root.getAttribute('data-ft-preserve-root-background') === 'true') return;
+    const table = root as HTMLTableElement;
+    const background = table.getAttribute('bgcolor') || table.style.backgroundColor || table.style.background || '';
+    if (!background) return;
+    table.removeAttribute('bgcolor');
+    table.style.removeProperty('background');
+    table.style.removeProperty('background-color');
+  });
   // A Custom HTML block can contain a complete email copied from this editor.
   // Keep only its innermost content cell; otherwise every clipboard/export
   // round-trip carries the old root table and its external background again.

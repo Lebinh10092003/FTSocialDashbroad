@@ -22,6 +22,24 @@ const elementDepth = (element: Element) => {
 
 const cloneShell = <T extends Element>(element: T): T => element.cloneNode(false) as T;
 
+const pageSurfaceBackground = (element: HTMLElement) => element.getAttribute('bgcolor')
+  || element.style.backgroundColor
+  || element.style.background
+  || '';
+
+/**
+ * A full email often has a coloured outer table around a white content card.
+ * It is page chrome, not part of any section. Retaining it for every split
+ * row duplicates that chrome and makes Gmail render each fragment with a dark
+ * frame. Child cell backgrounds are deliberately left untouched.
+ */
+function clearSplitPageSurface(element: HTMLElement) {
+  if (!pageSurfaceBackground(element)) return;
+  element.removeAttribute('bgcolor');
+  element.style.removeProperty('background');
+  element.style.removeProperty('background-color');
+}
+
 /** Wrap a fragment in the original ancestry, but omit sibling content. */
 function keepLayoutContext(documentNode: Document, source: Element, fragment: Element): string {
   const ancestors: Element[] = [];
@@ -34,6 +52,10 @@ function keepLayoutContext(documentNode: Document, source: Element, fragment: El
   let wrapped = fragment;
   for (let index = ancestors.length - 1; index >= 0; index -= 1) {
     const shell = cloneShell(ancestors[index]);
+    // Ancestor tables exist only to retain alignment/width. Their background
+    // is the source email's page surface and must never be cloned into each
+    // fragment. Do not touch TD backgrounds: those can be deliberate cards.
+    if (shell.tagName.toLowerCase() === 'table') clearSplitPageSurface(shell as HTMLElement);
     shell.appendChild(wrapped);
     wrapped = shell;
   }
@@ -43,6 +65,9 @@ function keepLayoutContext(documentNode: Document, source: Element, fragment: El
 function splitTableRows(documentNode: Document, table: HTMLTableElement, rows: HTMLTableRowElement[]): string[] {
   return rows.map(row => {
     const tableFragment = cloneShell(table);
+    // The selected table can itself be the full-page wrapper. Rows and cells
+    // retain their own authored backgrounds; only the wrapper surface is reset.
+    clearSplitPageSurface(tableFragment);
     const body = documentNode.createElement('tbody');
     body.appendChild(row.cloneNode(true));
     tableFragment.appendChild(body);
