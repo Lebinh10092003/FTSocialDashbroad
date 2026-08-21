@@ -11,6 +11,7 @@ import { emailIconRasterKey } from '../../lib/emailIconDelivery';
 import { getEmailBlockPresentation, getEmailLayoutCellPresentation, isDarkEmailColor } from '../../lib/emailPresentation';
 import { useEmailBuilderDialog } from './EmailBuilderDialog';
 import { matchesSearch } from '../../lib/searchText';
+import { uploadEmailImage } from '../../lib/emailImageUpload';
 
 export interface EmailCanvasHandle {
   hasTextSelection: (blockId: string) => boolean;
@@ -95,6 +96,7 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
   const selectionRefs = useRef<Record<string, Range | null>>({});
   const selectionBookmarks = useRef<Record<string, SelectionBookmark | null>>({});
   const imageInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const customHtmlPreviewCache = useRef<Record<string, { source: string; html: string }>>({});
   const [inserterTarget, setInserterTarget] = React.useState<{ parentId?: string; slotIndex?: number; placement: 'cell' | 'root' } | null>(null);
   const [blockQuery, setBlockQuery] = React.useState('');
   const [rootDragOver, setRootDragOver] = React.useState(false);
@@ -102,6 +104,17 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
   const inserterRef = useRef<HTMLDivElement | null>(null);
   const [dropHint, setDropHint] = React.useState<{ blockId: string; position: 'before' | 'after' } | null>(null);
   const dialog = useEmailBuilderDialog();
+  const previewCustomHtml = (cacheKey: string, source: unknown, isPrepared = false) => {
+    const raw = String(source || '');
+    // Imports and visual section splits are sanitized before reaching the
+    // canvas. Do not parse their full HTML again whenever a block is selected.
+    if (isPrepared) return raw;
+    const cached = customHtmlPreviewCache.current[cacheKey];
+    if (cached?.source === raw) return cached.html;
+    const html = sanitizeCustomHtml(raw);
+    customHtmlPreviewCache.current[cacheKey] = { source: raw, html };
+    return html;
+  };
   const publishSelectionFormat = (editorKey: string, blockId: string, range: Range) => {
     const editable = editableRefs.current[editorKey];
     const startElement = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer as Element : range.startContainer.parentElement;
@@ -527,13 +540,11 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     image.src = url;
   };
   const uploadImage = async (block: EmailBlock, file: File) => {
-    if (!file.type.startsWith('image/') || file.size > 3 * 1024 * 1024) return;
     try {
-      const response = await fetch('/api/upload', { method: 'POST', headers: { 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name) }, body: file });
-      const data = await response.json();
-      if (data.success && data.url) { setImageMetadata(block, `${window.location.origin}${data.url}`); return; }
-    } catch { /* use a portable data URL below */ }
-    const reader = new FileReader(); reader.onload = () => setImageMetadata(block, String(reader.result)); reader.readAsDataURL(file);
+      setImageMetadata(block, await uploadEmailImage(file));
+    } catch (error: any) {
+      await dialog.alert(error?.message || 'Không thể tải ảnh lên.', 'Không chèn được ảnh');
+    }
   };
   const pasteImageUrl = async (block: EmailBlock) => {
     const url = await dialog.prompt('Dán đường dẫn ảnh HTTPS:', { title: 'Chèn ảnh từ đường dẫn', defaultValue: block.content.url || 'https://', placeholder: 'https://example.com/image.png' });
@@ -591,7 +602,7 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     const editableField = (field: string, value: unknown, className = '') => <span contentEditable suppressContentEditableWarning onFocus={() => onSelectBlock(block.id)} onBlur={event => update({ [field]: event.currentTarget.innerText.replace(/\r\n?/g, '\n') })} style={{ whiteSpace: 'pre-wrap' }} className={`block min-h-5 cursor-text rounded outline-none focus:bg-blue-50 ${className}`}>{String(value ?? '')}</span>;
     const updateCollectionItem = (key: string, itemIndex: number, patch: Record<string, any>) => update({ [key]: (content[key] || []).map((item: any, currentIndex: number) => currentIndex === itemIndex ? { ...item, ...patch } : item) });
     const removeCollectionItem = (key: string, itemIndex: number) => update({ [key]: (content[key] || []).filter((_: any, currentIndex: number) => currentIndex !== itemIndex) });
-    if (block.type === 'custom-html') return <div className="space-y-2">{selected && <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[10px] leading-4 text-blue-800"><strong>Khối HTML tùy chỉnh.</strong> Canvas chỉ hiển thị bản xem trước; dùng biểu tượng mã HTML trên thanh công cụ để sửa mã, tránh đè lên nội dung email.</div>}<iframe title="Xem trước HTML" sandbox="" srcDoc={`<!doctype html><html><body style="margin:0">${sanitizeCustomHtml(content.html || '')}</body></html>`} className="pointer-events-none min-h-24 w-full rounded border bg-white" /></div>;
+    if (block.type === 'custom-html') return <div className="space-y-2">{selected && <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[10px] leading-4 text-blue-800"><strong>Khối HTML tùy chỉnh.</strong> Canvas chỉ hiển thị bản xem trước; dùng biểu tượng mã HTML trên thanh công cụ để sửa mã, tránh đè lên nội dung email.</div>}<iframe title="Xem trước HTML" sandbox="" srcDoc={`<!doctype html><html><body style="margin:0">${previewCustomHtml(block.id, content.html, content.htmlSanitized === true)}</body></html>`} className="pointer-events-none min-h-24 w-full rounded border bg-white" /></div>;
     if (block.type === 'gallery') {
       const images: string[] = content.images || ['', ''];
       return <div className="grid grid-cols-2 gap-2">{images.map((url: string, imageIndex: number) => <div key={imageIndex} className="relative space-y-1">{url ? <img src={url} className="h-24 w-full rounded object-cover" alt="" /> : <div className="flex h-24 items-center justify-center rounded bg-slate-100 text-xs text-slate-400">Ảnh {imageIndex + 1}</div>}{selected && <div className="flex gap-1"><input value={url} onChange={event => update({ images: images.map((image, currentIndex) => currentIndex === imageIndex ? event.target.value : image) })} onClick={event => event.stopPropagation()} placeholder="URL ảnh" className="min-w-0 flex-1 rounded border px-2 py-1 text-[9px]" /><button type="button" onClick={event => { event.stopPropagation(); removeCollectionItem('images', imageIndex); }} className="rounded border px-1 text-rose-500"><Trash2 className="h-3 w-3" /></button></div>}</div>)}{selected && images.length < 3 && <button type="button" onClick={event => { event.stopPropagation(); update({ images: [...images, ''] }); }} className="flex h-24 items-center justify-center gap-1 rounded border border-dashed border-blue-300 text-[10px] font-bold text-blue-700"><Plus className="h-4 w-4" />Thêm ảnh</button>}</div>;
@@ -682,7 +693,7 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
     if (hasHtmlOverride) return <div key={block.id} data-ft-block-id={block.id} data-ft-block-type={block.type} onClick={event => { event.stopPropagation(); onSelectBlock(block.id); }} className={`group relative rounded-xl transition ${selected ? 'outline outline-2 outline-blue-500 bg-blue-50/5' : 'hover:outline hover:outline-1 hover:outline-slate-300'} ${block.visible ? '' : 'opacity-40'}`} style={{ marginTop: styles.marginTop ?? (block.type === 'divider' ? 0 : 10), marginBottom: styles.marginBottom ?? (block.type === 'divider' ? 0 : 10) }}>
       <div className="absolute -top-3 left-3 z-20 hidden rounded bg-amber-600 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-white group-hover:block">HTML riêng</div>
       {selected && <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-bold text-amber-800">Block đang dùng HTML riêng. Sửa hoặc khôi phục ở cuối Properties.</div>}
-      <iframe title={`Xem trước HTML của ${TYPE_NAMES[block.type] || 'block'}`} sandbox="" srcDoc={`<!doctype html><html><body style="margin:0;overflow-wrap:anywhere">${sanitizeCustomHtml(content.htmlOverride)}</body></html>`} className="pointer-events-none min-h-24 w-full rounded border border-slate-200 bg-white" />
+      <iframe title={`Xem trước HTML của ${TYPE_NAMES[block.type] || 'block'}`} sandbox="" srcDoc={`<!doctype html><html><body style="margin:0;overflow-wrap:anywhere">${previewCustomHtml(`${block.id}:override`, content.htmlOverride, content.htmlOverrideSanitized === true)}</body></html>`} className="pointer-events-none min-h-24 w-full rounded border border-slate-200 bg-white" />
     </div>;
 
     return <div key={block.id} data-ft-block-id={block.id} data-ft-block-type={block.type} onClick={event => { event.stopPropagation(); onSelectBlock(block.id); }} onDragOver={event => { const acceptsDrop = event.dataTransfer.types.includes('application/x-ft-email-block-id') || event.dataTransfer.types.includes('application/x-ft-email-block'); if (!acceptsDrop) return; event.preventDefault(); event.stopPropagation(); setRootDragOver(false); event.dataTransfer.dropEffect = event.dataTransfer.types.includes('application/x-ft-email-block-id') ? 'move' : 'copy'; if (block.type === 'section') setDropHint(null); else { const rect = event.currentTarget.getBoundingClientRect(); setDropHint({ blockId: block.id, position: event.clientY < rect.top + rect.height / 2 ? 'before' : 'after' }); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropHint(current => current?.blockId === block.id ? null : current); }} onDrop={event => { const rect = event.currentTarget.getBoundingClientRect(); const position = dropHint?.blockId === block.id ? dropHint.position : event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'; dropInto(event, block, undefined, position); }} className={`group relative rounded-xl transition ${fillHeight ? 'flex h-full flex-col' : ''} ${selected ? 'outline outline-2 outline-blue-500 bg-blue-50/5' : 'hover:outline hover:outline-1 hover:outline-slate-300'} ${block.visible ? '' : 'opacity-40'}`} style={{ marginTop: styles.marginTop ?? (block.type === 'divider' ? 0 : 10), marginBottom: styles.marginBottom ?? (block.type === 'divider' ? 0 : 10) }}>

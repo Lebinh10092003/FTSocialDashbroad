@@ -38,7 +38,7 @@ import { generateEmailHtml } from '../../lib/emailHtmlGenerator';
 import { copyEmailToClipboard, copyTextToClipboard } from '../../lib/emailClipboard';
 import { createBlankEmailTemplate, createEmailTemplateFromHtml, HtmlImportMode, isHtmlEmailFile } from '../../lib/emailTemplateFactory';
 import { prepareEmailIconsForDelivery } from '../../lib/emailIconDelivery';
-import { importHtmlToEmailBlocks } from '../../lib/emailHtmlBlockImporter';
+import { splitEmailHtmlPreservingLayout } from '../../lib/emailHtmlSectionSplitter';
 
 import BlockLibrary from './BlockLibrary';
 import EmailCanvas, { EmailCanvasHandle, EmailSelectionFormat } from './EmailCanvas';
@@ -513,29 +513,33 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
     const sourceHtml = String(sourceBlock.content.html || '').trim();
     if (!sourceHtml) { showToast('Khối HTML này chưa có nội dung để tách.'); return; }
 
-    const converted = importHtmlToEmailBlocks(sourceHtml, Date.now());
-    const splitBlocks = converted.blocks.map((item, index, list) => ({
-      ...item,
-      visible: sourceBlock.visible,
-      styles: {
-        ...item.styles,
-        marginTop: index === 0 ? sourceBlock.styles.marginTop ?? item.styles.marginTop : item.styles.marginTop,
-        marginBottom: index === list.length - 1 ? sourceBlock.styles.marginBottom ?? item.styles.marginBottom : item.styles.marginBottom,
-      },
-    }));
-    const remainsSingleCustomBlock = splitBlocks.length === 1 && splitBlocks[0].type === 'custom-html';
-    if (!splitBlocks.length || remainsSingleCustomBlock) {
-      showToast('Không tìm thấy cấu trúc có thể tách; khối HTML được giữ nguyên để tránh mất giao diện.');
+    // Let the button state paint before parsing a long clipboard payload. The
+    // splitter intentionally preserves table wrappers instead of translating
+    // email markup into native blocks, which is what used to lose the form.
+    await new Promise<void>(resolve => window.setTimeout(resolve, 0));
+    const fragments = splitEmailHtmlPreservingLayout(sourceHtml);
+    if (fragments.length < 2) {
+      showToast('Không tìm thấy ít nhất 2 section độc lập trong HTML này. Hãy tách tại một bảng/hàng nội dung có từ 2 phần trở lên.');
       return;
     }
+    const splitBlocks: EmailBlock[] = fragments.map((html, index) => ({
+      id: `custom-html-${Date.now()}-${index}`,
+      type: 'custom-html',
+      content: { variant: 'style-1', html, htmlSanitized: true },
+      styles: {
+        marginTop: index === 0 ? sourceBlock.styles.marginTop ?? 0 : 0,
+        marginBottom: index === fragments.length - 1 ? sourceBlock.styles.marginBottom ?? 0 : 0,
+      },
+      visible: sourceBlock.visible,
+    }));
     const accepted = await dialog.confirm(
-      `Tách Custom HTML này thành ${countEmailBlocks(splitBlocks)} khối chỉnh sửa được? Phần HTML đặc thù có thể vẫn được giữ thành Custom HTML riêng.`,
-      { title: 'Tách Custom HTML', confirmText: 'Tách khối' },
+      `Tách HTML này thành ${splitBlocks.length} section giữ nguyên bố cục? Mỗi section sẽ là một Custom HTML riêng để bạn sửa mã mà không mất bảng/style bọc.`,
+      { title: 'Tách HTML theo section', confirmText: 'Tách section' },
     );
     if (!accepted) return;
     handleUpdateTemplateBlocks(replaceEmailBlock(activeTemplate.blocks, id, splitBlocks));
     setSelectedBlockId(splitBlocks[0].id);
-    showToast(`Đã tách Custom HTML thành ${countEmailBlocks(splitBlocks)} khối.`);
+    showToast(`Đã tách HTML thành ${splitBlocks.length} section giữ nguyên bố cục.`);
   };
   // 5. Variables Operations
   const updateVariablesList = (newList: EmailVariable[]) => {

@@ -7,19 +7,33 @@ const ACTIVE_TEMPLATE_ID_KEY = 'ft_active_email_template_id';
 function removeEmbeddedDataImagesInPlace(templates: EmailTemplate[]): number {
   let removedCount = 0;
 
-  for (const template of templates) {
-    if (!Array.isArray(template.blocks)) continue;
-
-    for (const block of template.blocks) {
-      const imageUrl = block.content?.url;
-      if (typeof imageUrl === 'string' && imageUrl.startsWith('data:image/')) {
-        block.content = {
-          ...block.content,
-          url: '',
-        };
+  const removeFromContent = (value: unknown): unknown => {
+    if (typeof value === 'string') {
+      if (value.startsWith('data:image/')) {
         removedCount += 1;
+        return '';
       }
+      return value;
     }
+    if (Array.isArray(value)) return value.map(removeFromContent);
+    if (value && typeof value === 'object') {
+      Object.entries(value as Record<string, unknown>).forEach(([key, child]) => {
+        (value as Record<string, unknown>)[key] = removeFromContent(child);
+      });
+    }
+    return value;
+  };
+
+  const removeFromBlocks = (blocks: EmailTemplate['blocks']) => {
+    for (const block of blocks || []) {
+      block.content = removeFromContent(block.content) as Record<string, any>;
+      if (block.children) removeFromBlocks(block.children);
+      if (block.columns) block.columns.forEach(removeFromBlocks);
+    }
+  };
+
+  for (const template of templates) {
+    if (Array.isArray(template.blocks)) removeFromBlocks(template.blocks);
   }
 
   return removedCount;

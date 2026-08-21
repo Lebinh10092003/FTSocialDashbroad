@@ -122,7 +122,10 @@ export function createEmailTemplateFromHtml(source: string, fileName: string, ti
   const blocks = converted?.blocks.length ? converted.blocks : [{
     id: `custom-html-${timestamp}`,
     type: 'custom-html' as const,
-    content: { variant: 'style-1', html: importedBody },
+    // The import pipeline has already inlined CSS and sanitized this payload.
+    // Marking it prevents the canvas from reparsing a large email on every
+    // selection/re-render.
+    content: { variant: 'style-1', html: importedBody, htmlSanitized: true },
     styles: { marginTop: 0, marginBottom: 0 },
     visible: true,
   }];

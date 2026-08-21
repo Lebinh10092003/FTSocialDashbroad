@@ -8,6 +8,8 @@ import { EMAIL_ICON_CATEGORY_LABELS, EMAIL_ICON_LIBRARY, EmailIconOption } from 
 import { getEmailLucideIcon } from '../../lib/emailIcon';
 import { useEmailBuilderDialog } from './EmailBuilderDialog';
 import { matchesSearch } from '../../lib/searchText';
+import { inlineCustomCss, sanitizeCustomHtml } from '../../lib/emailSanitizer';
+import { uploadEmailImage } from '../../lib/emailImageUpload';
 
 interface BlockSettingsProps {
   block: EmailBlock;
@@ -108,9 +110,12 @@ export default function BlockSettings({ block, variables = [], onUpdateBlockCont
     setIsHtmlEditorOpen(true);
   };
   const applyHtmlOverride = () => {
-    const htmlOverride = htmlDraft.trim();
-    if (!htmlOverride) return;
-    onUpdateBlockContent({ ...content, htmlOverride });
+    const draft = htmlDraft.trim();
+    if (!draft) return;
+    // Prepare once when the user explicitly applies HTML. Rendering the canvas
+    // must not repeatedly parse the same large email snippet.
+    const htmlOverride = sanitizeCustomHtml(inlineCustomCss(draft));
+    onUpdateBlockContent({ ...content, htmlOverride, htmlOverrideSanitized: true });
     setIsHtmlEditorOpen(false);
   };
   const clearHtmlOverride = async () => {
@@ -134,41 +139,22 @@ export default function BlockSettings({ block, variables = [], onUpdateBlockCont
   };
 
   const uploadImage = async (file: File) => {
-    if (!file.type.startsWith('image/')) { setUploadError('Vui lòng chọn tệp hình ảnh hợp lệ.'); return; }
-    if (file.size > 3 * 1024 * 1024) { setUploadError('Tệp quá lớn. Kích thước tối đa là 3MB.'); return; }
     setUploading(true); setUploadError('');
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const dataUrl = String(reader.result);
-      try {
-        const response = await fetch('/api/upload', { method: 'POST', headers: { 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name) }, body: file });
-        const result = await response.json();
-        applyImageMetadata(result.success && result.url ? `${window.location.origin}${result.url}` : dataUrl);
-      } catch { applyImageMetadata(dataUrl); }
+    try {
+      applyImageMetadata(await uploadEmailImage(file));
+    } catch (error: any) {
+      setUploadError(error?.message || 'Không thể tải ảnh lên.');
+    } finally {
       setUploading(false);
-    };
-    reader.onerror = () => { setUploadError('Không thể đọc dữ liệu tệp.'); setUploading(false); };
-    reader.readAsDataURL(file);
+    }
   };
 
   const uploadIconImage = (file: File) => {
-    if (!file.type.startsWith('image/')) { setUploadError('Vui lòng chọn tệp hình ảnh hợp lệ.'); return; }
-    if (file.size > 3 * 1024 * 1024) { setUploadError('Tệp quá lớn. Kích thước tối đa là 3MB.'); return; }
     setUploading(true); setUploadError('');
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const dataUrl = String(reader.result);
-      let iconUrl = dataUrl;
-      try {
-        const response = await fetch('/api/upload', { method: 'POST', headers: { 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name) }, body: file });
-        const result = await response.json();
-        if (result.success && result.url) iconUrl = `${window.location.origin}${result.url}`;
-      } catch { /* keep portable data URL */ }
-      onUpdateBlockContent({ ...content, iconSource: 'upload', iconUrl });
-      setUploading(false);
-    };
-    reader.onerror = () => { setUploadError('Không thể đọc dữ liệu tệp.'); setUploading(false); };
-    reader.readAsDataURL(file);
+    void uploadEmailImage(file)
+      .then(iconUrl => onUpdateBlockContent({ ...content, iconSource: 'upload', iconUrl }))
+      .catch((error: any) => setUploadError(error?.message || 'Không thể tải icon lên.'))
+      .finally(() => setUploading(false));
   };
 
   const filteredIcons = EMAIL_ICON_LIBRARY.filter(option => {
