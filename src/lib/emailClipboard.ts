@@ -1,3 +1,48 @@
+const pageSurfaceProperties = ['background', 'background-color', 'background-image'] as const;
+
+const readBackground = (element: HTMLElement) => element.getAttribute('bgcolor')
+  || element.style.getPropertyValue('background-color')
+  || element.style.getPropertyValue('background')
+  || '';
+
+const clearBackground = (element: HTMLElement) => {
+  element.removeAttribute('bgcolor');
+  pageSurfaceProperties.forEach(property => element.style.removeProperty(property));
+};
+
+const isPlainColour = (value: string) => /^(#[0-9a-f]{3,8}|rgba?\([^)]*\)|hsla?\([^)]*\)|[a-z]+)$/i.test(value.trim());
+
+/**
+ * Remove page/chrome backgrounds before handing HTML to Gmail.
+ *
+ * Gmail promotes table `bgcolor` more aggressively than browser previews.
+ * In particular, an imported Custom HTML wrapper can turn its original page
+ * colour into a background around the entire pasted message. Tables are layout
+ * containers in our output, so their own background is never needed; colours
+ * intentionally used by CTAs, cards and sections live on `td`/`th` and stay.
+ */
+function removeClipboardPageSurfaces(documentNode: Document) {
+  documentNode.querySelectorAll<HTMLElement>('table').forEach(clearBackground);
+
+  // The generated email content table is only a width/padding shell. Its cell
+  // must not carry a stale background from an older imported email either.
+  documentNode.querySelectorAll<HTMLElement>('.ft-email-content > tbody > tr > td, .ft-email-root > tbody > tr > td').forEach(clearBackground);
+
+  // A Custom HTML block is wrapped by a plain ft-email-block table. Clear the
+  // source fragment's outer table/div and its immediate cell only. Nested
+  // cells are actual components (buttons, cards, schedule rows) and retain
+  // their authored colours.
+  documentNode.querySelectorAll<HTMLElement>('table.ft-email-block:not([data-ft-block-type]), .ft-email-block-html-override').forEach(shell => {
+    const roots = shell.matches('table')
+      ? Array.from(shell.querySelectorAll<HTMLElement>(':scope > tbody > tr > td > :is(table, div)'))
+      : Array.from(shell.children).filter((child): child is HTMLElement => child instanceof HTMLElement && /^(table|div)$/i.test(child.tagName));
+    roots.forEach(root => {
+      clearBackground(root);
+      if (root.matches('table')) root.querySelectorAll<HTMLElement>(':scope > tbody > tr > td').forEach(clearBackground);
+    });
+  });
+}
+
 /** Make clipboard HTML self-contained before Gmail/Outlook can sanitise it. */
 function prepareGmailClipboardHtml(htmlContent: string): string {
   const documentNode = document.implementation.createHTMLDocument('Email clipboard');
@@ -5,13 +50,14 @@ function prepareGmailClipboardHtml(htmlContent: string): string {
   // Gmail inconsistently preserves a pasted style block. The email renderer
   // already writes essential presentation properties inline.
   documentNode.querySelectorAll('style, link, meta, title').forEach(element => element.remove());
-  documentNode.querySelectorAll<HTMLElement>('table, td, th').forEach(element => {
-    const background = element.getAttribute('bgcolor') || element.style.backgroundColor;
-    if (!background) return;
-    // bgcolor remains the most reliable background fallback in Gmail's
-    // contenteditable composer and Outlook.
-    element.setAttribute('bgcolor', background);
-    element.style.setProperty('background-color', background, 'important');
+  removeClipboardPageSurfaces(documentNode);
+  documentNode.querySelectorAll<HTMLElement>('td, th').forEach(element => {
+    const background = readBackground(element);
+    if (!background || !isPlainColour(background)) return;
+    // bgcolor remains the most reliable fallback in Gmail's composer, but do
+    // not add it to a table wrapper: that was the source of the green frame.
+    element.setAttribute('bgcolor', background.trim());
+    element.style.setProperty('background-color', background.trim(), 'important');
   });
   return documentNode.body.innerHTML;
 }
