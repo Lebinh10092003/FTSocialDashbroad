@@ -11,7 +11,7 @@ import { emailIconRasterKey } from '../../lib/emailIconDelivery';
 import { getEmailBlockPresentation, getEmailLayoutCellPresentation, isDarkEmailColor } from '../../lib/emailPresentation';
 import { useEmailBuilderDialog } from './EmailBuilderDialog';
 import { matchesSearch } from '../../lib/searchText';
-import { uploadEmailImage } from '../../lib/emailImageUpload';
+import { normalizeEmailImageUrl, uploadEmailImage } from '../../lib/emailImageUpload';
 
 export interface EmailCanvasHandle {
   hasTextSelection: (blockId: string) => boolean;
@@ -531,13 +531,16 @@ const EmailCanvas = React.forwardRef<EmailCanvasHandle, EmailCanvasProps>(functi
   }, [insertedVarName]);
 
   const setImageMetadata = (block: EmailBlock, url: string) => {
+    const imageUrl = normalizeEmailImageUrl(url);
+    if (!imageUrl) return;
     const image = new Image();
     image.onload = () => {
       const ratio = image.naturalWidth / Math.max(1, image.naturalHeight);
       const width = Number(block.content.width) || Math.min(image.naturalWidth, 600);
-      onUpdateBlockContent(block.id, { ...block.content, url, width, height: block.content.height || Math.round(width / ratio), naturalRatio: ratio, aspectLocked: block.content.aspectLocked !== false });
+      onUpdateBlockContent(block.id, { ...block.content, url: imageUrl, width, height: block.content.height || Math.round(width / ratio), naturalRatio: ratio, aspectLocked: block.content.aspectLocked !== false });
     };
-    image.src = url;
+    image.onerror = () => { void dialog.alert('Không thể tải ảnh từ liên kết này. Nếu dùng Google Drive, hãy đặt quyền “Bất kỳ ai có đường liên kết” là Người xem.', 'Không hiển thị được ảnh'); };
+    image.src = imageUrl;
   };
   const uploadImage = async (block: EmailBlock, file: File) => {
     try {

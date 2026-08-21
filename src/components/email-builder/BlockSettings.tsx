@@ -9,7 +9,7 @@ import { getEmailLucideIcon } from '../../lib/emailIcon';
 import { useEmailBuilderDialog } from './EmailBuilderDialog';
 import { matchesSearch } from '../../lib/searchText';
 import { inlineCustomCss, sanitizeCustomHtml } from '../../lib/emailSanitizer';
-import { uploadEmailImage } from '../../lib/emailImageUpload';
+import { normalizeEmailImageUrl, uploadEmailImage } from '../../lib/emailImageUpload';
 
 interface BlockSettingsProps {
   block: EmailBlock;
@@ -129,13 +129,17 @@ export default function BlockSettings({ block, variables = [], onUpdateBlockCont
   };
 
   const applyImageMetadata = (url: string) => {
+    const imageUrl = normalizeEmailImageUrl(url);
+    if (!imageUrl) return;
+    setUploadError('');
     const image = new Image();
     image.onload = () => {
       const ratio = image.naturalWidth / Math.max(1, image.naturalHeight);
       const width = Number(content.width) || Math.min(image.naturalWidth, 600);
-      onUpdateBlockContent({ ...content, url, width, height: content.height || Math.round(width / ratio), naturalRatio: ratio, aspectLocked: content.aspectLocked !== false });
+      onUpdateBlockContent({ ...content, url: imageUrl, width, height: content.height || Math.round(width / ratio), naturalRatio: ratio, aspectLocked: content.aspectLocked !== false });
     };
-    image.src = url;
+    image.onerror = () => setUploadError('Không thể tải ảnh từ link này. Với Google Drive, hãy đặt quyền “Bất kỳ ai có đường liên kết” là Người xem.');
+    image.src = imageUrl;
   };
 
   const uploadImage = async (file: File) => {
@@ -168,7 +172,7 @@ export default function BlockSettings({ block, variables = [], onUpdateBlockCont
     <label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const file = event.dataTransfer.files?.[0]; if (file) uploadImage(file); }} onPaste={event => { const file = [...event.clipboardData.items].find(item => item.type.startsWith('image/'))?.getAsFile(); if (file) { event.preventDefault(); uploadImage(file); } }} className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-4 text-center hover:border-blue-400" tabIndex={0}>
       <input type="file" accept="image/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) uploadImage(file); event.currentTarget.value = ''; }} />
       <span className="text-xs font-bold text-slate-700">{uploading ? 'Đang tải ảnh…' : 'Kéo thả, bấm chọn hoặc dán ảnh'}</span>
-      <span className="mt-1 text-[9px] text-slate-400">JPG, PNG, GIF, WebP — tối đa 3MB</span>
+      <span className="mt-1 text-[9px] text-slate-400">JPG, PNG, GIF, WebP — ảnh lớn tự thu nhỏ, tệp gốc tối đa 10MB</span>
     </label>
     {uploadError && <p className="rounded-lg bg-rose-50 p-2 text-[10px] font-bold text-rose-600">{uploadError}</p>}
   </div>;
@@ -262,7 +266,7 @@ export default function BlockSettings({ block, variables = [], onUpdateBlockCont
 
     {block.type !== 'spacer' && <section className="rounded-xl border border-slate-200 bg-slate-50 p-3.5"><h4 className="mb-2 text-[10px] font-black uppercase tracking-wider">Khoảng cách lề (px)</h4><div className="grid grid-cols-2 gap-3"><NumberDraft label="Lề trên" value={styles.marginTop ?? (block.type === 'divider' ? 0 : 10)} max={100} onCommit={value => updateStyles('marginTop', value === '' ? 0 : value)} /><NumberDraft label="Lề dưới" value={styles.marginBottom ?? (block.type === 'divider' ? 0 : 10)} max={100} onCommit={value => updateStyles('marginBottom', value === '' ? 0 : value)} /></div></section>}
 
-    {(block.type === 'image' || block.type === 'logo') && <div className="space-y-4"><ImageUploader /><div><label className="mb-1 block text-[10px] font-bold text-slate-500">Đường dẫn ảnh HTTPS</label><input value={content.url || ''} onChange={event => updateContent('url', event.target.value)} onBlur={() => content.url && applyImageMetadata(content.url)} placeholder="https://example.com/image.png" className={fieldClass} /></div><div><label className="mb-1 block text-[10px] font-bold text-slate-500">Mô tả ảnh (Alt text)</label><input value={content.alt || ''} onChange={event => updateContent('alt', event.target.value)} className={fieldClass} /></div>
+    {(block.type === 'image' || block.type === 'logo') && <div className="space-y-4"><ImageUploader /><div><label className="mb-1 block text-[10px] font-bold text-slate-500">Đường dẫn ảnh HTTPS</label><input value={content.url || ''} onChange={event => updateContent('url', event.target.value)} onBlur={event => applyImageMetadata(event.currentTarget.value)} placeholder="https://example.com/image.png" className={fieldClass} /></div><div><label className="mb-1 block text-[10px] font-bold text-slate-500">Mô tả ảnh (Alt text)</label><input value={content.alt || ''} onChange={event => updateContent('alt', event.target.value)} className={fieldClass} /></div>
       <section className="rounded-xl border border-blue-100 bg-blue-50/40 p-3"><div className="mb-2 flex items-center justify-between"><h4 className="text-[10px] font-black uppercase">Kích thước ảnh</h4><button type="button" onClick={() => updateContent('aspectLocked', content.aspectLocked === false)} className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-bold ${content.aspectLocked !== false ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-500'}`} title="Khóa tỉ lệ chiều rộng và chiều cao">{content.aspectLocked !== false ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />}{content.aspectLocked !== false ? 'Đang khóa tỉ lệ' : 'Tự do'}</button></div><div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2"><NumberDraft label="Chiều rộng (px)" value={content.width} min={1} max={2000} onCommit={value => changeImageDimension('width', value)} /><Link2 className={`mb-2 h-4 w-4 ${content.aspectLocked !== false ? 'text-blue-600' : 'text-slate-300'}`} /><NumberDraft label="Chiều cao (px)" value={content.height} min={1} max={2000} onCommit={value => changeImageDimension('height', value)} /></div><p className="mt-2 text-[9px] leading-relaxed text-slate-500">Có thể xóa trắng hoàn toàn một ô rồi nhập số mới. Khi khóa tỉ lệ, thay đổi một chiều sẽ tự cập nhật chiều còn lại.</p></section>
       {block.type === 'image' && <NumberDraft label="Bo góc ảnh (px)" value={content.borderRadius ?? 0} max={100} onCommit={value => updateContent('borderRadius', value === '' ? 0 : value)} />}{alignControl}<div><label className="mb-1 block text-[10px] font-bold text-slate-500">Liên kết khi bấm vào ảnh</label><input value={content.link || ''} onChange={event => updateContent('link', event.target.value)} className={fieldClass} /></div></div>}
 
@@ -275,7 +279,7 @@ export default function BlockSettings({ block, variables = [], onUpdateBlockCont
         <div className="grid max-h-64 grid-cols-[repeat(auto-fill,minmax(42px,1fr))] gap-1.5 overflow-y-auto pr-1">{filteredIcons.map(option => { const Icon = getEmailLucideIcon(option.name); return <button key={option.name} type="button" onClick={() => onUpdateBlockContent({ ...content, iconSource: 'library', iconName: option.name, iconPngUrl: '', iconRasterKey: '' })} title={option.label} className={`flex aspect-square min-h-10 items-center justify-center rounded-lg border transition hover:border-blue-400 hover:bg-blue-50 ${content.iconName === option.name ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-400' : 'border-slate-200 bg-white text-slate-600'}`}>{Icon ? <Icon size={18} /> : null}</button>; })}</div>
         {!filteredIcons.length && <p className="py-4 text-center text-[10px] font-bold text-slate-400">Không tìm thấy icon phù hợp.</p>}
       </section> : <section className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/40 p-3">
-        <label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const file = event.dataTransfer.files?.[0]; if (file) uploadIconImage(file); }} className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-blue-200 bg-white p-3 text-center hover:border-blue-400"><input type="file" accept="image/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) uploadIconImage(file); event.currentTarget.value = ''; }} /><Upload className="mb-2 h-5 w-5 text-blue-600" /><span className="text-[10px] font-bold text-slate-700">{uploading ? 'Đang tải icon…' : 'Bấm hoặc kéo ảnh icon vào đây'}</span><span className="mt-1 text-[8px] text-slate-400">PNG nền trong suốt được khuyến nghị · tối đa 3MB</span></label>
+        <label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const file = event.dataTransfer.files?.[0]; if (file) uploadIconImage(file); }} className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-blue-200 bg-white p-3 text-center hover:border-blue-400"><input type="file" accept="image/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) uploadIconImage(file); event.currentTarget.value = ''; }} /><Upload className="mb-2 h-5 w-5 text-blue-600" /><span className="text-[10px] font-bold text-slate-700">{uploading ? 'Đang tải icon…' : 'Bấm hoặc kéo ảnh icon vào đây'}</span><span className="mt-1 text-[8px] text-slate-400">Ảnh lớn tự thu nhỏ · tệp gốc tối đa 10MB</span></label>
         <div><label className="mb-1 block text-[10px] font-bold text-slate-500">Đường dẫn ảnh icon</label><input value={content.iconUrl || ''} onChange={event => updateContent('iconUrl', event.target.value)} placeholder="https://…" className={fieldClass} /></div>
         {content.iconUrl && <div className="flex justify-center rounded-lg border bg-white p-3"><img src={content.iconUrl} alt="Xem trước icon" style={{ width: Number(content.iconSize) || 24, height: Number(content.iconSize) || 24 }} className="object-contain" /></div>}
       </section>}

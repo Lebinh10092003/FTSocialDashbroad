@@ -5,7 +5,23 @@
  */
 export async function copyEmailToClipboard(htmlContent: string, plainTextContent: string, emailWidth = 650): Promise<boolean> {
   try {
-    // 1. Create a temporary hidden container in the DOM
+    // Prefer writing the exact MIME payload. Selecting an off-screen DOM node
+    // lets Chrome serialise styles again against the dashboard document; Gmail
+    // can then receive different table/background styles from the preview.
+    if (navigator.clipboard && window.ClipboardItem) {
+      try {
+        const clipboardItem = new ClipboardItem({
+          'text/html': new Blob([htmlContent], { type: 'text/html' }),
+          'text/plain': new Blob([plainTextContent], { type: 'text/plain' }),
+        });
+        await navigator.clipboard.write([clipboardItem]);
+        return true;
+      } catch (clipErr) {
+        console.warn('Exact HTML clipboard write failed, using legacy copy:', clipErr);
+      }
+    }
+
+    // Legacy fallback for browsers that block ClipboardItem.
     const tempDiv = document.createElement('div');
     tempDiv.style.position = 'fixed';
     tempDiv.style.left = '-9999px';
@@ -15,7 +31,7 @@ export async function copyEmailToClipboard(htmlContent: string, plainTextContent
     tempDiv.innerHTML = htmlContent;
     document.body.appendChild(tempDiv);
 
-    // 2. Perform selection and copy using the Selection API (100% synchronous to preserve gesture trust)
+    // Perform selection and copy using the Selection API.
     const range = document.createRange();
     range.selectNodeContents(tempDiv);
     
@@ -36,24 +52,14 @@ export async function copyEmailToClipboard(htmlContent: string, plainTextContent
       return true;
     }
 
-    // 3. Fallback to modern Clipboard API if execCommand is disabled
+    // Plain-text fallback if execCommand is disabled.
     try {
-      if (navigator.clipboard && window.ClipboardItem) {
-        const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
-        const textBlob = new Blob([plainTextContent], { type: 'text/plain' });
-        const clipboardItem = new ClipboardItem({
-          'text/html': htmlBlob,
-          'text/plain': textBlob
-        });
-        await navigator.clipboard.write([clipboardItem]);
-        return true;
-      }
-    } catch (clipErr) {
-      console.warn('Modern clipboard fallback failed, trying writeText:', clipErr);
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(plainTextContent);
         return true;
       }
+    } catch (clipErr) {
+      console.warn('Plain-text clipboard fallback failed:', clipErr);
     }
     
     return false;

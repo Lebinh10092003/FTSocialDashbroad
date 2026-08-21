@@ -90,6 +90,9 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 MEDIA_URL = "/uploads/"
 MEDIA_ROOT = PROJECT_ROOT / "uploads"
+# Keep under nginx's 12 MB request cap. Email-builder uploads are optimised in
+# the browser first; this remains a server-side guard for every caller.
+MAX_UPLOAD_SIZE = int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(10 * 1024 * 1024)))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 CORS_ALLOWED_ORIGINS = [
