@@ -5,6 +5,16 @@ const MAX_RENDER_PIXELS = 2_000_000;
 
 const extensionForType = (type: string) => type === 'image/jpeg' ? 'jpg' : type === 'image/webp' ? 'webp' : 'png';
 
+function authHeader(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem('ft_auth_session');
+    const token = raw ? JSON.parse(raw)?.token : '';
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+}
+
 function resizedName(file: File, type: string) {
   const baseName = file.name.replace(/\.[^.]+$/, '').trim() || 'email-image';
   return `${baseName}.${extensionForType(type)}`;
@@ -68,7 +78,7 @@ export async function uploadEmailImage(file: File): Promise<string> {
   const prepared = await prepareEmailImage(file);
   const response = await fetch('/api/upload', {
     method: 'POST',
-    headers: { 'Content-Type': prepared.type, 'X-File-Name': encodeURIComponent(prepared.name) },
+    headers: { 'Content-Type': prepared.type, 'X-File-Name': encodeURIComponent(prepared.name), ...authHeader() },
     body: prepared,
   });
   const payload = await response.json().catch(() => ({}));
