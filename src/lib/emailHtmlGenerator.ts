@@ -604,9 +604,9 @@ export function generateEmailHtml(
   // One canonical email body for preview and clipboard. The complete export
   // wraps it in an outer page table, but that shell must never be pasted into
   // Gmail/Outlook because it carries the editor's external background color.
-  const contentTableHtml = `<table role="presentation" class="ft-email-content" width="${settings.maxWidth}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: separate; border-spacing: 0; border-radius: ${settings.borderRadius || 0}px; overflow: hidden; box-shadow: 0 4px 18px rgba(19,50,92,0.09); font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
+  const contentTableHtml = `<table role="presentation" class="ft-email-content" width="${settings.maxWidth}" bgcolor="${settings.contentBg}" border="0" cellspacing="0" cellpadding="0" style="width: 100%; max-width: ${settings.maxWidth}px; table-layout: fixed; background-color: ${settings.contentBg}; border-collapse: separate; border-spacing: 0; border-radius: ${settings.borderRadius || 0}px; overflow: hidden; box-shadow: 0 4px 18px rgba(19,50,92,0.09); font-family: ${fontFamily}; color: ${textColor}; text-align: left;">
     <tr>
-      <td class="ft-email-content-cell" width="100%" style="width: 100%; max-width: 100%; box-sizing: border-box; padding: ${settings.contentPadding}px;">
+      <td class="ft-email-content-cell" width="100%" bgcolor="${settings.contentBg}" style="width: 100%; max-width: 100%; box-sizing: border-box; padding: ${settings.contentPadding}px; background-color: ${settings.contentBg};">
         ${blockHtmls}
       </td>
     </tr>
@@ -714,7 +714,7 @@ export function generateEmailHtml(
 
   // Clipboard must contain the email body only. Do not derive it by slicing
   // the complete document: the first table is the decorative outer shell.
-  const copyHtml = `${responsiveStyle}${contentTableHtml}`;
+  const copyHtml = contentTableHtml;
 
   // Build plain text fallback
   const plainTextLines: string[] = [];

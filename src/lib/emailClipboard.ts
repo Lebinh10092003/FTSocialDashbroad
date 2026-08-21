@@ -1,17 +1,56 @@
+/** Make clipboard HTML self-contained before Gmail/Outlook can sanitise it. */
+function prepareGmailClipboardHtml(htmlContent: string): string {
+  const documentNode = document.implementation.createHTMLDocument('Email clipboard');
+  documentNode.body.innerHTML = htmlContent;
+  // Gmail inconsistently preserves a pasted style block. The email renderer
+  // already writes essential presentation properties inline.
+  documentNode.querySelectorAll('style, link, meta, title').forEach(element => element.remove());
+  documentNode.querySelectorAll<HTMLElement>('table, td, th').forEach(element => {
+    const background = element.getAttribute('bgcolor') || element.style.backgroundColor;
+    if (!background) return;
+    // bgcolor remains the most reliable background fallback in Gmail's
+    // contenteditable composer and Outlook.
+    element.setAttribute('bgcolor', background);
+    element.style.setProperty('background-color', background, 'important');
+  });
+  return documentNode.body.innerHTML;
+}
+
 /**
- * Copies rich HTML and plain text simultaneously to the clipboard.
- * Uses synchronous selection copying to preserve user gesture trust, which is highly compatible
- * with rich-text pasting into Gmail/Outlook and supports embedded Base64 images without security blocks.
+ * The legacy fallback must not select a node inside the React application.
+ * Chromium otherwise serialises ambient dashboard styles into the clipboard.
  */
-export async function copyEmailToClipboard(htmlContent: string, plainTextContent: string, emailWidth = 650): Promise<boolean> {
+async function copyFromIsolatedDocument(htmlContent: string): Promise<boolean> {
+  const frame = document.createElement('iframe');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none;';
+  frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"></head><body>${htmlContent}</body></html>`;
   try {
+    await new Promise<void>(resolve => { frame.onload = () => resolve(); document.body.appendChild(frame); });
+    const frameDocument = frame.contentDocument;
+    const selection = frame.contentWindow?.getSelection();
+    if (!frameDocument || !selection) return false;
+    const range = frameDocument.createRange();
+    range.selectNodeContents(frameDocument.body);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return frameDocument.execCommand('copy');
+  } finally {
+    frame.remove();
+  }
+}
+
+/** Copies rich HTML and plain text simultaneously to the clipboard. */
+export async function copyEmailToClipboard(htmlContent: string, plainTextContent: string, _emailWidth = 650): Promise<boolean> {
+  try {
+    const clipboardHtml = prepareGmailClipboardHtml(htmlContent);
     // Prefer writing the exact MIME payload. Selecting an off-screen DOM node
     // lets Chrome serialise styles again against the dashboard document; Gmail
     // can then receive different table/background styles from the preview.
     if (navigator.clipboard && window.ClipboardItem) {
       try {
         const clipboardItem = new ClipboardItem({
-          'text/html': new Blob([htmlContent], { type: 'text/html' }),
+          'text/html': new Blob([clipboardHtml], { type: 'text/html' }),
           'text/plain': new Blob([plainTextContent], { type: 'text/plain' }),
         });
         await navigator.clipboard.write([clipboardItem]);
@@ -21,34 +60,8 @@ export async function copyEmailToClipboard(htmlContent: string, plainTextContent
       }
     }
 
-    // Legacy fallback for browsers that block ClipboardItem.
-    const tempDiv = document.createElement('div');
-    tempDiv.style.position = 'fixed';
-    tempDiv.style.left = '-9999px';
-    tempDiv.style.top = '0';
-    tempDiv.style.width = `${emailWidth}px`;
-    tempDiv.style.overflow = 'hidden';
-    tempDiv.innerHTML = htmlContent;
-    document.body.appendChild(tempDiv);
-
-    // Perform selection and copy using the Selection API.
-    const range = document.createRange();
-    range.selectNodeContents(tempDiv);
-    
-    const selection = window.getSelection();
-    if (!selection) {
-      document.body.removeChild(tempDiv);
-      return false;
-    }
-    
-    selection.removeAllRanges();
-    selection.addRange(range);
-    
-    const successful = document.execCommand('copy');
-    selection.removeAllRanges();
-    document.body.removeChild(tempDiv);
-    
-    if (successful) {
+    // Isolated fallback for browsers that block ClipboardItem.
+    if (await copyFromIsolatedDocument(clipboardHtml)) {
       return true;
     }
 
