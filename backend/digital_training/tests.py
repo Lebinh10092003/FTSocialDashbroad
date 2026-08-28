@@ -967,10 +967,17 @@ class TrainingAssessmentImportPreviewTests(TestCase):
         self.assertFalse(hasattr(snapshot, "questions"))
 
 class TrainingFinancePermissionTests(TestCase):
-    def client_for(self, email, role="EMPLOYEE", title_name="", department_name=""):
+    def client_for(self, email, role="EMPLOYEE", title_name="", department_name="", access_modules=None):
         title = JobTitle.objects.create(name=title_name) if title_name else None
         department = Department.objects.create(name=department_name) if department_name else None
-        profile = UserProfile.objects.create(email=email, name=email, role=role, job_title=title, department=department)
+        profile = UserProfile.objects.create(
+            email=email,
+            name=email,
+            role=role,
+            job_title=title,
+            department=department,
+            access_modules=["finance-report"] if access_modules is None else access_modules,
+        )
         if department:
             profile.departments.add(department)
         django_user = get_user_model().objects.create_user(

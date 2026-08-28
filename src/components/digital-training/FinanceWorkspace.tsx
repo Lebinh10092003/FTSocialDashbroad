@@ -30,7 +30,7 @@ export default function FinanceWorkspace({
   useEffect(() => {
     let active = true;
     setLoading(true);
-    fetch("/api/digital-training/partners", {
+    fetch("/api/digital-training/finance-partners", {
       headers: { Authorization: `Bearer ${idToken}` },
     })
       .then(async (response) => {

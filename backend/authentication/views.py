@@ -17,6 +17,7 @@ from django.core.exceptions import ValidationError
 from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes
@@ -654,7 +655,19 @@ def change_password(request):
     return Response({"success": True, "token": token.key, "user": _user_payload(_profile_for_user(django_user))})
 
 EMPLOYMENT_STATUSES = {"ACTIVE", "SUSPENDED", "TERMINATED", "PENDING"}
-WORKSPACE_MODULES = {"social-dashboard", "email-builder", "examination", "digital-training"}
+WORKSPACE_MODULES = {
+    "social-dashboard",
+    "attendance",
+    "email-builder",
+    "signature-builder",
+    "qr-generator",
+    "examination",
+    "digital-training",
+    "finance-report",
+}
+# These are ordinary workspace tools.  New staff should receive them without an
+# administrator having to make the same selections for every account.
+DEFAULT_ACCESS_MODULES = {"attendance", "email-builder", "signature-builder", "qr-generator"}
 DEFAULT_DEPARTMENTS = (
     ("Kế toán", "ACCOUNTING"),
     ("Truyền thông", "MEDIA"),
@@ -707,7 +720,8 @@ def _get_positive_int(value, default, maximum=100):
 
 def _write_employee(request, profile=None):
     data = request.data or {}
-    email = _normalise_email(data.get("email") if profile is None else profile.email)
+    previous_email = profile.email if profile else ""
+    email = _normalise_email(data.get("email") if profile is None or request.user_role == "ADMIN" else previous_email)
     name = str(data.get("name") or "").strip() or email.split("@", 1)[0]
     password = str(data.get("password") or "")
     role = str(data.get("role") or (profile.role if profile else "EMPLOYEE")).upper()
@@ -721,9 +735,13 @@ def _write_employee(request, profile=None):
     manager_email = _normalise_email(data.get("managerEmail") if "managerEmail" in data else data.get("manager_email"))
     requested_modules = data.get("accessModules") if "accessModules" in data else data.get("access_modules", profile.access_modules if profile else [])
     access_modules = {str(item) for item in requested_modules} if isinstance(requested_modules, list) else set()
+    raw_start_date = data.get("startDate") if "startDate" in data else data.get("start_date")
+    start_date = parse_date(str(raw_start_date)) if raw_start_date else None
 
     if not email:
         return None, Response({"error": "Vui lòng nhập email."}, status=status.HTTP_400_BAD_REQUEST)
+    if raw_start_date and not start_date:
+        return None, Response({"error": "Ngày bắt đầu không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
     if not access_modules.issubset(WORKSPACE_MODULES):
         return None, Response({"error": "Phạm vi truy cập mô-đun không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
     if role not in VALID_ROLES:
@@ -738,6 +756,8 @@ def _write_employee(request, profile=None):
         access_modules = access_modules.intersection(set(request.user.access_modules or []))
     if role == "ADMIN":
         access_modules = set(WORKSPACE_MODULES)
+    elif profile is None:
+        access_modules.update(DEFAULT_ACCESS_MODULES)
     if employee_code and UserProfile.objects.exclude(email=email).filter(employee_code__iexact=employee_code).exists():
         return None, Response({"error": "Mã nhân viên đã được sử dụng."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -759,49 +779,84 @@ def _write_employee(request, profile=None):
         if manager.email == email:
             return None, Response({"error": "Nhân viên không thể tự là người quản lý của mình."}, status=status.HTTP_400_BAD_REQUEST)
 
-    if profile is None:
-        password = password or 'Ft@12345'
-        if not password:
-            return None, Response({"error": "Vui lòng đặt mật khẩu khởi tạo."}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            validate_password(password)
-        except ValidationError as exc:
-            return None, Response({"error": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
-        django_user = User.objects.filter(username__iexact=email).first()
-        if django_user:
-            return None, Response({"error": "Email này đã có tài khoản."}, status=status.HTTP_400_BAD_REQUEST)
-        django_user = User.objects.create_user(username=email, email=email, password=password)
-        profile = UserProfile(email=email)
-    else:
-        django_user = User.objects.filter(username__iexact=email).first()
-        if not django_user:
-            django_user = User.objects.create_user(username=email, email=email, password=password or None)
-        if password:
+    with transaction.atomic():
+        if profile is None:
+            password = password or 'Ft@12345'
+            if not password:
+                return None, Response({"error": "Vui lòng đặt mật khẩu khởi tạo."}, status=status.HTTP_400_BAD_REQUEST)
             try:
-                validate_password(password, django_user)
+                validate_password(password)
             except ValidationError as exc:
                 return None, Response({"error": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
-            django_user.set_password(password)
+            django_user = User.objects.filter(username__iexact=email).first()
+            if django_user:
+                return None, Response({"error": "Email này đã có tài khoản."}, status=status.HTTP_400_BAD_REQUEST)
+            django_user = User.objects.create_user(username=email, email=email, password=password)
+            profile = UserProfile(email=email)
+        else:
+            django_user = User.objects.filter(username__iexact=previous_email).first()
+            if email != previous_email:
+                if request.user_role != "ADMIN":
+                    return None, Response({"error": "Chỉ quản trị viên được thay đổi email nhân sự."}, status=status.HTTP_403_FORBIDDEN)
+                if UserProfile.objects.exclude(email=previous_email).filter(email=email).exists() or User.objects.exclude(pk=django_user.pk if django_user else None).filter(username__iexact=email).exists():
+                    return None, Response({"error": "Email này đã có tài khoản."}, status=status.HTTP_400_BAD_REQUEST)
+            if not django_user:
+                django_user = User.objects.create_user(username=email, email=email, password=password or None)
+            if password:
+                try:
+                    validate_password(password, django_user)
+                except ValidationError as exc:
+                    return None, Response({"error": " ".join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+                django_user.set_password(password)
 
-    profile.name = name
-    profile.role = role
-    profile.employee_code = employee_code
-    profile.phone = str(data.get("phone") or "").strip()
-    profile.department = department
-    profile.job_title = job_title
-    profile.manager = manager
-    profile.start_date = data.get("startDate") or data.get("start_date") or None
-    profile.employment_status = employment_status
-    profile.access_modules = sorted(access_modules)
-    django_user.first_name = name
-    django_user.email = email
-    django_user.is_active = employment_status == "ACTIVE"
-    django_user.save()
-    profile.save()
-    profile.departments.set(departments)
-    if password:
-        Token.objects.filter(user=django_user).delete()
-    return profile, None
+        # Email is the profile primary key.  Create a replacement profile when
+        # it changes, then move its relations instead of leaving an orphaned
+        # account or attempting to mutate a primary key in place.
+        if previous_email and email != previous_email:
+            replacement = UserProfile(
+                email=email,
+                name=name,
+                role=role,
+                employee_code=employee_code,
+                phone=str(data.get("phone") or "").strip(),
+                department=department,
+                job_title=job_title,
+                manager=manager,
+                start_date=start_date,
+                employment_status=employment_status,
+                access_modules=sorted(access_modules),
+                photo_url=profile.photo_url,
+                last_login=profile.last_login,
+            )
+            replacement.save()
+            replacement.departments.set(departments)
+            UserProfile.objects.filter(manager_id=previous_email).update(manager_id=email)
+            profile.attendance_records.update(employee_id=email)
+            profile.delete()
+            profile = replacement
+            Token.objects.filter(user=django_user).delete()
+        else:
+            profile.name = name
+            profile.role = role
+            profile.employee_code = employee_code
+            profile.phone = str(data.get("phone") or "").strip()
+            profile.department = department
+            profile.job_title = job_title
+            profile.manager = manager
+            profile.start_date = start_date
+            profile.employment_status = employment_status
+            profile.access_modules = sorted(access_modules)
+            profile.save()
+            profile.departments.set(departments)
+
+        django_user.username = email
+        django_user.first_name = name
+        django_user.email = email
+        django_user.is_active = employment_status == "ACTIVE"
+        django_user.save()
+        if password:
+            Token.objects.filter(user=django_user).delete()
+        return profile, None
 
 
 @api_view(["GET"])

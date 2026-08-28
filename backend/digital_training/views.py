@@ -38,6 +38,7 @@ def _normalise_title(value):
 
 def _finance_permissions(request):
     role = getattr(request, "user_role", "")
+    access_modules = set(getattr(request, "access_modules", []) or [])
     title = _normalise_title(getattr(getattr(request.user, "job_title", None), "name", ""))
     department_names = [getattr(getattr(request.user, "department", None), "name", "")]
     departments = getattr(request.user, "departments", None)
@@ -45,8 +46,9 @@ def _finance_permissions(request):
         department_names.extend(departments.values_list("name", flat=True))
     identity = _normalise_title(" ".join([title, *department_names]))
     is_accountant = "ke toan" in identity
-    can_view = role in {"ADMIN", "MANAGER"} or is_accountant or "giam doc" in identity or "quan ly" in identity
-    can_edit = role == "ADMIN" or is_accountant
+    has_finance_access = role == "ADMIN" or "finance-report" in access_modules
+    can_view = has_finance_access and (role in {"ADMIN", "MANAGER"} or is_accountant or "giam doc" in identity or "quan ly" in identity)
+    can_edit = has_finance_access and (role == "ADMIN" or is_accountant)
     return can_view, can_edit
 
 
@@ -62,6 +64,17 @@ def _finance_forbidden(edit=False):
 class CanViewTrainingFinance(BasePermission):
     def has_permission(self, request, view):
         return _finance_permissions(request)[0]
+
+
+@api_view(["GET"])
+@permission_classes([CanViewTrainingFinance])
+def finance_partners(request):
+    """Minimal partner catalogue used by the finance workspace.
+
+    It deliberately has the finance permission rather than the broader Digital
+    Training permission, so finance access can be granted independently.
+    """
+    return Response(list(TrainingPartner.objects.order_by("name").values("id", "name")))
 
 
 def _snapshot(serializer_class, item, request):

@@ -378,6 +378,45 @@ class EmployeeDirectoryTests(TestCase):
         self.assertEqual(listing.json()["total"], 1)
         self.assertEqual(listing.json()["results"][0]["employmentStatus"], "PENDING")
 
+    def test_employee_create_with_start_date_returns_success_and_default_tools(self):
+        response = self.request("post", "/api/auth/users", {
+            "name": "Nhân viên có ngày bắt đầu",
+            "email": "start-date@example.com",
+            "password": "AnotherStrong9921",
+            "startDate": "2026-08-17",
+            "role": "EMPLOYEE",
+        })
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.json()["user"]["startDate"], "2026-08-17")
+        self.assertTrue({"attendance", "email-builder", "signature-builder", "qr-generator"}.issubset(
+            set(response.json()["user"]["accessModules"])
+        ))
+
+    def test_admin_can_change_email_and_revokes_the_old_session(self):
+        django_user = get_user_model().objects.create_user(
+            username="before@example.com", email="before@example.com", password="StrongPassword9921"
+        )
+        profile = UserProfile.objects.create(email="before@example.com", name="Before", role="EMPLOYEE")
+        UserProfile.objects.create(email="report@example.com", name="Report", role="EMPLOYEE", manager=profile)
+        old_token = Token.objects.create(user=django_user)
+
+        response = self.request("put", "/api/auth/users/before@example.com", {
+            "name": "After",
+            "email": "after@example.com",
+            "role": "EMPLOYEE",
+            "employmentStatus": "ACTIVE",
+            "accessModules": ["attendance"],
+        })
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertFalse(UserProfile.objects.filter(email="before@example.com").exists())
+        self.assertTrue(UserProfile.objects.filter(email="after@example.com").exists())
+        self.assertEqual(UserProfile.objects.get(email="report@example.com").manager_id, "after@example.com")
+        django_user.refresh_from_db()
+        self.assertEqual(django_user.username, "after@example.com")
+        self.assertFalse(Token.objects.filter(key=old_token.key).exists())
+
     def test_cannot_delete_self_or_last_admin(self):
         self_response = self.request("delete", "/api/auth/users/hr-admin@example.com")
         self.assertEqual(self_response.status_code, 400)

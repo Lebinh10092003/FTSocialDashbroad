@@ -19,6 +19,7 @@ urlpatterns = [
     path("digital-training/product-subscriptions", views.training_product_subscriptions, name="training_product_subscriptions"),
     path("digital-training/finance-entries", views.training_finance_entries, name="training_finance_entries"),
     path("digital-training/finance-entries/<int:pk>", views.training_finance_entry_detail, name="training_finance_entry_detail"),
+    path("digital-training/finance-partners", views.finance_partners, name="finance_partners"),
     path("digital-training/product-subscriptions/<int:pk>", views.training_product_subscription_detail, name="training_product_subscription_detail"),
     path("digital-training/product-opportunities", views.training_product_opportunities, name="training_product_opportunities"),
     path("digital-training/product-opportunities/<int:pk>", views.training_product_opportunity_detail, name="training_product_opportunity_detail"),

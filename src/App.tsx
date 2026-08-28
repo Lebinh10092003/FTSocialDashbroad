@@ -175,10 +175,11 @@ export default function App() {
   const normalisedEmployeeIdentity = [user.jobTitle?.name || '', ...(user.departments || []).map(item => item.name)]
     .join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(new RegExp(String.fromCharCode(273), 'g'), 'd').toLocaleLowerCase('vi-VN');
   const isAccountant = normalisedEmployeeIdentity.includes('ke toan');
-  const canViewFinance = !isGuest && (userRole === 'ADMIN' || userRole === 'MANAGER' || isAccountant || normalisedEmployeeIdentity.includes('giam doc') || normalisedEmployeeIdentity.includes('quan ly'));
-  const canEditFinance = !isGuest && (userRole === 'ADMIN' || isAccountant);
-  const moduleForView: Partial<Record<ViewMode, string>> = { 'social-dashboard': 'social-dashboard', 'email-builder': 'email-builder', 'signature-builder': 'email-builder', examination: 'examination', 'digital-training': 'digital-training', 'training-assessments': 'digital-training' };
-  const canAccessView = (mode: ViewMode) => { if (mode === 'qr-generator') return true; if (mode === 'attendance') return !isGuest; if (mode === 'training-assessments') return !isGuest && (userRole === 'ADMIN' || (user.accessModules || []).includes('digital-training')); if (mode === 'account-management') return userRole === 'ADMIN'; if (mode === 'finance-report') return canViewFinance; if (isGuest) return !!moduleForView[mode]; return userRole === 'ADMIN' || (!!moduleForView[mode] && (user.accessModules || []).includes(moduleForView[mode]!)); };
+  const hasModuleAccess = (module: string) => userRole === 'ADMIN' || (user.accessModules || []).includes(module);
+  const canViewFinance = !isGuest && hasModuleAccess('finance-report') && (userRole === 'ADMIN' || userRole === 'MANAGER' || isAccountant || normalisedEmployeeIdentity.includes('giam doc') || normalisedEmployeeIdentity.includes('quan ly'));
+  const canEditFinance = canViewFinance && (userRole === 'ADMIN' || isAccountant);
+  const moduleForView: Partial<Record<ViewMode, string>> = { 'social-dashboard': 'social-dashboard', attendance: 'attendance', 'email-builder': 'email-builder', 'signature-builder': 'signature-builder', 'qr-generator': 'qr-generator', examination: 'examination', 'digital-training': 'digital-training', 'training-assessments': 'digital-training' };
+  const canAccessView = (mode: ViewMode) => { if (mode === 'account-management') return userRole === 'ADMIN'; if (mode === 'finance-report') return canViewFinance; if (isGuest) return false; const module = moduleForView[mode]; return !!module && hasModuleAccess(module); };
   const googleAccessToken = null;
 
   const persistSession = (token: string, nextUser: AppUser, role: UserRole) => {
@@ -471,7 +472,7 @@ export default function App() {
       });
     }
 
-    const visibleApps = apps.filter(app => app.mode === 'attendance' || canAccessView(app.mode));
+    const visibleApps = apps.filter(app => canAccessView(app.mode));
     return (
       <div className="min-h-dvh liquid-bg flex flex-col font-sans relative overflow-x-hidden">
         <header className="sticky top-0 z-30 w-full glass-panel border-b border-white/50">
@@ -668,6 +669,7 @@ export default function App() {
             photoURL={user.photoURL}
             jobTitle={user.jobTitle?.name}
             departmentNames={(user.departments || []).map((item) => item.name)}
+            accessModules={user.accessModules || []}
             idToken={idToken || ''}
           />
         </Suspense>

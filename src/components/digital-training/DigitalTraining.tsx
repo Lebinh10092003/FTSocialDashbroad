@@ -1710,6 +1710,7 @@ export default function DigitalTraining({
   jobTitle,
   photoURL,
   departmentNames = [],
+  accessModules = [],
   idToken = "",
 }: {
   onBackToWorkspace: () => void;
@@ -1721,6 +1722,7 @@ export default function DigitalTraining({
   userRole?: string | null;
   jobTitle?: string | null;
   departmentNames?: string[];
+  accessModules?: string[];
   photoURL?: string | null;
   idToken?: string;
 }) {
@@ -1730,14 +1732,15 @@ export default function DigitalTraining({
     .replace(new RegExp(String.fromCharCode(273), "g"), "d")
     .toLocaleLowerCase("vi-VN");
   const isAccountant = normalisedJobTitle.includes("ke toan");
-  const canViewFinance = !isGuest && (
+  const hasFinanceAccess = userRole === "ADMIN" || accessModules.includes("finance-report");
+  const canViewFinance = !isGuest && hasFinanceAccess && (
     userRole === "ADMIN"
     || userRole === "MANAGER"
     || isAccountant
     || normalisedJobTitle.includes("giam doc")
     || normalisedJobTitle.includes("quan ly")
   );
-  const canEditFinance = !isGuest && (userRole === "ADMIN" || isAccountant);
+  const canEditFinance = canViewFinance && (userRole === "ADMIN" || isAccountant);
   const route = currentRoute(),
     [tab, setTab] = useState<Tab>(route.tab),
     [scheduleOpen, setScheduleOpen] = useState(
@@ -1866,6 +1869,9 @@ export default function DigitalTraining({
   const [quickPartner, setQuickPartner] = useState({
     name: "",
     partner_type: "",
+    partner_subtype: "",
+    province: "",
+    ward: "",
     contact_person: "",
     contact_position: "",
     phone: "",
@@ -2385,6 +2391,9 @@ export default function DigitalTraining({
     setQuickPartner({
       name: "",
       partner_type: "",
+      partner_subtype: "",
+      province: "",
+      ward: "",
       contact_person: "",
       contact_position: "",
       phone: "",
@@ -4171,10 +4180,30 @@ export default function DigitalTraining({
                     mode={mode}
                     onModeChange={setMode}
                     sessions={[
-                      ...sessions.map((item) => ({
-                        ...item,
-                        content: (item.contents || []).join("\n") || item.category,
-                      })),
+                      ...sessions.map((item) => {
+                        const partner = partners.find(
+                          (candidate) => candidate.id === item.partner_id,
+                        );
+                        const contents = (item.contents || []).filter(Boolean);
+                        const fallbackContents = (partner?.training_contents || []).filter(Boolean);
+                        return {
+                          ...item,
+                          // Automatically generated schedules may have been
+                          // created before per-session details were stored.
+                          // Keep them as informative as a manually created
+                          // schedule by inheriting the customer's defaults.
+                          content:
+                            contents.join("\n") ||
+                            item.category ||
+                            fallbackContents.join("\n") ||
+                            partner?.training_content ||
+                            "",
+                          location:
+                            item.location || partner?.training_location || "",
+                          staff_name:
+                            item.staff_name || partner?.training_staff || "",
+                        };
+                      }),
                       ...meetings.map((item) => ({
                         id: `${item.schedule_type === "other" ? "other" : "meeting"}-${item.id}`,
                         title: item.title,
@@ -6552,6 +6581,9 @@ export default function DigitalTraining({
                         setQuickPartner({
                           ...quickPartner,
                           partner_type: e.target.value,
+                          partner_subtype: "",
+                          province: "",
+                          ward: "",
                         })
                       }
                       className="w-full rounded-lg border px-3 py-2"
@@ -6563,6 +6595,68 @@ export default function DigitalTraining({
                       <option>Khác</option>
                     </select>
                   </label>
+                  {(quickPartner.partner_type === "Khối Hành chính công" ||
+                    quickPartner.partner_type === "Khối Giáo dục") && (
+                    <label>
+                      <span className="mb-1 block text-sm font-bold">
+                        Phân loại *
+                      </span>
+                      <select
+                        required
+                        value={quickPartner.partner_subtype}
+                        onChange={(e) => {
+                          const partner_subtype = e.target.value;
+                          const needsLocation =
+                            quickPartner.partner_type === "Khối Giáo dục" ||
+                            partner_subtype === "Khối Xã/Phường";
+                          setQuickPartner({
+                            ...quickPartner,
+                            partner_subtype,
+                            province: needsLocation
+                              ? quickPartner.province || "Hà Nội"
+                              : "",
+                            ward: needsLocation ? quickPartner.ward : "",
+                          });
+                        }}
+                        className="w-full rounded-lg border px-3 py-2"
+                      >
+                        <option value="">Chọn phân loại</option>
+                        {(partnerSubtypeCatalog[quickPartner.partner_type] || []).map(
+                          (subtype) => (
+                            <option key={subtype} value={subtype}>
+                              {subtype}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                  )}
+                  {(quickPartner.partner_type === "Khối Giáo dục" ||
+                    quickPartner.partner_subtype === "Khối Xã/Phường") && (
+                    <>
+                      <label>
+                        <span className="mb-1 block text-sm font-bold">
+                          Tỉnh/Thành phố
+                        </span>
+                        <SearchableSelect
+                          value={quickPartner.province}
+                          onChange={(province) =>
+                            setQuickPartner({ ...quickPartner, province })
+                          }
+                          options={provinceOptions}
+                          placeholder="Chọn tỉnh/thành phố"
+                          searchPlaceholder="Tìm tỉnh/thành phố..."
+                        />
+                      </label>
+                      <Input
+                        label="Xã/Phường"
+                        value={quickPartner.ward}
+                        onChange={(e) =>
+                          setQuickPartner({ ...quickPartner, ward: e.target.value })
+                        }
+                      />
+                    </>
+                  )}
                   <Input
                     label="Đại diện"
                     value={quickPartner.contact_person}

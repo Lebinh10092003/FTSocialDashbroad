@@ -2,6 +2,7 @@ from rest_framework import permissions
 
 
 MODULE_PATHS = {
+    "finance-report": "/api/digital-training/finance-",
     "examination": "/api/examination",
     "digital-training": "/api/digital-training",
     "email-builder": "/api/email-",
@@ -39,7 +40,7 @@ def has_module_access(request) -> bool:
     if request_role(request) == "ADMIN":
         return True
     module = requested_module(request)
-    return module is None or module == "attendance" or module in request_modules(request)
+    return module is None or module in request_modules(request)
 
 
 class IsAuthenticated(permissions.BasePermission):

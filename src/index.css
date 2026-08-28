@@ -1128,9 +1128,10 @@ body {
 .dt-calendar-event-main { display:block; }
 .dt-calendar-event-meta {
   display:block;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
+  overflow:visible;
+  text-overflow:clip;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
   font-size:9px;
   font-weight:700;
   line-height:1.25;
