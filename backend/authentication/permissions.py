@@ -7,6 +7,7 @@ MODULE_PATHS = {
     "digital-training": "/api/digital-training",
     "email-builder": "/api/email-",
     "attendance": "/api/attendance",
+    "work-schedule": "/api/work-schedule",
 }
 
 
@@ -40,7 +41,7 @@ def has_module_access(request) -> bool:
     if request_role(request) == "ADMIN":
         return True
     module = requested_module(request)
-    return module is None or module in request_modules(request)
+    return module is None or module == "work-schedule" or module in request_modules(request)
 
 
 class IsAuthenticated(permissions.BasePermission):

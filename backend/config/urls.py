@@ -18,6 +18,7 @@ urlpatterns = [
     path("api/", include("email_builder.urls")),
     path("api/", include("digital_training.urls")),
     path("api/", include("attendance.urls")),
+    path("api/", include("work_schedule.urls")),
 ]
 
 if settings.DEBUG:

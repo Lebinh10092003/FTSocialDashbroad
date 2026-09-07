@@ -11,6 +11,7 @@ from pathlib import Path
 
 import requests
 from django.conf import settings
+from django.apps import apps
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -832,6 +833,12 @@ def _write_employee(request, profile=None):
             replacement.departments.set(departments)
             UserProfile.objects.filter(manager_id=previous_email).update(manager_id=email)
             profile.attendance_records.update(employee_id=email)
+            work_item = apps.get_model("work_schedule", "WorkItem")
+            work_item.objects.filter(creator_id=previous_email).update(creator_id=email)
+            work_item.objects.filter(executor_id=previous_email).update(executor_id=email)
+            work_item.objects.filter(reviewed_by_id=previous_email).update(reviewed_by_id=email)
+            work_item.supporters.through.objects.filter(userprofile_id=previous_email).update(userprofile_id=email)
+            work_item.managers.through.objects.filter(userprofile_id=previous_email).update(userprofile_id=email)
             profile.delete()
             profile = replacement
             Token.objects.filter(user=django_user).delete()

@@ -545,6 +545,7 @@ export default function App() {
       <>
         <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp Lịch làm việc...</div>}>
           <WorkSchedule
+            idToken={idToken || ''}
             onBackToWorkspace={() => setViewMode('workspace')}
             onAccountClick={openAccount}
             onLogout={handleLogout}
