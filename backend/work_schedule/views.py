@@ -84,6 +84,7 @@ def _payload(item, user, role):
         "title": item.title,
         "displayTitle": f"{title_prefix}{item.title}",
         "description": item.description,
+        "progressNote": item.progress_note,
         "date": item.work_date.isoformat(),
         "startTime": item.start_time.isoformat(timespec="minutes") if item.start_time else "",
         "endTime": item.end_time.isoformat(timespec="minutes") if item.end_time else "",
@@ -108,6 +109,7 @@ def _payload(item, user, role):
         "canEdit": (can_manage or relation == "executor") and not item.reviewed_at,
         "canDelete": role == "ADMIN" or item.creator_id == user.email or (relation == "manager"),
         "canReview": can_view_review and can_manage and item.status == WorkItem.STATUS_COMPLETED and not item.reviewed_at,
+        "canManagePeople": can_manage or relation == "executor",
         "createdAt": item.created_at.isoformat(),
         "updatedAt": item.updated_at.isoformat(),
     }
@@ -170,6 +172,7 @@ def _apply_data(request, item, creating=False, allow_people=True):
     next_group = (executor.email, work_date)
     item.title = title[:255]
     item.description = str(data.get("description", item.description if item else "") or "").strip()
+    item.progress_note = str(data.get("progressNote", item.progress_note if item else "") or "").strip()[:1000]
     item.work_date = work_date
     item.start_time = start_time
     item.end_time = end_time
@@ -227,9 +230,17 @@ def work_item_detail(request, item_id):
         item.delete()
         _normalize_daily_order(*old_group)
         return Response({"message": "Đã xóa công việc."})
+    if "progressNote" in request.data and set(request.data.keys()).issubset({"progressNote"}):
+        item.progress_note = str(request.data.get("progressNote") or "").strip()[:1000]
+        item.save(update_fields=["progress_note", "updated_at"])
+        return Response({"message": "Đã lưu ghi chú tiến trình.", "item": _payload(item, request.user, request.user_role)})
     if not payload["canEdit"]:
         return Response({"error": "Bạn không có quyền cập nhật công việc này."}, status=status.HTTP_403_FORBIDDEN)
-    error = _apply_data(request, item, allow_people=_can_manage(item, request.user, request.user_role))
+    error = _apply_data(
+        request,
+        item,
+        allow_people=_can_manage(item, request.user, request.user_role) or item.executor_id == request.user.email,
+    )
     if error:
         return error
     item = _visible_items(request.user).get(pk=item.pk)
@@ -348,6 +359,36 @@ def work_items_batch(request):
             WorkItem.objects.filter(id__in=ids).update(status=next_status, updated_at=timezone.now())
             for item in WorkItem.objects.filter(id__in=ids):
                 sync_training_from_work_item(item)
+        elif action == "date":
+            work_date = parse_date(str(request.data.get("date") or ""))
+            if not work_date:
+                return Response({"error": "Vui lòng chọn ngày thực hiện hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+            if any(not _payload(item, request.user, request.user_role)["canEdit"] for item in items):
+                return Response({"error": "Bạn không có quyền đổi ngày toàn bộ công việc đã chọn."}, status=status.HTTP_403_FORBIDDEN)
+            old_groups = {(item.executor_id, item.work_date) for item in items}
+            for item in sorted(items, key=lambda row: (row.executor_id, row.daily_order, row.pk)):
+                if item.work_date == work_date:
+                    continue
+                item.work_date = work_date
+                item.daily_order = _next_daily_order(item.executor, work_date, item.pk)
+                item.save(update_fields=["work_date", "daily_order", "updated_at"])
+                sync_training_from_work_item(item)
+            for group in old_groups:
+                _normalize_daily_order(*group)
+        elif action in {"add_supporters", "add_managers"}:
+            people, error = _profiles(request.data.get("emails") or [], "Nhân sự")
+            if error:
+                return error
+            if not people:
+                return Response({"error": "Vui lòng chọn ít nhất một nhân sự."}, status=status.HTTP_400_BAD_REQUEST)
+            if any(not _payload(item, request.user, request.user_role)["canManagePeople"] for item in items):
+                return Response({"error": "Bạn không có quyền phân công toàn bộ công việc đã chọn."}, status=status.HTTP_403_FORBIDDEN)
+            for item in items:
+                related = [person for person in people if person.email != item.executor_id]
+                if action == "add_supporters":
+                    item.supporters.add(*related)
+                else:
+                    item.managers.add(*related)
         elif action in {"request_revision", "confirm"}:
             for item in items:
                 result = _review(item, request, action)

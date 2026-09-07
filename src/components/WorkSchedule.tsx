@@ -12,6 +12,7 @@ type WorkTask = {
   title: string;
   displayTitle: string;
   description: string;
+  progressNote: string;
   date: string;
   startTime: string;
   endTime: string;
@@ -34,11 +35,13 @@ type WorkTask = {
   canEdit: boolean;
   canDelete: boolean;
   canReview: boolean;
+  canManagePeople: boolean;
 };
 type WorkDraft = {
   id?: number;
   title: string;
   description: string;
+  progressNote: string;
   date: string;
   startTime: string;
   endTime: string;
@@ -65,7 +68,7 @@ type Props = {
   photoURL?: string | null;
 };
 
-const SHEET_TEMPLATE = "https://docs.google.com/spreadsheets/d/1kG9wttvkyU7N2T_zHBGz7bTJ65dk-1-ZAMjoXnq_X3U/edit?usp=sharing";
+const SHEET_TEMPLATE = "https://docs.google.com/spreadsheets/d/1kWiJdTSM_6ZDeLTGCWvDA3num5n0DmRH2Tv-6AwuBYc/edit?usp=sharing";
 const statuses: Array<{
   id: WorkStatus;
   label: string;
@@ -171,6 +174,7 @@ const draftFromTask = (task: WorkTask): WorkDraft => ({
   id: task.id,
   title: task.title,
   description: task.description,
+  progressNote: task.progressNote,
   date: task.date,
   startTime: task.startTime,
   endTime: task.endTime,
@@ -189,6 +193,7 @@ const draftFromTask = (task: WorkTask): WorkDraft => ({
 const blankDraft = (userEmail: string, date: string): WorkDraft => ({
   title: "",
   description: "",
+  progressNote: "",
   date,
   startTime: "",
   endTime: "",
@@ -304,6 +309,7 @@ function TaskCard({ task, selected, onSelect, onOpen, onDelete, onDragStart }: {
         {task.displayTitle}
       </h3>
       <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{task.description || "Không có mô tả."}</p>
+      {task.progressNote && <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-2 text-xs font-semibold leading-5 text-amber-800">Ghi chú tiến trình: {task.progressNote}</p>}
       <div className="mt-3 text-xs font-semibold text-slate-500">
         <span>
           {shortDate(task.date)} · {time}
@@ -340,6 +346,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     [selectedIds, setSelectedIds] = useState<number[]>([]),
     [draggedId, setDraggedId] = useState<number | null>(null),
     [query, setQuery] = useState(""),
+    [bulkPeopleMode, setBulkPeopleMode] = useState<"supporters" | "managers" | null>(null),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
   const sheetKey = `ft-work-schedule-sheet:${userEmail}`;
@@ -383,12 +390,17 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
       }),
     [query, tasks],
   );
-  const dailyTasks = filtered.filter((task) => task.date === selectedDate),
+  const todayIso = iso(new Date()),
+    overdueTasks = tasks.filter((task) => task.executor.email === userEmail && task.date < todayIso && (task.status === "todo" || task.status === "doing")),
+    overdueDates = [...new Set(overdueTasks.map((task) => task.date))].sort(),
+    dailyTasks = filtered.filter((task) => task.date === selectedDate),
     completedCount = dailyTasks.filter((task) => task.status === "completed" || task.status === "reviewed").length,
     completionPercent = dailyTasks.length ? Math.round((completedCount / dailyTasks.length) * 100) : 0,
     selectedTasks = tasks.filter((task) => selectedIds.includes(task.id)),
     canBulkReview = selectedTasks.length > 0 && selectedTasks.every((task) => task.canReview),
-    canBulkDelete = selectedTasks.length > 0 && selectedTasks.every((task) => task.canDelete);
+    canBulkDelete = selectedTasks.length > 0 && selectedTasks.every((task) => task.canDelete),
+    canBulkEdit = selectedTasks.length > 0 && selectedTasks.every((task) => task.canEdit),
+    canBulkManagePeople = selectedTasks.length > 0 && selectedTasks.every((task) => task.canManagePeople);
 
   const saveTask = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -405,6 +417,70 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
         title: "Không thể lưu công việc",
         tone: "danger",
       });
+    }
+  };
+  const saveProgressNote = async (draft = editing) => {
+    if (!draft?.id) return;
+    try {
+      const data = await requestJson(`/api/work-schedule/items/${draft.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ progressNote: draft.progressNote }),
+      });
+      setTasks((rows) => rows.map((item) => (item.id === data.item.id ? data.item : item)));
+      setEditing((current) => (current?.id === draft.id ? { ...current, progressNote: data.item.progressNote } : current));
+      void appDialog.alert("Đã lưu ghi chú tiến trình.", { title: "Đã cập nhật", tone: "success" });
+    } catch (cause: any) {
+      void appDialog.alert(cause.message, { title: "Không thể lưu ghi chú tiến trình", tone: "danger" });
+    }
+  };
+  const changeTaskDates = async (ids: number[], date: string) => {
+    await requestJson("/api/work-schedule/items/batch", {
+      method: "POST",
+      body: JSON.stringify({ ids, action: "date", date }),
+    });
+    setSelectedIds([]);
+    await load();
+  };
+  const batchDate = async () => {
+    const value = await appDialog.prompt("Chọn ngày mới cho toàn bộ công việc đã chọn.", {
+      title: "Đổi ngày hàng loạt",
+      inputType: "date",
+      defaultValue: selectedDate,
+      confirmText: "Đổi ngày",
+    });
+    if (!value) return;
+    try {
+      await changeTaskDates(selectedIds, value);
+    } catch (cause: any) {
+      void appDialog.alert(cause.message, { title: "Không thể đổi ngày hàng loạt", tone: "danger" });
+    }
+  };
+  const batchAddPeople = async (mode: "supporters" | "managers", emails: string[]) => {
+    try {
+      await requestJson("/api/work-schedule/items/batch", {
+        method: "POST",
+        body: JSON.stringify({ ids: selectedIds, action: mode === "supporters" ? "add_supporters" : "add_managers", emails }),
+      });
+      setBulkPeopleMode(null);
+      setSelectedIds([]);
+      await load();
+    } catch (cause: any) {
+      void appDialog.alert(cause.message, { title: "Không thể thêm nhân sự hàng loạt", tone: "danger" });
+    }
+  };
+  const moveOverdueToToday = async () => {
+    const confirmed = await appDialog.confirm(`Chuyển ${overdueTasks.length} công việc chưa hoàn thành sang ${fullDate(todayIso)}?`, {
+      title: "Chuyển lịch công tác",
+      confirmText: "Chuyển toàn bộ",
+      tone: "warning",
+    });
+    if (!confirmed) return;
+    try {
+      await changeTaskDates(overdueTasks.map((task) => task.id), todayIso);
+      setSelectedDate(todayIso);
+      setView("board");
+    } catch (cause: any) {
+      void appDialog.alert(cause.message, { title: "Không thể chuyển lịch công tác", tone: "danger" });
     }
   };
   const deleteTasks = async (ids: number[]) => {
@@ -609,6 +685,20 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
               </button>
             </div>
           )}
+          {view === "board" && overdueTasks.length > 0 && (
+            <section className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-900 shadow-sm">
+              <div className="min-w-[260px] flex-1">
+                <b>Bạn vẫn còn {overdueTasks.length} công việc chưa hoàn thành {overdueDates.length === 1 ? `ngày ${fullDate(overdueDates[0])}` : `từ ngày ${fullDate(overdueDates[0])} đến ${fullDate(overdueDates[overdueDates.length - 1])}`}.</b>
+                <span className="ml-1">Vui lòng đánh giá hoặc chuyển lịch công tác.</span>
+              </div>
+              <button type="button" onClick={() => setSelectedDate(overdueDates[0])} className="rounded-xl border border-rose-300 bg-white px-4 py-2 text-xs font-extrabold text-rose-700 hover:bg-rose-100">
+                Đánh giá ngay
+              </button>
+              <button type="button" onClick={() => void moveOverdueToToday()} className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-extrabold text-white hover:bg-rose-700">
+                Chuyển toàn bộ lịch công tác sang hôm nay
+              </button>
+            </section>
+          )}
           {view !== "sheet" && view !== "week" && (
             <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <div className="ws-stat">
@@ -664,6 +754,22 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
               <button onClick={() => void batchStatus("completed")} className="ws-bulk-btn text-emerald-700">
                 Hoàn thành
               </button>
+              {canBulkEdit && (
+                <button onClick={() => void batchDate()} className="ws-bulk-btn text-blue-700">
+                  <CalendarDays className="h-3.5 w-3.5" />
+                  Đổi ngày
+                </button>
+              )}
+              {canBulkManagePeople && (
+                <>
+                  <button onClick={() => setBulkPeopleMode("supporters")} className="ws-bulk-btn text-sky-700">
+                    Thêm người hỗ trợ
+                  </button>
+                  <button onClick={() => setBulkPeopleMode("managers")} className="ws-bulk-btn text-violet-700">
+                    Thêm người quản lý
+                  </button>
+                </>
+              )}
               {canBulkReview && (
                 <>
                   <button onClick={() => void batchReview("request_revision")} className="ws-bulk-btn text-amber-700">
@@ -688,7 +794,8 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
           {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={filtered} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={setCalendarPeriod} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={setView} setEditing={setEditing} setDraggedId={setDraggedId} moveTask={moveTask} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} />}
         </div>
       </main>
-      {editing && <TaskDialog draft={editing} setDraft={setEditing} staff={staff} userEmail={userEmail} saveTask={saveTask} deleteTasks={deleteTasks} review={review} />}
+      {editing && <TaskDialog draft={editing} setDraft={setEditing} staff={staff} userEmail={userEmail} saveTask={saveTask} saveProgressNote={saveProgressNote} deleteTasks={deleteTasks} review={review} />}
+      {bulkPeopleMode && <BulkPeopleDialog mode={bulkPeopleMode} staff={staff} onClose={() => setBulkPeopleMode(null)} onApply={(emails: string[]) => void batchAddPeople(bulkPeopleMode, emails)} />}
     </div>
   );
 }
@@ -857,7 +964,7 @@ function WeekView({ tasks, visibleDays, anchor, setAnchor, period, setPeriod, la
 function ScheduleTable({ days, rowsFor, setEditing, setDraggedId, moveTask }: any) {
   return (
     <section className="overflow-x-auto rounded-2xl border border-slate-300 bg-white shadow-sm">
-      <table className="min-w-[980px] w-full border-collapse text-sm">
+      <table className="min-w-[1220px] w-full border-collapse text-sm">
         <thead className="bg-emerald-50 text-[#001e40]">
           <tr>
             <th className="w-24 border-b border-r border-slate-300 px-3 py-3 text-left">Thứ</th>
@@ -865,6 +972,7 @@ function ScheduleTable({ days, rowsFor, setEditing, setDraggedId, moveTask }: an
             <th className="w-20 border-b border-r border-slate-300 px-3 py-3 text-center">Tuần</th>
             <th className="border-b border-r border-slate-300 px-3 py-3 text-left">Nội dung công việc</th>
             <th className="w-48 border-b border-r border-slate-300 px-3 py-3 text-left">Tự đánh giá</th>
+            <th className="w-72 border-b border-r border-slate-300 px-3 py-3 text-left">Ghi chú tiến trình</th>
             <th className="w-64 border-b border-slate-300 px-3 py-3 text-left">Lãnh đạo đánh giá</th>
           </tr>
         </thead>
@@ -900,6 +1008,14 @@ function ScheduleTable({ days, rowsFor, setEditing, setDraggedId, moveTask }: an
                     </div>
                   ))}
                 </td>
+                <td className="border-b border-r border-slate-200 px-3 py-3">
+                  {tasks.map((task: WorkTask) => (
+                    <div key={task.id} className="mb-2 last:mb-0">
+                      <b>{task.dailyOrder}.</b>{" "}
+                      {task.progressNote || <span className="text-slate-300">—</span>}
+                    </div>
+                  ))}
+                </td>
                 <td className="border-b border-slate-200 px-3 py-3">
                   {tasks.map((task: WorkTask) => (
                     <div key={task.id} className="mb-2 last:mb-0">
@@ -928,11 +1044,15 @@ function SheetView({ sheetUrl, setSheetUrl, sheetKey, notice, setNotice }: any) 
       <div className="overflow-hidden rounded-3xl border bg-white shadow-sm">
         <div className="bg-gradient-to-br from-[#0055da] to-[#003a98] p-8 text-white">
           <FileSpreadsheet className="h-8 w-8" />
-          <h2 className="mt-5 text-2xl font-extrabold">Liên kết lịch công tác Google Sheets</h2>
-          <p className="mt-2 text-sm text-blue-100">Lưu đường dẫn bảng tính riêng của tài khoản để mở nhanh.</p>
+          <h2 className="mt-5 text-2xl font-extrabold">Lịch công tác FT</h2>
+          <p className="mt-2 text-sm text-blue-100">Bảng công tác dùng chung làm nguồn đối chiếu lịch và chuẩn bị đồng bộ trạng thái hoàn thành.</p>
+          <button type="button" onClick={() => window.open(SHEET_TEMPLATE, "_blank", "noopener,noreferrer")} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-extrabold text-blue-700">
+            <ExternalLink className="h-4 w-4" />
+            Mở Lịch công tác FT
+          </button>
         </div>
         <div className="p-8">
-          <label className="text-sm font-bold">Đường dẫn Google Sheets</label>
+          <label className="text-sm font-bold">Đường dẫn Google Sheets cá nhân</label>
           <div className="mt-2 flex gap-2">
             <div className="relative flex-1">
               <Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -960,7 +1080,7 @@ function SheetView({ sheetUrl, setSheetUrl, sheetKey, notice, setNotice }: any) 
             </button>
             <button onClick={() => setSheetUrl(SHEET_TEMPLATE)} className="inline-flex items-center gap-2 px-4 text-sm font-bold text-blue-700">
               <Settings2 className="h-4 w-4" />
-              Dùng mẫu FT
+              Dùng Lịch công tác FT
             </button>
           </div>
         </div>
@@ -969,7 +1089,34 @@ function SheetView({ sheetUrl, setSheetUrl, sheetKey, notice, setNotice }: any) 
   );
 }
 
-function TaskDialog({ draft, setDraft, staff, userEmail, saveTask, deleteTasks, review }: any) {
+function BulkPeopleDialog({ mode, staff, onClose, onApply }: { mode: "supporters" | "managers"; staff: Person[]; onClose: () => void; onApply: (emails: string[]) => void }) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const label = mode === "supporters" ? "người hỗ trợ/theo dõi" : "người quản lý";
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-blue-600">Cập nhật hàng loạt</p>
+            <h2 className="mt-1 text-xl font-extrabold text-[#001e40]">Thêm {label}</h2>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100" aria-label="Đóng">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="mt-5">
+          <PeoplePicker label={`Chọn ${label}`} staff={staff} selected={selected} onChange={setSelected} />
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-xl border px-4 py-2.5 text-sm font-bold text-slate-600">Hủy</button>
+          <button type="button" disabled={!selected.length} onClick={() => onApply(selected)} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40">Thêm vào công việc đã chọn</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TaskDialog({ draft, setDraft, staff, userEmail, saveTask, saveProgressNote, deleteTasks, review }: any) {
   const lockedPeople = !draft.canEdit || (!!draft.id && draft.canReview);
   return (
     <div
@@ -1037,6 +1184,17 @@ function TaskDialog({ draft, setDraft, staff, userEmail, saveTask, deleteTasks, 
             <PeoplePicker label="Người hỗ trợ/theo dõi (chọn nhiều)" staff={staff.filter((item) => item.email !== draft.executorEmail)} selected={draft.supporterEmails} onChange={(emails) => setDraft({ ...draft, supporterEmails: emails })} disabled={lockedPeople} />
             <PeoplePicker label="Người quản lý (chọn nhiều)" staff={staff.filter((item) => item.email !== draft.executorEmail)} selected={draft.managerEmails} onChange={(emails) => setDraft({ ...draft, managerEmails: emails })} disabled={lockedPeople} />
           </div>
+          <label className="block rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+            <span className="ws-label text-amber-900">Ghi chú tiến trình</span>
+            <textarea rows={3} value={draft.progressNote} onChange={(event) => setDraft({ ...draft, progressNote: event.target.value })} placeholder="Nhập tình hình xử lý, nội dung đang chờ hoặc kết quả từng phần..." className="ws-input resize-y bg-white" />
+            {draft.id && (
+              <span className="mt-3 flex justify-end">
+                <button type="button" onClick={() => void saveProgressNote(draft)} className="rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-amber-700">
+                  Lưu ghi chú tiến trình
+                </button>
+              </span>
+            )}
+          </label>
           <label className="block">
             <span className="ws-label">Mô tả</span>
             <textarea disabled={!draft.canEdit} rows={4} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} className="ws-input resize-y disabled:bg-slate-50" />

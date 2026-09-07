@@ -23,6 +23,7 @@ class WorkItem(models.Model):
     managers = models.ManyToManyField(UserProfile, blank=True, related_name="managed_work_items")
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
+    progress_note = models.CharField(max_length=1000, blank=True, default="")
     work_date = models.DateField(db_index=True)
     start_time = models.TimeField(blank=True, null=True)
     end_time = models.TimeField(blank=True, null=True)
@@ -46,6 +47,9 @@ class WorkItem(models.Model):
         blank=True, null=True, validators=[MinValueValidator(0), MaxValueValidator(100)]
     )
     review_note = models.CharField(max_length=1000, blank=True, default="")
+    source_sheet_row = models.PositiveIntegerField(blank=True, null=True)
+    source_task_index = models.PositiveIntegerField(blank=True, null=True)
+    source_record_id = models.CharField(max_length=100, blank=True, default="")
     reviewed_by = models.ForeignKey(
         UserProfile, blank=True, null=True, on_delete=models.SET_NULL, related_name="reviewed_work_items"
     )

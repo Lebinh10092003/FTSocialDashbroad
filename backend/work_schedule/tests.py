@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.authtoken.models import Token
 
 from authentication.models import UserProfile
@@ -109,6 +110,40 @@ class WorkScheduleApiTests(TestCase):
         deleted = self.request(self.manager_token, "delete", f"/api/work-schedule/items/{first['id']}")
         self.assertEqual(deleted.status_code, 200, deleted.data)
         self.assertFalse(WorkItem.objects.filter(pk=first["id"]).exists())
+
+    def test_progress_note_can_be_updated_independently_in_any_status(self):
+        item = self.create_item()
+        WorkItem.objects.filter(pk=item["id"]).update(status="reviewed", reviewed_at=timezone.now())
+        response = self.request(self.executor_token, "patch", f"/api/work-schedule/items/{item['id']}", {
+            "progressNote": "Đang chờ Ms Phương xác nhận bản in",
+        })
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.json()["item"]["progressNote"], "Đang chờ Ms Phương xác nhận bản in")
+
+    def test_batch_date_and_people_assignment_are_supported(self):
+        first = self.create_item()
+        second = self.request(self.manager_token, "post", "/api/work-schedule/items", {
+            "title": "Việc thứ hai", "date": "2026-09-07", "executorEmail": self.executor.email,
+            "supporterEmails": [], "managerEmails": [self.manager.email],
+        }).json()["item"]
+        moved = self.request(self.manager_token, "post", "/api/work-schedule/items/batch", {
+            "ids": [first["id"], second["id"]], "action": "date", "date": "2026-09-09",
+        })
+        self.assertEqual(moved.status_code, 200, moved.data)
+        self.assertFalse(WorkItem.objects.filter(id__in=[first["id"], second["id"]]).exclude(work_date="2026-09-09").exists())
+
+        observer, _ = self.profile("observer@example.com")
+        assigned = self.request(self.manager_token, "post", "/api/work-schedule/items/batch", {
+            "ids": [first["id"], second["id"]], "action": "add_supporters", "emails": [observer.email],
+        })
+        self.assertEqual(assigned.status_code, 200, assigned.data)
+        self.assertEqual(WorkItem.objects.filter(id__in=[first["id"], second["id"]], supporters=observer).count(), 2)
+
+        added_manager = self.request(self.executor_token, "post", "/api/work-schedule/items/batch", {
+            "ids": [first["id"], second["id"]], "action": "add_managers", "emails": [observer.email],
+        })
+        self.assertEqual(added_manager.status_code, 200, added_manager.data)
+        self.assertEqual(WorkItem.objects.filter(id__in=[first["id"], second["id"]], managers=observer).count(), 2)
 
     def test_training_schedule_syncs_both_ways_with_three_hour_duration(self):
         response = self.request(self.manager_token, "post", "/api/work-schedule/items", {
