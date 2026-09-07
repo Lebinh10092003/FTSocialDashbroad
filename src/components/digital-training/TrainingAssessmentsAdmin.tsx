@@ -731,7 +731,9 @@ export default function TrainingAssessmentsAdmin({
     } catch (error: any) { setNotice(String(error?.message || error)); } finally { setBusy(false); }
   };
   const openDetail = async (item: Assessment, updateUrl = true) => {
-    if (updateUrl && window.location.pathname !== assessmentDetailPath(item.id)) window.history.pushState(null, "", assessmentDetailPath(item.id));
+    if (updateUrl && window.location.pathname !== assessmentDetailPath(item.id)) {
+      window.history.pushState({ trainingAssessmentId: item.id }, "", assessmentDetailPath(item.id));
+    }
     setSelected(item);
     setScheduleDraft({ opens_at: toDateTimeLocal(item.opens_at), closes_at: toDateTimeLocal(item.closes_at) });
     setDetailDraft({ duration_minutes: String(item.duration_minutes || 120), attempt_limit: String(item.attempt_limit || 1), description: item.description || "", instructions: item.instructions || "" });
@@ -892,6 +894,10 @@ export default function TrainingAssessmentsAdmin({
   };
 
   const returnToList = () => {
+    if (selected && window.history.state?.trainingAssessmentId === selected.id) {
+      window.history.back();
+      return;
+    }
     if (window.location.pathname !== "/training-assessments") window.history.pushState(null, "", "/training-assessments");
     setScreen("list");
     setSelected(null);
@@ -926,10 +932,21 @@ export default function TrainingAssessmentsAdmin({
   };
 
   useEffect(() => {
-    const match = window.location.pathname.match(/^\/training-assessments\/(\d+)\/?$/);
-    const requestedId = Number(match?.[1]);
-    const item = items.find((candidate) => candidate.id === requestedId);
-    if (item && (!selected || selected.id !== item.id)) void openDetail(item, false);
+    const applyLocation = () => {
+      const match = window.location.pathname.match(/^\/training-assessments\/(\d+)\/?$/);
+      const requestedId = Number(match?.[1]);
+      const item = items.find((candidate) => candidate.id === requestedId);
+      if (item) {
+        if (!selected || selected.id !== item.id || screen !== "detail") void openDetail(item, false);
+        return;
+      }
+      setScreen("list");
+      setSelected(null);
+      setResults([]);
+    };
+    applyLocation();
+    window.addEventListener("popstate", applyLocation);
+    return () => window.removeEventListener("popstate", applyLocation);
   }, [items]);
 
   const endAttempt = async (result: any) => {
