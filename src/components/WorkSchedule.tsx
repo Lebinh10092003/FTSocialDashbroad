@@ -1144,7 +1144,8 @@ function ScheduleTable({ days, rowsFor, setEditing, setEditingDay, setDraggedId,
                 <td className="border-b border-r border-slate-200 px-3 py-3">
                   {tasks.map((task: WorkTask) => (
                     <div key={task.id} className="mb-2 last:mb-0">
-                      <b>{task.dailyOrder}.</b> {task.progressNote || selfAssessment[task.status]}
+                      <b>{task.dailyOrder}.</b>{" "}
+                      {task.progressNote || <span className="text-slate-300">—</span>}
                     </div>
                   ))}
                 </td>
