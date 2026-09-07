@@ -153,3 +153,21 @@ class WorkScheduleApiTests(TestCase):
         row = next(item for item in manager_rows if item["id"] == response.json()["item"]["id"])
         self.assertEqual(row["viewerRelation"], "manager")
         self.assertTrue(row["canDelete"])
+
+    def test_executor_never_sees_manager_review_controls_or_details(self):
+        item = self.create_item()
+        WorkItem.objects.filter(pk=item["id"]).update(
+            status="completed", review_percent=85, review_note="Cần rà soát"
+        )
+        executor_row = self.request(
+            self.executor_token, "get", f"/api/work-schedule/items/{item['id']}"
+        ).json()
+        self.assertFalse(executor_row["canReview"])
+        self.assertIsNone(executor_row["reviewPercent"])
+        self.assertEqual(executor_row["reviewNote"], "")
+
+        manager_row = self.request(
+            self.manager_token, "get", f"/api/work-schedule/items/{item['id']}"
+        ).json()
+        self.assertTrue(manager_row["canReview"])
+        self.assertEqual(manager_row["reviewPercent"], 85)

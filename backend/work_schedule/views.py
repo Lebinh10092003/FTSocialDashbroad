@@ -66,6 +66,7 @@ def _normalize_daily_order(executor_id, work_date):
 
 def _payload(item, user, role):
     relation = _viewer_relation(item, user)
+    can_view_review = relation in {"manager", "creator"}
     display_status = item.status
     title_prefix = ""
     if relation in {"manager", "creator"} and item.status == WorkItem.STATUS_COMPLETED and not item.reviewed_at:
@@ -100,13 +101,13 @@ def _payload(item, user, role):
         "needsRevision": item.needs_revision,
         "revisionCount": item.revision_count,
         "revisionOfId": item.revision_of_id,
-        "reviewPercent": item.review_percent,
-        "reviewNote": item.review_note,
-        "reviewedBy": _profile_payload(item.reviewed_by) if item.reviewed_by else None,
-        "reviewedAt": item.reviewed_at.isoformat() if item.reviewed_at else None,
+        "reviewPercent": item.review_percent if can_view_review else None,
+        "reviewNote": item.review_note if can_view_review else "",
+        "reviewedBy": _profile_payload(item.reviewed_by) if can_view_review and item.reviewed_by else None,
+        "reviewedAt": item.reviewed_at.isoformat() if can_view_review and item.reviewed_at else None,
         "canEdit": (can_manage or relation == "executor") and not item.reviewed_at,
         "canDelete": role == "ADMIN" or item.creator_id == user.email or (relation == "manager"),
-        "canReview": can_manage and item.status == WorkItem.STATUS_COMPLETED and not item.reviewed_at,
+        "canReview": can_view_review and can_manage and item.status == WorkItem.STATUS_COMPLETED and not item.reviewed_at,
         "createdAt": item.created_at.isoformat(),
         "updatedAt": item.updated_at.isoformat(),
     }
