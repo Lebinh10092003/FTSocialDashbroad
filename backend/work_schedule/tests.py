@@ -5,6 +5,7 @@ from rest_framework.authtoken.models import Token
 from authentication.models import UserProfile
 
 from .models import WorkItem
+from .training_sync import sync_work_item_from_training
 
 
 class WorkScheduleApiTests(TestCase):
@@ -108,3 +109,34 @@ class WorkScheduleApiTests(TestCase):
         deleted = self.request(self.manager_token, "delete", f"/api/work-schedule/items/{first['id']}")
         self.assertEqual(deleted.status_code, 200, deleted.data)
         self.assertFalse(WorkItem.objects.filter(pk=first["id"]).exists())
+
+    def test_training_schedule_syncs_both_ways_with_three_hour_duration(self):
+        response = self.request(self.manager_token, "post", "/api/work-schedule/items", {
+            "title": "Tập huấn B1 TH Trung Văn", "date": "2026-09-15",
+            "startTime": "17:00", "executorEmail": self.executor.email,
+            "supporterEmails": [self.supporter.email], "managerEmails": [self.manager.email],
+            "label": "Tập huấn",
+        })
+        self.assertEqual(response.status_code, 201, response.data)
+        item = WorkItem.objects.select_related("training_session").get(pk=response.json()["item"]["id"])
+        self.assertIsNotNone(item.training_session_id)
+        self.assertEqual(item.end_time.isoformat(timespec="minutes"), "20:00")
+        self.assertEqual(item.training_session.end_time.isoformat(timespec="minutes"), "20:00")
+
+        session = item.training_session
+        session.session_date = "2026-09-16"
+        session.status = "completed"
+        session.save()
+        sync_work_item_from_training(session, self.manager)
+        item.refresh_from_db()
+        self.assertEqual(item.work_date.isoformat(), "2026-09-16")
+        self.assertEqual(item.status, "completed")
+
+    def test_training_reference_inside_normal_task_does_not_create_session(self):
+        response = self.request(self.executor_token, "post", "/api/work-schedule/items", {
+            "title": "Gửi tài liệu sau tập huấn", "date": "2026-09-07",
+            "executorEmail": self.executor.email, "supporterEmails": [], "managerEmails": [],
+            "label": "Công việc",
+        })
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertIsNone(WorkItem.objects.get(pk=response.json()["item"]["id"]).training_session_id)

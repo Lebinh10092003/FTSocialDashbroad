@@ -35,6 +35,13 @@ class WorkItem(models.Model):
     revision_of = models.ForeignKey(
         "self", blank=True, null=True, on_delete=models.SET_NULL, related_name="revision_items"
     )
+    training_session = models.OneToOneField(
+        "digital_training.TrainingSession",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="work_schedule_item",
+    )
     review_percent = models.PositiveSmallIntegerField(
         blank=True, null=True, validators=[MinValueValidator(0), MaxValueValidator(100)]
     )

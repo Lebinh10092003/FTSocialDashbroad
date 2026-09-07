@@ -40,10 +40,18 @@ def complete_past_training_schedules(now=None):
         moment = timezone.make_aware(moment, timezone.get_current_timezone())
     local_now = timezone.localtime(moment)
 
-    session_count = TrainingSession.objects.filter(
+    sessions = TrainingSession.objects.filter(
         _past_schedule_filter("session_date", local_now),
         status="planned",
-    ).update(status="completed", updated_at=moment)
+    )
+    session_ids = list(sessions.values_list("id", flat=True))
+    session_count = sessions.update(status="completed", updated_at=moment)
+    if session_ids:
+        from work_schedule.models import WorkItem
+        WorkItem.objects.filter(training_session_id__in=session_ids).update(
+            status=WorkItem.STATUS_COMPLETED,
+            updated_at=moment,
+        )
     meeting_count = TrainingCustomerMeeting.objects.filter(
         _past_schedule_filter("meeting_date", local_now),
         status="planned",

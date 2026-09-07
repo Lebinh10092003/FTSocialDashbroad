@@ -454,3 +454,17 @@ class ModuleAccessTests(TestCase):
         admin_token = Token.objects.create(user=admin).key
         allowed = self.client.get("/api/email-templates", HTTP_AUTHORIZATION=f"Bearer {admin_token}")
         self.assertEqual(allowed.status_code, 200)
+
+    def test_manager_cannot_access_employee_administration(self):
+        user = get_user_model().objects.create_user(
+            username="directory-manager@example.com", email="directory-manager@example.com", password="StrongPassword9921"
+        )
+        UserProfile.objects.create(
+            email=user.email, name="Directory Manager", role="MANAGER",
+            access_modules=["work-schedule", "social-dashboard"],
+        )
+        token = Token.objects.create(user=user).key
+        response = self.client.get(
+            "/api/auth/users", HTTP_AUTHORIZATION=f"Bearer {token}"
+        )
+        self.assertEqual(response.status_code, 403)

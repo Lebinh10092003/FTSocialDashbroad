@@ -12,6 +12,7 @@ from authentication.models import UserProfile
 from authentication.permissions import IsAuthenticated
 
 from .models import WorkItem
+from .training_sync import delete_training_for_work_item, sync_training_from_work_item
 
 
 VALID_STATUSES = {choice[0] for choice in WorkItem.STATUS_CHOICES}
@@ -85,6 +86,7 @@ def _payload(item, user, role):
         "priority": item.priority,
         "label": item.label,
         "dailyOrder": item.daily_order,
+        "trainingSessionId": item.training_session_id,
         "creator": _profile_payload(item.creator),
         "executor": _profile_payload(item.executor),
         "supporters": [_profile_payload(person) for person in item.supporters.all()],
@@ -174,6 +176,7 @@ def _apply_data(request, item, creating=False, allow_people=True):
     item.save()
     item.supporters.set(supporters)
     item.managers.set(managers)
+    sync_training_from_work_item(item)
     if previous_group and previous_group != next_group:
         _normalize_daily_order(*previous_group)
     return None
@@ -214,6 +217,7 @@ def work_item_detail(request, item_id):
         if not payload["canDelete"]:
             return Response({"error": "Bạn không có quyền xóa công việc này."}, status=status.HTTP_403_FORBIDDEN)
         old_group = (item.executor_id, item.work_date)
+        delete_training_for_work_item(item)
         item.delete()
         _normalize_daily_order(*old_group)
         return Response({"message": "Đã xóa công việc."})
@@ -242,6 +246,7 @@ def _review(item, request, action):
     if action == "request_revision":
         item.revision_count += 1
         item.save()
+        sync_training_from_work_item(item)
         revision = WorkItem.objects.create(
             creator=request.user,
             executor=item.executor,
@@ -260,6 +265,7 @@ def _review(item, request, action):
         )
         revision.supporters.set(item.supporters.all())
         revision.managers.set(item.managers.all())
+        sync_training_from_work_item(revision)
         return revision
     elif action == "confirm":
         item.status = WorkItem.STATUS_REVIEWED
@@ -267,6 +273,7 @@ def _review(item, request, action):
     else:
         return Response({"error": "Thao tác review không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
     item.save()
+    sync_training_from_work_item(item)
     return item
 
 
@@ -321,6 +328,8 @@ def work_items_batch(request):
             if denied:
                 return Response({"error": "Bạn không có quyền xóa toàn bộ công việc đã chọn."}, status=status.HTTP_403_FORBIDDEN)
             groups = {(item.executor_id, item.work_date) for item in items}
+            for item in items:
+                delete_training_for_work_item(item)
             WorkItem.objects.filter(id__in=ids).delete()
             for group in groups:
                 _normalize_daily_order(*group)
@@ -331,6 +340,8 @@ def work_items_batch(request):
             if any(not _payload(item, request.user, request.user_role)["canEdit"] for item in items):
                 return Response({"error": "Bạn không có quyền sửa toàn bộ công việc đã chọn."}, status=status.HTTP_403_FORBIDDEN)
             WorkItem.objects.filter(id__in=ids).update(status=next_status, updated_at=timezone.now())
+            for item in WorkItem.objects.filter(id__in=ids):
+                sync_training_from_work_item(item)
         elif action in {"request_revision", "confirm"}:
             for item in items:
                 result = _review(item, request, action)

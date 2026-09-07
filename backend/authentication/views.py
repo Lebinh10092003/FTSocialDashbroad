@@ -879,7 +879,7 @@ def assignable_staff(request):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsManagerOrAdmin])
+@permission_classes([IsAdmin])
 def manage_users(request):
     if request.method == "POST":
         profile, error_response = _write_employee(request)
@@ -906,7 +906,7 @@ def manage_users(request):
 
 
 @api_view(["PUT", "PATCH", "DELETE"])
-@permission_classes([IsManagerOrAdmin])
+@permission_classes([IsAdmin])
 def manage_single_user(request, email):
     clean_email = _normalise_email(email)
     profile = UserProfile.objects.filter(email=clean_email).first()
@@ -936,7 +936,7 @@ def manage_single_user(request, email):
 
 
 @api_view(["POST"])
-@permission_classes([IsManagerOrAdmin])
+@permission_classes([IsAdmin])
 def reset_employee_password(request, email):
     clean_email = _normalise_email(email)
     if clean_email == request.user.email:
@@ -994,38 +994,38 @@ def _category_detail(request, model, item_id, label):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsManagerOrAdmin])
+@permission_classes([IsAdmin])
 def departments_view(request):
     return _category_view(request, Department, "phòng ban")
 
 
 @api_view(["PUT", "PATCH", "DELETE"])
-@permission_classes([IsManagerOrAdmin])
+@permission_classes([IsAdmin])
 def department_detail(request, department_id):
     return _category_detail(request, Department, department_id, "phòng ban")
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsManagerOrAdmin])
+@permission_classes([IsAdmin])
 def job_titles_view(request):
     return _category_view(request, JobTitle, "chức danh")
 
 
 @api_view(["PUT", "PATCH", "DELETE"])
-@permission_classes([IsManagerOrAdmin])
+@permission_classes([IsAdmin])
 def job_title_detail(request, title_id):
     return _category_detail(request, JobTitle, title_id, "chức danh")
 
 
 @api_view(["GET"])
-@permission_classes([IsManagerOrAdmin])
+@permission_classes([IsAdmin])
 def admin_users(request):
     users = UserProfile.objects.all().order_by("-updated_at")
     return Response([_user_payload(item) for item in users])
 
 
 @api_view(["POST"])
-@permission_classes([IsManagerOrAdmin])
+@permission_classes([IsAdmin])
 def admin_create_user(request):
     profile, error_response = _write_employee(request)
     if error_response:
@@ -1034,7 +1034,7 @@ def admin_create_user(request):
 
 
 @api_view(["POST"])
-@permission_classes([IsManagerOrAdmin])
+@permission_classes([IsAdmin])
 def admin_delete_user(request):
     email = _normalise_email(request.data.get("email"))
     profile = UserProfile.objects.filter(email=email).first()
