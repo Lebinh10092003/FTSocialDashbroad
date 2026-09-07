@@ -21,6 +21,7 @@ from authentication.permissions import IsAuthenticated
 from .assessment_service import (
     append_assessment_deletion_log,
     append_variants,
+    assessment_google_sheet_resources,
     automatic_question_score,
     download_assessment_file_from_drive,
     fetch_google_sheet,
@@ -768,8 +769,20 @@ def assessment_sync_pending_results(request, pk):
         status__in=["submitted", "timed_out"], sync_status__in=["pending", "error"],
     )
     attempted = pending.count()
-    for attempt in pending:
-        _sync_completed_attempt(attempt)
+    if attempted:
+        try:
+            # One Sheets batch write replaces one request per learner. This keeps
+            # class-wide retries below the service account's write quota.
+            rebuild_assessment_google_sheet_rows(
+                assessment, assessment_google_sheet_resources(assessment),
+            )
+            now = timezone.now()
+            pending.update(
+                sync_status="synced", sync_error="", synced_at=now,
+                purge_after=now + timedelta(days=7),
+            )
+        except Exception as error:
+            pending.update(sync_status="error", sync_error=str(error)[:2000])
     remaining = assessment.attempts.filter(
         status__in=["submitted", "timed_out"], sync_status__in=["pending", "error"],
     ).count()

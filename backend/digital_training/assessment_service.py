@@ -6,6 +6,7 @@ import os
 import random
 import re
 import secrets
+import time
 import unicodedata
 from collections import Counter
 from decimal import Decimal
@@ -13,6 +14,7 @@ from decimal import Decimal
 import requests
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from openpyxl import load_workbook
 
@@ -1087,6 +1089,26 @@ def _sheet_attempt_row(attempt, questions):
     ]
 
 
+def _execute_sheets_write(request, attempts=4):
+    """Retry a transient Sheets write quota response with bounded backoff."""
+    for retry in range(attempts):
+        try:
+            return request.execute()
+        except HttpError as error:
+            status = getattr(getattr(error, "resp", None), "status", None)
+            if status != 429 or retry == attempts - 1:
+                raise
+            time.sleep(min(2 ** retry + random.uniform(0, 0.5), 8))
+
+
+def assessment_google_sheet_resources(assessment):
+    """Open the existing output sheet without rewriting its setup on every submission."""
+    spreadsheet_id = extract_spreadsheet_id(assessment.output_sheet_url)
+    if not spreadsheet_id:
+        raise ValueError("Chưa cấu hình Google Sheet đầu ra hợp lệ cho đợt kiểm tra.")
+    return build_sheets_service(None, {}), spreadsheet_id, _assessment_output_layout(assessment)
+
+
 def prepare_assessment_google_sheet(assessment):
     spreadsheet_id = extract_spreadsheet_id(assessment.output_sheet_url)
     if not spreadsheet_id:
@@ -1201,24 +1223,25 @@ def prepare_assessment_google_sheet(assessment):
 
 
 def rebuild_assessment_google_sheet_rows(assessment, resources=None):
-    service, spreadsheet_id, layout = resources or prepare_assessment_google_sheet(assessment)
+    service, spreadsheet_id, layout = resources or assessment_google_sheet_resources(assessment)
+    updates = []
     for variant, sheet_title in layout["answer_sheets"].items():
         questions = public_questions(assessment, variant)
         attempts = assessment.attempts.filter(variant=variant).order_by("started_at")
         rows = [_sheet_attempt_row(attempt, questions) for attempt in attempts]
         if rows:
-            service.spreadsheets().values().update(
-                spreadsheetId=spreadsheet_id,
-                range=f"'{sheet_title}'!A2",
-                valueInputOption="RAW",
-                body={"values": rows},
-            ).execute()
+            updates.append({"range": f"'{sheet_title}'!A2", "values": rows})
+    if updates:
+        _execute_sheets_write(service.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"valueInputOption": "RAW", "data": updates},
+        ))
     return service, spreadsheet_id, layout
 
 
 def append_assessment_deletion_log(attempt, actor, mode, note=""):
-    service, spreadsheet_id, layout = prepare_assessment_google_sheet(attempt.assessment)
-    service.spreadsheets().values().append(
+    service, spreadsheet_id, layout = assessment_google_sheet_resources(attempt.assessment)
+    _execute_sheets_write(service.spreadsheets().values().append(
         spreadsheetId=spreadsheet_id,
         range=f"'{layout['delete_log']}'!A:A",
         valueInputOption="RAW",
@@ -1227,11 +1250,11 @@ def append_assessment_deletion_log(attempt, actor, mode, note=""):
             str(attempt.access_token), attempt.variant, mode, actor, "Admin/System",
             "Hợp lệ", "Đã xóa", note,
         ]]},
-    ).execute()
+    ))
 
 
 def sync_attempt_to_google_sheet(attempt, resources=None):
-    service, spreadsheet_id, layout = resources or prepare_assessment_google_sheet(attempt.assessment)
+    service, spreadsheet_id, layout = resources or assessment_google_sheet_resources(attempt.assessment)
     questions = public_questions(attempt.assessment, attempt.variant)
     row = _sheet_attempt_row(attempt, questions)
     sheet_title = layout["answer_sheets"][attempt.variant]
@@ -1244,18 +1267,18 @@ def sync_attempt_to_google_sheet(attempt, resources=None):
         None,
     )
     if row_number:
-        service.spreadsheets().values().update(
+        _execute_sheets_write(service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
             range=f"'{sheet_title}'!A{row_number}",
             valueInputOption="RAW",
             body={"values": [row]},
-        ).execute()
+        ))
     else:
-        service.spreadsheets().values().append(
+        _execute_sheets_write(service.spreadsheets().values().append(
             spreadsheetId=spreadsheet_id,
             range=f"'{sheet_title}'!A:A",
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body={"values": [row]},
-        ).execute()
+        ))
     return True
