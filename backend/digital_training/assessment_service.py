@@ -13,7 +13,7 @@ from decimal import Decimal
 import requests
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from openpyxl import load_workbook
 
 from integrations.google_sheets import build_sheets_service, extract_spreadsheet_id
@@ -962,17 +962,33 @@ def _participant_folder_name(service, parent_id, attempt):
     return _safe_drive_name(f"{full_name} - {identifier}", full_name)
 
 
-def upload_assessment_file_to_drive(uploaded, assessment, attempt, question_id=""):
+def _assessment_drive_service():
     raw = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
     if not raw:
-        raise ValueError("Chưa cấu hình GOOGLE_SERVICE_ACCOUNT_JSON để tải tệp lên Google Drive.")
+        raise ValueError("Chưa cấu hình GOOGLE_SERVICE_ACCOUNT_JSON để làm việc với Google Drive.")
     info = json.loads(raw)
     info["private_key"] = str(info.get("private_key") or "").replace("\\n", "\n")
     credentials = service_account.Credentials.from_service_account_info(
         info,
         scopes=["https://www.googleapis.com/auth/drive.file"],
     )
-    service = build("drive", "v3", credentials=credentials, cache_discovery=False)
+    return build("drive", "v3", credentials=credentials, cache_discovery=False)
+
+
+def download_assessment_file_from_drive(file_id):
+    """Read a submitted Drive file with the service account, for authenticated in-app preview."""
+    service = _assessment_drive_service()
+    request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
+    buffer = io.BytesIO()
+    downloader = MediaIoBaseDownload(buffer, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    return buffer.getvalue()
+
+
+def upload_assessment_file_to_drive(uploaded, assessment, attempt, question_id=""):
+    service = _assessment_drive_service()
     folder_id = assessment.drive_folder_id
     config = assessment.storage_config or {}
     if config.get("create_customer_folder", True):

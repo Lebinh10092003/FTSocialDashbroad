@@ -7,6 +7,7 @@ from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
+from django.http import FileResponse, HttpResponse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, parser_classes, permission_classes
@@ -21,6 +22,7 @@ from .assessment_service import (
     append_assessment_deletion_log,
     append_variants,
     automatic_question_score,
+    download_assessment_file_from_drive,
     fetch_google_sheet,
     generate_variants_from_import,
     grade_attempt,
@@ -651,6 +653,28 @@ def assessment_result_grade(request, pk, attempt_pk):
     ])
     _sync_completed_attempt(attempt)
     return Response(TrainingAssessmentAttemptSerializer(attempt, context={"request": request}).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def assessment_result_upload_content(request, pk, attempt_pk, upload_pk):
+    """Serve submitted evidence to an authorized grader without exposing Drive permissions."""
+    if not _can_manage(request):
+        return _forbidden()
+    upload = TrainingAssessmentUpload.objects.filter(
+        pk=upload_pk, attempt_id=attempt_pk, attempt__assessment_id=pk,
+    ).first()
+    if not upload:
+        return _assessment_error("Không tìm thấy tệp minh chứng.", status.HTTP_404_NOT_FOUND)
+    content_type = upload.content_type or "application/octet-stream"
+    if upload.file:
+        return FileResponse(upload.file.open("rb"), content_type=content_type)
+    if not upload.drive_file_id:
+        return _assessment_error("Tệp minh chứng chưa sẵn sàng.", status.HTTP_404_NOT_FOUND)
+    try:
+        return HttpResponse(download_assessment_file_from_drive(upload.drive_file_id), content_type=content_type)
+    except Exception as error:
+        return _assessment_error(f"Không thể tải tệp minh chứng: {error}", status.HTTP_502_BAD_GATEWAY)
 
 
 @api_view(["POST"])

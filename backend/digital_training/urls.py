@@ -36,6 +36,7 @@ urlpatterns = [
     path("digital-training/assessments/<int:pk>/results", assessment_views.assessment_results, name="training_assessment_results"),
     path("digital-training/assessment-previews/<slug:slug>", assessment_views.assessment_preview, name="training_assessment_preview"),
     path("digital-training/assessments/<int:pk>/results/<int:attempt_pk>", assessment_views.assessment_result_grade, name="training_assessment_result_grade"),
+    path("digital-training/assessments/<int:pk>/results/<int:attempt_pk>/uploads/<int:upload_pk>/content", assessment_views.assessment_result_upload_content, name="training_assessment_result_upload_content"),
     path("digital-training/assessments/<int:pk>/results/<int:attempt_pk>/kick", assessment_views.assessment_result_kick, name="training_assessment_result_kick"),
     path("digital-training/assessments/<int:pk>/prepare-output", assessment_views.assessment_prepare_output, name="training_assessment_prepare_output"),
     path("digital-training/assessments/<int:pk>/results/<int:attempt_pk>/storage", assessment_views.assessment_result_storage, name="training_assessment_result_storage"),
