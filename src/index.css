@@ -1191,3 +1191,10 @@ body {
   .ft-toolbar > *, .ft-page-header > * { min-width: 0; }
   .ft-page-header :is(h1, h2), .ft-toolbar :is(h1, h2) { overflow-wrap: anywhere; }
 }
+
+/* Visible, draggable scrollbars in the grading workspace. */
+.assessment-grading .grading-scroll { scrollbar-width: auto; scrollbar-color: #94a3b8 #e2e8f0; scrollbar-gutter: stable; overscroll-behavior: contain; }
+.assessment-grading .grading-scroll::-webkit-scrollbar { width: 12px; height: 12px; }
+.assessment-grading .grading-scroll::-webkit-scrollbar-track { background: #e2e8f0; border-radius: 8px; }
+.assessment-grading .grading-scroll::-webkit-scrollbar-thumb { background: #94a3b8; border: 2px solid #e2e8f0; border-radius: 8px; }
+.assessment-grading .grading-scroll::-webkit-scrollbar-thumb:hover { background: #64748b; }
