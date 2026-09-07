@@ -39,6 +39,7 @@ urlpatterns = [
     path("digital-training/assessments/<int:pk>/results/<int:attempt_pk>/kick", assessment_views.assessment_result_kick, name="training_assessment_result_kick"),
     path("digital-training/assessments/<int:pk>/prepare-output", assessment_views.assessment_prepare_output, name="training_assessment_prepare_output"),
     path("digital-training/assessments/<int:pk>/results/<int:attempt_pk>/storage", assessment_views.assessment_result_storage, name="training_assessment_result_storage"),
+    path("digital-training/assessments/<int:pk>/results/sync-pending", assessment_views.assessment_sync_pending_results, name="training_assessment_sync_pending_results"),
     path("training-assessments/<slug:slug>", assessment_views.public_assessment, name="public_training_assessment"),
     path("training-assessments/<slug:slug>/start", assessment_views.public_assessment_start, name="public_training_assessment_start"),
     path("training-assessment-attempts/<uuid:token>", assessment_views.public_attempt, name="public_training_assessment_attempt"),

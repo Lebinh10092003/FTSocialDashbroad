@@ -675,7 +675,7 @@ class TrainingAssessmentAttemptSerializer(serializers.ModelSerializer):
             "id", "respondent_name", "email", "phone", "organization", "position",
             "participant_code", "variant", "answers", "progress", "score",
             "max_score", "auto_graded_points", "practical_score",
-            "manual_grading_required", "status", "sync_status", "sync_error",
+            "manual_grading_required", "grading", "status", "sync_status", "sync_error",
             "synced_at", "purge_after", "started_at", "expires_at",
             "submitted_at", "updated_at", "uploads",
         ]
@@ -691,6 +691,7 @@ class TrainingAssessmentAttemptSerializer(serializers.ModelSerializer):
                 "storage": upload.sync_status,
                 "question_id": upload.question_id,
                 "name": upload.original_name,
+                "content_type": upload.content_type,
                 "url": request.build_absolute_uri(url) if request and url.startswith("/") else url,
             })
         return result

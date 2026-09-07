@@ -874,47 +874,44 @@ def _answer_text(value):
     return str(value or "").strip()
 
 
+def automatic_question_score(question, answer):
+    """Return the automatic score for a question, or None when a teacher must score it."""
+    points = Decimal(str(question.get("points") or 0))
+    answer_text = _answer_text(answer)
+    correct = question.get("correct_answers") or []
+    if question.get("type") == "single_choice":
+        return points if correct and answer_text.upper() == str(correct[0]).strip().upper() else Decimal("0")
+    if question.get("type") == "multiple_choice":
+        actual_values = {part.strip().upper() for part in re.split(r"[,;|]", answer_text) if part.strip()}
+        correct_values = {str(part).strip().upper() for part in correct if str(part).strip()}
+        return points if correct_values and actual_values == correct_values else Decimal("0")
+    if question.get("type") == "short_answer":
+        if not correct:
+            return None
+        normalized = _key(answer_text)
+        return points if normalized and normalized in {_key(value) for value in correct} else Decimal("0")
+    if question.get("type") in {"matching", "ordering"}:
+        if not correct:
+            return None
+        expected_arrangements = {_key(value) for value in correct}
+        if len(correct) > 1:
+            expected_arrangements.add(_key(("|" if question.get("type") == "matching" else "-").join(str(value) for value in correct)))
+        return points if _key(answer_text) in expected_arrangements else Decimal("0")
+    return None
+
+
 def grade_attempt(attempt):
-    questions = [
-        item for item in attempt.assessment.questions
-        if str(item.get("variant") or "Đề 1") == attempt.variant
-    ]
+    questions = [item for item in attempt.assessment.questions if str(item.get("variant") or "Đề 1") == attempt.variant]
     score = Decimal("0")
     maximum = Decimal("0")
     manual = False
     for question in questions:
-        points = Decimal(str(question.get("points") or 0))
-        maximum += points
-        answer = attempt.answers.get(str(question.get("id")), "")
-        answer_text = _answer_text(answer)
-        correct = question.get("correct_answers") or []
-        if question.get("type") == "single_choice":
-            if correct and answer_text.upper() == str(correct[0]).strip().upper():
-                score += points
-        elif question.get("type") == "multiple_choice":
-            actual_values = {part.strip().upper() for part in re.split(r"[,;|]", answer_text) if part.strip()}
-            correct_values = {str(part).strip().upper() for part in correct if str(part).strip()}
-            if correct_values and actual_values == correct_values:
-                score += points
-        elif question.get("type") == "short_answer":
-            if correct:
-                normalized = _key(answer_text)
-                if normalized and normalized in {_key(value) for value in correct}:
-                    score += points
-            else:
-                manual = True
-        elif question.get("type") in {"matching", "ordering"}:
-            expected_arrangements = {_key(value) for value in correct}
-            # Older imports stored one piece per pair/position. Treat their
-            # concatenation as the same complete arrangement for grading.
-            if len(correct) > 1:
-                expected_arrangements.add(_key(("|" if question.get("type") == "matching" else "-").join(str(value) for value in correct)))
-            if correct and _key(answer_text) in expected_arrangements:
-                score += points
-            elif not correct:
-                manual = True
-        else:
+        maximum += Decimal(str(question.get("points") or 0))
+        automatic_score = automatic_question_score(question, attempt.answers.get(str(question.get("id")), ""))
+        if automatic_score is None:
             manual = True
+        else:
+            score += automatic_score
     attempt.auto_graded_points = score
     attempt.score = score
     attempt.max_score = maximum

@@ -20,6 +20,7 @@ from authentication.permissions import IsAuthenticated
 from .assessment_service import (
     append_assessment_deletion_log,
     append_variants,
+    automatic_question_score,
     fetch_google_sheet,
     generate_variants_from_import,
     grade_attempt,
@@ -306,6 +307,26 @@ def _expire_if_needed(attempt):
             "score", "max_score", "auto_graded_points", "manual_grading_required",
             "status", "submitted_at", "updated_at",
         ])
+        # A timed-out attempt is still a completed submission. Previously it
+        # stopped here, leaving it indefinitely in the pending-sync queue.
+        _sync_completed_attempt(attempt)
+    return attempt
+
+
+def _sync_completed_attempt(attempt):
+    """Deliver one completed attempt while keeping the database as the source of truth."""
+    if not attempt.assessment.output_sheet_url:
+        return attempt
+    attempt.purge_after = attempt.purge_after or timezone.now() + timedelta(days=7)
+    try:
+        sync_attempt_to_google_sheet(attempt)
+        attempt.sync_status = "synced"
+        attempt.sync_error = ""
+        attempt.synced_at = timezone.now()
+    except Exception as error:
+        attempt.sync_status = "error"
+        attempt.sync_error = str(error)[:2000]
+    attempt.save(update_fields=["sync_status", "sync_error", "synced_at", "purge_after", "updated_at"])
     return attempt
 
 
@@ -557,6 +578,64 @@ def assessment_result_grade(request, pk, attempt_pk):
     attempt = TrainingAssessmentAttempt.objects.filter(pk=attempt_pk, assessment_id=pk).first()
     if not attempt:
         return _assessment_error("Không tìm thấy lượt làm bài.", status.HTTP_404_NOT_FOUND)
+    if attempt.assessment.status != "closed":
+        return _assessment_error("Chỉ chấm bài sau khi bài kiểm tra đã đóng.")
+    question_scores = request.data.get("question_scores")
+    if isinstance(question_scores, dict):
+        questions = [
+            question for question in attempt.assessment.questions
+            if str(question.get("variant") or "Đề 1") == attempt.variant
+        ]
+        questions_by_id = {str(question.get("id")): question for question in questions}
+        grading = dict(attempt.grading or {})
+        for question_id, value in question_scores.items():
+            question_id = str(question_id)
+            question = questions_by_id.get(question_id)
+            if not question:
+                return _assessment_error("Có điểm chấm cho câu hỏi không thuộc bài làm này.")
+            try:
+                awarded = Decimal(str(value))
+            except (InvalidOperation, TypeError):
+                return _assessment_error(f"Điểm câu {question.get('order') or question_id} không hợp lệ.")
+            maximum = Decimal(str(question.get("points") or 0))
+            if awarded < 0 or awarded > maximum:
+                return _assessment_error(f"Điểm câu {question.get('order') or question_id} phải từ 0 đến {maximum}.")
+            grading[question_id] = float(awarded)
+
+        total = Decimal("0")
+        automatic_total = Decimal("0")
+        manual_total = Decimal("0")
+        maximum = Decimal("0")
+        manual_pending = False
+        for question in questions:
+            question_id = str(question.get("id"))
+            question_maximum = Decimal(str(question.get("points") or 0))
+            maximum += question_maximum
+            automatic = automatic_question_score(question, attempt.answers.get(question_id, ""))
+            if automatic is not None:
+                automatic_total += automatic
+            if question_id in grading:
+                awarded = Decimal(str(grading[question_id]))
+            elif automatic is None:
+                awarded = Decimal("0")
+                manual_pending = True
+            else:
+                awarded = automatic
+            total += awarded
+            if automatic is None:
+                manual_total += awarded
+        attempt.grading = grading
+        attempt.auto_graded_points = automatic_total
+        attempt.practical_score = manual_total
+        attempt.score = total
+        attempt.max_score = maximum
+        attempt.manual_grading_required = manual_pending
+        attempt.save(update_fields=[
+            "grading", "auto_graded_points", "practical_score", "score", "max_score",
+            "manual_grading_required", "updated_at",
+        ])
+        _sync_completed_attempt(attempt)
+        return Response(TrainingAssessmentAttemptSerializer(attempt, context={"request": request}).data)
     try:
         score = Decimal(str(request.data.get("score")))
     except (InvalidOperation, TypeError):
@@ -566,20 +645,11 @@ def assessment_result_grade(request, pk, attempt_pk):
     attempt.score = score
     attempt.practical_score = max(Decimal("0"), score - (attempt.auto_graded_points or Decimal("0")))
     attempt.manual_grading_required = False
-    if attempt.assessment.output_sheet_url:
-        attempt.purge_after = attempt.purge_after or timezone.now() + timedelta(days=7)
-        try:
-            sync_attempt_to_google_sheet(attempt)
-            attempt.sync_status = "synced"
-            attempt.sync_error = ""
-            attempt.synced_at = timezone.now()
-        except Exception as error:
-            attempt.sync_status = "error"
-            attempt.sync_error = str(error)[:2000]
     attempt.save(update_fields=[
         "score", "practical_score", "manual_grading_required", "sync_status",
         "sync_error", "synced_at", "purge_after", "updated_at",
     ])
+    _sync_completed_attempt(attempt)
     return Response(TrainingAssessmentAttemptSerializer(attempt, context={"request": request}).data)
 
 
@@ -596,9 +666,14 @@ def assessment_result_kick(request, pk, attempt_pk):
         return _assessment_error("Không tìm thấy lượt làm bài.", status.HTTP_404_NOT_FOUND)
     if attempt.status != "in_progress":
         return _assessment_error("Lượt làm này đã kết thúc.")
+    grade_attempt(attempt)
     attempt.status = "timed_out"
     attempt.submitted_at = timezone.now()
-    attempt.save(update_fields=["status", "submitted_at", "updated_at"])
+    attempt.save(update_fields=[
+        "score", "max_score", "auto_graded_points", "manual_grading_required",
+        "status", "submitted_at", "updated_at",
+    ])
+    _sync_completed_attempt(attempt)
     return Response(TrainingAssessmentAttemptSerializer(attempt, context={"request": request}).data)
 
 
@@ -613,6 +688,10 @@ def assessment_prepare_output(request, pk):
     try:
         resources = prepare_assessment_google_sheet(assessment)
         rebuild_assessment_google_sheet_rows(assessment, resources)
+        assessment.attempts.filter(status__in=["submitted", "timed_out"]).update(
+            sync_status="synced", sync_error="", synced_at=timezone.now(),
+            purge_after=timezone.now() + timedelta(days=7),
+        )
         assessment.sync_status = "ready"
         assessment.sync_error = ""
     except Exception as error:
@@ -642,18 +721,35 @@ def assessment_result_storage(request, pk, attempt_pk):
             return _assessment_error(f"Không thể ghi nhật ký xóa vào Google Sheets: {error}")
         attempt.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-    try:
-        attempt.purge_after = attempt.purge_after or timezone.now() + timedelta(days=7)
-        sync_attempt_to_google_sheet(attempt)
-        attempt.sync_status = "synced"
-        attempt.sync_error = ""
-        attempt.synced_at = timezone.now()
-        attempt.purge_after = timezone.now() + timedelta(days=7)
-    except Exception as error:
-        attempt.sync_status = "error"
-        attempt.sync_error = str(error)[:2000]
-    attempt.save(update_fields=["sync_status", "sync_error", "synced_at", "purge_after", "updated_at"])
+    if attempt.status == "in_progress":
+        return _assessment_error("Chỉ đồng bộ lượt làm đã nộp hoặc đã hết giờ.")
+    if not attempt.assessment.output_sheet_url:
+        return _assessment_error("Bài kiểm tra chưa có Google Sheet đầu ra để đồng bộ.")
+    _sync_completed_attempt(attempt)
     return Response(TrainingAssessmentAttemptSerializer(attempt, context={"request": request}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def assessment_sync_pending_results(request, pk):
+    """Retry every completed record whose delivery is not confirmed yet."""
+    if not _can_manage(request):
+        return _forbidden()
+    assessment = TrainingAssessment.objects.filter(pk=pk).first()
+    if not assessment:
+        return _assessment_error("Không tìm thấy đợt kiểm tra.", status.HTTP_404_NOT_FOUND)
+    if not assessment.output_sheet_url:
+        return _assessment_error("Bài kiểm tra chưa có Google Sheet đầu ra để đồng bộ.")
+    pending = assessment.attempts.filter(
+        status__in=["submitted", "timed_out"], sync_status__in=["pending", "error"],
+    )
+    attempted = pending.count()
+    for attempt in pending:
+        _sync_completed_attempt(attempt)
+    remaining = assessment.attempts.filter(
+        status__in=["submitted", "timed_out"], sync_status__in=["pending", "error"],
+    ).count()
+    return Response({"attempted": attempted, "remaining": remaining})
 
 
 @api_view(["GET"])
@@ -860,17 +956,7 @@ def public_attempt(request, token):
         attempt.status = "submitted"
         attempt.submitted_at = timezone.now()
         attempt.save()
-        if attempt.assessment.output_sheet_url:
-            attempt.purge_after = timezone.now() + timedelta(days=7)
-            try:
-                sync_attempt_to_google_sheet(attempt)
-                attempt.sync_status = "synced"
-                attempt.sync_error = ""
-                attempt.synced_at = timezone.now()
-            except Exception as error:
-                attempt.sync_status = "error"
-                attempt.sync_error = str(error)[:2000]
-            attempt.save(update_fields=["sync_status", "sync_error", "synced_at", "purge_after", "updated_at"])
+        _sync_completed_attempt(attempt)
     else:
         attempt.save(update_fields=["answers", "progress", "updated_at"])
     return Response(_attempt_payload(attempt, request))
