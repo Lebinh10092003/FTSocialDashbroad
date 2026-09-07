@@ -25,14 +25,14 @@ def _profile_payload(profile):
 
 def _visible_items(user):
     return WorkItem.objects.select_related("creator", "executor", "reviewed_by").prefetch_related("supporters", "managers").filter(
-        Q(creator=user) | Q(executor=user) | Q(supporters=user) | Q(managers=user)
+        Q(creator=user) | Q(executor=user) | Q(supporters=user) | Q(managers=user) | Q(executor__manager=user)
     ).distinct()
 
 
 def _viewer_relation(item, user):
     if item.executor_id == user.email:
         return "executor"
-    if any(person.email == user.email for person in item.managers.all()):
+    if item.executor.manager_id == user.email or any(person.email == user.email for person in item.managers.all()):
         return "manager"
     if any(person.email == user.email for person in item.supporters.all()):
         return "supporter"
@@ -40,7 +40,12 @@ def _viewer_relation(item, user):
 
 
 def _can_manage(item, user, role):
-    return role == "ADMIN" or item.creator_id == user.email or any(person.email == user.email for person in item.managers.all())
+    return (
+        role == "ADMIN"
+        or item.creator_id == user.email
+        or item.executor.manager_id == user.email
+        or any(person.email == user.email for person in item.managers.all())
+    )
 
 
 def _next_daily_order(executor, work_date, exclude_id=None):

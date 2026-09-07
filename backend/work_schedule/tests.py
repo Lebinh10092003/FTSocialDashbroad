@@ -140,3 +140,16 @@ class WorkScheduleApiTests(TestCase):
         })
         self.assertEqual(response.status_code, 201, response.data)
         self.assertIsNone(WorkItem.objects.get(pk=response.json()["item"]["id"]).training_session_id)
+
+    def test_organisational_manager_sees_and_reviews_direct_report_work(self):
+        self.executor.manager = self.manager
+        self.executor.save(update_fields=["manager"])
+        response = self.request(self.executor_token, "post", "/api/work-schedule/items", {
+            "title": "Việc của nhân viên", "date": "2026-09-17",
+            "executorEmail": self.executor.email, "supporterEmails": [], "managerEmails": [],
+        })
+        self.assertEqual(response.status_code, 201, response.data)
+        manager_rows = self.request(self.manager_token, "get", "/api/work-schedule/items").json()["items"]
+        row = next(item for item in manager_rows if item["id"] == response.json()["item"]["id"])
+        self.assertEqual(row["viewerRelation"], "manager")
+        self.assertTrue(row["canDelete"])
