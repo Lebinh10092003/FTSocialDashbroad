@@ -302,6 +302,24 @@ export default function TrainingAssessmentsAdmin({
     }
   }, [idToken]);
 
+  useEffect(() => {
+    if (screen !== "detail" || !selected?.id) return;
+    let active = true;
+    const refreshQuestions = async () => {
+      try {
+        const response = await fetch(`/api/digital-training/assessments/${selected.id}`, { headers: { Authorization: `Bearer ${idToken}` } });
+        if (!response.ok) return;
+        const updated = await response.json();
+        if (active) {
+          setSelected((current) => current?.id === updated.id ? { ...current, questions: updated.questions, variants: updated.variants } : current);
+          setItems((current) => current.map((item) => item.id === updated.id ? updated : item));
+        }
+      } catch { /* Keep the current detail if the connection is unavailable. */ }
+    };
+    window.addEventListener("focus", refreshQuestions);
+    return () => { active = false; window.removeEventListener("focus", refreshQuestions); };
+  }, [screen, selected?.id, idToken]);
+
   const publicLink = selected
     ? `${window.location.origin}/training-assessment/${selected.public_slug}`
     : "";
