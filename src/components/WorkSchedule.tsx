@@ -158,7 +158,7 @@ const selfAssessment: Record<WorkStatus, string> = {
   todo: "Cần làm",
   doing: "Đang thực hiện",
   completed: "Hoàn thành",
-  reviewed: "Đã review",
+  reviewed: "Hoàn thành",
 };
 const initials = (name: string) =>
   name
@@ -1145,7 +1145,7 @@ function ScheduleTable({ days, rowsFor, setEditing, setEditingDay, setDraggedId,
                   {tasks.map((task: WorkTask) => (
                     <div key={task.id} className="mb-2 last:mb-0">
                       <b>{task.dailyOrder}.</b>{" "}
-                      {task.progressNote || <span className="text-slate-300">—</span>}
+                      {task.progressNote || selfAssessment[task.status]}
                     </div>
                   ))}
                 </td>
