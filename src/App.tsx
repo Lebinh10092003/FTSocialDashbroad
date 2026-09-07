@@ -103,7 +103,7 @@ function userFromApi(value: any): AppUser {
   };
 }
 
-function getInitialViewMode(hasSession = false): ViewMode {
+function getInitialViewMode(): ViewMode {
   const path = window.location.pathname;
   if (path.startsWith('/training-assessment/')) return 'training-assessment-public';
   if (path.startsWith('/training-assessments')) return 'training-assessments';
@@ -117,7 +117,7 @@ function getInitialViewMode(hasSession = false): ViewMode {
   if (path.startsWith('/qr-generator')) return 'qr-generator';
   if (path.startsWith('/attendance')) return 'attendance';
   if (path.startsWith('/account-management')) return 'account-management';
-  return hasSession ? 'work-schedule' : 'workspace';
+  return 'workspace';
 }
 
 class ExaminationErrorBoundary extends Component<
@@ -168,7 +168,7 @@ export default function App() {
   const [showProfile, setShowProfile] = useState(false);
   const [accessNotice, setAccessNotice] = useState('');
 
-  const [viewMode, setViewModeState] = useState<ViewMode>(() => getInitialViewMode(!!initialSession));
+  const [viewMode, setViewModeState] = useState<ViewMode>(getInitialViewMode());
   const [activeTab, setActiveTab] = useState<SocialTab>(() => socialTabFromPath(window.location.pathname));
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(false);
@@ -212,10 +212,6 @@ export default function App() {
         setUser(nextUser);
         setUserRole(nextRole);
         persistSession(idToken, nextUser, nextRole);
-        if (window.location.pathname === '/') {
-          setViewModeState('work-schedule');
-          window.history.replaceState(null, '', '/work-schedule');
-        }
       } catch {
         if (!active) return;
         clearSession();
@@ -310,7 +306,6 @@ export default function App() {
       persistSession(token, nextUser, nextRole);
       setLoginPassword('');
       setShowLoginModal(false);
-      setViewMode('work-schedule');
     } catch (error: any) {
       setAuthError(error.message || 'Đăng nhập thất bại.');
     } finally {
