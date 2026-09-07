@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDot, ClipboardCheck, ExternalLink, FileSpreadsheet, LayoutDashboard, Link2, ListChecks, Plus, Search, Settings2, Trash2, UserCheck, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDot, ClipboardCheck, ExternalLink, FileSpreadsheet, LayoutDashboard, Link2, ListChecks, Pencil, Plus, Search, Settings2, Trash2, UserCheck, X } from "lucide-react";
 import AccountMenu from "./AccountMenu";
 import { appDialog } from "./AppDialog";
 
@@ -57,6 +57,7 @@ type WorkDraft = {
   reviewPercent: number | null;
   reviewNote: string;
 };
+type DayEditState = { date: string; tasks: WorkTask[] };
 type Props = {
   idToken: string;
   onBackToWorkspace: () => void;
@@ -156,7 +157,7 @@ const selfAssessment: Record<WorkStatus, string> = {
   todo: "Cần làm",
   doing: "Đang thực hiện",
   completed: "Hoàn thành",
-  reviewed: "Hoàn thành",
+  reviewed: "Đã review",
 };
 const initials = (name: string) =>
   name
@@ -343,6 +344,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     [calendarPeriod, setCalendarPeriod] = useState<"week" | "month">("week"),
     [calendarLayout, setCalendarLayout] = useState<"calendar" | "table">("table"),
     [editing, setEditing] = useState<WorkDraft | null>(null),
+    [editingDay, setEditingDay] = useState<DayEditState | null>(null),
     [selectedIds, setSelectedIds] = useState<number[]>([]),
     [draggedId, setDraggedId] = useState<number | null>(null),
     [query, setQuery] = useState(""),
@@ -431,6 +433,19 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
       void appDialog.alert("Đã lưu ghi chú tiến trình.", { title: "Đã cập nhật", tone: "success" });
     } catch (cause: any) {
       void appDialog.alert(cause.message, { title: "Không thể lưu ghi chú tiến trình", tone: "danger" });
+    }
+  };
+  const saveDayTable = async (items: Array<{ id?: number; title: string; progressNote: string }>) => {
+    if (!editingDay) return;
+    try {
+      await requestJson("/api/work-schedule/day", {
+        method: "POST",
+        body: JSON.stringify({ date: editingDay.date, items }),
+      });
+      setEditingDay(null);
+      await load();
+    } catch (cause: any) {
+      void appDialog.alert(cause.message, { title: "Không thể lưu lịch trong ngày", tone: "danger" });
     }
   };
   const changeTaskDates = async (ids: number[], date: string) => {
@@ -791,10 +806,11 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
               </button>
             </div>
           )}
-          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={filtered} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={setCalendarPeriod} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={setView} setEditing={setEditing} setDraggedId={setDraggedId} moveTask={moveTask} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} />}
+          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={filtered} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={setCalendarPeriod} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={setView} setEditing={setEditing} setEditingDay={setEditingDay} setDraggedId={setDraggedId} moveTask={moveTask} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} />}
         </div>
       </main>
       {editing && <TaskDialog draft={editing} setDraft={setEditing} staff={staff} userEmail={userEmail} saveTask={saveTask} saveProgressNote={saveProgressNote} deleteTasks={deleteTasks} review={review} />}
+      {editingDay && <DayTableEditor state={editingDay} onClose={() => setEditingDay(null)} onSave={saveDayTable} />}
       {bulkPeopleMode && <BulkPeopleDialog mode={bulkPeopleMode} staff={staff} onClose={() => setBulkPeopleMode(null)} onApply={(emails: string[]) => void batchAddPeople(bulkPeopleMode, emails)} />}
     </div>
   );
@@ -862,7 +878,7 @@ function BoardView({ tasks, selectedDate, setSelectedDate, userEmail, selectedId
     </>
   );
 }
-function WeekView({ tasks, visibleDays, anchor, setAnchor, period, setPeriod, layout, setLayout, setSelectedDate, setView, setEditing, setDraggedId, moveTask }: any) {
+function WeekView({ tasks, visibleDays, anchor, setAnchor, period, setPeriod, layout, setLayout, setSelectedDate, setView, setEditing, setEditingDay, setDraggedId, moveTask }: any) {
   const today = iso(new Date());
   const currentMonth = anchor.getMonth();
   const [dragTargetDate, setDragTargetDate] = useState<string | null>(null);
@@ -955,13 +971,13 @@ function WeekView({ tasks, visibleDays, anchor, setAnchor, period, setPeriod, la
           </div>
         </section>
       ) : (
-        <ScheduleTable days={visibleDays} rowsFor={rowsFor} setEditing={setEditing} setDraggedId={setDraggedId} moveTask={moveTask} />
+        <ScheduleTable days={visibleDays} rowsFor={rowsFor} setEditing={setEditing} setEditingDay={setEditingDay} setDraggedId={setDraggedId} moveTask={moveTask} />
       )}
     </>
   );
 }
 
-function ScheduleTable({ days, rowsFor, setEditing, setDraggedId, moveTask }: any) {
+function ScheduleTable({ days, rowsFor, setEditing, setEditingDay, setDraggedId, moveTask }: any) {
   return (
     <section className="overflow-x-auto rounded-2xl border border-slate-300 bg-white shadow-sm">
       <table className="min-w-[1220px] w-full border-collapse text-sm">
@@ -972,7 +988,6 @@ function ScheduleTable({ days, rowsFor, setEditing, setDraggedId, moveTask }: an
             <th className="w-20 border-b border-r border-slate-300 px-3 py-3 text-center">Tuần</th>
             <th className="border-b border-r border-slate-300 px-3 py-3 text-left">Nội dung công việc</th>
             <th className="w-48 border-b border-r border-slate-300 px-3 py-3 text-left">Tự đánh giá</th>
-            <th className="w-72 border-b border-r border-slate-300 px-3 py-3 text-left">Ghi chú tiến trình</th>
             <th className="w-64 border-b border-slate-300 px-3 py-3 text-left">Lãnh đạo đánh giá</th>
           </tr>
         </thead>
@@ -985,7 +1000,10 @@ function ScheduleTable({ days, rowsFor, setEditing, setDraggedId, moveTask }: an
                 <td className="border-b border-r border-slate-200 px-3 py-3 font-bold">{weekday(dayIso)}</td>
                 <td className="border-b border-r border-slate-200 px-3 py-3">{fullDate(dayIso)}</td>
                 <td className="border-b border-r border-slate-200 px-3 py-3 text-center font-semibold">{weekNumber(dayIso)}</td>
-                <td className="border-b border-r border-slate-200 px-3 py-3">
+                <td className="relative border-b border-r border-slate-200 px-3 py-3 pr-12">
+                  <button type="button" onClick={() => setEditingDay({ date: dayIso, tasks })} className="absolute right-2 top-2 rounded-lg p-2 text-blue-600 hover:bg-blue-100" aria-label={`Chỉnh sửa lịch ngày ${fullDate(dayIso)}`} title="Chỉnh sửa lịch trong ngày">
+                    <Pencil className="h-4 w-4" />
+                  </button>
                   {tasks.length ? (
                     <ol className="space-y-2">
                       {tasks.map((task: WorkTask) => (
@@ -1004,15 +1022,7 @@ function ScheduleTable({ days, rowsFor, setEditing, setDraggedId, moveTask }: an
                 <td className="border-b border-r border-slate-200 px-3 py-3">
                   {tasks.map((task: WorkTask) => (
                     <div key={task.id} className="mb-2 last:mb-0">
-                      <b>{task.dailyOrder}.</b> {selfAssessment[task.status]}
-                    </div>
-                  ))}
-                </td>
-                <td className="border-b border-r border-slate-200 px-3 py-3">
-                  {tasks.map((task: WorkTask) => (
-                    <div key={task.id} className="mb-2 last:mb-0">
-                      <b>{task.dailyOrder}.</b>{" "}
-                      {task.progressNote || <span className="text-slate-300">—</span>}
+                      <b>{task.dailyOrder}.</b> {task.progressNote || selfAssessment[task.status]}
                     </div>
                   ))}
                 </td>
@@ -1036,6 +1046,86 @@ function ScheduleTable({ days, rowsFor, setEditing, setDraggedId, moveTask }: an
         </tbody>
       </table>
     </section>
+  );
+}
+
+function DayTableEditor({ state, onClose, onSave }: { state: DayEditState; onClose: () => void; onSave: (items: Array<{ id?: number; title: string; progressNote: string }>) => Promise<void> }) {
+  const ordered = [...state.tasks].sort((a, b) => a.dailyOrder - b.dailyOrder);
+  const [content, setContent] = useState(() => ordered.map((task, index) => `${index + 1}. ${task.title}`).join("\n"));
+  const [assessment, setAssessment] = useState(() => ordered.map((task, index) => `${index + 1}. ${task.progressNote}`).join("\n"));
+  const [saving, setSaving] = useState(false);
+
+  const parseLines = (value: string, allowBlank: boolean) => {
+    const result: Array<{ number: number; text: string }> = [];
+    for (const raw of value.split(/\r?\n/)) {
+      if (!raw.trim()) continue;
+      const match = raw.match(/^\s*(\d{1,3})[.)]\s*(.*?)\s*$/);
+      if (!match || (!allowBlank && !match[2])) return null;
+      const number = Number(match[1]);
+      if (number < 1 || number > 100 || result.some((item) => item.number === number)) return null;
+      result.push({ number, text: match[2] });
+    }
+    return result.sort((a, b) => a.number - b.number);
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const contents = parseLines(content, false);
+    const assessments = parseLines(assessment, true);
+    if (!contents?.length) {
+      void appDialog.alert("Mỗi nhiệm vụ phải nằm trên một dòng và bắt đầu bằng số từ 1 đến 100, ví dụ: 1. Chuẩn bị báo cáo.", { title: "Nội dung chưa hợp lệ", tone: "warning" });
+      return;
+    }
+    if (!assessments) {
+      void appDialog.alert("Mỗi dòng tự đánh giá phải bắt đầu bằng số tương ứng từ 1 đến 100.", { title: "Tự đánh giá chưa hợp lệ", tone: "warning" });
+      return;
+    }
+    if (contents.length < ordered.length) {
+      void appDialog.alert("Không thể xóa nhiệm vụ bằng cách bỏ dòng tại đây. Hãy mở nhiệm vụ và dùng biểu tượng xóa.", { title: "Không thể bỏ nhiệm vụ", tone: "warning" });
+      return;
+    }
+    const noteByNumber = new Map(assessments.map((item) => [item.number, item.text]));
+    const items = contents.map((item, index) => ({
+      ...(ordered[index] ? { id: ordered[index].id } : {}),
+      title: item.text,
+      progressNote: noteByNumber.get(item.number) || "",
+    }));
+    setSaving(true);
+    try {
+      await onSave(items);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <form onSubmit={submit} className="max-h-[94vh] w-full max-w-7xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between border-b px-6 py-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-blue-600">Chỉnh sửa trực tiếp trên bảng tuần</p>
+            <h2 className="mt-1 text-xl font-extrabold text-[#001e40]">Lịch ngày {fullDate(state.date)}</h2>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100" aria-label="Đóng"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="grid gap-5 p-6 lg:grid-cols-[2fr_1fr]">
+          <label className="block">
+            <span className="ws-label">Nội dung công việc</span>
+            <textarea autoFocus rows={18} value={content} onChange={(event) => setContent(event.target.value)} placeholder={"1. Nhiệm vụ thứ nhất\n2. Nhiệm vụ thứ hai"} className="ws-input min-h-[430px] resize-y font-medium leading-7" />
+            <small className="mt-2 block text-slate-500">Thêm một dòng được đánh số từ 1–100 để tự động tạo nhiệm vụ mới. Việc mới mặc định ở trạng thái Cần làm và người thực hiện là bạn.</small>
+          </label>
+          <label className="block">
+            <span className="ws-label">Tự đánh giá / ghi chú tiến trình</span>
+            <textarea rows={18} value={assessment} onChange={(event) => setAssessment(event.target.value)} placeholder={"1. Đang chờ phản hồi\n2. Đã gửi bản chính"} className="ws-input min-h-[430px] resize-y leading-7" />
+            <small className="mt-2 block text-slate-500">Để trống nội dung sau số nếu muốn bảng hiển thị trạng thái mặc định. Ghi chú tại đây không làm thay đổi trạng thái công việc.</small>
+          </label>
+        </div>
+        <div className="flex justify-end gap-3 border-t px-6 py-4">
+          <button type="button" onClick={onClose} className="rounded-xl border px-4 py-2.5 text-sm font-bold text-slate-600">Hủy</button>
+          <button type="submit" disabled={saving} className="rounded-xl bg-[#0055da] px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{saving ? "Đang lưu..." : "Lưu lịch trong ngày"}</button>
+        </div>
+      </form>
+    </div>
   );
 }
 function SheetView({ sheetUrl, setSheetUrl, sheetKey, notice, setNotice }: any) {

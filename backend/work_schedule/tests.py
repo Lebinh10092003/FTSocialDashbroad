@@ -120,6 +120,34 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.json()["item"]["progressNote"], "Đang chờ Ms Phương xác nhận bản in")
 
+    def test_day_table_edit_keeps_status_and_creates_numbered_new_task(self):
+        first = self.create_item()
+        second = self.request(self.executor_token, "post", "/api/work-schedule/items", {
+            "title": "Nhiệm vụ đã hoàn thành", "date": "2026-09-07",
+            "executorEmail": self.executor.email, "supporterEmails": [], "managerEmails": [],
+            "status": "completed",
+        }).json()["item"]
+
+        response = self.request(self.executor_token, "post", "/api/work-schedule/day", {
+            "date": "2026-09-07",
+            "items": [
+                {"id": first["id"], "title": "Hoàn thiện báo cáo đã sửa", "progressNote": "Đang chờ duyệt"},
+                {"id": second["id"], "title": second["title"], "progressNote": "Đã gửi bản chính"},
+                {"title": "Nhiệm vụ nhập từ dòng số 3", "progressNote": ""},
+            ],
+        })
+        self.assertEqual(response.status_code, 200, response.data)
+        first_row = WorkItem.objects.get(pk=first["id"])
+        second_row = WorkItem.objects.get(pk=second["id"])
+        new_row = WorkItem.objects.get(title="Nhiệm vụ nhập từ dòng số 3", executor=self.executor)
+        self.assertEqual(first_row.status, "todo")
+        self.assertEqual(first_row.progress_note, "Đang chờ duyệt")
+        self.assertEqual(second_row.status, "completed")
+        self.assertEqual(second_row.progress_note, "Đã gửi bản chính")
+        self.assertEqual(new_row.status, "todo")
+        self.assertEqual(new_row.executor, self.executor)
+        self.assertEqual(new_row.daily_order, 3)
+
     def test_batch_date_and_people_assignment_are_supported(self):
         first = self.create_item()
         second = self.request(self.manager_token, "post", "/api/work-schedule/items", {

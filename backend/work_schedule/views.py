@@ -213,6 +213,81 @@ def work_items(request):
     return Response({"items": [_payload(item, request.user, request.user_role) for item in rows]})
 
 
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def work_day_edit(request):
+    """Update the table representation of one day without coupling notes to status."""
+    work_date = parse_date(str(request.data.get("date") or ""))
+    rows = request.data.get("items")
+    if not work_date:
+        return Response({"error": "Ngày làm việc không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+    if not isinstance(rows, list) or not rows or len(rows) > 100:
+        return Response({"error": "Vui lòng nhập từ 1 đến 100 nhiệm vụ."}, status=status.HTTP_400_BAD_REQUEST)
+
+    existing_ids = []
+    normalized_rows = []
+    for row in rows:
+        if not isinstance(row, dict):
+            return Response({"error": "Dữ liệu nhiệm vụ không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+        title = str(row.get("title") or "").strip()
+        if not title:
+            return Response({"error": "Nội dung nhiệm vụ không được để trống."}, status=status.HTTP_400_BAD_REQUEST)
+        normalized = {"title": title[:255], "progress_note": str(row.get("progressNote") or "").strip()[:1000]}
+        if row.get("id") is not None:
+            try:
+                normalized["id"] = int(row["id"])
+                existing_ids.append(normalized["id"])
+            except (TypeError, ValueError):
+                return Response({"error": "Mã nhiệm vụ không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+        normalized_rows.append(normalized)
+    if len(existing_ids) != len(set(existing_ids)):
+        return Response({"error": "Danh sách có nhiệm vụ bị trùng."}, status=status.HTTP_400_BAD_REQUEST)
+
+    visible = {item.id: item for item in _visible_items(request.user).filter(id__in=existing_ids)}
+    if len(visible) != len(existing_ids):
+        return Response({"error": "Có nhiệm vụ không tồn tại hoặc bạn không được truy cập."}, status=status.HTTP_403_FORBIDDEN)
+    if any(item.work_date != work_date for item in visible.values()):
+        return Response({"error": "Có nhiệm vụ không thuộc ngày đang chỉnh sửa."}, status=status.HTTP_400_BAD_REQUEST)
+    for row in normalized_rows:
+        if "id" not in row:
+            continue
+        item = visible[row["id"]]
+        if row["title"] != item.title and not _payload(item, request.user, request.user_role)["canEdit"]:
+            return Response({"error": f"Bạn không có quyền sửa nội dung nhiệm vụ số {item.daily_order}."}, status=status.HTTP_403_FORBIDDEN)
+
+    updated_ids = []
+    with transaction.atomic():
+        for row in normalized_rows:
+            if "id" not in row:
+                item = WorkItem.objects.create(
+                    creator=request.user,
+                    executor=request.user,
+                    title=row["title"],
+                    progress_note=row["progress_note"],
+                    work_date=work_date,
+                    status=WorkItem.STATUS_TODO,
+                    priority="medium",
+                    label="Công việc",
+                    daily_order=_next_daily_order(request.user, work_date),
+                )
+            else:
+                item = visible[row["id"]]
+                update_fields = ["progress_note", "updated_at"]
+                item.progress_note = row["progress_note"]
+                if row["title"] != item.title:
+                    item.title = row["title"]
+                    update_fields.append("title")
+                item.save(update_fields=update_fields)
+                sync_training_from_work_item(item)
+            updated_ids.append(item.id)
+
+    refreshed = list(_visible_items(request.user).filter(id__in=updated_ids).order_by("daily_order", "created_at"))
+    return Response({
+        "message": "Đã cập nhật lịch trong ngày. Trạng thái công việc được giữ nguyên.",
+        "items": [_payload(item, request.user, request.user_role) for item in refreshed],
+    })
+
+
 @api_view(["GET", "PATCH", "DELETE"])
 @permission_classes([IsAuthenticated])
 def work_item_detail(request, item_id):
