@@ -1,6 +1,6 @@
 import React, { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { appDialog } from './components/AppDialog';
-import { BadgeDollarSign, CalendarCheck, ChartColumnBig, ClipboardList, FileCheck2, GraduationCap, Mail, QrCode, ShieldUser } from 'lucide-react';
+import { BadgeDollarSign, CalendarCheck, CalendarRange, ChartColumnBig, ClipboardList, FileCheck2, GraduationCap, Mail, QrCode, ShieldUser } from 'lucide-react';
 
 import { Channel, UserRole } from './types';
 import Sidebar from './components/social-dashboard/Sidebar';
@@ -40,8 +40,9 @@ const TrainingAssessmentPublic = lazyWithRecovery(() => import('./components/dig
 const TrainingAssessmentWorkspace = lazyWithRecovery(() => import('./components/digital-training/TrainingAssessmentWorkspace'));
 const QRCodeGenerator = lazyWithRecovery(() => import('./components/QRCodeGenerator'));
 const Attendance = lazyWithRecovery(() => import('./components/Attendance'));
+const WorkSchedule = lazyWithRecovery(() => import('./components/WorkSchedule'));
 
-type ViewMode = 'workspace' | 'social-dashboard' | 'email-builder' | 'signature-builder' | 'examination' | 'digital-training' | 'finance-report' | 'training-assessments' | 'training-assessment-public' | 'qr-generator' | 'attendance' | 'account-management';
+type ViewMode = 'workspace' | 'work-schedule' | 'social-dashboard' | 'email-builder' | 'signature-builder' | 'examination' | 'digital-training' | 'finance-report' | 'training-assessments' | 'training-assessment-public' | 'qr-generator' | 'attendance' | 'account-management';
 
 const SOCIAL_TABS = ['dashboard', 'media', 'posts', 'sync', 'config'] as const;
 type SocialTab = typeof SOCIAL_TABS[number];
@@ -102,11 +103,12 @@ function userFromApi(value: any): AppUser {
   };
 }
 
-function getInitialViewMode(): ViewMode {
+function getInitialViewMode(hasSession = false): ViewMode {
   const path = window.location.pathname;
   if (path.startsWith('/training-assessment/')) return 'training-assessment-public';
   if (path.startsWith('/training-assessments')) return 'training-assessments';
   if (path.startsWith('/digital-training')) return 'digital-training';
+  if (path.startsWith('/work-schedule')) return 'work-schedule';
   if (path.startsWith('/social-dashboard')) return 'social-dashboard';
   if (path.startsWith('/finance-report')) return 'finance-report';
   if (path.startsWith('/signature-builder')) return 'signature-builder';
@@ -115,7 +117,7 @@ function getInitialViewMode(): ViewMode {
   if (path.startsWith('/qr-generator')) return 'qr-generator';
   if (path.startsWith('/attendance')) return 'attendance';
   if (path.startsWith('/account-management')) return 'account-management';
-  return 'workspace';
+  return hasSession ? 'work-schedule' : 'workspace';
 }
 
 class ExaminationErrorBoundary extends Component<
@@ -166,7 +168,7 @@ export default function App() {
   const [showProfile, setShowProfile] = useState(false);
   const [accessNotice, setAccessNotice] = useState('');
 
-  const [viewMode, setViewModeState] = useState<ViewMode>(getInitialViewMode());
+  const [viewMode, setViewModeState] = useState<ViewMode>(() => getInitialViewMode(!!initialSession));
   const [activeTab, setActiveTab] = useState<SocialTab>(() => socialTabFromPath(window.location.pathname));
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(false);
@@ -179,7 +181,7 @@ export default function App() {
   const canViewFinance = !isGuest && hasModuleAccess('finance-report') && (userRole === 'ADMIN' || userRole === 'MANAGER' || isAccountant || normalisedEmployeeIdentity.includes('giam doc') || normalisedEmployeeIdentity.includes('quan ly'));
   const canEditFinance = canViewFinance && (userRole === 'ADMIN' || isAccountant);
   const moduleForView: Partial<Record<ViewMode, string>> = { 'social-dashboard': 'social-dashboard', attendance: 'attendance', 'email-builder': 'email-builder', 'signature-builder': 'signature-builder', 'qr-generator': 'qr-generator', examination: 'examination', 'digital-training': 'digital-training', 'training-assessments': 'digital-training' };
-  const canAccessView = (mode: ViewMode) => { if (mode === 'account-management') return userRole === 'ADMIN'; if (mode === 'finance-report') return canViewFinance; if (isGuest) return false; const module = moduleForView[mode]; return !!module && hasModuleAccess(module); };
+  const canAccessView = (mode: ViewMode) => { if (mode === 'account-management') return userRole === 'ADMIN'; if (mode === 'finance-report') return canViewFinance; if (mode === 'work-schedule') return !isGuest; if (isGuest) return false; const module = moduleForView[mode]; return !!module && hasModuleAccess(module); };
   const googleAccessToken = null;
 
   const persistSession = (token: string, nextUser: AppUser, role: UserRole) => {
@@ -210,6 +212,10 @@ export default function App() {
         setUser(nextUser);
         setUserRole(nextRole);
         persistSession(idToken, nextUser, nextRole);
+        if (window.location.pathname === '/') {
+          setViewModeState('work-schedule');
+          window.history.replaceState(null, '', '/work-schedule');
+        }
       } catch {
         if (!active) return;
         clearSession();
@@ -304,6 +310,7 @@ export default function App() {
       persistSession(token, nextUser, nextRole);
       setLoginPassword('');
       setShowLoginModal(false);
+      setViewMode('work-schedule');
     } catch (error: any) {
       setAuthError(error.message || 'Đăng nhập thất bại.');
     } finally {
@@ -403,6 +410,13 @@ export default function App() {
   if (viewMode === 'workspace') {
     const apps: Array<{ mode: ViewMode; title: string; description: string; gradient: string; icon: React.ElementType }> = [
       {
+        mode: 'work-schedule',
+        title: 'Lịch làm việc',
+        description: 'Lập lịch cá nhân, quản lý nhiệm vụ và theo dõi công việc của đội nhóm.',
+        gradient: 'from-[#0055DA] to-[#00A6E8]',
+        icon: CalendarRange,
+      },
+      {
         mode: 'examination',
         title: 'Khảo thí',
         description: 'Quản lý cuộc thi, kỳ tổ chức, thí sinh và nguồn dữ liệu Google Sheets.',
@@ -422,13 +436,6 @@ export default function App() {
         description: 'Theo dõi Facebook, Zalo OA, báo cáo tương tác và đồng bộ dữ liệu.',
         gradient: 'from-[#0055DA] to-[#0042AD]',
         icon: ChartColumnBig,
-      },
-      {
-        mode: 'attendance',
-        title: 'Công ca',
-        description: 'Ghi nhận giờ vào, giờ ra và theo dõi dữ liệu công ca theo tháng.',
-        gradient: 'from-[#173F30] to-[#4E9B73]',
-        icon: CalendarCheck,
       },
       {
         mode: 'email-builder',
@@ -471,6 +478,14 @@ export default function App() {
         icon: BadgeDollarSign,
       });
     }
+
+    apps.push({
+      mode: 'attendance',
+      title: 'Công ca',
+      description: 'Ghi nhận giờ vào, giờ ra và theo dõi dữ liệu công ca theo tháng.',
+      gradient: 'from-[#173F30] to-[#4E9B73]',
+      icon: CalendarCheck,
+    });
 
     const visibleApps = apps.filter(app => canAccessView(app.mode));
     return (
@@ -527,6 +542,27 @@ export default function App() {
   }
 
   if (viewMode === 'finance-report' && !canAccessView('finance-report')) return null;
+
+  if (viewMode === 'work-schedule' && !canAccessView('work-schedule')) return null;
+
+  if (viewMode === 'work-schedule') {
+    return (
+      <>
+        <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp Lịch làm việc...</div>}>
+          <WorkSchedule
+            onBackToWorkspace={() => setViewMode('workspace')}
+            onAccountClick={openAccount}
+            onLogout={handleLogout}
+            userName={user.displayName}
+            userEmail={user.email}
+            userRole={userRole}
+            photoURL={user.photoURL}
+          />
+        </Suspense>
+        {loginModal}{profileModal}
+      </>
+    );
+  }
 
   if (viewMode === 'finance-report') {
     return (

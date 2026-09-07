@@ -642,6 +642,37 @@ a { color: inherit; text-decoration: none; }
 .ft-overview-header + section {
   padding: 1rem;
 }
+
+/* Work schedule: a focused operational surface, inspired by board and calendar tools. */
+.ws-shell { display: flex; }
+.ws-sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  height: 100dvh;
+  width: 16.5rem;
+  flex: 0 0 16.5rem;
+  flex-direction: column;
+  color: white;
+  background: linear-gradient(180deg, #0055da 0%, #003d9f 100%);
+  box-shadow: 5px 0 24px rgba(0, 55, 150, .16);
+}
+.ws-board { display: grid; grid-template-columns: repeat(4, minmax(280px, 1fr)); gap: 1rem; overflow-x: auto; padding-bottom: .5rem; }
+.ws-stat { display: flex; align-items: center; gap: .875rem; min-height: 88px; border: 1px solid #e2e8f0; border-radius: 1rem; background: #fff; padding: 1rem; box-shadow: 0 2px 8px rgba(15,23,42,.04); }
+.ws-stat-icon { display: grid; width: 2.75rem; height: 2.75rem; flex: 0 0 2.75rem; place-items: center; border-radius: .875rem; }
+.ws-stat-icon svg { width: 1.25rem; height: 1.25rem; }
+.ws-stat div span { display: block; font-size: .75rem; font-weight: 600; color: #64748b; }
+.ws-stat div b { display: block; margin-top: .1rem; font-family: var(--ft-font-display, sans-serif); font-size: 1.35rem; line-height: 1.35; color: #001e40; }
+.ws-label { display: block; margin-bottom: .45rem; font-size: .75rem; font-weight: 700; color: #475569; }
+.ws-input { width: 100%; border: 1px solid #e2e8f0; border-radius: .75rem; background: #fff; padding: .7rem .8rem; font-size: .875rem; color: #0f172a; outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
+.ws-input:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(59,130,246,.12); }
+@media (max-width: 900px) {
+  .ws-shell { display: block; }
+  .ws-sidebar { position: relative; width: 100%; height: auto; min-height: 0; }
+  .ws-sidebar nav { display: flex; overflow-x: auto; }
+  .ws-sidebar nav button { min-width: max-content; }
+  .ws-sidebar > div:last-child { display: none; }
+}
 .ft-overview-header + section > div:first-child {
   display: none;
 }
