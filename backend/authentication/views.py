@@ -657,6 +657,7 @@ def change_password(request):
 
 EMPLOYMENT_STATUSES = {"ACTIVE", "SUSPENDED", "TERMINATED", "PENDING"}
 WORKSPACE_MODULES = {
+    "work-schedule",
     "social-dashboard",
     "attendance",
     "email-builder",
@@ -668,7 +669,7 @@ WORKSPACE_MODULES = {
 }
 # These are ordinary workspace tools.  New staff should receive them without an
 # administrator having to make the same selections for every account.
-DEFAULT_ACCESS_MODULES = {"attendance", "email-builder", "signature-builder", "qr-generator"}
+DEFAULT_ACCESS_MODULES = {"work-schedule", "attendance", "email-builder", "signature-builder", "qr-generator"}
 DEFAULT_DEPARTMENTS = (
     ("Kế toán", "ACCOUNTING"),
     ("Truyền thông", "MEDIA"),

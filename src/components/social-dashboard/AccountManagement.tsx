@@ -11,6 +11,7 @@ type EmployeeDraft = { name: string; employeeCode: string; email: string; phone:
 const roleLabels: Record<UserRole, string> = { ADMIN: 'Quản trị viên', MANAGER: 'Quản lý', EMPLOYEE: 'Nhân viên', VIEWER: 'Chỉ xem' };
 const statusLabels: Record<EmploymentStatus, string> = { ACTIVE: 'Đang hoạt động', SUSPENDED: 'Tạm khóa', TERMINATED: 'Đã nghỉ việc', PENDING: 'Chưa kích hoạt' };
 const moduleLabels: Record<string, string> = {
+  'work-schedule': 'Lịch làm việc',
   'social-dashboard': 'Truyền thông',
   attendance: 'Công ca',
   'email-builder': 'Trình tạo Email',
@@ -20,7 +21,7 @@ const moduleLabels: Record<string, string> = {
   'digital-training': 'Đào tạo số',
   'finance-report': 'Báo cáo thu chi',
 };
-const defaultAccessModules = ['attendance', 'email-builder', 'signature-builder', 'qr-generator'];
+const defaultAccessModules = ['work-schedule', 'attendance', 'email-builder', 'signature-builder', 'qr-generator'];
 const blankDraft = (): EmployeeDraft => ({ name: '', employeeCode: '', email: '', phone: '', departmentIds: [], jobTitleId: '', managerEmail: '', startDate: '', role: 'EMPLOYEE', employmentStatus: 'PENDING', accessModules: defaultAccessModules, password: 'Ft@12345' });
 const authHeaders = (token: string) => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${token}` });
 

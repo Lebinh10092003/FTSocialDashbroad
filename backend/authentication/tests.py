@@ -389,7 +389,7 @@ class EmployeeDirectoryTests(TestCase):
 
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.json()["user"]["startDate"], "2026-08-17")
-        self.assertTrue({"attendance", "email-builder", "signature-builder", "qr-generator"}.issubset(
+        self.assertTrue({"work-schedule", "attendance", "email-builder", "signature-builder", "qr-generator"}.issubset(
             set(response.json()["user"]["accessModules"])
         ))
 
