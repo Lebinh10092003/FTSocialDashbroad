@@ -226,6 +226,20 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual([member["email"] for member in response.json()["members"]], [self.executor.email])
         self.assertEqual(response.json()["members"][0]["employeeCode"], "FT-09")
 
+    def test_admin_has_no_automatic_access_to_other_employees_schedules(self):
+        admin, admin_token = self.profile("admin@example.com", "ADMIN")
+        item = self.request(self.executor_token, "post", "/api/work-schedule/items", {
+            "title": "Lịch riêng của nhân viên", "date": "2026-09-18",
+            "executorEmail": self.executor.email, "supporterEmails": [], "managerEmails": [],
+        }).json()["item"]
+        admin_items = self.request(admin_token, "get", "/api/work-schedule/items").json()["items"]
+        self.assertNotIn(item["id"], [row["id"] for row in admin_items])
+        self.assertEqual(self.request(admin_token, "get", "/api/work-schedule/team").json()["members"], [])
+        self.assertEqual(
+            self.request(admin_token, "get", f"/api/work-schedule/items/{item['id']}").status_code,
+            404,
+        )
+
     def test_executor_never_sees_manager_review_controls_or_details(self):
         item = self.create_item()
         WorkItem.objects.filter(pk=item["id"]).update(

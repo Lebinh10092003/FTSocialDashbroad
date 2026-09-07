@@ -25,8 +25,6 @@ def _profile_payload(profile):
 
 def _visible_items(user):
     rows = WorkItem.objects.select_related("creator", "executor", "reviewed_by").prefetch_related("supporters", "managers")
-    if user.role == "ADMIN":
-        return rows.all()
     return rows.filter(
         Q(creator=user) | Q(executor=user) | Q(supporters=user) | Q(managers=user) | Q(executor__manager=user)
     ).distinct()
@@ -44,8 +42,7 @@ def _viewer_relation(item, user):
 
 def _can_manage(item, user, role):
     return (
-        role == "ADMIN"
-        or item.creator_id == user.email
+        item.creator_id == user.email
         or item.executor.manager_id == user.email
         or any(person.email == user.email for person in item.managers.all())
     )
@@ -110,7 +107,7 @@ def _payload(item, user, role):
         "reviewedBy": _profile_payload(item.reviewed_by) if can_view_review and item.reviewed_by else None,
         "reviewedAt": item.reviewed_at.isoformat() if can_view_review and item.reviewed_at else None,
         "canEdit": (can_manage or relation == "executor") and not item.reviewed_at,
-        "canDelete": role == "ADMIN" or item.creator_id == user.email or (relation == "manager"),
+        "canDelete": item.creator_id == user.email or (relation == "manager"),
         "canReview": can_view_review and can_manage and item.status == WorkItem.STATUS_COMPLETED and not item.reviewed_at,
         "canManagePeople": can_manage or relation == "executor",
         "createdAt": item.created_at.isoformat(),
@@ -168,7 +165,7 @@ def _apply_data(request, item, creating=False, allow_people=True):
         return error
     supporters = [person for person in supporters if person.email != executor.email]
     managers = [person for person in managers if person.email != executor.email]
-    if creating and request.user_role in {"ADMIN", "MANAGER"} and executor.email != request.user.email and request.user.email not in {p.email for p in managers}:
+    if creating and request.user_role == "MANAGER" and executor.email != request.user.email and request.user.email not in {p.email for p in managers}:
         managers.append(request.user)
 
     previous_group = (item.executor_id, item.work_date) if item and item.pk else None
@@ -219,10 +216,7 @@ def work_items(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def work_team(request):
-    if request.user_role == "ADMIN":
-        rows = UserProfile.objects.filter(employment_status="ACTIVE").exclude(email=request.user.email)
-    else:
-        rows = UserProfile.objects.filter(employment_status="ACTIVE", manager=request.user)
+    rows = UserProfile.objects.filter(employment_status="ACTIVE", manager=request.user)
     rows = rows.select_related("department", "job_title").order_by("name", "email")
     return Response({"members": [
         {

@@ -636,7 +636,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
   const navItems: Array<{ id: View; label: string; icon: React.ElementType }> = [
     { id: "board", label: "Công việc theo ngày", icon: LayoutDashboard },
     { id: "week", label: "Lịch tuần / tháng", icon: CalendarDays },
-    ...(["ADMIN", "MANAGER"].includes(userRole) ? [{ id: "team" as View, label: "Quản lý nhân sự", icon: UserCheck }] : []),
+    ...(teamMembers.length > 0 ? [{ id: "team" as View, label: "Quản lý nhân sự", icon: UserCheck }] : []),
     { id: "sheet", label: "Liên kết Google Sheets", icon: FileSpreadsheet },
   ];
 
