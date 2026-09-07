@@ -16,6 +16,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+from django.utils import timezone
 from openpyxl import load_workbook
 
 from integrations.google_sheets import build_sheets_service, extract_spreadsheet_id
@@ -79,7 +80,7 @@ def _question_type(value):
         return "ordering"
     if normalized in {"fileupload", "uploadtep", "noptep", "tailen"}:
         return "file_upload"
-    if normalized in {"taianh", "uploadanh", "upload", "thuchanh", "ganlinktaianh", "diendapanganlink", "ganlink", "linkupload"}:
+    if normalized in {"practicalsubmission", "taianh", "uploadanh", "upload", "thuchanh", "ganlinktaianh", "diendapanganlink", "ganlink", "linkupload"}:
         return "practical_submission"
     return normalized
 
@@ -1021,6 +1022,16 @@ def upload_assessment_file_to_drive(uploaded, assessment, attempt, question_id="
     return {"id": result.get("id", ""), "url": result.get("webViewLink", "")}
 
 
+def delete_assessment_file_from_drive(file_id):
+    """Remove one learner-owned evidence file without touching its containing folders."""
+    if not file_id:
+        return
+    _assessment_drive_service().files().delete(
+        fileId=file_id,
+        supportsAllDrives=True,
+    ).execute()
+
+
 def _variant_sheet_title(prefix, variant):
     label = str(variant or "").strip()
     if _key(label).startswith('de'):
@@ -1030,7 +1041,7 @@ def _variant_sheet_title(prefix, variant):
 
 def _assessment_output_layout(assessment):
     overview_title = "T\u1ed4NG QUAN"
-    distribution_title = "PH\u00c2N \u0110\u1ec0"
+    distribution_title = "DANH S\u00c1CH B\u00c0I L\u00c0M"
     delete_log_title = "NH\u1eacT K\u00dd X\u00d3A"
     variants = variants_for(assessment)
     return {
@@ -1038,7 +1049,7 @@ def _assessment_output_layout(assessment):
         "distribution": distribution_title,
         "delete_log": delete_log_title,
         "question_sheets": {variant: _variant_sheet_title("\u0110\u1ec0", variant) for variant in variants},
-        "answer_sheets": {variant: _variant_sheet_title("B\u00c0I L\u00c0M", variant) for variant in variants},
+        "answer_sheets": {variant: _variant_sheet_title("B\u00c0I L\u00c0M \u0110\u1ec0", variant) for variant in variants},
     }
 
 
@@ -1056,13 +1067,12 @@ def _sheet_question_header(question, index):
 def _sheet_answer_value(question, value):
     if _is_practical_question(question) and isinstance(value, dict):
         product_link = str(value.get("link") or "").strip()
-        evidence_link = str(value.get("upload_url") or "").strip()
-        values = []
-        if product_link:
-            values.append(f"Link sản phẩm: {product_link}")
-        if evidence_link:
-            values.append(f"Tệp minh chứng: {evidence_link}")
-        return "\n".join(values)
+        evidence_links = [
+            item for item in str(value.get("upload_urls") or value.get("upload_url") or "").splitlines()
+            if item.strip()
+        ]
+        # Keep each cell as URL-only content so Google Sheets can make it clickable.
+        return "\n".join([product_link, *evidence_links]).strip()
     return _answer_text(value)
 
 
@@ -1071,6 +1081,49 @@ def _sheet_attempt_row(attempt, questions):
     answer_values = [
         _sheet_answer_value(question, attempt.answers.get(str(question.get("id")), ""))
         for question in questions
+    ]
+
+
+def _completion_label(attempt):
+    maximum = Decimal(str(attempt.max_score or 0))
+    percent = (Decimal(str(attempt.score or 0)) / maximum * 100) if maximum > 0 else Decimal("0")
+    if percent >= 90:
+        return "Hoàn thành xuất sắc"
+    if percent >= 80:
+        return "Hoàn thành tốt"
+    if percent >= 60:
+        return "Hoàn thành"
+    return "Chưa hoàn thành"
+
+
+def _sheet_local_datetime(value):
+    return timezone.localtime(value).strftime("%H:%M:%S %d/%m/%Y") if value else ""
+
+
+def _submission_list_headers():
+    return [
+        "STT", "Người học", "Liên hệ", "Tổ chuyên môn/Phòng ban", "Chức vụ", "Mã đề",
+        "Điểm", "Đánh giá", "Trạng thái", "Thời gian bắt đầu", "Thời gian nộp bài",
+        "Mã lượt làm", "Trạng thái đồng bộ",
+    ]
+
+
+def _submission_list_row(attempt, index=""):
+    status_names = {"in_progress": "Đang làm", "submitted": "Đã nộp", "timed_out": "Hết giờ"}
+    return [
+        index,
+        attempt.respondent_name,
+        attempt.email or attempt.phone,
+        attempt.organization,
+        attempt.position,
+        attempt.variant,
+        f"{float(attempt.score or 0):g} / {float(attempt.max_score or 0):g}",
+        _completion_label(attempt),
+        status_names.get(attempt.status, attempt.status),
+        _sheet_local_datetime(attempt.started_at),
+        _sheet_local_datetime(attempt.submitted_at),
+        str(attempt.access_token),
+        attempt.sync_status or "pending",
     ]
     return [
         attempt.respondent_name, attempt.email, attempt.phone, attempt.organization, attempt.position,
@@ -1119,9 +1172,28 @@ def prepare_assessment_google_sheet(assessment):
         spreadsheetId=spreadsheet_id,
         fields="sheets(properties(sheetId,title))",
     ).execute()
-    existing = {item.get("properties", {}).get("title") for item in metadata.get("sheets", [])}
+    existing = {
+        item.get("properties", {}).get("title"): item.get("properties", {}).get("sheetId")
+        for item in metadata.get("sheets", [])
+    }
+    rename_requests = []
+    legacy_distribution = "PHÂN ĐỀ"
+    if layout["distribution"] not in existing and legacy_distribution in existing:
+        rename_requests.append({"updateSheetProperties": {
+            "properties": {"sheetId": existing[legacy_distribution], "title": layout["distribution"]},
+            "fields": "title",
+        }})
+        existing[layout["distribution"]] = existing.pop(legacy_distribution)
+    for variant, target_title in layout["answer_sheets"].items():
+        legacy_title = _variant_sheet_title("BÀI LÀM", variant)
+        if target_title not in existing and legacy_title in existing:
+            rename_requests.append({"updateSheetProperties": {
+                "properties": {"sheetId": existing[legacy_title], "title": target_title},
+                "fields": "title",
+            }})
+            existing[target_title] = existing.pop(legacy_title)
     required = [layout["overview"], layout["distribution"], *layout["question_sheets"].values(), *layout["answer_sheets"].values(), layout["delete_log"]]
-    requests_body = [
+    requests_body = rename_requests + [
         {"addSheet": {"properties": {"title": title, "gridProperties": {"rowCount": 1000, "columnCount": 250}}}}
         for title in required if title not in existing
     ]
@@ -1139,6 +1211,11 @@ def prepare_assessment_google_sheet(assessment):
         ["S\u1ed1 m\u00e3 \u0111\u1ec1", len(variants_for(assessment))],
         ["Tr\u1ea1ng th\u00e1i", assessment.status],
     ]
+    service.spreadsheets().values().clear(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{layout['distribution']}'!A:ZZ",
+        body={},
+    ).execute()
     service.spreadsheets().values().update(
         spreadsheetId=spreadsheet_id,
         range=f"'{layout['overview']}'!A1",
@@ -1147,38 +1224,9 @@ def prepare_assessment_google_sheet(assessment):
     ).execute()
 
     attempts = list(assessment.attempts.order_by("started_at"))
-    attempt_statuses = {}
-    participant_identities = set()
-    status_names = {"in_progress": "Đang làm", "submitted": "Đã nộp", "timed_out": "Hết giờ"}
-    participant_values = [["Họ tên", "Email", "Số điện thoại", "Tổ chuyên môn/Phòng ban", "Chức vụ", "Mã người làm", "Mã lượt làm", "Mã đề", "Trạng thái", "Bắt đầu lúc", "Nộp lúc"]]
-    for item in attempts:
-        code = str(item.participant_code or "").strip().casefold()
-        email = str(item.email or "").strip().casefold()
-        phone = str(item.phone or "").strip()
-        participant_identities.update(identity for identity in (f"code:{code}" if code else "", f"email:{email}" if email else "", f"phone:{phone}" if phone else "") if identity)
-        if code:
-            attempt_statuses[code] = item.status or ""
-        participant_values.append([
-            item.respondent_name, item.email, item.phone, item.organization, item.position,
-            item.participant_code, str(item.access_token), item.variant,
-            status_names.get(item.status, item.status),
-            item.started_at.isoformat() if item.started_at else "",
-            item.submitted_at.isoformat() if item.submitted_at else "",
-        ])
-    participant_values.extend([
-        [
-            item.get("name", ""), item.get("email", ""), item.get("phone", ""),
-            item.get("organization", item.get("group", "")), item.get("position", ""),
-            item.get("code", ""), "", item.get("variant", ""),
-            status_names.get(attempt_statuses.get(str(item.get("code") or "").strip().casefold(), ""), "Chưa làm"), "", "",
-        ]
-        for item in assessment.participants or []
-        if not any(identity and identity in participant_identities for identity in (
-            f"code:{str(item.get('code') or '').strip().casefold()}" if item.get("code") else "",
-            f"email:{str(item.get('email') or '').strip().casefold()}" if item.get("email") else "",
-            f"phone:{str(item.get('phone') or '').strip()}" if item.get("phone") else "",
-        ))
-    ])
+    participant_values = [_submission_list_headers(), *[
+        _submission_list_row(item, index) for index, item in enumerate(attempts, start=1)
+    ]]
     service.spreadsheets().values().update(
         spreadsheetId=spreadsheet_id,
         range=f"'{layout['distribution']}'!A1",
@@ -1206,6 +1254,11 @@ def prepare_assessment_google_sheet(assessment):
     for variant, sheet_title in layout["answer_sheets"].items():
         questions = public_questions(assessment, variant)
         headers = ["Họ tên", "Email", "Số điện thoại", "Tổ chuyên môn/Phòng ban", "Chức vụ", "Mã người làm", "Mã lượt làm", "Mã đề", "Trạng thái", "Bắt đầu lúc", "Nộp lúc", *[_sheet_question_header(question, index) for index, question in enumerate(questions, start=1)], "Điểm tự động", "Điểm thực hành", "Tổng điểm", "Trạng thái chấm", "Trạng thái đồng bộ", "Thời điểm ghi Sheet", "Hạn xóa dữ liệu tạm"]
+        service.spreadsheets().values().clear(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sheet_title}'!A:ZZ",
+            body={},
+        ).execute()
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
             range=f"'{sheet_title}'!A1",
@@ -1226,6 +1279,11 @@ def rebuild_assessment_google_sheet_rows(assessment, resources=None):
     service, spreadsheet_id, layout = resources or assessment_google_sheet_resources(assessment)
     updates = []
     for variant, sheet_title in layout["answer_sheets"].items():
+        _execute_sheets_write(service.spreadsheets().values().clear(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sheet_title}'!A2:ZZ",
+            body={},
+        ))
         questions = public_questions(assessment, variant)
         attempts = assessment.attempts.filter(variant=variant).order_by("started_at")
         rows = [_sheet_attempt_row(attempt, questions) for attempt in attempts]
@@ -1257,7 +1315,14 @@ def sync_attempt_to_google_sheet(attempt, resources=None):
     service, spreadsheet_id, layout = resources or assessment_google_sheet_resources(attempt.assessment)
     questions = public_questions(attempt.assessment, attempt.variant)
     row = _sheet_attempt_row(attempt, questions)
-    sheet_title = layout["answer_sheets"][attempt.variant]
+    metadata = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields="sheets(properties(title))",
+    ).execute()
+    existing_titles = {item.get("properties", {}).get("title") for item in metadata.get("sheets", [])}
+    preferred_title = layout["answer_sheets"][attempt.variant]
+    legacy_title = _variant_sheet_title("BÀI LÀM", attempt.variant)
+    sheet_title = preferred_title if preferred_title in existing_titles else legacy_title
     existing = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
         range=f"'{sheet_title}'!G:G",
@@ -1281,4 +1346,120 @@ def sync_attempt_to_google_sheet(attempt, resources=None):
             insertDataOption="INSERT_ROWS",
             body={"values": [row]},
         ))
+    if layout["distribution"] in existing_titles:
+        summary_tokens = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{layout['distribution']}'!L:L",
+        ).execute().get("values", [])
+        summary_row_number = next(
+            (index for index, values in enumerate(summary_tokens, start=1) if values and str(values[0]) == str(attempt.access_token)),
+            None,
+        )
+        summary_row = _submission_list_row(attempt, summary_row_number - 1 if summary_row_number else max(1, len(summary_tokens)))
+        summary_row[-1] = "synced"
+        if summary_row_number:
+            _execute_sheets_write(service.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"'{layout['distribution']}'!A{summary_row_number}",
+                valueInputOption="RAW",
+                body={"values": [summary_row]},
+            ))
+        else:
+            _execute_sheets_write(service.spreadsheets().values().append(
+                spreadsheetId=spreadsheet_id,
+                range=f"'{layout['distribution']}'!A:A",
+                valueInputOption="RAW",
+                insertDataOption="INSERT_ROWS",
+                body={"values": [summary_row]},
+            ))
     return True
+
+
+def sync_assessment_grades_from_google_sheet(assessment):
+    """Import aggregate manual/total scores only; learner answers remain database-owned."""
+    service, spreadsheet_id, layout = assessment_google_sheet_resources(assessment)
+    metadata = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields="sheets(properties(title))",
+    ).execute()
+    existing_titles = {item.get("properties", {}).get("title") for item in metadata.get("sheets", [])}
+    attempts_by_token = {
+        str(item.access_token): item
+        for item in assessment.attempts.exclude(status="in_progress")
+    }
+    updated = []
+    errors = []
+
+    def decimal_value(value):
+        text = str(value or "").strip().replace(",", ".")
+        return Decimal(text) if text else None
+
+    for variant, preferred_title in layout["answer_sheets"].items():
+        legacy_title = _variant_sheet_title("BÀI LÀM", variant)
+        sheet_title = preferred_title if preferred_title in existing_titles else legacy_title
+        if sheet_title not in existing_titles:
+            continue
+        values = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sheet_title}'!A:ZZ",
+        ).execute().get("values", [])
+        if not values:
+            continue
+        headers = {_key(label): index for index, label in enumerate(values[0])}
+        token_index = headers.get(_key("Mã lượt làm"))
+        total_index = headers.get(_key("Tổng điểm"))
+        practical_index = headers.get(_key("Điểm thực hành"))
+        grading_status_index = headers.get(_key("Trạng thái chấm"))
+        if token_index is None or (total_index is None and practical_index is None):
+            errors.append(f"{sheet_title}: thiếu cột Mã lượt làm hoặc cột điểm.")
+            continue
+        for row_number, row_values in enumerate(values[1:], start=2):
+            token = str(row_values[token_index] if token_index < len(row_values) else "").strip()
+            attempt = attempts_by_token.get(token)
+            if not attempt:
+                continue
+            try:
+                total = decimal_value(row_values[total_index] if total_index is not None and total_index < len(row_values) else "")
+                practical = decimal_value(row_values[practical_index] if practical_index is not None and practical_index < len(row_values) else "")
+            except Exception:
+                errors.append(f"{sheet_title}!{row_number}: điểm không phải là số.")
+                continue
+            if total is None and practical is None:
+                continue
+            total_was_changed = total is not None and Decimal(str(attempt.score or 0)) != total
+            practical_was_changed = practical is not None and (
+                attempt.practical_score is None or Decimal(str(attempt.practical_score or 0)) != practical
+            )
+            if practical_was_changed and not total_was_changed:
+                total = Decimal(str(attempt.auto_graded_points or 0)) + practical
+            elif total is None:
+                total = Decimal(str(attempt.auto_graded_points or 0)) + practical
+            if total < 0 or total > Decimal(str(attempt.max_score or 0)):
+                errors.append(f"{sheet_title}!{row_number}: tổng điểm phải từ 0 đến {attempt.max_score}.")
+                continue
+            calculated_practical = max(Decimal("0"), total - Decimal(str(attempt.auto_graded_points or 0)))
+            grading_status = str(
+                row_values[grading_status_index]
+                if grading_status_index is not None and grading_status_index < len(row_values) else ""
+            )
+            sheet_marks_graded = _key(grading_status) == _key("Đã chấm")
+            score_changed = (
+                Decimal(str(attempt.score or 0)) != total
+                or (practical is not None and Decimal(str(attempt.practical_score or 0)) != calculated_practical)
+            )
+            if not score_changed and not (attempt.manual_grading_required and sheet_marks_graded):
+                continue
+            attempt.score = total
+            attempt.practical_score = calculated_practical
+            attempt.manual_grading_required = False
+            attempt.sync_status = "synced"
+            attempt.sync_error = ""
+            attempt.synced_at = timezone.now()
+            attempt.updated_at = timezone.now()
+            updated.append(attempt)
+    if updated:
+        assessment.attempts.model.objects.bulk_update(
+            updated,
+            ["score", "practical_score", "manual_grading_required", "sync_status", "sync_error", "synced_at", "updated_at"],
+        )
+    return {"updated": len(updated), "errors": errors[:50]}

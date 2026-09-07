@@ -24,6 +24,7 @@ from .assessment_service import (
     assessment_google_sheet_resources,
     automatic_question_score,
     download_assessment_file_from_drive,
+    delete_assessment_file_from_drive,
     fetch_google_sheet,
     generate_variants_from_import,
     grade_attempt,
@@ -32,6 +33,7 @@ from .assessment_service import (
     public_questions,
     rebuild_assessment_google_sheet_rows,
     sync_attempt_to_google_sheet,
+    sync_assessment_grades_from_google_sheet,
     upload_assessment_file_to_drive,
     variants_for,
 )
@@ -301,6 +303,77 @@ def _attempt_payload(attempt, request):
     return data
 
 
+def _normalized_submission_link(value):
+    value = str(value or "").strip()
+    if not re.match(r"^https?://", value, flags=re.IGNORECASE):
+        return ""
+    # Fragments and a trailing slash do not identify a different submitted work.
+    value = value.split("#", 1)[0].rstrip("/")
+    return value.casefold()
+
+
+def _admin_attempt_payloads(attempts, request):
+    """Add per-question automatic scores and same-assessment duplicate-link evidence."""
+    attempts = list(attempts)
+    if not attempts:
+        return []
+    assessment = attempts[0].assessment
+    questions_by_variant = {}
+    for question in assessment.questions:
+        questions_by_variant.setdefault(str(question.get("variant") or "Đề 1"), []).append(question)
+
+    link_index = {}
+    attempt_links = {}
+    for attempt in attempts:
+        rows = []
+        if attempt.status == "in_progress":
+            attempt_links[attempt.id] = rows
+            continue
+        for question in questions_by_variant.get(attempt.variant, []):
+            question_id = str(question.get("id") or "")
+            answer = (attempt.answers or {}).get(question_id)
+            link = answer.get("link") if isinstance(answer, dict) else (
+                answer if question.get("type") in {"practical_submission", "file_upload"} else ""
+            )
+            normalized = _normalized_submission_link(link)
+            if not normalized:
+                continue
+            entry = {
+                "attempt_id": attempt.id,
+                "respondent_name": attempt.respondent_name,
+                "question_id": question_id,
+                "question_order": question.get("order"),
+            }
+            link_index.setdefault(normalized, []).append(entry)
+            rows.append((normalized, str(link), question_id))
+        attempt_links[attempt.id] = rows
+
+    serialized = TrainingAssessmentAttemptSerializer(attempts, many=True, context={"request": request}).data
+    payloads = []
+    for attempt, data in zip(attempts, serialized):
+        automatic_grading = {}
+        for question in questions_by_variant.get(attempt.variant, []):
+            question_id = str(question.get("id") or "")
+            awarded = automatic_question_score(question, (attempt.answers or {}).get(question_id, ""))
+            if awarded is not None:
+                automatic_grading[question_id] = float(awarded)
+        warnings = []
+        for normalized, link, question_id in attempt_links.get(attempt.id, []):
+            matches = [item for item in link_index.get(normalized, []) if item["attempt_id"] != attempt.id]
+            if matches:
+                warnings.append({"question_id": question_id, "link": link, "matches": matches})
+        data["automatic_grading"] = automatic_grading
+        data["duplicate_link_warnings"] = warnings
+        data["grading_notes"] = attempt.grading_notes or []
+        payloads.append(data)
+    return payloads
+
+
+def _admin_attempt_payload(attempt, request):
+    attempts = attempt.assessment.attempts.prefetch_related("uploads").order_by("-started_at")
+    return next(item for item in _admin_attempt_payloads(attempts, request) if item["id"] == attempt.id)
+
+
 def _expire_if_needed(attempt):
     if attempt.status == "in_progress" and timezone.now() >= attempt.expires_at:
         grade_attempt(attempt)
@@ -538,11 +611,13 @@ def assessment_import_preview(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def assessment_results(request, pk):
+    if not _can_manage(request):
+        return _forbidden()
     assessment = TrainingAssessment.objects.filter(pk=pk).first()
     if not assessment:
         return _assessment_error("Không tìm thấy bài đánh giá.", status.HTTP_404_NOT_FOUND)
     attempts = assessment.attempts.prefetch_related("uploads").order_by("-started_at")
-    return Response(TrainingAssessmentAttemptSerializer(attempts, many=True, context={"request": request}).data)
+    return Response(_admin_attempt_payloads(attempts, request))
 
 
 @api_view(["GET", "PATCH"])
@@ -603,6 +678,17 @@ def assessment_result_grade(request, pk, attempt_pk):
         return _assessment_error("Không tìm thấy lượt làm bài.", status.HTTP_404_NOT_FOUND)
     if attempt.assessment.status != "closed":
         return _assessment_error("Chỉ chấm bài sau khi bài kiểm tra đã đóng.")
+    grading_note = str(request.data.get("grading_note") or "").strip()
+    if grading_note:
+        notes = list(attempt.grading_notes or [])
+        notes.append({
+            "id": secrets.token_hex(8),
+            "content": grading_note[:2000],
+            "grader": getattr(request.user, "name", "") or _actor(request),
+            "created_at": timezone.now().isoformat(),
+        })
+        attempt.grading_notes = notes[-200:]
+        attempt.save(update_fields=["grading_notes", "updated_at"])
     question_scores = request.data.get("question_scores")
     if isinstance(question_scores, dict):
         questions = [
@@ -658,7 +744,9 @@ def assessment_result_grade(request, pk, attempt_pk):
             "manual_grading_required", "updated_at",
         ])
         _sync_completed_attempt(attempt)
-        return Response(TrainingAssessmentAttemptSerializer(attempt, context={"request": request}).data)
+        return Response(_admin_attempt_payload(attempt, request))
+    if grading_note:
+        return Response(_admin_attempt_payload(attempt, request))
     try:
         score = Decimal(str(request.data.get("score")))
     except (InvalidOperation, TypeError):
@@ -673,7 +761,7 @@ def assessment_result_grade(request, pk, attempt_pk):
         "sync_error", "synced_at", "purge_after", "updated_at",
     ])
     _sync_completed_attempt(attempt)
-    return Response(TrainingAssessmentAttemptSerializer(attempt, context={"request": request}).data)
+    return Response(_admin_attempt_payload(attempt, request))
 
 
 @api_view(["GET"])
@@ -719,7 +807,7 @@ def assessment_result_kick(request, pk, attempt_pk):
         "status", "submitted_at", "updated_at",
     ])
     _sync_completed_attempt(attempt)
-    return Response(TrainingAssessmentAttemptSerializer(attempt, context={"request": request}).data)
+    return Response(_admin_attempt_payload(attempt, request))
 
 
 @api_view(["POST"])
@@ -744,6 +832,22 @@ def assessment_prepare_output(request, pk):
         assessment.sync_error = str(error)[:2000]
     assessment.save(update_fields=["sync_status", "sync_error", "updated_at"])
     return Response(TrainingAssessmentSerializer(assessment, context={"request": request}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def assessment_import_sheet_grades(request, pk):
+    if not _can_manage(request):
+        return _forbidden()
+    assessment = TrainingAssessment.objects.filter(pk=pk).first()
+    if not assessment:
+        return _assessment_error("Không tìm thấy đợt kiểm tra.", status.HTTP_404_NOT_FOUND)
+    if not assessment.output_sheet_url:
+        return _assessment_error("Bài kiểm tra chưa liên kết Google Sheet.")
+    try:
+        return Response(sync_assessment_grades_from_google_sheet(assessment))
+    except Exception as error:
+        return _assessment_error(f"Không thể đồng bộ điểm từ Google Sheet: {error}")
 
 
 @api_view(["POST", "DELETE"])
@@ -771,7 +875,7 @@ def assessment_result_storage(request, pk, attempt_pk):
     if not attempt.assessment.output_sheet_url:
         return _assessment_error("Bài kiểm tra chưa có Google Sheet đầu ra để đồng bộ.")
     _sync_completed_attempt(attempt)
-    return Response(TrainingAssessmentAttemptSerializer(attempt, context={"request": request}).data)
+    return Response(_admin_attempt_payload(attempt, request))
 
 
 @api_view(["POST"])
@@ -1078,7 +1182,57 @@ def public_attempt_upload(request, token):
     current_answer = attempt.answers.get(question_id)
     answer_payload = current_answer if isinstance(current_answer, dict) else {"link": str(current_answer or "")}
     upload_url = item.drive_url or (item.file.url if item.file else "")
-    answer_payload = {**answer_payload, "upload_id": str(item.id), "upload_file_id": item.drive_file_id, "upload_url": upload_url}
+    existing_ids = [part for part in str(answer_payload.get("upload_ids") or answer_payload.get("upload_id") or "").split(",") if part]
+    existing_urls = [part for part in str(answer_payload.get("upload_urls") or answer_payload.get("upload_url") or "").split("\n") if part]
+    answer_payload = {
+        **answer_payload,
+        "upload_id": str(item.id),
+        "upload_file_id": item.drive_file_id,
+        "upload_url": upload_url,
+        "upload_ids": ",".join([*existing_ids, str(item.id)]),
+        "upload_urls": "\n".join([*existing_urls, upload_url]),
+    }
     attempt.answers = {**attempt.answers, question_id: answer_payload}
     attempt.save(update_fields=["answers", "updated_at"])
-    return Response({"id": item.id, "file_id": item.drive_file_id, "name": item.original_name, "question_id": question_id, "url": upload_url}, status=status.HTTP_201_CREATED)
+    return Response({
+        "id": item.id, "file_id": item.drive_file_id, "name": item.original_name,
+        "question_id": question_id, "url": upload_url, "content_type": item.content_type,
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(["DELETE"])
+@permission_classes([AllowAny])
+def public_attempt_upload_delete(request, token, upload_pk):
+    attempt = TrainingAssessmentAttempt.objects.select_related("assessment").filter(access_token=token).first()
+    if not attempt:
+        return _assessment_error("Phiên làm bài không tồn tại.", status.HTTP_404_NOT_FOUND)
+    attempt = _expire_if_needed(attempt)
+    if attempt.status != "in_progress":
+        return _assessment_error("Chỉ có thể xóa ảnh khi bài vẫn đang được làm.")
+    upload = attempt.uploads.filter(pk=upload_pk).first()
+    if not upload:
+        return _assessment_error("Không tìm thấy ảnh minh chứng.", status.HTTP_404_NOT_FOUND)
+    if upload.drive_file_id:
+        try:
+            delete_assessment_file_from_drive(upload.drive_file_id)
+        except Exception as error:
+            return _assessment_error(f"Không thể xóa ảnh trên Google Drive: {error}")
+    question_id = upload.question_id
+    if upload.file:
+        upload.file.delete(save=False)
+    upload.delete()
+    remaining = list(attempt.uploads.filter(question_id=question_id).order_by("created_at"))
+    current = (attempt.answers or {}).get(question_id)
+    answer_payload = dict(current) if isinstance(current, dict) else {"link": str(current or "")}
+    last = remaining[-1] if remaining else None
+    last_url = (last.drive_url or (last.file.url if last and last.file else "")) if last else ""
+    answer_payload.update({
+        "upload_id": str(last.id) if last else "",
+        "upload_file_id": last.drive_file_id if last else "",
+        "upload_url": last_url,
+        "upload_ids": ",".join(str(item.id) for item in remaining),
+        "upload_urls": "\n".join(item.drive_url or (item.file.url if item.file else "") for item in remaining),
+    })
+    attempt.answers = {**(attempt.answers or {}), question_id: answer_payload}
+    attempt.save(update_fields=["answers", "updated_at"])
+    return Response({"deleted": upload_pk, "question_id": question_id})

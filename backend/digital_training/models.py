@@ -389,6 +389,7 @@ class TrainingAssessmentAttempt(models.Model):
     manual_grading_required = models.BooleanField(default=False)
     practical_score = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     grading = models.JSONField(default=dict, blank=True)
+    grading_notes = models.JSONField(default=list, blank=True)
     sync_status = models.CharField(max_length=20, default="pending")
     sync_error = models.TextField(blank=True)
     synced_at = models.DateTimeField(null=True, blank=True)
