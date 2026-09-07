@@ -216,32 +216,40 @@ function PeoplePicker({ label, staff, selected, onChange, multiple = true, disab
       return;
     }
     onChange(multiple ? [...selected, person.email] : [person.email]);
+    setQuery("");
     if (!multiple) setOpen(false);
   };
   return (
     <div className="relative">
       <span className="ws-label">{label}</span>
-      <button type="button" disabled={disabled} onClick={() => setOpen((value) => !value)} className="ws-input flex min-h-12 items-center justify-between gap-3 text-left disabled:bg-slate-50" aria-expanded={open}>
-        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-          {selectedPeople.length ? (
-            selectedPeople.map((person) => (
-              <span key={person.email} className="inline-flex max-w-full items-center gap-2 rounded-lg bg-blue-50 px-2.5 py-1.5 text-sm font-semibold text-blue-900">
-                <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-blue-100 text-[9px] font-extrabold text-blue-700">{initials(person.name)}</span>
-                <span className="truncate">{person.name}</span>
-              </span>
-            ))
-          ) : (
-            <span className="text-sm text-slate-400">{multiple ? "Chọn một hoặc nhiều nhân sự" : "Chọn người thực hiện"}</span>
-          )}
-        </span>
-        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition ${open ? "rotate-180" : ""}`} />
-      </button>
+      <div className={`ws-input flex min-h-12 items-center gap-2 ${disabled ? "bg-slate-50" : ""}`}>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          {selectedPeople.map((person) => (
+            <span key={person.email} className="inline-flex max-w-full items-center gap-2 rounded-lg bg-blue-50 px-2.5 py-1.5 text-sm font-semibold text-blue-900">
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-blue-100 text-[9px] font-extrabold text-blue-700">{initials(person.name)}</span>
+              <span className="truncate">{person.name}</span>
+            </span>
+          ))}
+          <input
+            value={query}
+            disabled={disabled}
+            onFocus={() => setOpen(true)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setOpen(true);
+            }}
+            placeholder={selectedPeople.length ? (multiple ? "Tìm thêm nhân sự..." : "Tìm người khác...") : "Tìm theo tên hoặc email..."}
+            className="min-w-[180px] flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
+            role="combobox"
+            aria-expanded={open}
+          />
+        </div>
+        <button type="button" disabled={disabled} onClick={() => setOpen((value) => !value)} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 disabled:cursor-not-allowed" aria-label={open ? "Đóng danh sách nhân sự" : "Mở danh sách nhân sự"}>
+          <ChevronDown className={`h-4 w-4 transition ${open ? "rotate-180" : ""}`} />
+        </button>
+      </div>
       {open && !disabled && (
         <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
-          <label className="relative block border-b border-slate-100 p-2">
-            <Search className="absolute left-5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm theo tên hoặc email..." className="w-full rounded-lg bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-blue-200" />
-          </label>
           <div className="max-h-60 overflow-y-auto p-2">
             {matches.map((person) => (
               <button key={person.email} type="button" onClick={() => toggle(person)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-slate-50 ${selected.includes(person.email) ? "bg-blue-50" : ""}`}>
@@ -687,6 +695,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
 
 function BoardView({ tasks, selectedDate, setSelectedDate, userEmail, selectedIds, setSelectedIds, setEditing, deleteTasks, setDraggedId, moveTask }: any) {
   const allSelected = tasks.length > 0 && tasks.every((task) => selectedIds.includes(task.id));
+  const isToday = selectedDate === iso(new Date());
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -702,9 +711,7 @@ function BoardView({ tasks, selectedDate, setSelectedDate, userEmail, selectedId
             <button onClick={() => setSelectedDate(iso(addDays(fromIso(selectedDate), -1)))} className="rounded-lg p-2 hover:bg-slate-100" aria-label="Ngày trước">
               <ChevronLeft className="h-4 w-4" />
             </button>
-            <button onClick={() => setSelectedDate(iso(new Date()))} className="px-3 text-xs font-bold">
-              Hôm nay
-            </button>
+            {isToday && <span className="px-3 text-xs font-bold text-blue-700">Hôm nay</span>}
             <input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} className="rounded-lg border-0 px-2 py-1 text-xs font-bold outline-none" />
             <button onClick={() => setSelectedDate(iso(addDays(fromIso(selectedDate), 1)))} className="rounded-lg p-2 hover:bg-slate-100" aria-label="Ngày sau">
               <ChevronRight className="h-4 w-4" />
