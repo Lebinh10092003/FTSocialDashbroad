@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import QuestionEditor from "./AssessmentQuestionEditor";
 import { appDialog } from "../AppDialog";
 import {
   AlertCircle,
@@ -105,6 +106,8 @@ export default function TrainingAssessmentPublic({ slug, idToken = "" }: { slug:
   const isPreview = previewRole === "creator" || previewRole === "respondent";
   const isCreatorPreview = previewRole === "creator";
   const previewVariant = new URLSearchParams(window.location.search).get("variant") || "";
+  const [editingQuestion, setEditingQuestion] = useState<PublicQuestion | null>(null);
+  const [originalQuestion, setOriginalQuestion] = useState<PublicQuestion | null>(null);
   const [assessment, setAssessment] = useState<any>(null);
   const [attempt, setAttempt] = useState<any>(null);
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
@@ -142,6 +145,21 @@ export default function TrainingAssessmentPublic({ slug, idToken = "" }: { slug:
     setReviewedIds(reviewed);
     const questionIndex = (body.questions || []).findIndex((item: PublicQuestion) => item.id === body.progress?.current_question_id);
     setCurrentIndex(questionIndex >= 0 ? questionIndex : 0);
+  };
+
+  const savePreviewQuestion = async () => {
+    if (!isCreatorPreview || !editingQuestion || !originalQuestion || !idToken) return;
+    setBusy(true); setMessage("");
+    try {
+      const response = await fetch(`/api/digital-training/assessment-previews/${slug}`, {
+        method: "PATCH", headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ original: originalQuestion, question: editingQuestion }),
+      });
+      if (!response.ok) throw new Error(await apiError(response));
+      const body = await response.json();
+      setAttempt((current: any) => ({ ...current, questions: current.questions.map((q: PublicQuestion) => q.id === body.question.id ? body.question : q) }));
+      setEditingQuestion(null); setOriginalQuestion(null); setMessage("Đã lưu câu hỏi.");
+    } catch (error: any) { setMessage(String(error.message || error)); } finally { setBusy(false); }
   };
 
   const load = async () => {
@@ -429,7 +447,7 @@ export default function TrainingAssessmentPublic({ slug, idToken = "" }: { slug:
   if (!loading && assessment && attempt && isCreatorPreview) {
     const previewQuestions: PublicQuestion[] = attempt.questions || [];
     const previewVariants: string[] = attempt.preview_variants || [];
-    return <div lang="vi" translate="no" className="notranslate min-h-screen bg-slate-50 p-4 text-slate-900 sm:p-8"><main className="mx-auto max-w-5xl"><div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-violet-200 bg-violet-50 p-4"><div><p className="text-xs font-bold uppercase tracking-wide text-violet-700">Xem trước · Người tạo</p><h1 className="mt-1 text-xl font-extrabold">{assessment.title}</h1><p className="mt-1 text-sm text-slate-600">Hiển thị đáp án và cấu hình, không tạo lượt làm.</p></div><a href={`/training-assessment/${slug}?preview=respondent&variant=${encodeURIComponent(attempt.variant || "")}`} className="ft-btn ft-btn-secondary">Xem như người trả lời</a></div><div className="mb-5 rounded-2xl border bg-white p-4"><label className="block text-sm font-bold">Mã đề đang xem<select value={attempt.variant || ""} onChange={(event) => { window.location.href = `/training-assessment/${slug}?preview=creator&variant=${encodeURIComponent(event.target.value)}`; }} className="ft-input mt-2">{previewVariants.map((variant) => <option key={variant} value={variant}>{variant}</option>)}</select></label></div><div className="space-y-4">{previewQuestions.map((question, index) => <article key={question.id} className="rounded-2xl border bg-white p-5 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-blue-700">{question.question_code || `Câu ${index + 1}`}</p><div className="mt-2 flex flex-wrap gap-2"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold">{question.type}</span>{question.category && <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-bold text-blue-700">{question.category}</span>}{question.points != null && <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-bold text-amber-800">{question.points} điểm</span>}</div></div></div><h2 className="mt-4 whitespace-pre-wrap text-lg font-bold leading-7">{question.text}</h2>{question.media_url && <a href={question.media_url} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm font-bold text-blue-700 underline">Mở ảnh/tư liệu minh họa</a>}{(question.options || []).length > 0 && <ol className="mt-4 space-y-2">{question.options.map((option) => <li key={option.key} className="rounded-lg border bg-slate-50 px-3 py-2 text-sm"><b>{option.key}.</b> {option.text || option.match_text || "—"}</li>)}</ol>}<div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900"><b>Đáp án:</b> {(question.correct_answers || []).join(", ") || "Cần chấm thủ công / không thiết lập đáp án"}</div></article>)}</div></main></div>;
+    return <div lang="vi" translate="no" className="notranslate min-h-screen bg-slate-50 p-4 text-slate-900 sm:p-8"><main className="mx-auto max-w-5xl"><div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-violet-200 bg-violet-50 p-4"><div><p className="text-xs font-bold uppercase tracking-wide text-violet-700">Xem trước · Người tạo</p><h1 className="mt-1 text-xl font-extrabold">{assessment.title}</h1></div><a href={`/training-assessment/${slug}?preview=respondent&variant=${encodeURIComponent(attempt.variant || "")}`} className="ft-btn ft-btn-secondary">Xem như người trả lời</a></div><div className="mb-5 rounded-2xl border bg-white p-4"><label className="block text-sm font-bold">Mã đề đang xem<select disabled={busy || !!editingQuestion} value={attempt.variant || ""} onChange={(event) => { window.location.href = `/training-assessment/${slug}?preview=creator&variant=${encodeURIComponent(event.target.value)}`; }} className="ft-input mt-2">{previewVariants.map((variant) => <option key={variant} value={variant}>{variant}</option>)}</select></label></div>{message && <p role="status" className="mb-4 rounded-xl border bg-white p-3 text-sm">{message}</p>}<div className="space-y-4">{previewQuestions.map((question, index) => <article key={question.id} className="rounded-2xl border bg-white p-5 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-blue-700">{question.question_code || `Câu ${index + 1}`}</p><div className="mt-2 flex flex-wrap gap-2"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold">{question.type}</span>{question.category && <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-bold text-blue-700">{question.category}</span>}{question.points != null && <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-bold text-amber-800">{question.points} điểm</span>}</div></div><button disabled={busy || !!editingQuestion} onClick={() => { setOriginalQuestion(question); setEditingQuestion(structuredClone(question)); setMessage(""); }} className="ft-btn ft-btn-secondary">Sửa câu hỏi</button></div><h2 className="mt-4 whitespace-pre-wrap text-lg font-bold leading-7">{question.text}</h2>{question.media_url && <a href={question.media_url} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm font-bold text-blue-700 underline">Mở ảnh/tư liệu minh họa</a>}{(question.options || []).length > 0 && <ol className="mt-4 space-y-2">{question.options.map((option) => <li key={option.key} className="rounded-lg border bg-slate-50 px-3 py-2 text-sm"><b>{option.key}.</b> {option.text || option.match_text || "—"}</li>)}</ol>}<div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900"><b>Đáp án:</b> {(question.correct_answers || []).join(", ") || "Cần chấm thủ công / không thiết lập đáp án"}</div>{editingQuestion?.id === question.id && <fieldset disabled={busy} className="mt-4"><QuestionEditor question={editingQuestion} onChange={setEditingQuestion} onClose={() => { setEditingQuestion(null); setOriginalQuestion(null); }} /><div className="mt-3 flex justify-end"><button disabled={busy} onClick={() => void savePreviewQuestion()} className="ft-primary">{busy ? "Đang lưu..." : "Lưu câu hỏi"}</button></div></fieldset>}</article>)}</div></main></div>;
   }
 
   if (loading) {

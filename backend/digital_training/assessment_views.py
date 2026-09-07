@@ -545,7 +545,7 @@ def assessment_results(request, pk):
     return Response(TrainingAssessmentAttemptSerializer(attempts, many=True, context={"request": request}).data)
 
 
-@api_view(["GET"])
+@api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
 def assessment_preview(request, slug):
     if not _can_manage(request):
@@ -553,6 +553,26 @@ def assessment_preview(request, slug):
     assessment = _public_assessment_by_slug(slug)
     if not assessment:
         return _assessment_error("Không tìm thấy bài kiểm tra.", status.HTTP_404_NOT_FOUND)
+    if request.method == "PATCH":
+        original = request.data.get("original")
+        edited = request.data.get("question")
+        if not isinstance(original, dict) or not isinstance(edited, dict):
+            return _assessment_error("Câu hỏi cập nhật không hợp lệ.")
+        with transaction.atomic():
+            assessment = TrainingAssessment.objects.select_for_update().get(pk=assessment.pk)
+            index = next((i for i, q in enumerate(assessment.questions) if q.get("id") == original.get("id")), None)
+            if index is None:
+                return _assessment_error("Không tìm thấy câu hỏi.", status.HTTP_404_NOT_FOUND)
+            current = assessment.questions[index]
+            if current != original:
+                return _assessment_error("Câu hỏi đã được thay đổi. Hãy tải lại trang trước khi sửa.", status.HTTP_409_CONFLICT)
+            updated_question = {**current, **{key: edited[key] for key in ("text", "type", "points", "options", "correct_answers") if key in edited}}
+            questions = list(assessment.questions)
+            questions[index] = updated_question
+            serializer = TrainingAssessmentSerializer(assessment, data={"questions": questions}, partial=True, context={"request": request})
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+        return Response({"question": updated_question})
     variants = variants_for(assessment)
     requested_variant = str(request.query_params.get("variant") or "").strip()
     variant = requested_variant if requested_variant in variants else (variants[0] if variants else "")
@@ -561,7 +581,7 @@ def assessment_preview(request, slug):
     if role == "creator":
         raw_by_id = {str(item.get("id") or ""): item for item in assessment.questions if str(item.get("variant") or "Đề 1") == variant}
         questions = [
-            {**question, "correct_answers": raw_by_id.get(str(question.get("id") or ""), {}).get("correct_answers") or []}
+            raw_by_id[str(question.get("id") or "")]
             for question in questions
         ]
     return Response({
