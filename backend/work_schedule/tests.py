@@ -217,6 +217,15 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(row["viewerRelation"], "manager")
         self.assertTrue(row["canDelete"])
 
+    def test_team_endpoint_lists_only_direct_reports_for_manager(self):
+        self.executor.manager = self.manager
+        self.executor.employee_code = "FT-09"
+        self.executor.save(update_fields=["manager", "employee_code"])
+        response = self.request(self.manager_token, "get", "/api/work-schedule/team")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual([member["email"] for member in response.json()["members"]], [self.executor.email])
+        self.assertEqual(response.json()["members"][0]["employeeCode"], "FT-09")
+
     def test_executor_never_sees_manager_review_controls_or_details(self):
         item = self.create_item()
         WorkItem.objects.filter(pk=item["id"]).update(

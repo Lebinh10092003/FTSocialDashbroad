@@ -5,8 +5,9 @@ import { appDialog } from "./AppDialog";
 
 type WorkStatus = "todo" | "doing" | "completed" | "reviewed";
 type Priority = "low" | "medium" | "high";
-type View = "board" | "week" | "sheet";
+type View = "board" | "week" | "team" | "sheet";
 type Person = { email: string; name: string };
+type TeamMember = Person & { employeeCode: string; department: string; jobTitle: string };
 type WorkTask = {
   id: number;
   title: string;
@@ -339,6 +340,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
   const [view, setView] = useState<View>("board"),
     [tasks, setTasks] = useState<WorkTask[]>([]),
     [staff, setStaff] = useState<Person[]>([{ email: userEmail, name: userName }]),
+    [teamMembers, setTeamMembers] = useState<TeamMember[]>([]),
     [selectedDate, setSelectedDate] = useState(iso(new Date())),
     [weekStart, setWeekStart] = useState(mondayOf(new Date())),
     [calendarPeriod, setCalendarPeriod] = useState<"week" | "month">("week"),
@@ -372,9 +374,10 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     setLoading(true);
     setError("");
     try {
-      const [items, people] = await Promise.all([requestJson("/api/work-schedule/items"), requestJson("/api/auth/assignable-staff")]);
+      const [items, people, team] = await Promise.all([requestJson("/api/work-schedule/items"), requestJson("/api/auth/assignable-staff"), requestJson("/api/work-schedule/team")]);
       setTasks(Array.isArray(items.items) ? items.items : []);
       setStaff(Array.isArray(people) ? people : []);
+      setTeamMembers(Array.isArray(team.members) ? team.members : []);
     } catch (cause: any) {
       setError(cause.message || "Không thể tải lịch làm việc.");
     } finally {
@@ -633,6 +636,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
   const navItems: Array<{ id: View; label: string; icon: React.ElementType }> = [
     { id: "board", label: "Công việc theo ngày", icon: LayoutDashboard },
     { id: "week", label: "Lịch tuần / tháng", icon: CalendarDays },
+    ...(["ADMIN", "MANAGER"].includes(userRole) ? [{ id: "team" as View, label: "Quản lý nhân sự", icon: UserCheck }] : []),
     { id: "sheet", label: "Liên kết Google Sheets", icon: FileSpreadsheet },
   ];
 
@@ -714,7 +718,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
               </button>
             </section>
           )}
-          {view !== "sheet" && view !== "week" && (
+          {view === "board" && (
             <section className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <div className="ws-stat">
                 <span className="ws-stat-icon bg-blue-50 text-blue-700">
@@ -806,7 +810,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
               </button>
             </div>
           )}
-          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={filtered} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={setCalendarPeriod} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={setView} setEditing={setEditing} setEditingDay={setEditingDay} setDraggedId={setDraggedId} moveTask={moveTask} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} />}
+          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={filtered} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={setCalendarPeriod} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={setView} setEditing={setEditing} setEditingDay={setEditingDay} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "team" ? <TeamView members={teamMembers} tasks={tasks} userEmail={userEmail} setEditing={setEditing} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} />}
         </div>
       </main>
       {editing && <TaskDialog draft={editing} setDraft={setEditing} staff={staff} userEmail={userEmail} saveTask={saveTask} saveProgressNote={saveProgressNote} deleteTasks={deleteTasks} review={review} />}
@@ -876,6 +880,124 @@ function BoardView({ tasks, selectedDate, setSelectedDate, userEmail, selectedId
         ))}
       </div>
     </>
+  );
+}
+
+function TeamView({ members, tasks, userEmail, setEditing }: { members: TeamMember[]; tasks: WorkTask[]; userEmail: string; setEditing: (draft: WorkDraft) => void }) {
+  const [selectedEmail, setSelectedEmail] = useState(members[0]?.email || "");
+  const [query, setQuery] = useState("");
+  const [anchor, setAnchor] = useState(mondayOf(new Date()));
+  useEffect(() => {
+    if (!members.some((member) => member.email === selectedEmail)) setSelectedEmail(members[0]?.email || "");
+  }, [members, selectedEmail]);
+  const selected = members.find((member) => member.email === selectedEmail);
+  const days = Array.from({ length: 7 }, (_, index) => addDays(mondayOf(anchor), index));
+  const start = iso(days[0]),
+    end = iso(days[6]);
+  const rows = tasks
+    .filter((task) => task.executor.email === selectedEmail && task.date >= start && task.date <= end)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.dailyOrder - b.dailyOrder);
+  const pending = rows.filter((task) => task.canReview).length;
+  const reviewed = rows.filter((task) => task.status === "reviewed").length;
+  const completed = rows.filter((task) => task.status === "completed" || task.status === "reviewed").length;
+  const filteredMembers = members.filter((member) => `${member.name} ${member.email} ${member.employeeCode}`.toLocaleLowerCase("vi-VN").includes(query.trim().toLocaleLowerCase("vi-VN")));
+  const statusStyle: Record<WorkStatus, string> = {
+    todo: "bg-slate-100 text-slate-700",
+    doing: "bg-blue-100 text-blue-700",
+    completed: "bg-emerald-100 text-emerald-700",
+    reviewed: "bg-violet-100 text-violet-700",
+  };
+
+  if (!members.length) {
+    return (
+      <section className="grid min-h-[420px] place-items-center rounded-3xl border border-dashed border-slate-300 bg-white p-8 text-center">
+        <div>
+          <UserCheck className="mx-auto h-10 w-10 text-slate-300" />
+          <h2 className="mt-4 text-lg font-extrabold text-[#001e40]">Chưa có nhân sự trực tiếp dưới quyền</h2>
+          <p className="mt-2 text-sm text-slate-500">Danh sách sẽ xuất hiện khi quản trị viên thiết lập người quản lý cho nhân viên.</p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[300px_1fr]">
+      <aside className="overflow-hidden rounded-2xl border bg-white shadow-sm">
+        <div className="border-b p-4">
+          <h2 className="font-extrabold text-[#001e40]">Nhân sự dưới quyền</h2>
+          <label className="relative mt-3 block">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm tên, email, mã nhân sự..." className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-blue-400" />
+          </label>
+        </div>
+        <div className="max-h-[680px] space-y-1 overflow-y-auto p-2">
+          {filteredMembers.map((member) => {
+            const memberTasks = tasks.filter((task) => task.executor.email === member.email);
+            const waiting = memberTasks.filter((task) => task.canReview).length;
+            return (
+              <button key={member.email} type="button" onClick={() => setSelectedEmail(member.email)} className={`flex w-full items-center gap-3 rounded-xl p-3 text-left transition ${selectedEmail === member.email ? "bg-blue-600 text-white shadow-md shadow-blue-200" : "hover:bg-slate-50"}`}>
+                <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-xs font-extrabold ${selectedEmail === member.email ? "bg-white/20" : "bg-blue-50 text-blue-700"}`}>{initials(member.name)}</span>
+                <span className="min-w-0 flex-1">
+                  <b className="block truncate text-sm">{member.name}</b>
+                  <small className={`block truncate ${selectedEmail === member.email ? "text-blue-100" : "text-slate-400"}`}>{member.employeeCode || member.email}</small>
+                </span>
+                {waiting > 0 && <span className={`rounded-full px-2 py-1 text-[11px] font-extrabold ${selectedEmail === member.email ? "bg-white text-blue-700" : "bg-amber-100 text-amber-700"}`}>{waiting} chờ</span>}
+              </button>
+            );
+          })}
+        </div>
+      </aside>
+      <section className="min-w-0 space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-white p-5 shadow-sm">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-blue-600">Lịch nhân sự</p>
+            <h2 className="mt-1 text-xl font-extrabold text-[#001e40]">{selected?.name}</h2>
+            <p className="mt-1 text-sm text-slate-500">{[selected?.jobTitle, selected?.department, selected?.employeeCode].filter(Boolean).join(" · ") || selected?.email}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex overflow-hidden rounded-xl border bg-white">
+              <button type="button" onClick={() => setAnchor(addDays(anchor, -7))} className="p-2.5 hover:bg-slate-50" aria-label="Tuần trước"><ChevronLeft className="h-4 w-4" /></button>
+              <div className="border-x px-4 py-2 text-center text-xs font-bold text-slate-600">Tuần {weekNumber(start)}<br /><span className="font-medium text-slate-400">{shortDate(start)}–{fullDate(end)}</span></div>
+              <button type="button" onClick={() => setAnchor(addDays(anchor, 7))} className="p-2.5 hover:bg-slate-50" aria-label="Tuần sau"><ChevronRight className="h-4 w-4" /></button>
+            </div>
+            {selected && (
+              <button type="button" onClick={() => setEditing({ ...blankDraft(userEmail, iso(new Date())), executorEmail: selected.email, managerEmails: [userEmail] })} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-extrabold text-white shadow-md shadow-blue-200">
+                <Plus className="h-4 w-4" /> Giao việc
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="ws-stat"><span className="ws-stat-icon bg-blue-50 text-blue-700"><ListChecks /></span><div><span>Tổng việc trong tuần</span><b>{rows.length}</b></div></div>
+          <div className="ws-stat"><span className="ws-stat-icon bg-sky-50 text-sky-700"><CircleDot /></span><div><span>Đang thực hiện</span><b>{rows.filter((task) => task.status === "doing").length}</b></div></div>
+          <div className="ws-stat"><span className="ws-stat-icon bg-amber-50 text-amber-700"><ClipboardCheck /></span><div><span>Chờ quản lý review</span><b>{pending}</b></div></div>
+          <div className="ws-stat"><span className="ws-stat-icon bg-violet-50 text-violet-700"><CheckCircle2 /></span><div><span>Đã review</span><b>{reviewed}</b><small className="text-[11px] font-semibold text-violet-600">{rows.length ? Math.round((completed / rows.length) * 100) : 0}% hoàn thành</small></div></div>
+        </div>
+        <div className="overflow-hidden rounded-2xl border bg-white shadow-sm">
+          <div className="border-b px-5 py-4"><h3 className="font-extrabold text-[#001e40]">Lịch công việc tuần {weekNumber(start)}</h3></div>
+          <div className="divide-y">
+            {days.map((day) => {
+              const date = iso(day), dayRows = rows.filter((task) => task.date === date);
+              return (
+                <div key={date} className="grid min-h-20 gap-3 p-4 sm:grid-cols-[150px_1fr]">
+                  <div><b className="block text-sm text-slate-800">{weekday(date)}</b><span className="text-sm text-slate-400">{fullDate(date)}</span></div>
+                  <div className="space-y-2">
+                    {dayRows.length ? dayRows.map((task) => (
+                      <button key={task.id} type="button" onClick={() => setEditing(draftFromTask(task))} className="flex w-full flex-wrap items-center gap-3 rounded-xl border border-slate-200 px-4 py-3 text-left hover:border-blue-300 hover:bg-blue-50/40">
+                        <span className="font-bold text-blue-600">{task.dailyOrder}.</span>
+                        <span className="min-w-[240px] flex-1 font-semibold text-slate-800">{task.title}</span>
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${statusStyle[task.status]}`}>{task.canReview ? "Chờ review" : selfAssessment[task.status]}</span>
+                        {task.progressNote && <span className="w-full pl-7 text-sm text-slate-500">{task.progressNote}</span>}
+                      </button>
+                    )) : <span className="text-sm text-slate-300">Không có lịch</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 function WeekView({ tasks, visibleDays, anchor, setAnchor, period, setPeriod, layout, setLayout, setSelectedDate, setView, setEditing, setEditingDay, setDraggedId, moveTask }: any) {

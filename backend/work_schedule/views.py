@@ -24,7 +24,10 @@ def _profile_payload(profile):
 
 
 def _visible_items(user):
-    return WorkItem.objects.select_related("creator", "executor", "reviewed_by").prefetch_related("supporters", "managers").filter(
+    rows = WorkItem.objects.select_related("creator", "executor", "reviewed_by").prefetch_related("supporters", "managers")
+    if user.role == "ADMIN":
+        return rows.all()
+    return rows.filter(
         Q(creator=user) | Q(executor=user) | Q(supporters=user) | Q(managers=user) | Q(executor__manager=user)
     ).distinct()
 
@@ -211,6 +214,26 @@ def work_items(request):
         rows = rows.filter(work_date__lte=end)
     rows = list(rows.order_by("work_date", "daily_order", "start_time", "created_at")[:1000])
     return Response({"items": [_payload(item, request.user, request.user_role) for item in rows]})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def work_team(request):
+    if request.user_role == "ADMIN":
+        rows = UserProfile.objects.filter(employment_status="ACTIVE").exclude(email=request.user.email)
+    else:
+        rows = UserProfile.objects.filter(employment_status="ACTIVE", manager=request.user)
+    rows = rows.select_related("department", "job_title").order_by("name", "email")
+    return Response({"members": [
+        {
+            "email": profile.email,
+            "name": profile.name or profile.email.split("@", 1)[0],
+            "employeeCode": profile.employee_code or "",
+            "department": profile.department.name if profile.department else "",
+            "jobTitle": profile.job_title.name if profile.job_title else "",
+        }
+        for profile in rows
+    ]})
 
 
 @api_view(["POST"])
