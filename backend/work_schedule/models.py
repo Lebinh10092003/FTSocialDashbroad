@@ -29,8 +29,12 @@ class WorkItem(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_TODO, db_index=True)
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default="medium")
     label = models.CharField(max_length=100, blank=True, default="Công việc")
+    daily_order = models.PositiveIntegerField(default=1)
     needs_revision = models.BooleanField(default=False)
     revision_count = models.PositiveIntegerField(default=0)
+    revision_of = models.ForeignKey(
+        "self", blank=True, null=True, on_delete=models.SET_NULL, related_name="revision_items"
+    )
     review_percent = models.PositiveSmallIntegerField(
         blank=True, null=True, validators=[MinValueValidator(0), MaxValueValidator(100)]
     )
@@ -43,7 +47,7 @@ class WorkItem(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["work_date", "start_time", "created_at"]
+        ordering = ["work_date", "daily_order", "start_time", "created_at"]
         indexes = [
             models.Index(fields=["executor", "work_date", "status"], name="work_executor_date_status_idx"),
             models.Index(fields=["creator", "work_date"], name="work_creator_date_idx"),

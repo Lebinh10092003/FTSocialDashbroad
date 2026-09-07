@@ -1,5 +1,7 @@
+from datetime import timedelta
+
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Max, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_time
 from rest_framework import status
@@ -40,11 +42,27 @@ def _can_manage(item, user, role):
     return role == "ADMIN" or item.creator_id == user.email or any(person.email == user.email for person in item.managers.all())
 
 
+def _next_daily_order(executor, work_date, exclude_id=None):
+    rows = WorkItem.objects.filter(executor=executor, work_date=work_date)
+    if exclude_id:
+        rows = rows.exclude(pk=exclude_id)
+    return (rows.aggregate(highest=Max("daily_order"))["highest"] or 0) + 1
+
+
+def _normalize_daily_order(executor_id, work_date):
+    rows = WorkItem.objects.filter(executor_id=executor_id, work_date=work_date).order_by(
+        "daily_order", "start_time", "created_at", "pk"
+    )
+    for order, row in enumerate(rows, start=1):
+        if row.daily_order != order:
+            WorkItem.objects.filter(pk=row.pk).update(daily_order=order)
+
+
 def _payload(item, user, role):
     relation = _viewer_relation(item, user)
     display_status = item.status
     title_prefix = ""
-    if relation in {"manager", "creator"} and item.status == WorkItem.STATUS_COMPLETED:
+    if relation in {"manager", "creator"} and item.status == WorkItem.STATUS_COMPLETED and not item.reviewed_at:
         display_status = WorkItem.STATUS_TODO
         title_prefix = "Kiểm tra kết quả công việc: "
     elif relation == "supporter":
@@ -66,6 +84,7 @@ def _payload(item, user, role):
         "displayStatus": display_status,
         "priority": item.priority,
         "label": item.label,
+        "dailyOrder": item.daily_order,
         "creator": _profile_payload(item.creator),
         "executor": _profile_payload(item.executor),
         "supporters": [_profile_payload(person) for person in item.supporters.all()],
@@ -73,13 +92,14 @@ def _payload(item, user, role):
         "viewerRelation": relation,
         "needsRevision": item.needs_revision,
         "revisionCount": item.revision_count,
+        "revisionOfId": item.revision_of_id,
         "reviewPercent": item.review_percent,
         "reviewNote": item.review_note,
         "reviewedBy": _profile_payload(item.reviewed_by) if item.reviewed_by else None,
         "reviewedAt": item.reviewed_at.isoformat() if item.reviewed_at else None,
-        "canEdit": can_manage or relation == "executor",
+        "canEdit": (can_manage or relation == "executor") and not item.reviewed_at,
         "canDelete": role == "ADMIN" or item.creator_id == user.email or (relation == "manager"),
-        "canReview": can_manage and item.status == WorkItem.STATUS_COMPLETED,
+        "canReview": can_manage and item.status == WorkItem.STATUS_COMPLETED and not item.reviewed_at,
         "createdAt": item.created_at.isoformat(),
         "updatedAt": item.updated_at.isoformat(),
     }
@@ -138,6 +158,8 @@ def _apply_data(request, item, creating=False, allow_people=True):
     if creating and request.user_role in {"ADMIN", "MANAGER"} and executor.email != request.user.email and request.user.email not in {p.email for p in managers}:
         managers.append(request.user)
 
+    previous_group = (item.executor_id, item.work_date) if item and item.pk else None
+    next_group = (executor.email, work_date)
     item.title = title[:255]
     item.description = str(data.get("description", item.description if item else "") or "").strip()
     item.work_date = work_date
@@ -147,9 +169,13 @@ def _apply_data(request, item, creating=False, allow_people=True):
     item.priority = requested_priority
     item.label = str(data.get("label", item.label if item else "Công việc") or "Công việc").strip()[:100]
     item.executor = executor
+    if creating or previous_group != next_group:
+        item.daily_order = _next_daily_order(executor, work_date, item.pk)
     item.save()
     item.supporters.set(supporters)
     item.managers.set(managers)
+    if previous_group and previous_group != next_group:
+        _normalize_daily_order(*previous_group)
     return None
 
 
@@ -171,7 +197,7 @@ def work_items(request):
         rows = rows.filter(work_date__gte=start)
     if end:
         rows = rows.filter(work_date__lte=end)
-    rows = list(rows.order_by("work_date", "start_time", "created_at")[:1000])
+    rows = list(rows.order_by("work_date", "daily_order", "start_time", "created_at")[:1000])
     return Response({"items": [_payload(item, request.user, request.user_role) for item in rows]})
 
 
@@ -187,7 +213,9 @@ def work_item_detail(request, item_id):
     if request.method == "DELETE":
         if not payload["canDelete"]:
             return Response({"error": "Bạn không có quyền xóa công việc này."}, status=status.HTTP_403_FORBIDDEN)
+        old_group = (item.executor_id, item.work_date)
         item.delete()
+        _normalize_daily_order(*old_group)
         return Response({"message": "Đã xóa công việc."})
     if not payload["canEdit"]:
         return Response({"error": "Bạn không có quyền cập nhật công việc này."}, status=status.HTTP_403_FORBIDDEN)
@@ -199,7 +227,7 @@ def work_item_detail(request, item_id):
 
 
 def _review(item, request, action):
-    if not _can_manage(item, request.user, request.user_role) or item.status != WorkItem.STATUS_COMPLETED:
+    if not _can_manage(item, request.user, request.user_role) or item.status != WorkItem.STATUS_COMPLETED or item.reviewed_at:
         return Response({"error": "Công việc chưa sẵn sàng hoặc bạn không có quyền review."}, status=status.HTTP_403_FORBIDDEN)
     try:
         review_percent = int(request.data.get("reviewPercent"))
@@ -212,16 +240,34 @@ def _review(item, request, action):
     item.reviewed_by = request.user
     item.reviewed_at = timezone.now()
     if action == "request_revision":
-        item.status = WorkItem.STATUS_DOING
-        item.needs_revision = True
         item.revision_count += 1
+        item.save()
+        revision = WorkItem.objects.create(
+            creator=request.user,
+            executor=item.executor,
+            title=item.title,
+            description=item.review_note or item.description,
+            work_date=item.work_date + timedelta(days=1),
+            start_time=item.start_time,
+            end_time=item.end_time,
+            status=WorkItem.STATUS_DOING,
+            priority=item.priority,
+            label=item.label,
+            daily_order=_next_daily_order(item.executor, item.work_date + timedelta(days=1)),
+            needs_revision=True,
+            revision_count=item.revision_count,
+            revision_of=item,
+        )
+        revision.supporters.set(item.supporters.all())
+        revision.managers.set(item.managers.all())
+        return revision
     elif action == "confirm":
         item.status = WorkItem.STATUS_REVIEWED
         item.needs_revision = False
     else:
         return Response({"error": "Thao tác review không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
     item.save()
-    return None
+    return item
 
 
 @api_view(["POST"])
@@ -230,11 +276,15 @@ def work_item_review(request, item_id):
     item = _visible_items(request.user).filter(pk=item_id).first()
     if not item:
         return Response({"error": "Không tìm thấy công việc."}, status=status.HTTP_404_NOT_FOUND)
-    error = _review(item, request, str(request.data.get("action") or ""))
-    if error:
-        return error
+    with transaction.atomic():
+        result = _review(item, request, str(request.data.get("action") or ""))
+        if isinstance(result, Response):
+            return result
     item = _visible_items(request.user).get(pk=item.pk)
-    return Response({"message": "Đã cập nhật kết quả review.", "item": _payload(item, request.user, request.user_role)})
+    response = {"message": "Đã cập nhật kết quả review.", "item": _payload(item, request.user, request.user_role)}
+    if result and result.pk != item.pk:
+        response["revisionItem"] = _payload(_visible_items(request.user).get(pk=result.pk), request.user, request.user_role)
+    return Response(response)
 
 
 @api_view(["POST"])
@@ -258,14 +308,22 @@ def work_items_batch(request):
             return Response({"error": "Vui lòng nhập mức độ hoàn thành từ 0 đến 100%."}, status=status.HTTP_400_BAD_REQUEST)
         if review_percent < 0 or review_percent > 100:
             return Response({"error": "Mức độ hoàn thành phải từ 0 đến 100%."}, status=status.HTTP_400_BAD_REQUEST)
-        if any(not _can_manage(item, request.user, request.user_role) or item.status != WorkItem.STATUS_COMPLETED for item in items):
+        if any(
+            not _can_manage(item, request.user, request.user_role)
+            or item.status != WorkItem.STATUS_COMPLETED
+            or item.reviewed_at
+            for item in items
+        ):
             return Response({"error": "Có công việc chưa sẵn sàng hoặc bạn không có quyền review."}, status=status.HTTP_403_FORBIDDEN)
     with transaction.atomic():
         if action == "delete":
             denied = [item.id for item in items if not _payload(item, request.user, request.user_role)["canDelete"]]
             if denied:
                 return Response({"error": "Bạn không có quyền xóa toàn bộ công việc đã chọn."}, status=status.HTTP_403_FORBIDDEN)
+            groups = {(item.executor_id, item.work_date) for item in items}
             WorkItem.objects.filter(id__in=ids).delete()
+            for group in groups:
+                _normalize_daily_order(*group)
         elif action == "status":
             next_status = str(request.data.get("status") or "")
             if next_status not in {WorkItem.STATUS_TODO, WorkItem.STATUS_DOING, WorkItem.STATUS_COMPLETED}:
@@ -275,9 +333,9 @@ def work_items_batch(request):
             WorkItem.objects.filter(id__in=ids).update(status=next_status, updated_at=timezone.now())
         elif action in {"request_revision", "confirm"}:
             for item in items:
-                error = _review(item, request, action)
-                if error:
-                    return error
+                result = _review(item, request, action)
+                if isinstance(result, Response):
+                    return result
         else:
             return Response({"error": "Thao tác hàng loạt không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
     return Response({"message": f"Đã cập nhật {len(ids)} công việc.", "updated": len(ids)})

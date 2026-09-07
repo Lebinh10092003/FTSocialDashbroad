@@ -43,7 +43,7 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(supporter["displayTitle"], "Hỗ trợ/theo dõi: Hoàn thiện báo cáo")
         self.assertEqual(item["executor"]["email"], self.executor.email)
 
-    def test_manager_review_can_request_revision_then_confirm(self):
+    def test_manager_revision_keeps_completed_item_and_creates_next_day_item(self):
         item = self.create_item()
         completed = self.request(self.executor_token, "patch", f"/api/work-schedule/items/{item['id']}", {
             "title": item["title"], "date": item["date"], "executorEmail": self.executor.email,
@@ -58,16 +58,41 @@ class WorkScheduleApiTests(TestCase):
             "action": "request_revision", "reviewPercent": 70, "reviewNote": "Bổ sung số liệu",
         })
         self.assertEqual(revise.status_code, 200, revise.data)
-        executor_view = self.request(self.executor_token, "get", "/api/work-schedule/items").json()["items"][0]
-        self.assertEqual(executor_view["status"], "doing")
-        self.assertTrue(executor_view["displayTitle"].startswith("Bổ sung:"))
+        rows = self.request(self.executor_token, "get", "/api/work-schedule/items").json()["items"]
+        original = next(row for row in rows if row["id"] == item["id"])
+        revision = next(row for row in rows if row["id"] != item["id"])
+        self.assertEqual(original["status"], "completed")
+        self.assertEqual(original["date"], "2026-09-07")
+        self.assertFalse(original["canEdit"])
+        self.assertFalse(original["canReview"])
+        self.assertEqual(revision["status"], "doing")
+        self.assertEqual(revision["date"], "2026-09-08")
+        self.assertEqual(revision["revisionOfId"], item["id"])
+        self.assertTrue(revision["displayTitle"].startswith("Bổ sung:"))
 
-        WorkItem.objects.filter(pk=item["id"]).update(status="completed")
-        confirm = self.request(self.manager_token, "post", f"/api/work-schedule/items/{item['id']}/review", {
+        WorkItem.objects.filter(pk=revision["id"]).update(status="completed")
+        confirm = self.request(self.manager_token, "post", f"/api/work-schedule/items/{revision['id']}/review", {
             "action": "confirm", "reviewPercent": 100,
         })
         self.assertEqual(confirm.status_code, 200, confirm.data)
         self.assertEqual(confirm.json()["item"]["status"], "reviewed")
+
+    def test_items_are_numbered_per_executor_and_date_and_renumber_after_move(self):
+        first = self.create_item()
+        second = self.request(self.executor_token, "post", "/api/work-schedule/items", {
+            "title": "Việc thứ hai", "date": "2026-09-07", "executorEmail": self.executor.email,
+            "supporterEmails": [], "managerEmails": [],
+        }).json()["item"]
+        self.assertEqual(first["dailyOrder"], 1)
+        self.assertEqual(second["dailyOrder"], 2)
+
+        moved = self.request(self.executor_token, "patch", f"/api/work-schedule/items/{first['id']}", {
+            "title": first["title"], "date": "2026-09-08", "executorEmail": self.executor.email,
+            "supporterEmails": [self.supporter.email], "managerEmails": [self.manager.email], "status": "todo",
+        })
+        self.assertEqual(moved.status_code, 200, moved.data)
+        self.assertEqual(moved.json()["item"]["dailyOrder"], 1)
+        self.assertEqual(WorkItem.objects.get(pk=second["id"]).daily_order, 1)
 
     def test_delete_requires_no_password_and_batch_status_is_supported(self):
         first = self.create_item()
@@ -83,4 +108,3 @@ class WorkScheduleApiTests(TestCase):
         deleted = self.request(self.manager_token, "delete", f"/api/work-schedule/items/{first['id']}")
         self.assertEqual(deleted.status_code, 200, deleted.data)
         self.assertFalse(WorkItem.objects.filter(pk=first["id"]).exists())
-
