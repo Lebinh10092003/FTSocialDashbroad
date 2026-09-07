@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDot, ClipboardCheck, ExternalLink, FileSpreadsheet, LayoutDashboard, Link2, ListChecks, Plus, Search, Settings2, Trash2, UserCheck, Users, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDot, ClipboardCheck, ExternalLink, FileSpreadsheet, LayoutDashboard, Link2, ListChecks, Plus, Search, Settings2, Trash2, UserCheck, X } from "lucide-react";
 import AccountMenu from "./AccountMenu";
 import { appDialog } from "./AppDialog";
 
 type WorkStatus = "todo" | "doing" | "completed" | "reviewed";
 type Priority = "low" | "medium" | "high";
-type View = "board" | "week" | "team" | "sheet";
+type View = "board" | "week" | "sheet";
 type Person = { email: string; name: string };
 type WorkTask = {
   id: number;
@@ -332,7 +332,6 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     [selectedIds, setSelectedIds] = useState<number[]>([]),
     [draggedId, setDraggedId] = useState<number | null>(null),
     [query, setQuery] = useState(""),
-    [person, setPerson] = useState("all"),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
   const sheetKey = `ft-work-schedule-sheet:${userEmail}`;
@@ -371,11 +370,10 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
   const filtered = useMemo(
     () =>
       tasks.filter((task) => {
-        const matchesPerson = person === "all" || task.executor.email === person;
         const haystack = `${task.displayTitle} ${task.description} ${task.label} ${task.executor.name}`.toLocaleLowerCase("vi-VN");
-        return matchesPerson && haystack.includes(query.trim().toLocaleLowerCase("vi-VN"));
+        return haystack.includes(query.trim().toLocaleLowerCase("vi-VN"));
       }),
-    [person, query, tasks],
+    [query, tasks],
   );
   const dailyTasks = filtered.filter((task) => task.date === selectedDate),
     completedCount = dailyTasks.filter((task) => task.status === "completed" || task.status === "reviewed").length,
@@ -536,7 +534,6 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
   const navItems: Array<{ id: View; label: string; icon: React.ElementType }> = [
     { id: "board", label: "Công việc theo ngày", icon: LayoutDashboard },
     { id: "week", label: "Lịch tuần / tháng", icon: CalendarDays },
-    { id: "team", label: "Nhân sự liên quan", icon: Users },
     { id: "sheet", label: "Liên kết Google Sheets", icon: FileSpreadsheet },
   ];
 
@@ -680,7 +677,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
               </button>
             </div>
           )}
-          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={filtered} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={setCalendarPeriod} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={setView} setEditing={setEditing} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "team" ? <TeamView tasks={filtered.filter((task) => task.date === selectedDate)} staff={staff} person={person} setPerson={setPerson} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} />}
+          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={filtered} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={setCalendarPeriod} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={setView} setEditing={setEditing} setDraggedId={setDraggedId} moveTask={moveTask} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} />}
         </div>
       </main>
       {editing && <TaskDialog draft={editing} setDraft={setEditing} staff={staff} userEmail={userEmail} saveTask={saveTask} deleteTasks={deleteTasks} review={review} />}
@@ -916,31 +913,6 @@ function ScheduleTable({ days, rowsFor, setEditing, setDraggedId, moveTask }: an
         </tbody>
       </table>
     </section>
-  );
-}
-function TeamView({ tasks, staff, person, setPerson, selectedIds, setSelectedIds, setEditing, deleteTasks, setDraggedId }: any) {
-  return (
-    <>
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-extrabold text-[#001e40]">Nhân sự liên quan</h2>
-          <p className="mt-1 text-sm text-slate-500">Xem lịch theo người thực hiện, hỗ trợ và quản lý.</p>
-        </div>
-        <select value={person} onChange={(event) => setPerson(event.target.value)} className="ws-input max-w-xs">
-          <option value="all">Tất cả người thực hiện</option>
-          {staff.map((item) => (
-            <option key={item.email} value={item.email}>
-              {item.name}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {tasks.map((task) => (
-          <TaskCard key={task.id} task={task} selected={selectedIds.includes(task.id)} onSelect={() => setSelectedIds((ids) => (ids.includes(task.id) ? ids.filter((id) => id !== task.id) : [...ids, task.id]))} onOpen={() => setEditing(draftFromTask(task))} onDelete={() => void deleteTasks([task.id])} onDragStart={() => setDraggedId(task.id)} />
-        ))}
-      </div>
-    </>
   );
 }
 function SheetView({ sheetUrl, setSheetUrl, sheetKey, notice, setNotice }: any) {
