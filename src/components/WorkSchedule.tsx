@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDot, ClipboardCheck, ExternalLink, FileSpreadsheet, LayoutDashboard, Link2, ListChecks, Pencil, Plus, RefreshCw, Search, Settings2, Trash2, UserCheck, X } from "lucide-react";
 import AccountMenu from "./AccountMenu";
 import { appDialog } from "./AppDialog";
@@ -69,6 +69,7 @@ type DayEditorRow = {
   canEdit: boolean;
   assessment: DayAssessmentEntry;
 };
+type InlineDayDraft = { content: string; selfAssessment: string };
 type Props = {
   idToken: string;
   onBackToWorkspace: () => void;
@@ -387,13 +388,14 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     [calendarPeriod, setCalendarPeriod] = useState<"week" | "month">(initialLocation.period),
     [calendarLayout, setCalendarLayout] = useState<"calendar" | "table">("table"),
     [editing, setEditing] = useState<WorkDraft | null>(null),
-    [editingDay, setEditingDay] = useState<DayEditState | null>(null),
     [selectedIds, setSelectedIds] = useState<number[]>([]),
     [draggedId, setDraggedId] = useState<number | null>(null),
     [query, setQuery] = useState(""),
     [bulkPeopleMode, setBulkPeopleMode] = useState<"supporters" | "managers" | null>(null),
     [loading, setLoading] = useState(true),
+    [savingTask, setSavingTask] = useState(false),
     [error, setError] = useState("");
+  const savingTaskRef = useRef(false);
   const sheetKey = `ft-work-schedule-sheet:${userEmail}`;
   const [sheetUrl, setSheetUrl] = useState(() => localStorage.getItem(sheetKey) || SHEET_TEMPLATE),
     [sheetNotice, setSheetNotice] = useState("");
@@ -476,7 +478,9 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
 
   const saveTask = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!editing) return;
+    if (!editing || savingTaskRef.current) return;
+    savingTaskRef.current = true;
+    setSavingTask(true);
     try {
       const data = await requestJson(editing.id ? `/api/work-schedule/items/${editing.id}` : "/api/work-schedule/items", {
         method: editing.id ? "PATCH" : "POST",
@@ -489,8 +493,16 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
         title: "Không thể lưu công việc",
         tone: "danger",
       });
+    } finally {
+      savingTaskRef.current = false;
+      setSavingTask(false);
     }
   };
+  const saveInlineDay = (date: string, items: Array<{ id?: number; title: string; progressNote: string; status: WorkStatus }>, deleteIds: number[]) =>
+    requestJson("/api/work-schedule/day", {
+      method: "POST",
+      body: JSON.stringify({ date, items, deleteIds }),
+    });
   const saveProgressNote = async (draft = editing) => {
     if (!draft?.id) return;
     try {
@@ -503,19 +515,6 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
       void appDialog.alert("Đã lưu ghi chú tiến trình.", { title: "Đã cập nhật", tone: "success" });
     } catch (cause: any) {
       void appDialog.alert(cause.message, { title: "Không thể lưu ghi chú tiến trình", tone: "danger" });
-    }
-  };
-  const saveDayTable = async (items: Array<{ id?: number; title: string; progressNote: string }>) => {
-    if (!editingDay) return;
-    try {
-      await requestJson("/api/work-schedule/day", {
-        method: "POST",
-        body: JSON.stringify({ date: editingDay.date, items }),
-      });
-      setEditingDay(null);
-      await load();
-    } catch (cause: any) {
-      void appDialog.alert(cause.message, { title: "Không thể lưu lịch trong ngày", tone: "danger" });
     }
   };
   const changeTaskDates = async (ids: number[], date: string) => {
@@ -867,11 +866,10 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
               </button>
             </div>
           )}
-          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={filtered} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={(period: "week" | "month") => navigateSchedule("week", period)} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={(next: View) => navigateSchedule(next)} setEditing={setEditing} setEditingDay={setEditingDay} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "team" ? <TeamView members={teamMembers} tasks={teamTasks} userEmail={userEmail} setEditing={setEditing} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} onSync={syncSheet} />}
+          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={tasks} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={(period: "week" | "month") => navigateSchedule("week", period)} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={(next: View) => navigateSchedule(next)} setEditing={setEditing} setDraggedId={setDraggedId} moveTask={moveTask} saveInlineDay={saveInlineDay} reloadTasks={load} /> : view === "team" ? <TeamView members={teamMembers} tasks={teamTasks} userEmail={userEmail} setEditing={setEditing} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} onSync={syncSheet} />}
         </div>
       </main>
-      {editing && <TaskDialog draft={editing} setDraft={setEditing} staff={staff} userEmail={userEmail} saveTask={saveTask} saveProgressNote={saveProgressNote} deleteTasks={deleteTasks} review={review} />}
-      {editingDay && <DayTableEditor state={editingDay} onClose={() => setEditingDay(null)} onSave={saveDayTable} />}
+      {editing && <TaskDialog draft={editing} setDraft={setEditing} staff={staff} userEmail={userEmail} saveTask={saveTask} saving={savingTask} saveProgressNote={saveProgressNote} deleteTasks={deleteTasks} review={review} />}
       {bulkPeopleMode && <BulkPeopleDialog mode={bulkPeopleMode} staff={staff} onClose={() => setBulkPeopleMode(null)} onApply={(emails: string[]) => void batchAddPeople(bulkPeopleMode, emails)} />}
     </div>
   );
@@ -1057,7 +1055,7 @@ function TeamView({ members, tasks, userEmail, setEditing }: { members: TeamMemb
     </div>
   );
 }
-function WeekView({ tasks, visibleDays, anchor, setAnchor, period, setPeriod, layout, setLayout, setSelectedDate, setView, setEditing, setEditingDay, setDraggedId, moveTask }: any) {
+function WeekView({ tasks, visibleDays, anchor, setAnchor, period, setPeriod, layout, setLayout, setSelectedDate, setView, setEditing, setDraggedId, moveTask, saveInlineDay, reloadTasks }: any) {
   const today = iso(new Date());
   const currentMonth = anchor.getMonth();
   const [dragTargetDate, setDragTargetDate] = useState<string | null>(null);
@@ -1150,15 +1148,114 @@ function WeekView({ tasks, visibleDays, anchor, setAnchor, period, setPeriod, la
           </div>
         </section>
       ) : (
-        <ScheduleTable days={visibleDays} rowsFor={rowsFor} setEditing={setEditing} setEditingDay={setEditingDay} setDraggedId={setDraggedId} moveTask={moveTask} />
+        <ScheduleTable days={visibleDays} tasks={tasks} saveInlineDay={saveInlineDay} reloadTasks={reloadTasks} />
       )}
     </>
   );
 }
 
-function ScheduleTable({ days, rowsFor, setEditing, setEditingDay, setDraggedId, moveTask }: any) {
+const numberedCell = (values: string[]) => values.map((value, index) => `${index + 1}. ${value}`).join("\n");
+const splitNumberedCell = (value: string) => {
+  const entries: Array<{ number: number; text: string[] }> = [];
+  String(value || "").replace(/\r\n/g, "\n").split("\n").forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) return;
+    const match = line.match(/^\s*(\d{1,3})\s*[.,)]\s*(.*)$/);
+    if (match) entries.push({ number: Number(match[1]), text: [match[2].trim()] });
+    else if (entries.length) entries[entries.length - 1].text.push(line);
+    else entries.push({ number: 1, text: [line] });
+  });
+  return entries.map((entry) => ({ number: entry.number, text: entry.text.join("\n").trim() }));
+};
+const isCompletionNote = (value: string) => ["hoàn thành", "đã hoàn thành", "xong"].includes(value.trim().toLocaleLowerCase("vi-VN"));
+
+function ScheduleTable({ days, tasks, saveInlineDay, reloadTasks }: { days: Date[]; tasks: WorkTask[]; saveInlineDay: (date: string, items: Array<{ id?: number; title: string; progressNote: string; status: WorkStatus }>, deleteIds: number[]) => Promise<unknown>; reloadTasks: () => Promise<void> }) {
+  const rowsFor = (date: string) => tasks.filter((task) => task.date === date).sort((a, b) => a.dailyOrder - b.dailyOrder);
+  const makeDrafts = () => Object.fromEntries(days.map((day) => {
+    const rows = rowsFor(iso(day));
+    return [iso(day), {
+      content: numberedCell(rows.map((task) => task.title)),
+      selfAssessment: numberedCell(rows.map((task) => displayedSelfAssessment(task))),
+    }];
+  })) as Record<string, InlineDayDraft>;
+  const dayKey = days.map(iso).join("|");
+  const [drafts, setDrafts] = useState<Record<string, InlineDayDraft>>(makeDrafts);
+  const [dirtyDates, setDirtyDates] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDrafts(makeDrafts());
+    setDirtyDates([]);
+  }, [tasks, dayKey]);
+
+  const updateCell = (date: string, patch: Partial<InlineDayDraft>) => {
+    setDrafts((current) => ({ ...current, [date]: { ...(current[date] || { content: "", selfAssessment: "" }), ...patch } }));
+    setDirtyDates((current) => current.includes(date) ? current : [...current, date]);
+  };
+  const completeTask = (date: string, taskIndex: number) => {
+    const draft = drafts[date] || { content: "", selfAssessment: "" };
+    const taskCount = splitNumberedCell(draft.content).filter((entry) => entry.text).length;
+    const existingNotes = splitNumberedCell(draft.selfAssessment);
+    const notes = Array.from({ length: taskCount }, (_, index) => existingNotes.find((entry) => entry.number === index + 1)?.text || existingNotes[index]?.text || "");
+    notes[taskIndex] = isCompletionNote(notes[taskIndex] || "") ? "" : "Hoàn thành";
+    updateCell(date, { selfAssessment: numberedCell(notes) });
+  };
+  const removeTask = (date: string, taskIndex: number) => {
+    const draft = drafts[date] || { content: "", selfAssessment: "" };
+    const contentEntries = splitNumberedCell(draft.content);
+    const targetNumber = contentEntries[taskIndex]?.number ?? taskIndex + 1;
+    const nextContent = contentEntries.filter((_, index) => index !== taskIndex).map((entry) => `${entry.number}. ${entry.text}`).join("\n");
+    const noteEntries = splitNumberedCell(draft.selfAssessment);
+    const numberedNoteIndex = noteEntries.findIndex((entry) => entry.number === targetNumber);
+    const noteIndex = numberedNoteIndex >= 0 ? numberedNoteIndex : taskIndex;
+    const nextNotes = noteEntries.filter((_, index) => index !== noteIndex).map((entry) => `${entry.number}. ${entry.text}`).join("\n");
+    updateCell(date, { content: nextContent, selfAssessment: nextNotes });
+  };
+  const saveTable = async () => {
+    if (saving || !dirtyDates.length) return;
+    setSaving(true);
+    try {
+      for (const date of dirtyDates) {
+        const original = rowsFor(date);
+        const contentEntries = splitNumberedCell(drafts[date]?.content || "").filter((entry) => entry.text);
+        const noteEntries = splitNumberedCell(drafts[date]?.selfAssessment || "");
+        if (contentEntries.length > 100) throw new Error(`Ngày ${fullDate(date)} vượt quá 100 nhiệm vụ.`);
+        const usedIds = new Set<number>();
+        const items = contentEntries.map((entry, index) => {
+          let current = original.find((task) => !usedIds.has(task.id) && task.title.trim() === entry.text.trim());
+          if (!current) current = original[entry.number - 1];
+          if (current && usedIds.has(current.id)) current = undefined;
+          if (!current) current = original.find((task, taskIndex) => taskIndex >= index && !usedIds.has(task.id));
+          if (current) usedIds.add(current.id);
+          const note = noteEntries.find((item) => item.number === entry.number)?.text || noteEntries[index]?.text || "";
+          return {
+            ...(current ? { id: current.id } : {}),
+            title: entry.text,
+            progressNote: note,
+            status: current?.status === "reviewed" ? "reviewed" : isCompletionNote(note) ? "completed" : current?.status || "todo",
+          } as { id?: number; title: string; progressNote: string; status: WorkStatus };
+        });
+        const removed = original.filter((task) => !usedIds.has(task.id));
+        const blocked = removed.find((task) => !task.canDelete);
+        if (blocked) throw new Error(`Bạn không có quyền xóa nhiệm vụ số ${blocked.dailyOrder} của ngày ${fullDate(date)}.`);
+        await saveInlineDay(date, items, removed.map((task) => task.id));
+      }
+      await reloadTasks();
+      setDirtyDates([]);
+    } catch (cause: any) {
+      void appDialog.alert(cause.message || "Không thể lưu bảng lịch tuần.", { title: "Không thể lưu bảng", tone: "danger" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <section className="overflow-x-auto rounded-2xl border border-slate-300 bg-white shadow-sm">
+    <section className="overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-blue-50/70 px-4 py-3">
+        <div><b className="block text-sm text-blue-900">Bảng chỉnh sửa trực tiếp</b><span className="text-xs text-slate-600">Mỗi ngày là một hàng; mỗi nhiệm vụ bắt đầu bằng số thứ tự và có thể xuống nhiều dòng trong cùng một ô.</span></div>
+        <button type="button" disabled={!dirtyDates.length || saving} onClick={() => void saveTable()} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white disabled:bg-slate-200 disabled:text-slate-400">{saving ? "Đang lưu bảng..." : `Lưu bảng${dirtyDates.length ? ` (${dirtyDates.length} ngày)` : ""}`}</button>
+      </div>
+      <div className="overflow-x-auto">
       <table className="min-w-[1220px] w-full border-collapse text-sm">
         <thead className="bg-emerald-50 text-[#001e40]">
           <tr>
@@ -1172,77 +1269,31 @@ function ScheduleTable({ days, rowsFor, setEditing, setEditingDay, setDraggedId,
         </thead>
         <tbody>
           {days.map((day: Date) => {
-            const dayIso = iso(day),
-              tasks = rowsFor(day),
-              allCompleted = tasks.length > 0 && tasks.every((task: WorkTask) => task.status === "completed" || task.status === "reviewed"),
-              allReviewed = tasks.length > 0 && tasks.every((task: WorkTask) => task.status === "reviewed");
+            const date = iso(day);
+            const rows = rowsFor(date);
+            const draft = drafts[date] || { content: "", selfAssessment: "" };
+            const draftTaskCount = splitNumberedCell(draft.content).filter((entry) => entry.text).length;
+            const leaderAssessment = numberedCell(rows.map((task) => task.reviewPercent === null ? "Chưa đánh giá" : `${task.reviewPercent}%${task.reviewNote ? ` · ${task.reviewNote}` : ""}`));
             return (
-              <tr key={dayIso} onDragOver={(event) => event.preventDefault()} onDrop={() => void moveTask({ date: dayIso })} className="align-top hover:bg-blue-50/30">
-                <td className="border-b border-r border-slate-200 px-3 py-3 font-bold">{weekday(dayIso)}</td>
-                <td className="border-b border-r border-slate-200 px-3 py-3">{fullDate(dayIso)}</td>
-                <td className="border-b border-r border-slate-200 px-3 py-3 text-center font-semibold">{weekNumber(dayIso)}</td>
-                <td
-                  className="relative cursor-pointer border-b border-r border-slate-200 px-3 py-3 pr-12 outline-none transition hover:bg-blue-50/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setEditingDay({ date: dayIso, tasks })}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setEditingDay({ date: dayIso, tasks });
-                    }
-                  }}
-                  aria-label={`Chỉnh sửa lịch ngày ${fullDate(dayIso)}`}
-                >
-                  <button type="button" onClick={(event) => { event.stopPropagation(); setEditingDay({ date: dayIso, tasks }); }} className="absolute right-2 top-2 rounded-lg p-2 text-blue-600 hover:bg-blue-100" aria-label={`Chỉnh sửa lịch ngày ${fullDate(dayIso)}`} title="Chỉnh sửa lịch trong ngày">
-                    <Pencil className="h-4 w-4" />
-                  </button>
-                  {tasks.length ? (
-                    <ol className="space-y-2">
-                      {tasks.map((task: WorkTask, index: number) => (
-                        <li key={task.id}>
-                          <button draggable={task.canEdit && task.status !== "reviewed"} onDragStart={() => setDraggedId(task.id)} onClick={(event) => { event.stopPropagation(); setEditing(draftFromTask(task)); }} className="text-left font-semibold leading-5 text-slate-800 hover:text-blue-700">
-                            <span className="mr-1 text-blue-600">{index + 1}.</span>
-                            {task.displayTitle}
-                          </button>
-                        </li>
-                      ))}
-                    </ol>
-                  ) : (
-                    <span className="text-slate-300">—</span>
-                  )}
+              <tr key={date} className="align-top hover:bg-blue-50/20">
+                <td className="border-b border-r border-slate-200 px-3 py-3 font-bold">{weekday(date)}</td>
+                <td className="border-b border-r border-slate-200 px-3 py-3">{fullDate(date)}</td>
+                <td className="border-b border-r border-slate-200 px-3 py-3 text-center font-semibold">{weekNumber(date)}</td>
+                <td className="border-b border-r border-slate-200 p-2">
+                  <textarea rows={Math.max(3, draft.content.split("\n").length)} value={draft.content} onChange={(event) => updateCell(date, { content: event.target.value })} placeholder={'1. Nhập nội dung công việc\n2. Nhiệm vụ tiếp theo'} className="min-h-24 w-full resize-y rounded-lg border border-transparent bg-transparent px-2 py-1.5 font-medium leading-5 outline-none hover:border-blue-200 focus:border-blue-400 focus:bg-white" />
+                  {!!rows.length && <div className="mt-2 flex flex-wrap gap-1.5">{rows.map((task, index) => task.canDelete ? <button key={task.id} type="button" onClick={() => removeTask(date, index)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-bold text-slate-400 hover:bg-rose-50 hover:text-rose-600" title={`Xóa nhiệm vụ ${index + 1} khi lưu bảng`}><Trash2 className="h-3 w-3" /> Xóa {index + 1}</button> : null)}</div>}
                 </td>
-                <td className="border-b border-r border-slate-200 px-3 py-3">
-                  {allCompleted ? (
-                    <span className="font-semibold text-emerald-700">Hoàn thành</span>
-                  ) : tasks.map((task: WorkTask, index: number) => (
-                      <div key={task.id} className="mb-2 last:mb-0">
-                        <b>{index + 1}.</b>{" "}
-                        {displayedSelfAssessment(task) || <span className="text-slate-300">—</span>}
-                      </div>
-                    ))}
+                <td className="border-b border-r border-slate-200 p-2">
+                  <textarea rows={Math.max(3, draft.selfAssessment.split("\n").length)} value={draft.selfAssessment} onChange={(event) => updateCell(date, { selfAssessment: event.target.value })} placeholder={'1. Ghi chú tiến trình hiện tại'} className="min-h-24 w-full resize-y rounded-lg border border-transparent bg-transparent px-2 py-1.5 text-xs leading-5 outline-none hover:border-blue-200 focus:border-blue-400 focus:bg-white" />
+                  {draftTaskCount > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{Array.from({ length: draftTaskCount }, (_, index) => <button key={index} type="button" onClick={() => completeTask(date, index)} className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100"><CheckCircle2 className="h-3 w-3" /> {index + 1}. Hoàn thành</button>)}</div>}
                 </td>
-                <td className="border-b border-slate-200 px-3 py-3">
-                  {allReviewed ? (
-                    <span className="font-semibold text-emerald-700">Hoàn thành</span>
-                  ) : tasks.map((task: WorkTask, index: number) => (
-                      <div key={task.id} className="mb-2 last:mb-0">
-                        <b>{index + 1}.</b>{" "}
-                        {task.reviewPercent === null ? (
-                          <span className="text-slate-300">Chưa đánh giá</span>
-                        ) : (
-                          <span>
-                            {task.reviewPercent}%{task.reviewNote ? ` · ${task.reviewNote}` : ""}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                </td>
+                <td className="border-b border-slate-200 p-2"><textarea readOnly rows={Math.max(3, leaderAssessment.split("\n").length)} value={leaderAssessment} placeholder="Chưa đánh giá" className="min-h-24 w-full resize-y rounded-lg border border-transparent bg-transparent px-2 py-1.5 text-xs leading-5 text-slate-600 outline-none" /></td>
               </tr>
             );
           })}
         </tbody>
       </table>
+      </div>
     </section>
   );
 }
@@ -1472,7 +1523,7 @@ function BulkPeopleDialog({ mode, staff, onClose, onApply }: { mode: "supporters
   );
 }
 
-function TaskDialog({ draft, setDraft, staff, userEmail, saveTask, saveProgressNote, deleteTasks, review }: any) {
+function TaskDialog({ draft, setDraft, staff, userEmail, saveTask, saving, saveProgressNote, deleteTasks, review }: any) {
   const lockedPeople = !draft.canEdit || (!!draft.id && draft.canReview);
   return (
     <div
@@ -1597,8 +1648,8 @@ function TaskDialog({ draft, setDraft, staff, userEmail, saveTask, saveProgressN
             Đóng
           </button>
           {draft.canEdit && !draft.canReview && (
-            <button type="submit" className="rounded-xl bg-[#0055da] px-5 py-2.5 text-sm font-bold text-white">
-              {draft.id ? "Lưu thay đổi" : "Thêm công việc"}
+            <button type="submit" disabled={saving} className="rounded-xl bg-[#0055da] px-5 py-2.5 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60">
+              {saving ? "Đang lưu..." : draft.id ? "Lưu thay đổi" : "Thêm công việc"}
             </button>
           )}
         </div>

@@ -275,10 +275,19 @@ def work_day_edit(request):
     """Update the table representation of one day without coupling notes to status."""
     work_date = parse_date(str(request.data.get("date") or ""))
     rows = request.data.get("items")
+    raw_delete_ids = request.data.get("deleteIds", [])
     if not work_date:
         return Response({"error": "Ngày làm việc không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
-    if not isinstance(rows, list) or not rows or len(rows) > 100:
-        return Response({"error": "Vui lòng nhập từ 1 đến 100 nhiệm vụ."}, status=status.HTTP_400_BAD_REQUEST)
+    if not isinstance(rows, list) or len(rows) > 100:
+        return Response({"error": "Danh sách nhiệm vụ không hợp lệ hoặc vượt quá 100 nhiệm vụ."}, status=status.HTTP_400_BAD_REQUEST)
+    if not isinstance(raw_delete_ids, list):
+        return Response({"error": "Danh sách nhiệm vụ cần xóa không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        delete_ids = list(dict.fromkeys(int(value) for value in raw_delete_ids))
+    except (TypeError, ValueError):
+        return Response({"error": "Mã nhiệm vụ cần xóa không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+    if not rows and not delete_ids:
+        return Response({"error": "Không có thay đổi để lưu."}, status=status.HTTP_400_BAD_REQUEST)
 
     existing_ids = []
     normalized_rows = []
@@ -288,7 +297,14 @@ def work_day_edit(request):
         title = str(row.get("title") or "").strip()
         if not title:
             return Response({"error": "Nội dung nhiệm vụ không được để trống."}, status=status.HTTP_400_BAD_REQUEST)
-        normalized = {"title": title[:1000], "progress_note": str(row.get("progressNote") or "").strip()[:1000]}
+        row_status = str(row.get("status") or "").strip().lower() if "status" in row else None
+        if row_status is not None and row_status not in VALID_STATUSES:
+            return Response({"error": "Trạng thái nhiệm vụ không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+        normalized = {
+            "title": title[:1000],
+            "progress_note": str(row.get("progressNote") or "").strip()[:1000],
+            "status": row_status,
+        }
         if row.get("id") is not None:
             try:
                 normalized["id"] = int(row["id"])
@@ -298,9 +314,12 @@ def work_day_edit(request):
         normalized_rows.append(normalized)
     if len(existing_ids) != len(set(existing_ids)):
         return Response({"error": "Danh sách có nhiệm vụ bị trùng."}, status=status.HTTP_400_BAD_REQUEST)
+    if set(existing_ids) & set(delete_ids):
+        return Response({"error": "Một nhiệm vụ không thể vừa cập nhật vừa xóa."}, status=status.HTTP_400_BAD_REQUEST)
 
-    visible = {item.id: item for item in _visible_items(request.user, request.user_role).filter(id__in=existing_ids)}
-    if len(visible) != len(existing_ids):
+    requested_ids = existing_ids + delete_ids
+    visible = {item.id: item for item in _visible_items(request.user, request.user_role).filter(id__in=requested_ids)}
+    if len(visible) != len(requested_ids):
         return Response({"error": "Có nhiệm vụ không tồn tại hoặc bạn không được truy cập."}, status=status.HTTP_403_FORBIDDEN)
     if any(item.work_date != work_date for item in visible.values()):
         return Response({"error": "Có nhiệm vụ không thuộc ngày đang chỉnh sửa."}, status=status.HTTP_400_BAD_REQUEST)
@@ -308,20 +327,28 @@ def work_day_edit(request):
         if "id" not in row:
             continue
         item = visible[row["id"]]
-        if row["title"] != item.title and not _payload(item, request.user, request.user_role)["canEdit"]:
-            return Response({"error": f"Bạn không có quyền sửa nội dung nhiệm vụ số {item.daily_order}."}, status=status.HTTP_403_FORBIDDEN)
+        can_edit = _payload(item, request.user, request.user_role)["canEdit"]
+        status_changed = row["status"] is not None and row["status"] != item.status
+        if (row["title"] != item.title or status_changed) and not can_edit:
+            return Response({"error": f"Bạn không có quyền sửa nội dung hoặc trạng thái nhiệm vụ số {item.daily_order}."}, status=status.HTTP_403_FORBIDDEN)
+    for item_id in delete_ids:
+        item = visible[item_id]
+        if not _payload(item, request.user, request.user_role)["canDelete"]:
+            return Response({"error": f"Bạn không có quyền xóa nhiệm vụ số {item.daily_order}."}, status=status.HTTP_403_FORBIDDEN)
 
     updated_ids = []
     with transaction.atomic():
         for row in normalized_rows:
             if "id" not in row:
+                if row["status"] == WorkItem.STATUS_REVIEWED:
+                    return Response({"error": "Nhiệm vụ mới không thể ở trạng thái đã review."}, status=status.HTTP_400_BAD_REQUEST)
                 item = WorkItem.objects.create(
                     creator=request.user,
                     executor=request.user,
                     title=row["title"],
                     progress_note=row["progress_note"],
                     work_date=work_date,
-                    status=WorkItem.STATUS_TODO,
+                    status=row["status"] or WorkItem.STATUS_TODO,
                     priority="medium",
                     label="Công việc",
                     daily_order=_next_daily_order(request.user, work_date),
@@ -333,13 +360,24 @@ def work_day_edit(request):
                 if row["title"] != item.title:
                     item.title = row["title"]
                     update_fields.append("title")
+                if row["status"] is not None and row["status"] != item.status:
+                    item.status = row["status"]
+                    update_fields.append("status")
                 item.save(update_fields=update_fields)
                 sync_training_from_work_item(item)
             updated_ids.append(item.id)
+        affected_groups = set()
+        for item_id in delete_ids:
+            item = visible[item_id]
+            affected_groups.add((item.executor_id, item.work_date))
+            delete_training_for_work_item(item)
+            item.delete()
+        for executor_id, date in affected_groups:
+            _normalize_daily_order(executor_id, date)
 
     refreshed = list(_visible_items(request.user, request.user_role).filter(id__in=updated_ids).order_by("daily_order", "created_at"))
     return Response({
-        "message": "Đã cập nhật lịch trong ngày. Trạng thái công việc được giữ nguyên.",
+        "message": "Đã cập nhật bảng lịch trong ngày.",
         "items": [_payload(item, request.user, request.user_role) for item in refreshed],
     })
 

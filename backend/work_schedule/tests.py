@@ -52,7 +52,7 @@ class WorkScheduleSheetParserTests(TestCase):
             "1. Nhiệm vụ đầu\nphần mô tả xuống dòng\n2. Nhiệm vụ hai\n2. 17h30: Tập huấn GCE1"
         )
         self.assertEqual([task.title for task in tasks], [
-            "Nhiệm vụ đầu phần mô tả xuống dòng",
+            "Nhiệm vụ đầu\nphần mô tả xuống dòng",
             "Nhiệm vụ hai",
             "Tập huấn GCE1",
         ])
@@ -216,6 +216,37 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(new_row.status, "todo")
         self.assertEqual(new_row.executor, self.executor)
         self.assertEqual(new_row.daily_order, 3)
+
+    def test_day_table_edit_can_confirm_completion_directly(self):
+        item = self.create_item()
+        response = self.request(self.executor_token, "post", "/api/work-schedule/day", {
+            "date": item["date"],
+            "items": [{
+                "id": item["id"],
+                "title": item["title"],
+                "progressNote": "Hoàn thành",
+                "status": "completed",
+            }],
+        })
+        self.assertEqual(response.status_code, 200, response.data)
+        updated = WorkItem.objects.get(pk=item["id"])
+        self.assertEqual(updated.status, "completed")
+        self.assertEqual(updated.progress_note, "Hoàn thành")
+
+    def test_day_table_edit_can_delete_a_removed_numbered_task(self):
+        first = self.create_item()
+        second = self.request(self.executor_token, "post", "/api/work-schedule/items", {
+            "title": "Nhiệm vụ cần xóa", "date": first["date"],
+            "executorEmail": self.executor.email, "supporterEmails": [], "managerEmails": [],
+        }).json()["item"]
+        response = self.request(self.executor_token, "post", "/api/work-schedule/day", {
+            "date": first["date"],
+            "items": [{"id": first["id"], "title": first["title"], "progressNote": ""}],
+            "deleteIds": [second["id"]],
+        })
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertFalse(WorkItem.objects.filter(pk=second["id"]).exists())
+        self.assertEqual(WorkItem.objects.get(pk=first["id"]).daily_order, 1)
 
 
     def test_batch_date_and_people_assignment_are_supported(self):

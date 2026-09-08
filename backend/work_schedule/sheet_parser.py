@@ -4,7 +4,7 @@ from datetime import datetime, time, timedelta
 
 
 NUMBERED_LINE = re.compile(r"^\s*(\d{1,3})\s*[.,)]\s*(.*?)(?:\s*)$")
-LEADING_TIME = re.compile(r"^\s*(\d{1,2})(?:[:hH])(\d{2})\s*:?[ ]*(.+)$")
+LEADING_TIME = re.compile(r"^\s*(\d{1,2})(?:[:hH])(\d{2})\s*:?[ ]*(.+)$", re.DOTALL)
 
 
 @dataclass(frozen=True)
@@ -32,7 +32,7 @@ def split_numbered_tasks(value: str) -> list[tuple[int, str]]:
             entries[-1][1].append(line)
         else:
             entries.append((1, [line]))
-    return [(number, " ".join(parts).strip()) for number, parts in entries if " ".join(parts).strip()]
+    return [(number, "\n".join(parts).strip()) for number, parts in entries if "\n".join(parts).strip()]
 
 
 def parse_sheet_tasks(value: str) -> list[ParsedSheetTask]:
@@ -66,7 +66,7 @@ def assessment_notes(value: str, task_count: int) -> list[str]:
         notes = [""] * task_count
         fallback = 0
         for number, parts in entries:
-            note = " ".join(parts).strip()
+            note = "\n".join(parts).strip()
             if 1 <= number <= task_count and not notes[number - 1]:
                 notes[number - 1] = note
                 continue
