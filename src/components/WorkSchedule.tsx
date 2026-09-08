@@ -1186,7 +1186,8 @@ function ScheduleTable({ days, rowsFor, setEditing, setEditingDay, setDraggedId,
         <tbody>
           {days.map((day: Date) => {
             const dayIso = iso(day),
-              tasks = rowsFor(day);
+              tasks = rowsFor(day),
+              allCompleted = tasks.length > 0 && tasks.every((task: WorkTask) => task.status === "completed" || task.status === "reviewed");
             return (
               <tr key={dayIso} onDragOver={(event) => event.preventDefault()} onDrop={() => void moveTask({ date: dayIso })} className="align-top hover:bg-blue-50/30">
                 <td className="border-b border-r border-slate-200 px-3 py-3 font-bold">{weekday(dayIso)}</td>
@@ -1224,12 +1225,14 @@ function ScheduleTable({ days, rowsFor, setEditing, setEditingDay, setDraggedId,
                   )}
                 </td>
                 <td className="border-b border-r border-slate-200 px-3 py-3">
-                  {tasks.map((task: WorkTask, index: number) => (
-                    <div key={task.id} className="mb-2 last:mb-0">
-                      <b>{index + 1}.</b>{" "}
-                      {task.progressNote || selfAssessment[task.status]}
-                    </div>
-                  ))}
+                  {allCompleted ? (
+                    <span className="font-semibold text-emerald-700">Hoàn thành</span>
+                  ) : tasks.map((task: WorkTask, index: number) => (
+                      <div key={task.id} className="mb-2 last:mb-0">
+                        <b>{index + 1}.</b>{" "}
+                        {task.progressNote || selfAssessment[task.status]}
+                      </div>
+                    ))}
                 </td>
                 <td className="border-b border-slate-200 px-3 py-3">
                   {tasks.map((task: WorkTask, index: number) => (

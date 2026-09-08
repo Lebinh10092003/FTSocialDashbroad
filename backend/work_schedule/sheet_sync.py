@@ -90,14 +90,18 @@ def _group_values(items):
         f"{item.start_time.strftime('%H:%M')}: {item.title}" if item.start_time else item.title
         for item in items
     ])
-    self_notes = "\n".join(
+    all_completed = bool(items) and all(
+        item.status in {WorkItem.STATUS_COMPLETED, WorkItem.STATUS_REVIEWED}
+        for item in items
+    )
+    self_notes = "Hoàn thành" if all_completed else "\n".join(
         f"{index}. {item.progress_note or 'Hoàn thành'}"
         for index, item in enumerate(items, 1)
         if item.progress_note or item.status in {WorkItem.STATUS_COMPLETED, WorkItem.STATUS_REVIEWED}
     )
     leader_notes = "\n".join(
         f"{index}. " +
-        (f"{item.review_percent}%" if item.review_percent is not None else "Đã review") +
+        (f"{item.review_percent}%" if item.review_percent is not None else "Hoàn thành") +
         (f" · {item.review_note}" if item.review_note else "")
         for index, item in enumerate(items, 1)
         if item.status == WorkItem.STATUS_REVIEWED

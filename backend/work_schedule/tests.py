@@ -18,12 +18,12 @@ class WorkScheduleSheetParserTests(TestCase):
 
     def test_sheet_output_omits_open_statuses_and_empty_leader_reviews(self):
         class Item:
-            def __init__(self, status, note=""):
+            def __init__(self, status, note="", review_percent=None):
                 self.title = status
                 self.start_time = None
                 self.status = status
                 self.progress_note = note
-                self.review_percent = None
+                self.review_percent = review_percent
                 self.review_note = ""
                 self.sync_uid = deterministic_sheet_uid(1094, 1 if status == "todo" else 2)
 
@@ -32,6 +32,12 @@ class WorkScheduleSheetParserTests(TestCase):
         ])
         self.assertEqual(self_notes, "3. Hoàn thành\n4. Đang chờ khách phản hồi")
         self.assertEqual(leader_notes, "")
+
+        _, completed_notes, leader_notes, _ = _group_values([
+            Item("completed"), Item("reviewed")
+        ])
+        self.assertEqual(completed_notes, "Hoàn thành")
+        self.assertEqual(leader_notes, "2. Hoàn thành")
 
     def test_numbered_cell_keeps_wrapped_lines_and_accepts_duplicate_numbers(self):
         tasks = parse_sheet_tasks(
