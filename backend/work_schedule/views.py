@@ -49,11 +49,16 @@ def _profile_payload(profile):
     return {"email": profile.email, "name": profile.name or profile.email.split("@", 1)[0]}
 
 
-def _visible_items(user):
+def _related_items(user):
     rows = WorkItem.objects.select_related("creator", "executor", "reviewed_by").prefetch_related("supporters", "managers")
     return rows.filter(
         Q(creator=user) | Q(executor=user) | Q(supporters=user) | Q(managers=user)
     ).distinct()
+
+
+def _visible_items(user, role=None):
+    rows = WorkItem.objects.select_related("creator", "executor", "reviewed_by").prefetch_related("supporters", "managers")
+    return rows if role == "ADMIN" else _related_items(user)
 
 
 def _viewer_relation(item, user):
@@ -70,7 +75,8 @@ def _viewer_relation(item, user):
 
 def _can_manage(item, user, role):
     return (
-        item.creator_id == user.email
+        role == "ADMIN"
+        or item.creator_id == user.email
         or any(person.email == user.email for person in item.managers.all())
     )
 
@@ -93,15 +99,15 @@ def _normalize_daily_order(executor_id, work_date):
 
 def _payload(item, user, role):
     relation = _viewer_relation(item, user)
-    can_view_review = relation in {"manager", "creator"}
+    can_view_review = role == "ADMIN" or relation in {"manager", "creator"}
     display_status = item.status
     title_prefix = ""
-    if relation in {"manager", "creator"} and item.status == WorkItem.STATUS_COMPLETED and not item.reviewed_at:
+    if relation == "manager" and item.status == WorkItem.STATUS_COMPLETED and not item.reviewed_at:
         display_status = WorkItem.STATUS_TODO
         title_prefix = "Kiểm tra kết quả công việc: "
     elif relation == "supporter":
         title_prefix = "Hỗ trợ/theo dõi: "
-    elif relation in {"manager", "creator"}:
+    elif relation == "manager":
         title_prefix = "Quản lý: "
     if relation == "executor" and item.needs_revision and item.status != WorkItem.STATUS_REVIEWED:
         title_prefix = "Bổ sung: "
@@ -134,7 +140,7 @@ def _payload(item, user, role):
         "reviewedBy": _profile_payload(item.reviewed_by) if can_view_review and item.reviewed_by else None,
         "reviewedAt": item.reviewed_at.isoformat() if can_view_review and item.reviewed_at else None,
         "canEdit": (can_manage or relation == "executor") and not item.reviewed_at,
-        "canDelete": item.creator_id == user.email or (relation == "manager"),
+        "canDelete": role == "ADMIN" or item.creator_id == user.email or relation == "manager",
         "canReview": can_view_review and can_manage and item.status == WorkItem.STATUS_COMPLETED and not item.reviewed_at,
         "canManagePeople": can_manage or relation == "executor",
         "createdAt": item.created_at.isoformat(),
@@ -226,10 +232,10 @@ def work_items(request):
         error = _apply_data(request, item, creating=True)
         if error:
             return error
-        item = _visible_items(request.user).get(pk=item.pk)
+        item = _visible_items(request.user, request.user_role).get(pk=item.pk)
         return Response({"message": "Đã thêm công việc.", "item": _payload(item, request.user, request.user_role)}, status=status.HTTP_201_CREATED)
 
-    rows = _visible_items(request.user)
+    rows = _related_items(request.user)
     start = parse_date(str(request.query_params.get("start") or ""))
     end = parse_date(str(request.query_params.get("end") or ""))
     if start:
@@ -243,7 +249,9 @@ def work_items(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def work_team(request):
-    rows = UserProfile.objects.filter(employment_status="ACTIVE", manager=request.user)
+    rows = UserProfile.objects.filter(employment_status="ACTIVE")
+    if request.user_role != "ADMIN":
+        rows = rows.filter(manager=request.user)
     rows = rows.select_related("department", "job_title").order_by("name", "email")
     member_ids = list(rows.values_list("email", flat=True))
     team_items = WorkItem.objects.select_related("creator", "executor", "reviewed_by").prefetch_related("supporters", "managers").filter(
@@ -291,7 +299,7 @@ def work_day_edit(request):
     if len(existing_ids) != len(set(existing_ids)):
         return Response({"error": "Danh sách có nhiệm vụ bị trùng."}, status=status.HTTP_400_BAD_REQUEST)
 
-    visible = {item.id: item for item in _visible_items(request.user).filter(id__in=existing_ids)}
+    visible = {item.id: item for item in _visible_items(request.user, request.user_role).filter(id__in=existing_ids)}
     if len(visible) != len(existing_ids):
         return Response({"error": "Có nhiệm vụ không tồn tại hoặc bạn không được truy cập."}, status=status.HTTP_403_FORBIDDEN)
     if any(item.work_date != work_date for item in visible.values()):
@@ -329,7 +337,7 @@ def work_day_edit(request):
                 sync_training_from_work_item(item)
             updated_ids.append(item.id)
 
-    refreshed = list(_visible_items(request.user).filter(id__in=updated_ids).order_by("daily_order", "created_at"))
+    refreshed = list(_visible_items(request.user, request.user_role).filter(id__in=updated_ids).order_by("daily_order", "created_at"))
     return Response({
         "message": "Đã cập nhật lịch trong ngày. Trạng thái công việc được giữ nguyên.",
         "items": [_payload(item, request.user, request.user_role) for item in refreshed],
@@ -339,7 +347,7 @@ def work_day_edit(request):
 @api_view(["GET", "PATCH", "DELETE"])
 @permission_classes([IsAuthenticated])
 def work_item_detail(request, item_id):
-    item = _visible_items(request.user).filter(pk=item_id).first()
+    item = _visible_items(request.user, request.user_role).filter(pk=item_id).first()
     if not item:
         return Response({"error": "Không tìm thấy công việc."}, status=status.HTTP_404_NOT_FOUND)
     payload = _payload(item, request.user, request.user_role)
@@ -366,7 +374,7 @@ def work_item_detail(request, item_id):
     )
     if error:
         return error
-    item = _visible_items(request.user).get(pk=item.pk)
+    item = _visible_items(request.user, request.user_role).get(pk=item.pk)
     return Response({"message": "Đã cập nhật công việc.", "item": _payload(item, request.user, request.user_role)})
 
 
@@ -420,17 +428,17 @@ def _review(item, request, action):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def work_item_review(request, item_id):
-    item = _visible_items(request.user).filter(pk=item_id).first()
+    item = _visible_items(request.user, request.user_role).filter(pk=item_id).first()
     if not item:
         return Response({"error": "Không tìm thấy công việc."}, status=status.HTTP_404_NOT_FOUND)
     with transaction.atomic():
         result = _review(item, request, str(request.data.get("action") or ""))
         if isinstance(result, Response):
             return result
-    item = _visible_items(request.user).get(pk=item.pk)
+    item = _visible_items(request.user, request.user_role).get(pk=item.pk)
     response = {"message": "Đã cập nhật kết quả review.", "item": _payload(item, request.user, request.user_role)}
     if result and result.pk != item.pk:
-        response["revisionItem"] = _payload(_visible_items(request.user).get(pk=result.pk), request.user, request.user_role)
+        response["revisionItem"] = _payload(_visible_items(request.user, request.user_role).get(pk=result.pk), request.user, request.user_role)
     return Response(response)
 
 
@@ -444,7 +452,7 @@ def work_items_batch(request):
         return Response({"error": "Danh sách công việc không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
     if not ids or len(ids) > 200:
         return Response({"error": "Vui lòng chọn từ 1 đến 200 công việc."}, status=status.HTTP_400_BAD_REQUEST)
-    items = list(_visible_items(request.user).filter(id__in=ids))
+    items = list(_visible_items(request.user, request.user_role).filter(id__in=ids))
     if len(items) != len(ids):
         return Response({"error": "Có công việc không tồn tại hoặc bạn không được truy cập."}, status=status.HTTP_403_FORBIDDEN)
     action = str(request.data.get("action") or "")

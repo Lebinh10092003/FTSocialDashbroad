@@ -100,8 +100,10 @@ class WorkScheduleApiTests(TestCase):
         item = self.create_item()
         executor = self.request(self.executor_token, "get", "/api/work-schedule/items").json()["items"][0]
         supporter = self.request(self.supporter_token, "get", "/api/work-schedule/items").json()["items"][0]
+        manager = self.request(self.manager_token, "get", "/api/work-schedule/items").json()["items"][0]
         self.assertEqual(executor["displayTitle"], "Hoàn thiện báo cáo")
         self.assertEqual(supporter["displayTitle"], "Hỗ trợ/theo dõi: Hoàn thiện báo cáo")
+        self.assertEqual(manager["displayTitle"], "Quản lý: Hoàn thiện báo cáo")
         self.assertEqual(item["executor"]["email"], self.executor.email)
 
     def test_manager_revision_keeps_completed_item_and_creates_next_day_item(self):
@@ -285,6 +287,7 @@ class WorkScheduleApiTests(TestCase):
         team_rows = self.request(self.manager_token, "get", "/api/work-schedule/team").json()["items"]
         row = next(item for item in team_rows if item["id"] == response.json()["item"]["id"])
         self.assertEqual(row["viewerRelation"], "team_viewer")
+        self.assertEqual(row["displayTitle"], "Việc của nhân viên")
         self.assertFalse(row["canDelete"])
         self.assertFalse(row["canReview"])
 
@@ -297,7 +300,7 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual([member["email"] for member in response.json()["members"]], [self.executor.email])
         self.assertEqual(response.json()["members"][0]["employeeCode"], "FT-09")
 
-    def test_admin_has_no_automatic_access_to_other_employees_schedules(self):
+    def test_admin_can_manage_every_employee_without_adding_manager_title(self):
         admin, admin_token = self.profile("admin@example.com", "ADMIN")
         item = self.request(self.executor_token, "post", "/api/work-schedule/items", {
             "title": "Lịch riêng của nhân viên", "date": "2026-09-18",
@@ -305,11 +308,34 @@ class WorkScheduleApiTests(TestCase):
         }).json()["item"]
         admin_items = self.request(admin_token, "get", "/api/work-schedule/items").json()["items"]
         self.assertNotIn(item["id"], [row["id"] for row in admin_items])
-        self.assertEqual(self.request(admin_token, "get", "/api/work-schedule/team").json()["members"], [])
-        self.assertEqual(
-            self.request(admin_token, "get", f"/api/work-schedule/items/{item['id']}").status_code,
-            404,
-        )
+        team = self.request(admin_token, "get", "/api/work-schedule/team").json()
+        self.assertIn(self.executor.email, [member["email"] for member in team["members"]])
+        admin_row = next(row for row in team["items"] if row["id"] == item["id"])
+        self.assertEqual(admin_row["displayTitle"], "Lịch riêng của nhân viên")
+        self.assertTrue(admin_row["canEdit"])
+        self.assertTrue(admin_row["canDelete"])
+        self.assertTrue(admin_row["canManagePeople"])
+        self.assertEqual(self.request(admin_token, "get", f"/api/work-schedule/items/{item['id']}").status_code, 200)
+
+        updated = self.request(admin_token, "patch", f"/api/work-schedule/items/{item['id']}", {
+            "title": item["title"], "date": "2026-09-19", "executorEmail": self.executor.email,
+            "supporterEmails": [], "managerEmails": [], "status": "completed",
+        })
+        self.assertEqual(updated.status_code, 200, updated.data)
+        self.assertEqual(updated.json()["item"]["date"], "2026-09-19")
+        self.assertTrue(updated.json()["item"]["canReview"])
+        reviewed = self.request(admin_token, "post", f"/api/work-schedule/items/{item['id']}/review", {
+            "action": "confirm", "reviewPercent": 100,
+        })
+        self.assertEqual(reviewed.status_code, 200, reviewed.data)
+        self.assertEqual(reviewed.json()["item"]["status"], "reviewed")
+
+        created = self.request(admin_token, "post", "/api/work-schedule/items", {
+            "title": "Admin giao việc không chỉ định quản lý", "date": "2026-09-20",
+            "executorEmail": self.executor.email, "supporterEmails": [], "managerEmails": [],
+        })
+        self.assertEqual(created.status_code, 201, created.data)
+        self.assertEqual(created.json()["item"]["displayTitle"], "Admin giao việc không chỉ định quản lý")
 
     def test_executor_never_sees_manager_review_controls_or_details(self):
         item = self.create_item()

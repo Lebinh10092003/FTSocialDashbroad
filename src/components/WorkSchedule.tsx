@@ -1326,6 +1326,7 @@ function DayTableEditor({ state, onClose, onSave }: { state: DayEditState; onClo
           <div className="space-y-3">
             {rows.map((row, index) => {
               const automaticNote = automaticSelfAssessment(row.status);
+              const isCompleted = row.assessment.mode === "completed" || (row.assessment.mode === "default" && !!automaticNote);
               return (
                 <section key={row.key} className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-[3rem_minmax(0,1.65fr)_minmax(320px,1fr)] lg:gap-4">
                   <span className="grid h-9 w-9 place-items-center rounded-full bg-blue-50 text-sm font-extrabold text-blue-700">{index + 1}</span>
@@ -1342,38 +1343,33 @@ function DayTableEditor({ state, onClose, onSave }: { state: DayEditState; onClo
                     />
                   </label>
                   <div className="min-w-0">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <span className="ws-label mb-0 lg:hidden">Tự đánh giá / ghi chú</span>
-                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">Trạng thái: {selfAssessment[row.status]}</span>
-                    </div>
-                    <select
-                      value={row.assessment.mode}
-                      onChange={(event) => {
-                        const mode = event.target.value as DayAssessmentMode;
-                        updateRow(index, {
-                          assessment: {
-                            mode,
-                            note: mode === "custom" && row.assessment.mode === "custom" ? row.assessment.note : mode === "completed" ? "Hoàn thành" : "",
-                          },
-                        });
-                      }}
-                      className="ws-input py-2.5 text-sm font-semibold"
-                      aria-label={`Tự đánh giá nhiệm vụ ${index + 1}`}
-                    >
-                      <option value="default">{automaticNote ? "Tự động · Hoàn thành" : "Chưa tự đánh giá"}</option>
-                      <option value="completed">Hoàn thành</option>
-                      <option value="custom">Tự ghi...</option>
-                    </select>
-                    {row.assessment.mode === "custom" && (
+                    <span className="ws-label">Đánh giá / ghi chú tiến trình</span>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                      <button
+                        type="button"
+                        onClick={() => updateRow(index, {
+                          assessment: row.assessment.mode === "completed" && !automaticNote
+                            ? { mode: "default", note: "" }
+                            : { mode: "completed", note: "Hoàn thành" },
+                        })}
+                        aria-pressed={isCompleted}
+                        className={`inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-extrabold transition ${isCompleted ? "border-emerald-600 bg-emerald-600 text-white shadow-sm" : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100"}`}
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                        Hoàn thành
+                      </button>
                       <textarea
                         rows={2}
-                        value={row.assessment.note}
-                        onChange={(event) => updateRow(index, { assessment: { mode: "custom", note: event.target.value } })}
-                        placeholder="Nhập ghi chú tiến trình của đúng nhiệm vụ này..."
-                        className="ws-input mt-2 resize-y py-2 text-sm"
+                        value={row.assessment.mode === "custom" ? row.assessment.note : ""}
+                        onChange={(event) => {
+                          const note = event.target.value;
+                          updateRow(index, { assessment: note.trim() ? { mode: "custom", note } : { mode: "default", note: "" } });
+                        }}
+                        placeholder="Nhấn để nhập đánh giá hoặc ghi chú..."
+                        aria-label={`Đánh giá hoặc ghi chú nhiệm vụ ${index + 1}`}
+                        className="ws-input min-h-12 flex-1 resize-y py-2 text-sm"
                       />
-                    )}
-                    {row.assessment.mode === "default" && !automaticNote && <p className="mt-2 text-xs text-slate-400">Cần làm/Đang thực hiện không tự điền vào cột tự đánh giá.</p>}
+                    </div>
                   </div>
                 </section>
               );
