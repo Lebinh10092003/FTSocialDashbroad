@@ -419,3 +419,33 @@ class WorkScheduleSheetWebhookTests(TestCase):
         event = WorkScheduleSheetInboundEvent.objects.get(event_id="evt-6")
         self.assertEqual(event.status, WorkScheduleSheetInboundEvent.STATUS_PROCESSED)
         self.assertIn("Sheets API quota", event.error)
+
+    @mock.patch("work_schedule.sheet_sync.push_groups_to_sheet")
+    @mock.patch("work_schedule.sheet_sync.ensure_sync_columns")
+    @mock.patch("work_schedule.sheet_sync._service")
+    def test_retrying_a_failed_event_id_actually_reprocesses_instead_of_no_opping(self, mock_service, mock_ensure, mock_push):
+        from .sheet_sync import _ingest_row as real_ingest_row
+
+        call_count = {"n": 0}
+
+        def flaky_ingest_row(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("Sheets API tạm lỗi")
+            return real_ingest_row(*args, **kwargs)
+
+        with mock.patch("work_schedule.sheet_sync._ingest_row", side_effect=flaky_ingest_row):
+            first = self.post({"event_id": "evt-7", "row": self.ROW_NUMBER, "values": self.row_values()})
+            self.assertEqual(first.status_code, 502, first.content)
+            event = WorkScheduleSheetInboundEvent.objects.get(event_id="evt-7")
+            self.assertEqual(event.status, WorkScheduleSheetInboundEvent.STATUS_FAILED)
+            self.assertFalse(WorkItem.objects.filter(source_sheet_row=self.ROW_NUMBER).exists())
+
+            retry = self.post({"event_id": "evt-7", "row": self.ROW_NUMBER, "values": self.row_values()})
+            self.assertEqual(retry.status_code, 200, retry.content)
+
+        self.assertEqual(call_count["n"], 2)
+        event.refresh_from_db()
+        self.assertEqual(event.status, WorkScheduleSheetInboundEvent.STATUS_PROCESSED)
+        self.assertTrue(WorkItem.objects.filter(source_sheet_row=self.ROW_NUMBER).exists())
+        self.assertEqual(WorkScheduleSheetInboundEvent.objects.filter(event_id="evt-7").count(), 1)

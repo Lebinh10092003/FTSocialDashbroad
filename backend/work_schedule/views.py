@@ -547,23 +547,32 @@ def work_schedule_sheet_webhook(request):
         event_id=event_id,
         defaults={"row_number": row_number, "payload": {"row": row_number, "values": values}, "status": WorkScheduleSheetInboundEvent.STATUS_PROCESSED},
     )
-    if not created:
+    if not created and event.status == WorkScheduleSheetInboundEvent.STATUS_PROCESSED:
         return Response({
             "message": "Sự kiện đã được xử lý trước đó (bỏ qua để tránh trùng lặp).",
             "status": event.status,
             "createdCount": event.created_count,
             "updatedCount": event.updated_count,
         })
+    if not created:
+        # Previous attempt for this event_id failed (Apps Script retryFailedOutboxRows sends
+        # the same event_id again) — refresh the snapshot and actually retry instead of
+        # silently returning the stale failure as if it were a duplicate no-op.
+        event.row_number = row_number
+        event.payload = {"row": row_number, "values": values}
+        event.error = ""
+        event.save(update_fields=["row_number", "payload", "error"])
 
     row = [str(value) for value in values]
     try:
         with transaction.atomic():
             with suppress_sheet_queue():
                 created_count, updated_count, touched = _ingest_row(row_number, row, timezone.localdate())
+            event.status = WorkScheduleSheetInboundEvent.STATUS_PROCESSED
             event.created_count = created_count
             event.updated_count = updated_count
             event.processed_at = timezone.now()
-            event.save(update_fields=["created_count", "updated_count", "processed_at"])
+            event.save(update_fields=["status", "created_count", "updated_count", "processed_at"])
     except Exception as exc:
         event.status = WorkScheduleSheetInboundEvent.STATUS_FAILED
         event.error = str(exc)
