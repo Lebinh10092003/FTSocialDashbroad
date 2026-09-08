@@ -39,6 +39,11 @@ class WorkScheduleSheetParserTests(TestCase):
         self.assertEqual(completed_notes, "Hoàn thành")
         self.assertEqual(leader_notes, "2. Hoàn thành")
 
+        _, _, all_reviewed_notes, _ = _group_values([
+            Item("reviewed"), Item("reviewed", review_percent=90)
+        ])
+        self.assertEqual(all_reviewed_notes, "Hoàn thành")
+
     def test_numbered_cell_keeps_wrapped_lines_and_accepts_duplicate_numbers(self):
         tasks = parse_sheet_tasks(
             "1. Nhiệm vụ đầu\nphần mô tả xuống dòng\n2. Nhiệm vụ hai\n2. 17h30: Tập huấn GCE1"
