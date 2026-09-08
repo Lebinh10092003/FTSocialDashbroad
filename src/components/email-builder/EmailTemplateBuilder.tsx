@@ -7,7 +7,12 @@ import {
   HelpCircle,
   FileText,
   AlertTriangle,
-  Play
+  Play,
+  ArrowLeft,
+  ContactRound,
+  MailPlus,
+  RotateCcw,
+  Upload
 } from 'lucide-react';
 
 import { BlockType, EmailBlock, EmailSettings, EmailTemplate, EmailVariable } from '../../types/emailBuilder';
@@ -355,13 +360,13 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, backLabel = 'Quay lạ
     setActiveTemplateId(id);
     setSelectedBlockId(null);
     setEditorMode('edit');
-    window.history.pushState(null, '', `/email-builder?id=${id}`);
+    window.history.pushState(null, '', `/communication-tools/email?id=${id}`);
   };
 
   const handleBackToList = () => {
     setEditorMode('list');
     setSelectedBlockId(null);
-    window.history.pushState(null, '', '/email-builder');
+    window.history.pushState(null, '', '/communication-tools/email');
   };
 
   const handleDuplicateTemplateInline = (tpl: EmailTemplate) => {
@@ -423,7 +428,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, backLabel = 'Quay lạ
     setActiveTemplateIdState(id);
     setActiveTemplateId(id);
     setSelectedBlockId(null);
-    window.history.pushState(null, '', `/email-builder?id=${id}`);
+    window.history.pushState(null, '', `/communication-tools/email?id=${id}`);
   };
 
   const handleUpdateTemplateBlocks = (newBlocks: EmailBlock[]) => {
@@ -888,7 +893,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, backLabel = 'Quay lạ
   // RENDER LIST MODE
   if (editorMode === 'list') {
     return (
-      <div className="ft-module-shell ft-email-builder flex flex-col h-screen font-sans overflow-y-auto">
+      <div className="ft-module-shell ft-email-builder flex h-screen overflow-hidden font-sans">
         
         {/* Toast Notification */}
         {toastMessage && (
@@ -898,25 +903,16 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, backLabel = 'Quay lạ
           </div>
         )}
 
-        {/* Top Header */}
-        <header className="ft-module-header bg-white border-b px-6 py-4.5 flex items-center justify-between shrink-0 z-20 sticky top-0 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-sky-100 bg-white shadow-sm"><img src="/logo.png" alt="Fermat" className="h-7 w-auto object-contain"/></div>
-            <div>
-              <h1 className="text-sm font-black text-slate-900 tracking-wide">Trình quản lý mẫu Email</h1>
-              <p className="text-[10px] text-slate-400 font-extrabold uppercase mt-0.5">FermatTech Workspace</p>
-            </div>
+        <aside className="ft-module-sidebar fixed inset-y-0 left-0 hidden w-64 flex-col md:flex">
+          <div className="ft-sidebar-brand flex items-center gap-3 text-left">
+            <img src="/logo.png" alt="FermatTech" className="h-9 w-auto object-contain" />
+            <span><b>FermatTech</b><small>Bộ công cụ truyền thông</small></span>
           </div>
-
-          <div className="flex flex-wrap items-center justify-end gap-2.5">
-            <button
-              onClick={handleRestoreDefaults}
-              className="px-4 py-2 text-xs font-bold text-slate-650 hover:text-slate-800 hover:bg-slate-100/60 border border-slate-200 rounded-xl cursor-pointer transition-all"
-            >
-              Khôi phục mẫu gốc
-            </button>
-
-            <label className="px-4 py-2 text-xs font-bold text-slate-650 hover:text-slate-850 hover:bg-slate-100/60 border border-slate-200 rounded-xl cursor-pointer transition-all flex items-center gap-1.5" title="Nhập mẫu từ tệp JSON hoặc HTML">
+          <nav className="flex-1 space-y-1 overflow-y-auto p-4">
+            <button type="button" className="ft-nav-item ft-nav-item-active flex w-full items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-left text-sm font-bold"><FileText className="h-5 w-5" />Kho mẫu Email</button>
+            <button type="button" onClick={handleCreateTemplate} className="ft-nav-item flex w-full items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-left text-sm font-bold"><MailPlus className="h-5 w-5" />Tạo mẫu mới</button>
+            <label className="ft-nav-item flex w-full cursor-pointer items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-left text-sm font-bold" title="Nhập mẫu từ tệp JSON hoặc HTML">
+              <Upload className="h-5 w-5" />
               <input
                 type="file"
                 accept=".json,.html,.htm,application/json,text/html"
@@ -934,30 +930,18 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, backLabel = 'Quay lạ
               />
               Tải tệp mẫu
             </label>
-            <button
-              onClick={onOpenSignatureBuilder}
-              className="px-4 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50 border border-blue-200 rounded-xl cursor-pointer transition-all"
-            >
-              Trình tạo chữ ký
-            </button>
-<button
-              onClick={handleCreateTemplate}
-              className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl cursor-pointer transition-all"
-            >
-              Tạo mẫu mới
-            </button>
-            <button
-              onClick={onBackToWorkspace}
-              className="px-4 py-2 text-xs font-bold text-slate-650 bg-slate-100 hover:bg-slate-200/80 rounded-xl cursor-pointer transition-all border border-slate-200"
-            >
-              {backLabel}
-            </button>
-            <AccountMenu userName={userName} userRole={userRole} photoURL={photoURL} isGuest={isGuest} onAccountClick={onAccountClick} onLogout={onLogout} variant="avatar"/>
+            <button type="button" onClick={handleRestoreDefaults} className="ft-nav-item flex w-full items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-left text-sm font-bold"><RotateCcw className="h-5 w-5" />Khôi phục mẫu gốc</button>
+            <button type="button" onClick={onOpenSignatureBuilder} className="ft-nav-item flex w-full items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-left text-sm font-bold"><ContactRound className="h-5 w-5" />Trình tạo chữ ký</button>
+          </nav>
+          <div className="ft-sidebar-footer border-t p-4">
+            <button type="button" onClick={onBackToWorkspace} className="ft-sidebar-back mb-3 flex w-full items-center gap-3 rounded-xl border p-3 text-left text-sm font-bold"><ArrowLeft className="h-5 w-5" />{backLabel}</button>
+            <AccountMenu userName={userName} userRole={userRole} photoURL={photoURL} isGuest={isGuest} onAccountClick={onAccountClick} onLogout={onLogout} variant="sidebar"/>
           </div>
-        </header>
+        </aside>
 
-        {/* Templates grid area */}
-        <main className="flex-1 max-w-6xl mx-auto w-full p-6 md:p-8 space-y-6">
+        <main className="min-w-0 flex-1 overflow-y-auto md:ml-64">
+          <header className="ft-module-header sticky top-0 z-20 flex items-center justify-between border-b px-5 py-4 md:px-8"><div><p className="text-xs font-extrabold uppercase tracking-[.14em] text-blue-600">Bộ công cụ truyền thông</p><h1 className="text-lg font-extrabold text-slate-900">Trình quản lý mẫu Email</h1></div><AccountMenu userName={userName} userRole={userRole} photoURL={photoURL} isGuest={isGuest} onAccountClick={onAccountClick} onLogout={onLogout} variant="avatar"/></header>
+          <div className="ft-module-content mx-auto w-full max-w-6xl space-y-6 p-6 md:p-8">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
               <h2 className="text-base font-black text-slate-800">Danh sách mẫu thiết kế ({templates.length})</h2>
@@ -1080,6 +1064,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, backLabel = 'Quay lạ
               })}
             </div>
           )}
+          </div>
         </main>
         {showHtmlImport && <EmailHtmlImportDialog context="create" onClose={() => setShowHtmlImport(false)} onCreateBlank={handleCreateBlankTemplate} onImport={handleImportPastedHtml} onApplyToCurrent={handleApplyPastedHtmlToCurrentTemplate} />}
       </div>

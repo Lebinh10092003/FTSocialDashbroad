@@ -211,25 +211,19 @@ export default function QRCodeGenerator({ onBackToWorkspace, backLabel = 'Worksp
   ];
 
   return (
-    <div className="workspace-module-canvas min-h-dvh bg-[#f7f4ee] font-sans text-[#102A43]">
-      <header className="border-b border-[#102A43]/10 bg-[#f7f4ee]/90 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
-          <button type="button" onClick={onBackToWorkspace} className="inline-flex items-center gap-2 text-sm font-bold transition hover:text-[#de6b35]">
-            <ArrowLeft className="h-4 w-4" />{backLabel}
-          </button>
-          <div className="flex items-center gap-2.5">
-            <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#102A43] text-white"><QrCode className="h-5 w-5" /></div>
-            <span className="text-sm font-extrabold tracking-tight">QR Studio</span>
-          </div>
-          <div className="hidden items-center gap-2 text-xs font-semibold text-[#52677a] sm:flex"><LockKeyhole className="h-4 w-4 text-emerald-700" />Kiểm tra link trước khi xuất</div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-12">
+    <div className="ft-module-shell workspace-module-canvas flex min-h-dvh bg-[#f7f4ee] font-sans text-[#102A43]">
+      <aside className="ft-module-sidebar fixed inset-y-0 left-0 hidden w-64 flex-col md:flex">
+        <div className="ft-sidebar-brand flex items-center gap-3 text-left"><img src="/logo.png" alt="FermatTech" className="h-9 w-auto object-contain" /><span><b>FermatTech</b><small>Bộ công cụ truyền thông</small></span></div>
+        <nav className="flex-1 space-y-1 p-4"><button type="button" className="ft-nav-item ft-nav-item-active flex w-full items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-left text-sm font-bold"><QrCode className="h-5 w-5" />Tạo mã QR</button></nav>
+        <div className="ft-sidebar-footer border-t p-4"><button type="button" onClick={onBackToWorkspace} className="ft-sidebar-back flex w-full items-center gap-3 rounded-xl border p-3 text-left text-sm font-bold"><ArrowLeft className="h-5 w-5" />{backLabel}</button></div>
+      </aside>
+      <div className="min-w-0 flex-1 md:ml-64">
+        <header className="ft-module-header sticky top-0 z-20 flex h-16 items-center justify-between border-b px-5 md:px-8"><div><p className="text-xs font-extrabold uppercase tracking-[.14em] text-blue-600">Bộ công cụ truyền thông</p><h1 className="text-lg font-extrabold">Trình tạo mã QR</h1></div><div className="workspace-canvas-muted hidden items-center gap-2 text-xs font-semibold sm:flex"><LockKeyhole className="h-4 w-4 text-emerald-500" />Kiểm tra link trước khi xuất</div></header>
+        <main className="mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-12">
         <section className="mb-9 max-w-3xl">
           <div className="mb-3 flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.18em] text-[#de6b35]"><span className="h-px w-8 bg-[#de6b35]" />Trình tạo mã QR trực tiếp</div>
           <h1 className="max-w-2xl text-3xl font-extrabold leading-tight tracking-[-0.035em] sm:text-5xl">Một lần quét.<br />Đến đúng nơi cần đến.</h1>
-          <p className="mt-4 max-w-2xl text-sm leading-7 text-[#52677a] sm:text-base">Tạo mã QR dẫn thẳng tới form khảo sát, tài liệu hoặc bất kỳ trang web nào — không chèn link trung gian và không thu thập dữ liệu người quét.</p>
+          <p className="workspace-canvas-muted mt-4 max-w-2xl text-sm leading-7 sm:text-base">Tạo mã QR dẫn thẳng tới form khảo sát, tài liệu hoặc bất kỳ trang web nào — không chèn link trung gian và không thu thập dữ liệu người quét.</p>
         </section>
 
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.12fr)_minmax(360px,.88fr)]">
@@ -337,7 +331,8 @@ export default function QRCodeGenerator({ onBackToWorkspace, backLabel = 'Worksp
             <p className="mt-4 px-1 text-xs leading-5 text-[#718294]">Mẹo: thử quét bằng ít nhất một iPhone và một máy Android trước khi trình chiếu hoặc in số lượng lớn.</p>
           </aside>
         </div>
-      </main>
+        </main>
+      </div>
       {notice && <div className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 bg-[#102A43] px-4 py-3 text-sm font-bold text-white shadow-2xl" role="status"><Check className="h-4 w-4 text-emerald-400" />{notice}</div>}
     </div>
   );

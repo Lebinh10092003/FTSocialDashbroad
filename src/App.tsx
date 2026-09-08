@@ -76,15 +76,15 @@ const GUEST_USER: AppUser = {
   photoURL: '',
 };
 
-const workspacePalettes: Record<WorkspaceAppearance['theme'], { background: string; card: string; panel: string; text: string; muted: string; accent: string; imageOverlay: string }> = {
-  light: { background: 'linear-gradient(150deg,#f6f8fc 0%,#eef3fb 45%,#eaf1ff 72%,#fff 100%)', card: 'rgba(255,255,255,.74)', panel: 'rgba(255,255,255,.84)', text: '#0f172a', muted: '#64748b', accent: '#0055da', imageOverlay: 'rgba(246,248,252,.72)' },
-  dark: { background: 'linear-gradient(150deg,#07111f 0%,#111827 48%,#172554 100%)', card: 'rgba(15,23,42,.78)', panel: 'rgba(15,23,42,.88)', text: '#f8fafc', muted: '#cbd5e1', accent: '#7dd3fc', imageOverlay: 'rgba(2,6,23,.72)' },
-  blue: { background: 'linear-gradient(150deg,#eff6ff 0%,#dbeafe 48%,#e0f2fe 100%)', card: 'rgba(255,255,255,.7)', panel: 'rgba(239,246,255,.88)', text: '#172554', muted: '#475569', accent: '#2563eb', imageOverlay: 'rgba(219,234,254,.7)' },
-  green: { background: 'linear-gradient(150deg,#f0fdf4 0%,#dcfce7 50%,#d1fae5 100%)', card: 'rgba(255,255,255,.7)', panel: 'rgba(240,253,244,.88)', text: '#14532d', muted: '#4b6356', accent: '#16a34a', imageOverlay: 'rgba(220,252,231,.7)' },
-  pink: { background: 'linear-gradient(150deg,#fdf2f8 0%,#fce7f3 50%,#ffe4e6 100%)', card: 'rgba(255,255,255,.72)', panel: 'rgba(253,242,248,.9)', text: '#831843', muted: '#6b5560', accent: '#db2777', imageOverlay: 'rgba(252,231,243,.7)' },
-  lavender: { background: 'linear-gradient(150deg,#faf5ff 0%,#ede9fe 48%,#f3e8ff 100%)', card: 'rgba(255,255,255,.72)', panel: 'rgba(250,245,255,.9)', text: '#4c1d95', muted: '#655a73', accent: '#7c3aed', imageOverlay: 'rgba(237,233,254,.7)' },
-  peach: { background: 'linear-gradient(150deg,#fff7ed 0%,#ffedd5 52%,#fef3c7 100%)', card: 'rgba(255,255,255,.72)', panel: 'rgba(255,247,237,.9)', text: '#7c2d12', muted: '#705c51', accent: '#ea580c', imageOverlay: 'rgba(255,237,213,.7)' },
-  custom: { background: 'linear-gradient(150deg,color-mix(in srgb,var(--workspace-accent) 8%,white),color-mix(in srgb,var(--workspace-accent) 18%,white))', card: 'rgba(255,255,255,.72)', panel: 'rgba(255,255,255,.86)', text: '#172033', muted: '#64748b', accent: '#8b5cf6', imageOverlay: 'rgba(255,255,255,.68)' },
+const workspacePalettes: Record<WorkspaceAppearance['theme'], { background: string; card: string; panel: string; text: string; muted: string; surfaceText: string; surfaceMuted: string; accent: string; imageOverlay: string }> = {
+  light: { background: 'linear-gradient(150deg,#f6f8fc 0%,#eef3fb 45%,#eaf1ff 72%,#fff 100%)', card: 'rgba(255,255,255,.82)', panel: 'rgba(255,255,255,.9)', text: '#0f172a', muted: '#64748b', surfaceText: '#172033', surfaceMuted: '#64748b', accent: '#0055da', imageOverlay: 'rgba(246,248,252,.72)' },
+  dark: { background: 'linear-gradient(145deg,#182235 0%,#202d45 52%,#263a5d 100%)', card: 'rgba(248,250,252,.96)', panel: 'rgba(24,34,53,.94)', text: '#f8fafc', muted: '#cbd5e1', surfaceText: '#172033', surfaceMuted: '#5f6f82', accent: '#60a5fa', imageOverlay: 'rgba(20,30,48,.66)' },
+  blue: { background: 'linear-gradient(150deg,#eff6ff 0%,#dbeafe 48%,#e0f2fe 100%)', card: 'rgba(255,255,255,.78)', panel: 'rgba(239,246,255,.92)', text: '#172554', muted: '#475569', surfaceText: '#172554', surfaceMuted: '#475569', accent: '#2563eb', imageOverlay: 'rgba(219,234,254,.7)' },
+  green: { background: 'linear-gradient(150deg,#f0fdf4 0%,#dcfce7 50%,#d1fae5 100%)', card: 'rgba(255,255,255,.78)', panel: 'rgba(240,253,244,.92)', text: '#14532d', muted: '#4b6356', surfaceText: '#14532d', surfaceMuted: '#4b6356', accent: '#16a34a', imageOverlay: 'rgba(220,252,231,.7)' },
+  pink: { background: 'linear-gradient(150deg,#fdf2f8 0%,#fce7f3 50%,#ffe4e6 100%)', card: 'rgba(255,255,255,.8)', panel: 'rgba(253,242,248,.93)', text: '#831843', muted: '#6b5560', surfaceText: '#831843', surfaceMuted: '#6b5560', accent: '#db2777', imageOverlay: 'rgba(252,231,243,.7)' },
+  lavender: { background: 'linear-gradient(150deg,#faf5ff 0%,#ede9fe 48%,#f3e8ff 100%)', card: 'rgba(255,255,255,.8)', panel: 'rgba(250,245,255,.93)', text: '#4c1d95', muted: '#655a73', surfaceText: '#4c1d95', surfaceMuted: '#655a73', accent: '#7c3aed', imageOverlay: 'rgba(237,233,254,.7)' },
+  peach: { background: 'linear-gradient(150deg,#fff7ed 0%,#ffedd5 52%,#fef3c7 100%)', card: 'rgba(255,255,255,.8)', panel: 'rgba(255,247,237,.93)', text: '#7c2d12', muted: '#705c51', surfaceText: '#7c2d12', surfaceMuted: '#705c51', accent: '#ea580c', imageOverlay: 'rgba(255,237,213,.7)' },
+  custom: { background: 'linear-gradient(150deg,color-mix(in srgb,var(--workspace-accent) 8%,white),color-mix(in srgb,var(--workspace-accent) 18%,white))', card: 'rgba(255,255,255,.8)', panel: 'rgba(255,255,255,.9)', text: '#172033', muted: '#64748b', surfaceText: '#172033', surfaceMuted: '#64748b', accent: '#8b5cf6', imageOverlay: 'rgba(255,255,255,.68)' },
 };
 
 function workspaceAppearanceStyle(appearance: WorkspaceAppearance): React.CSSProperties {
@@ -100,6 +100,8 @@ function workspaceAppearanceStyle(appearance: WorkspaceAppearance): React.CSSPro
     '--workspace-panel': palette.panel,
     '--workspace-text': palette.text,
     '--workspace-muted': palette.muted,
+    '--workspace-surface-text': palette.surfaceText,
+    '--workspace-surface-muted': palette.surfaceMuted,
     '--workspace-accent': accent,
   } as React.CSSProperties;
 }
@@ -139,6 +141,9 @@ function getInitialViewMode(): ViewMode {
   if (path.startsWith('/digital-training')) return 'digital-training';
   if (path.startsWith('/work-schedule')) return 'work-schedule';
   if (path.startsWith('/social-dashboard')) return 'social-dashboard';
+  if (path.startsWith('/communication-tools/email')) return 'email-builder';
+  if (path.startsWith('/communication-tools/signature')) return 'signature-builder';
+  if (path.startsWith('/communication-tools/qr')) return 'qr-generator';
   if (path.startsWith('/communication-tools')) return 'communication-tools';
   if (path.startsWith('/finance-report')) return 'finance-report';
   if (path.startsWith('/signature-builder')) return 'signature-builder';
@@ -277,9 +282,26 @@ export default function App() {
 
   const setViewMode = (mode: ViewMode) => {
     setViewModeState(mode);
-    const path = mode === 'workspace' ? '/' : `/${mode}`;
+    const paths: Partial<Record<ViewMode, string>> = {
+      workspace: '/',
+      'communication-tools': '/communication-tools',
+      'email-builder': '/communication-tools/email',
+      'signature-builder': '/communication-tools/signature',
+      'qr-generator': '/communication-tools/qr',
+    };
+    const path = paths[mode] || `/${mode}`;
     if (window.location.pathname !== path) window.history.pushState(null, '', path);
   };
+
+  useEffect(() => {
+    const legacyRoutes: Array<[string, string]> = [
+      ['/email-builder', '/communication-tools/email'],
+      ['/signature-builder', '/communication-tools/signature'],
+      ['/qr-generator', '/communication-tools/qr'],
+    ];
+    const match = legacyRoutes.find(([legacy]) => window.location.pathname.startsWith(legacy));
+    if (match) window.history.replaceState(null, '', `${match[1]}${window.location.search}${window.location.hash}`);
+  }, []);
 
   useEffect(() => {
     const updateAppearance = (event: Event) => setAppearance((event as CustomEvent<WorkspaceAppearance>).detail || readWorkspaceAppearance());

@@ -710,19 +710,9 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
   return (
     <div className="ws-shell min-h-dvh bg-[#f5f7fb] text-slate-900">
       <aside className="ws-sidebar">
-        <div className="border-b border-white/15 p-5">
-          <div className="rounded-2xl bg-white p-3 shadow-lg">
-            <img src="/logo.png" alt="FermatTech" className="h-7 object-contain" />
-          </div>
-          <div className="mt-5 flex items-center gap-3 px-1">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-white/15">
-              <CalendarDays className="h-5 w-5" />
-            </div>
-            <div>
-              <b className="block text-sm">Lịch làm việc</b>
-              <span className="text-[11px] text-blue-100">Cá nhân & đội nhóm</span>
-            </div>
-          </div>
+        <div className="ft-sidebar-brand mx-3 mt-3 flex items-center gap-3">
+          <img src="/logo.png" alt="FermatTech" className="h-9 object-contain" />
+          <div><b>FermatTech</b><p>Lịch làm việc</p></div>
         </div>
         <nav className="flex-1 space-y-1 p-3">
           {navItems.map((item) => {
