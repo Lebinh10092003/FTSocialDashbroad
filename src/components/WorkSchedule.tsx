@@ -59,6 +59,8 @@ type WorkDraft = {
   reviewNote: string;
 };
 type DayEditState = { date: string; tasks: WorkTask[] };
+type DayAssessmentMode = "default" | "todo" | "doing" | "completed" | "custom";
+type DayAssessmentEntry = { mode: DayAssessmentMode; note: string };
 type Props = {
   idToken: string;
   onBackToWorkspace: () => void;
@@ -176,6 +178,30 @@ const selfAssessment: Record<WorkStatus, string> = {
   completed: "Hoàn thành",
   reviewed: "Hoàn thành",
 };
+const assessmentModeLabel: Record<Exclude<DayAssessmentMode, "default" | "custom">, string> = {
+  todo: "Cần làm",
+  doing: "Đang thực hiện",
+  completed: "Hoàn thành",
+};
+
+function dayAssessmentEntry(task: WorkTask): DayAssessmentEntry {
+  if (!task.progressNote) return { mode: "default", note: "" };
+  const preset = (Object.entries(assessmentModeLabel) as Array<["todo" | "doing" | "completed", string]>).find(([, label]) => label === task.progressNote);
+  return preset ? { mode: preset[0], note: task.progressNote } : { mode: "custom", note: task.progressNote };
+}
+
+function parseDayEditorLines(value: string, allowBlank: boolean) {
+  const result: Array<{ number: number; text: string }> = [];
+  for (const raw of value.split(/\r?\n/)) {
+    if (!raw.trim()) continue;
+    const match = raw.match(/^\s*(\d{1,3})[.)]\s*(.*?)\s*$/);
+    if (!match || (!allowBlank && !match[2])) return null;
+    const number = Number(match[1]);
+    if (number < 1 || number > 100 || result.some((item) => item.number === number)) return null;
+    result.push({ number, text: match[2] });
+  }
+  return result.sort((a, b) => a.number - b.number);
+}
 const initials = (name: string) =>
   name
     .split(/\s+/)
@@ -1166,15 +1192,27 @@ function ScheduleTable({ days, rowsFor, setEditing, setEditingDay, setDraggedId,
                 <td className="border-b border-r border-slate-200 px-3 py-3 font-bold">{weekday(dayIso)}</td>
                 <td className="border-b border-r border-slate-200 px-3 py-3">{fullDate(dayIso)}</td>
                 <td className="border-b border-r border-slate-200 px-3 py-3 text-center font-semibold">{weekNumber(dayIso)}</td>
-                <td className="relative border-b border-r border-slate-200 px-3 py-3 pr-12">
-                  <button type="button" onClick={() => setEditingDay({ date: dayIso, tasks })} className="absolute right-2 top-2 rounded-lg p-2 text-blue-600 hover:bg-blue-100" aria-label={`Chỉnh sửa lịch ngày ${fullDate(dayIso)}`} title="Chỉnh sửa lịch trong ngày">
+                <td
+                  className="relative cursor-pointer border-b border-r border-slate-200 px-3 py-3 pr-12 outline-none transition hover:bg-blue-50/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setEditingDay({ date: dayIso, tasks })}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setEditingDay({ date: dayIso, tasks });
+                    }
+                  }}
+                  aria-label={`Chỉnh sửa lịch ngày ${fullDate(dayIso)}`}
+                >
+                  <button type="button" onClick={(event) => { event.stopPropagation(); setEditingDay({ date: dayIso, tasks }); }} className="absolute right-2 top-2 rounded-lg p-2 text-blue-600 hover:bg-blue-100" aria-label={`Chỉnh sửa lịch ngày ${fullDate(dayIso)}`} title="Chỉnh sửa lịch trong ngày">
                     <Pencil className="h-4 w-4" />
                   </button>
                   {tasks.length ? (
                     <ol className="space-y-2">
                       {tasks.map((task: WorkTask, index: number) => (
                         <li key={task.id}>
-                          <button draggable={task.canEdit && task.status !== "reviewed"} onDragStart={() => setDraggedId(task.id)} onClick={() => setEditing(draftFromTask(task))} className="text-left font-semibold leading-5 text-slate-800 hover:text-blue-700">
+                          <button draggable={task.canEdit && task.status !== "reviewed"} onDragStart={() => setDraggedId(task.id)} onClick={(event) => { event.stopPropagation(); setEditing(draftFromTask(task)); }} className="text-left font-semibold leading-5 text-slate-800 hover:text-blue-700">
                             <span className="mr-1 text-blue-600">{index + 1}.</span>
                             {task.displayTitle}
                           </button>
@@ -1219,43 +1257,37 @@ function ScheduleTable({ days, rowsFor, setEditing, setEditingDay, setDraggedId,
 function DayTableEditor({ state, onClose, onSave }: { state: DayEditState; onClose: () => void; onSave: (items: Array<{ id?: number; title: string; progressNote: string }>) => Promise<void> }) {
   const ordered = [...state.tasks].sort((a, b) => a.dailyOrder - b.dailyOrder);
   const [content, setContent] = useState(() => ordered.map((task, index) => `${index + 1}. ${task.title}`).join("\n"));
-  const [assessment, setAssessment] = useState(() => ordered.map((task, index) => `${index + 1}. ${task.progressNote}`).join("\n"));
+  const [assessments, setAssessments] = useState<DayAssessmentEntry[]>(() => ordered.map(dayAssessmentEntry));
   const [saving, setSaving] = useState(false);
+  const previewRows = useMemo(() => parseDayEditorLines(content, false) || [], [content]);
 
-  const parseLines = (value: string, allowBlank: boolean) => {
-    const result: Array<{ number: number; text: string }> = [];
-    for (const raw of value.split(/\r?\n/)) {
-      if (!raw.trim()) continue;
-      const match = raw.match(/^\s*(\d{1,3})[.)]\s*(.*?)\s*$/);
-      if (!match || (!allowBlank && !match[2])) return null;
-      const number = Number(match[1]);
-      if (number < 1 || number > 100 || result.some((item) => item.number === number)) return null;
-      result.push({ number, text: match[2] });
-    }
-    return result.sort((a, b) => a.number - b.number);
+  const updateAssessment = (index: number, value: DayAssessmentEntry) => {
+    setAssessments((current) => {
+      const next = [...current];
+      next[index] = value;
+      return next;
+    });
   };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    const contents = parseLines(content, false);
-    const assessments = parseLines(assessment, true);
+    const contents = parseDayEditorLines(content, false);
     if (!contents?.length) {
       void appDialog.alert("Mỗi nhiệm vụ phải nằm trên một dòng và bắt đầu bằng số từ 1 đến 100, ví dụ: 1. Chuẩn bị báo cáo.", { title: "Nội dung chưa hợp lệ", tone: "warning" });
-      return;
-    }
-    if (!assessments) {
-      void appDialog.alert("Mỗi dòng tự đánh giá phải bắt đầu bằng số tương ứng từ 1 đến 100.", { title: "Tự đánh giá chưa hợp lệ", tone: "warning" });
       return;
     }
     if (contents.length < ordered.length) {
       void appDialog.alert("Không thể xóa nhiệm vụ bằng cách bỏ dòng tại đây. Hãy mở nhiệm vụ và dùng biểu tượng xóa.", { title: "Không thể bỏ nhiệm vụ", tone: "warning" });
       return;
     }
-    const noteByNumber = new Map(assessments.map((item) => [item.number, item.text]));
     const items = contents.map((item, index) => ({
       ...(ordered[index] ? { id: ordered[index].id } : {}),
       title: item.text,
-      progressNote: noteByNumber.get(item.number) || "",
+      progressNote: assessments[index]?.mode === "custom"
+        ? assessments[index].note.trim()
+        : assessments[index]?.mode && assessments[index].mode !== "default"
+          ? assessmentModeLabel[assessments[index].mode]
+          : "",
     }));
     setSaving(true);
     try {
@@ -1281,11 +1313,52 @@ function DayTableEditor({ state, onClose, onSave }: { state: DayEditState; onClo
             <textarea autoFocus rows={18} value={content} onChange={(event) => setContent(event.target.value)} placeholder={"1. Nhiệm vụ thứ nhất\n2. Nhiệm vụ thứ hai"} className="ws-input min-h-[430px] resize-y font-medium leading-7" />
             <small className="mt-2 block text-slate-500">Thêm một dòng được đánh số từ 1–100 để tự động tạo nhiệm vụ mới. Việc mới mặc định ở trạng thái Cần làm và người thực hiện là bạn.</small>
           </label>
-          <label className="block">
+          <div className="block">
             <span className="ws-label">Tự đánh giá / ghi chú tiến trình</span>
-            <textarea rows={18} value={assessment} onChange={(event) => setAssessment(event.target.value)} placeholder={"1. Đang chờ phản hồi\n2. Đã gửi bản chính"} className="ws-input min-h-[430px] resize-y leading-7" />
-            <small className="mt-2 block text-slate-500">Để trống nội dung sau số nếu muốn bảng hiển thị trạng thái mặc định. Ghi chú tại đây không làm thay đổi trạng thái công việc.</small>
-          </label>
+            <div className="max-h-[430px] min-h-[430px] space-y-3 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              {previewRows.length ? previewRows.map((row, index) => {
+                const task = ordered[index];
+                const entry = assessments[index] || { mode: "default" as const, note: "" };
+                const defaultLabel = task ? selfAssessment[task.status] : selfAssessment.todo;
+                return (
+                  <div key={`${row.number}-${task?.id || "new"}`} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                    <div className="mb-2 flex items-start gap-2">
+                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-blue-50 text-xs font-extrabold text-blue-700">{row.number}</span>
+                      <span className="line-clamp-2 min-w-0 flex-1 text-sm font-semibold text-slate-700">{row.text}</span>
+                    </div>
+                    <select
+                      value={entry.mode}
+                      onChange={(event) => {
+                        const mode = event.target.value as DayAssessmentMode;
+                        updateAssessment(index, {
+                          mode,
+                          note: mode === "custom" ? (entry.mode === "custom" ? entry.note : "") : mode === "default" ? "" : assessmentModeLabel[mode],
+                        });
+                      }}
+                      className="ws-input py-2 text-sm font-semibold"
+                      aria-label={`Tự đánh giá nhiệm vụ ${row.number}`}
+                    >
+                      <option value="default">Theo trạng thái · {defaultLabel}</option>
+                      <option value="todo">Cần làm</option>
+                      <option value="doing">Đang thực hiện</option>
+                      <option value="completed">Hoàn thành</option>
+                      <option value="custom">Ghi chú riêng...</option>
+                    </select>
+                    {entry.mode === "custom" && (
+                      <input
+                        autoFocus
+                        value={entry.note}
+                        onChange={(event) => updateAssessment(index, { mode: "custom", note: event.target.value })}
+                        placeholder="Nhập ghi chú tiến trình..."
+                        className="ws-input mt-2 py-2 text-sm"
+                      />
+                    )}
+                  </div>
+                );
+              }) : <div className="grid min-h-[390px] place-items-center px-6 text-center text-sm text-slate-400">Nhập nhiệm vụ hợp lệ ở ô bên trái để thiết lập tự đánh giá.</div>}
+            </div>
+            <small className="mt-2 block text-slate-500">Mặc định hiển thị đúng trạng thái hiện tại. Chỉ chọn “Ghi chú riêng” khi cần nội dung khác; thay đổi tại đây không đổi trạng thái công việc.</small>
+          </div>
         </div>
         <div className="flex justify-end gap-3 border-t px-6 py-4">
           <button type="button" onClick={onClose} className="rounded-xl border px-4 py-2.5 text-sm font-bold text-slate-600">Hủy</button>
