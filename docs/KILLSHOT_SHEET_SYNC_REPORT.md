@@ -109,6 +109,21 @@ test sang lọc theo `source_sheet_row=ROW_NUMBER` cố định + xoá dữ li�
   chạm `attendance/`/`digital_training/`) — kết luận đây là lỗi có sẵn trên `main`, không phải do
   thay đổi lần này gây ra. Không tự sửa (ngoài phạm vi được giao).
 
+## Cập nhật (2026-09-08, sau review của Hestia)
+
+Hestia review độc lập, tìm đúng 1 bug thật ở `work_schedule_sheet_webhook`: điều kiện
+`if not created:` (dedup theo `event_id`) không phân biệt `event.status` — nếu lần xử lý đầu
+`_ingest_row` raise exception (event lưu `status=FAILED`, trả 502), Apps Script
+`retryFailedOutboxRows()` gửi lại đúng `event_id` đó sẽ bị dedup nuốt mất, trả 200 "đã xử lý
+trước đó" mà KHÔNG thử lại — dữ liệu mất vĩnh viễn và im lặng (response giả thành công). Đã sửa:
+chỉ short-circuit khi `event.status == STATUS_PROCESSED`; nếu `status == FAILED`, làm mới
+`row_number`/`payload`/`error` rồi chạy lại `_ingest_row` thật, set `status = PROCESSED` khi
+thành công. Thêm test `test_retrying_a_failed_event_id_actually_reprocesses_instead_of_no_opping`
+mô phỏng đúng kịch bản (lần 1 raise exception, lần 2 gọi lại cùng `event_id` phải thấy
+`_ingest_row` được gọi lần 2 và cuối cùng `status=PROCESSED`, `WorkItem` tồn tại) — test này sẽ
+FAIL nếu chưa sửa, đã verify PASS sau khi sửa. `python manage.py test work_schedule` →
+**25/25 PASS**. Đã commit riêng (không amend commit cũ).
+
 ## Việc CHƯA làm / cần Hestia quyết định
 
 1. **Chưa dán Code.gs vào Script Editor thật + chưa test với sheet/webhook thật** (không có
