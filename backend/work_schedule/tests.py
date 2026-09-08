@@ -6,7 +6,30 @@ from rest_framework.authtoken.models import Token
 from authentication.models import UserProfile
 
 from .models import WorkItem
+from .sheet_parser import assessment_notes, parse_sheet_tasks, status_from_note, training_end
 from .training_sync import sync_work_item_from_training
+
+
+class WorkScheduleSheetParserTests(TestCase):
+    def test_numbered_cell_keeps_wrapped_lines_and_accepts_duplicate_numbers(self):
+        tasks = parse_sheet_tasks(
+            "1. Nhiệm vụ đầu\nphần mô tả xuống dòng\n2. Nhiệm vụ hai\n2. 17h30: Tập huấn GCE1"
+        )
+        self.assertEqual([task.title for task in tasks], [
+            "Nhiệm vụ đầu phần mô tả xuống dòng",
+            "Nhiệm vụ hai",
+            "Tập huấn GCE1",
+        ])
+        self.assertEqual(tasks[-1].start_time.isoformat(timespec="minutes"), "17:30")
+        self.assertEqual(training_end(tasks[-1].start_time).isoformat(timespec="minutes"), "20:30")
+
+    def test_assessment_is_aligned_by_occurrence_and_custom_note_does_not_complete(self):
+        notes = assessment_notes("1. Đang chờ ký\n2. Hoàn thành", 3)
+        self.assertEqual(notes, ["Đang chờ ký", "Hoàn thành", ""])
+        self.assertEqual(status_from_note(notes[0], False), "doing")
+        self.assertEqual(status_from_note(notes[1], False), "completed")
+        self.assertEqual(status_from_note("", True), "todo")
+        self.assertEqual(assessment_notes("2. Hoàn thành", 3), ["", "Hoàn thành", ""])
 
 
 class WorkScheduleApiTests(TestCase):

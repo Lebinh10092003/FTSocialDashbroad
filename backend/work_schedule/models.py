@@ -21,7 +21,7 @@ class WorkItem(models.Model):
     executor = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name="assigned_work_items")
     supporters = models.ManyToManyField(UserProfile, blank=True, related_name="supported_work_items")
     managers = models.ManyToManyField(UserProfile, blank=True, related_name="managed_work_items")
-    title = models.CharField(max_length=255)
+    title = models.CharField(max_length=1000)
     description = models.TextField(blank=True, default="")
     progress_note = models.CharField(max_length=1000, blank=True, default="")
     work_date = models.DateField(db_index=True)
