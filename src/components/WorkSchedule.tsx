@@ -59,8 +59,16 @@ type WorkDraft = {
   reviewNote: string;
 };
 type DayEditState = { date: string; tasks: WorkTask[] };
-type DayAssessmentMode = "default" | "todo" | "doing" | "completed" | "custom";
+type DayAssessmentMode = "default" | "completed" | "custom";
 type DayAssessmentEntry = { mode: DayAssessmentMode; note: string };
+type DayEditorRow = {
+  key: string;
+  id?: number;
+  title: string;
+  status: WorkStatus;
+  canEdit: boolean;
+  assessment: DayAssessmentEntry;
+};
 type Props = {
   idToken: string;
   onBackToWorkspace: () => void;
@@ -178,30 +186,19 @@ const selfAssessment: Record<WorkStatus, string> = {
   completed: "Hoàn thành",
   reviewed: "Hoàn thành",
 };
-const assessmentModeLabel: Record<Exclude<DayAssessmentMode, "default" | "custom">, string> = {
-  todo: "Cần làm",
-  doing: "Đang thực hiện",
-  completed: "Hoàn thành",
-};
-
 function dayAssessmentEntry(task: WorkTask): DayAssessmentEntry {
   if (!task.progressNote) return { mode: "default", note: "" };
-  const preset = (Object.entries(assessmentModeLabel) as Array<["todo" | "doing" | "completed", string]>).find(([, label]) => label === task.progressNote);
-  return preset ? { mode: preset[0], note: task.progressNote } : { mode: "custom", note: task.progressNote };
+  if (task.progressNote === "Cần làm" || task.progressNote === "Đang thực hiện") return { mode: "default", note: "" };
+  return task.progressNote === "Hoàn thành"
+    ? { mode: "completed", note: "Hoàn thành" }
+    : { mode: "custom", note: task.progressNote };
 }
 
-function parseDayEditorLines(value: string, allowBlank: boolean) {
-  const result: Array<{ number: number; text: string }> = [];
-  for (const raw of value.split(/\r?\n/)) {
-    if (!raw.trim()) continue;
-    const match = raw.match(/^\s*(\d{1,3})[.)]\s*(.*?)\s*$/);
-    if (!match || (!allowBlank && !match[2])) return null;
-    const number = Number(match[1]);
-    if (number < 1 || number > 100 || result.some((item) => item.number === number)) return null;
-    result.push({ number, text: match[2] });
-  }
-  return result.sort((a, b) => a.number - b.number);
-}
+const automaticSelfAssessment = (status: WorkStatus) => status === "completed" || status === "reviewed" ? "Hoàn thành" : "";
+const displayedSelfAssessment = (task: WorkTask) => {
+  const legacyAutomaticNote = task.progressNote === "Cần làm" || task.progressNote === "Đang thực hiện";
+  return legacyAutomaticNote ? automaticSelfAssessment(task.status) : task.progressNote || automaticSelfAssessment(task.status);
+};
 const initials = (name: string) =>
   name
     .split(/\s+/)
@@ -328,7 +325,7 @@ function PeoplePicker({ label, staff, selected, onChange, multiple = true, disab
 function TaskCard({ task, displayOrder, selected, onSelect, onOpen, onDelete, onDragStart }: { task: WorkTask; displayOrder: number; selected: boolean; onSelect: () => void; onOpen: () => void; onDelete: () => void; onDragStart: () => void }) {
   const time = task.startTime || task.endTime ? `${task.startTime || "—"}${task.endTime ? `–${task.endTime}` : ""}` : "Cả ngày";
   return (
-    <article draggable={task.canEdit && task.status !== "reviewed" && !task.canReview} onDragStart={onDragStart} onClick={onOpen} className={`group cursor-pointer rounded-2xl border bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selected ? "border-blue-500 ring-2 ring-blue-100" : "border-slate-200"}`}>
+    <article draggable={task.canEdit && task.status !== "reviewed"} onDragStart={onDragStart} onClick={onOpen} className={`group cursor-pointer rounded-2xl border bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selected ? "border-blue-500 ring-2 ring-blue-100" : "border-slate-200"}`}>
       <div className="mb-3 flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
           <input type="checkbox" checked={selected} onChange={onSelect} onClick={(event) => event.stopPropagation()} aria-label={`Chọn ${task.displayTitle}`} />
@@ -667,7 +664,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
   const moveTask = async (patch: { status?: WorkStatus; date?: string }) => {
     const task = tasks.find((item) => item.id === draggedId);
     setDraggedId(null);
-    if (!task || !task.canEdit || task.status === "reviewed" || task.canReview) return;
+    if (!task || !task.canEdit || task.status === "reviewed") return;
     const previousTasks = tasks,
       targetDate = patch.date || task.date,
       nextOrder = Math.max(0, ...tasks.filter((item) => item.executor.email === task.executor.email && item.date === targetDate && item.id !== task.id).map((item) => item.dailyOrder)) + 1;
@@ -1187,7 +1184,8 @@ function ScheduleTable({ days, rowsFor, setEditing, setEditingDay, setDraggedId,
           {days.map((day: Date) => {
             const dayIso = iso(day),
               tasks = rowsFor(day),
-              allCompleted = tasks.length > 0 && tasks.every((task: WorkTask) => task.status === "completed" || task.status === "reviewed");
+              allCompleted = tasks.length > 0 && tasks.every((task: WorkTask) => task.status === "completed" || task.status === "reviewed"),
+              allReviewed = tasks.length > 0 && tasks.every((task: WorkTask) => task.status === "reviewed");
             return (
               <tr key={dayIso} onDragOver={(event) => event.preventDefault()} onDrop={() => void moveTask({ date: dayIso })} className="align-top hover:bg-blue-50/30">
                 <td className="border-b border-r border-slate-200 px-3 py-3 font-bold">{weekday(dayIso)}</td>
@@ -1230,12 +1228,12 @@ function ScheduleTable({ days, rowsFor, setEditing, setEditingDay, setDraggedId,
                   ) : tasks.map((task: WorkTask, index: number) => (
                       <div key={task.id} className="mb-2 last:mb-0">
                         <b>{index + 1}.</b>{" "}
-                        {task.progressNote || selfAssessment[task.status]}
+                        {displayedSelfAssessment(task) || <span className="text-slate-300">—</span>}
                       </div>
                     ))}
                 </td>
                 <td className="border-b border-slate-200 px-3 py-3">
-                  {tasks.length > 0 && tasks.every((task: WorkTask) => task.status === "reviewed") ? (
+                  {allReviewed ? (
                     <span className="font-semibold text-emerald-700">Hoàn thành</span>
                   ) : tasks.map((task: WorkTask, index: number) => (
                       <div key={task.id} className="mb-2 last:mb-0">
@@ -1261,37 +1259,44 @@ function ScheduleTable({ days, rowsFor, setEditing, setEditingDay, setDraggedId,
 
 function DayTableEditor({ state, onClose, onSave }: { state: DayEditState; onClose: () => void; onSave: (items: Array<{ id?: number; title: string; progressNote: string }>) => Promise<void> }) {
   const ordered = [...state.tasks].sort((a, b) => a.dailyOrder - b.dailyOrder);
-  const [content, setContent] = useState(() => ordered.map((task, index) => `${index + 1}. ${task.title}`).join("\n"));
-  const [assessments, setAssessments] = useState<DayAssessmentEntry[]>(() => ordered.map(dayAssessmentEntry));
+  const [rows, setRows] = useState<DayEditorRow[]>(() => ordered.map((task) => ({
+    key: `task-${task.id}`,
+    id: task.id,
+    title: task.title,
+    status: task.status,
+    canEdit: task.canEdit,
+    assessment: dayAssessmentEntry(task),
+  })));
   const [saving, setSaving] = useState(false);
-  const previewRows = useMemo(() => parseDayEditorLines(content, false) || [], [content]);
 
-  const updateAssessment = (index: number, value: DayAssessmentEntry) => {
-    setAssessments((current) => {
-      const next = [...current];
-      next[index] = value;
-      return next;
-    });
+  const updateRow = (index: number, patch: Partial<DayEditorRow>) => {
+    setRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row));
+  };
+
+  const addRow = () => {
+    if (rows.length >= 100) return;
+    setRows((current) => [...current, {
+      key: `new-${Date.now()}-${current.length}`,
+      title: "",
+      status: "todo",
+      canEdit: true,
+      assessment: { mode: "default", note: "" },
+    }]);
   };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    const contents = parseDayEditorLines(content, false);
-    if (!contents?.length) {
-      void appDialog.alert("Mỗi nhiệm vụ phải nằm trên một dòng và bắt đầu bằng số từ 1 đến 100, ví dụ: 1. Chuẩn bị báo cáo.", { title: "Nội dung chưa hợp lệ", tone: "warning" });
+    if (!rows.length || rows.some((row) => !row.title.trim())) {
+      void appDialog.alert("Mỗi mảnh nhiệm vụ phải có nội dung. Vui lòng điền các ô còn trống trước khi lưu.", { title: "Nội dung chưa hợp lệ", tone: "warning" });
       return;
     }
-    if (contents.length < ordered.length) {
-      void appDialog.alert("Không thể xóa nhiệm vụ bằng cách bỏ dòng tại đây. Hãy mở nhiệm vụ và dùng biểu tượng xóa.", { title: "Không thể bỏ nhiệm vụ", tone: "warning" });
-      return;
-    }
-    const items = contents.map((item, index) => ({
-      ...(ordered[index] ? { id: ordered[index].id } : {}),
-      title: item.text,
-      progressNote: assessments[index]?.mode === "custom"
-        ? assessments[index].note.trim()
-        : assessments[index]?.mode && assessments[index].mode !== "default"
-          ? assessmentModeLabel[assessments[index].mode]
+    const items = rows.map((row) => ({
+      ...(row.id ? { id: row.id } : {}),
+      title: row.title.trim(),
+      progressNote: row.assessment.mode === "custom"
+        ? row.assessment.note.trim()
+        : row.assessment.mode === "completed"
+          ? "Hoàn thành"
           : "",
     }));
     setSaving(true);
@@ -1303,69 +1308,83 @@ function DayTableEditor({ state, onClose, onSave }: { state: DayEditState; onClo
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <form onSubmit={submit} className="max-h-[94vh] w-full max-w-7xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
-        <div className="flex items-start justify-between border-b px-6 py-5">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-2 backdrop-blur-sm sm:p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <form onSubmit={submit} className="flex max-h-[96vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div className="flex shrink-0 items-start justify-between border-b px-5 py-4 sm:px-7">
           <div>
             <p className="text-xs font-bold uppercase tracking-wider text-blue-600">Chỉnh sửa trực tiếp trên bảng tuần</p>
             <h2 className="mt-1 text-xl font-extrabold text-[#001e40]">Lịch ngày {fullDate(state.date)}</h2>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100" aria-label="Đóng"><X className="h-5 w-5" /></button>
         </div>
-        <div className="grid gap-5 p-6 lg:grid-cols-[2fr_1fr]">
-          <label className="block">
-            <span className="ws-label">Nội dung công việc</span>
-            <textarea autoFocus rows={18} value={content} onChange={(event) => setContent(event.target.value)} placeholder={"1. Nhiệm vụ thứ nhất\n2. Nhiệm vụ thứ hai"} className="ws-input min-h-[430px] resize-y font-medium leading-7" />
-            <small className="mt-2 block text-slate-500">Thêm một dòng được đánh số từ 1–100 để tự động tạo nhiệm vụ mới. Việc mới mặc định ở trạng thái Cần làm và người thực hiện là bạn.</small>
-          </label>
-          <div className="block">
-            <span className="ws-label">Tự đánh giá / ghi chú tiến trình</span>
-            <div className="max-h-[430px] min-h-[430px] space-y-3 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-3">
-              {previewRows.length ? previewRows.map((row, index) => {
-                const task = ordered[index];
-                const entry = assessments[index] || { mode: "default" as const, note: "" };
-                const defaultLabel = task ? selfAssessment[task.status] : selfAssessment.todo;
-                return (
-                  <div key={`${row.number}-${task?.id || "new"}`} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-                    <div className="mb-2 flex items-start gap-2">
-                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-blue-50 text-xs font-extrabold text-blue-700">{row.number}</span>
-                      <span className="line-clamp-2 min-w-0 flex-1 text-sm font-semibold text-slate-700">{row.text}</span>
+        <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 p-4 sm:p-6">
+          <div className="mb-3 hidden grid-cols-[3rem_minmax(0,1.65fr)_minmax(320px,1fr)] gap-4 px-4 text-xs font-extrabold uppercase tracking-wide text-slate-500 lg:grid">
+            <span>STT</span>
+            <span>Nội dung công việc</span>
+            <span>Tự đánh giá / ghi chú tiến trình</span>
+          </div>
+          <div className="space-y-3">
+            {rows.map((row, index) => {
+              const automaticNote = automaticSelfAssessment(row.status);
+              return (
+                <section key={row.key} className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-[3rem_minmax(0,1.65fr)_minmax(320px,1fr)] lg:gap-4">
+                  <span className="grid h-9 w-9 place-items-center rounded-full bg-blue-50 text-sm font-extrabold text-blue-700">{index + 1}</span>
+                  <label className="block min-w-0">
+                    <span className="ws-label lg:hidden">Nội dung công việc</span>
+                    <textarea
+                      autoFocus={index === 0}
+                      rows={3}
+                      value={row.title}
+                      disabled={!row.canEdit}
+                      onChange={(event) => updateRow(index, { title: event.target.value })}
+                      placeholder="Nhập nội dung nhiệm vụ..."
+                      className="ws-input min-h-24 resize-y font-medium leading-6 disabled:bg-slate-50 disabled:text-slate-500"
+                    />
+                  </label>
+                  <div className="min-w-0">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="ws-label mb-0 lg:hidden">Tự đánh giá / ghi chú</span>
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">Trạng thái: {selfAssessment[row.status]}</span>
                     </div>
                     <select
-                      value={entry.mode}
+                      value={row.assessment.mode}
                       onChange={(event) => {
                         const mode = event.target.value as DayAssessmentMode;
-                        updateAssessment(index, {
-                          mode,
-                          note: mode === "custom" ? (entry.mode === "custom" ? entry.note : "") : mode === "default" ? "" : assessmentModeLabel[mode],
+                        updateRow(index, {
+                          assessment: {
+                            mode,
+                            note: mode === "custom" && row.assessment.mode === "custom" ? row.assessment.note : mode === "completed" ? "Hoàn thành" : "",
+                          },
                         });
                       }}
-                      className="ws-input py-2 text-sm font-semibold"
-                      aria-label={`Tự đánh giá nhiệm vụ ${row.number}`}
+                      className="ws-input py-2.5 text-sm font-semibold"
+                      aria-label={`Tự đánh giá nhiệm vụ ${index + 1}`}
                     >
-                      <option value="default">Theo trạng thái · {defaultLabel}</option>
-                      <option value="todo">Cần làm</option>
-                      <option value="doing">Đang thực hiện</option>
+                      <option value="default">{automaticNote ? "Tự động · Hoàn thành" : "Chưa tự đánh giá"}</option>
                       <option value="completed">Hoàn thành</option>
-                      <option value="custom">Ghi chú riêng...</option>
+                      <option value="custom">Tự ghi...</option>
                     </select>
-                    {entry.mode === "custom" && (
-                      <input
-                        autoFocus
-                        value={entry.note}
-                        onChange={(event) => updateAssessment(index, { mode: "custom", note: event.target.value })}
-                        placeholder="Nhập ghi chú tiến trình..."
-                        className="ws-input mt-2 py-2 text-sm"
+                    {row.assessment.mode === "custom" && (
+                      <textarea
+                        rows={2}
+                        value={row.assessment.note}
+                        onChange={(event) => updateRow(index, { assessment: { mode: "custom", note: event.target.value } })}
+                        placeholder="Nhập ghi chú tiến trình của đúng nhiệm vụ này..."
+                        className="ws-input mt-2 resize-y py-2 text-sm"
                       />
                     )}
+                    {row.assessment.mode === "default" && !automaticNote && <p className="mt-2 text-xs text-slate-400">Cần làm/Đang thực hiện không tự điền vào cột tự đánh giá.</p>}
                   </div>
-                );
-              }) : <div className="grid min-h-[390px] place-items-center px-6 text-center text-sm text-slate-400">Nhập nhiệm vụ hợp lệ ở ô bên trái để thiết lập tự đánh giá.</div>}
-            </div>
-            <small className="mt-2 block text-slate-500">Mặc định hiển thị đúng trạng thái hiện tại. Chỉ chọn “Ghi chú riêng” khi cần nội dung khác; thay đổi tại đây không đổi trạng thái công việc.</small>
+                </section>
+              );
+            })}
           </div>
+          <button type="button" onClick={addRow} disabled={rows.length >= 100} className="mt-4 inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-4 py-2.5 text-sm font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+            <Plus className="h-4 w-4" /> Thêm nhiệm vụ
+          </button>
+          <p className="mt-3 text-xs leading-5 text-slate-500">Mỗi mảnh nhiệm vụ luôn ghép cố định với phần tự đánh giá bên cạnh. Nhiệm vụ mới mặc định là Cần làm; thay đổi tự đánh giá tại đây không đổi trạng thái công việc.</p>
         </div>
-        <div className="flex justify-end gap-3 border-t px-6 py-4">
+        <div className="flex shrink-0 justify-end gap-3 border-t px-5 py-4 sm:px-7">
           <button type="button" onClick={onClose} className="rounded-xl border px-4 py-2.5 text-sm font-bold text-slate-600">Hủy</button>
           <button type="submit" disabled={saving} className="rounded-xl bg-[#0055da] px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{saving ? "Đang lưu..." : "Lưu lịch trong ngày"}</button>
         </div>
