@@ -101,3 +101,27 @@ class WorkScheduleSheetChange(models.Model):
 class WorkScheduleSheetSyncLease(models.Model):
     key = models.CharField(max_length=40, primary_key=True, default="ft-work-schedule")
     locked_until = models.DateTimeField(blank=True, null=True)
+
+
+class WorkScheduleSheetInboundEvent(models.Model):
+    """One onEdit webhook call from the Apps Script trigger (Sheet -> Web direction)."""
+
+    STATUS_PROCESSED = "processed"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_PROCESSED, "Đã xử lý"),
+        (STATUS_FAILED, "Lỗi"),
+    ]
+
+    event_id = models.CharField(max_length=64, unique=True, db_index=True)
+    row_number = models.PositiveIntegerField()
+    payload = models.JSONField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, db_index=True)
+    created_count = models.PositiveSmallIntegerField(default=0)
+    updated_count = models.PositiveSmallIntegerField(default=0)
+    error = models.TextField(blank=True, default="")
+    received_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ["-received_at"]
