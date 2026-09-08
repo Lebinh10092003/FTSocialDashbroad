@@ -90,14 +90,17 @@ const workspacePalettes: Record<WorkspaceAppearance['theme'], { background: stri
 function workspaceAppearanceStyle(appearance: WorkspaceAppearance): React.CSSProperties {
   const palette = workspacePalettes[appearance.theme];
   const accent = appearance.theme === 'custom' ? appearance.customColor : palette.accent;
+  const canvas = appearance.backgroundImage
+    ? `linear-gradient(${palette.imageOverlay},${palette.imageOverlay}),url("${appearance.backgroundImage}")`
+    : palette.background;
   return {
     '--workspace-background': palette.background,
+    '--workspace-canvas': canvas,
     '--workspace-card': palette.card,
     '--workspace-panel': palette.panel,
     '--workspace-text': palette.text,
     '--workspace-muted': palette.muted,
     '--workspace-accent': accent,
-    backgroundImage: appearance.backgroundImage ? `linear-gradient(${palette.imageOverlay},${palette.imageOverlay}),url("${appearance.backgroundImage}")` : undefined,
   } as React.CSSProperties;
 }
 
@@ -291,6 +294,22 @@ export default function App() {
       document.removeEventListener('click', returnHomeFromLogo, true);
     };
   }, []);
+
+  useEffect(() => {
+    const themeClasses = Object.keys(workspacePalettes).map(theme => `workspace-theme-${theme}`);
+    const variables = workspaceAppearanceStyle(appearance) as Record<string, string>;
+    document.body.classList.remove(...themeClasses);
+    document.body.classList.add('workspace-app-theme', `workspace-theme-${appearance.theme}`);
+    Object.entries(variables).forEach(([property, value]) => {
+      if (property.startsWith('--')) document.body.style.setProperty(property, value);
+    });
+    return () => {
+      document.body.classList.remove('workspace-app-theme', ...themeClasses);
+      Object.keys(variables).forEach(property => {
+        if (property.startsWith('--')) document.body.style.removeProperty(property);
+      });
+    };
+  }, [appearance]);
 
   const setSocialTab = (tab: string) => {
     const requestedTab = (SOCIAL_TABS as readonly string[]).includes(tab) ? tab as SocialTab : 'dashboard';
@@ -645,7 +664,7 @@ export default function App() {
     if (userRole !== 'ADMIN') return null;
     return (
       <>
-        <div className="min-h-screen bg-slate-50 font-sans">
+        <div className="workspace-module-canvas min-h-screen bg-slate-50 font-sans">
           <header className="border-b border-slate-200 bg-white"><div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4 sm:px-8"><button onClick={() => setViewMode('workspace')} className="ft-btn ft-btn-secondary">Quay lại Workspace</button><span className="text-sm font-bold text-slate-700">Quản trị Workspace</span></div></header>
           <main className="mx-auto max-w-6xl px-5 py-8 sm:px-8"><Suspense fallback={<div className="py-16 text-center text-sm text-slate-500">Đang tải quản lý nhân viên...</div>}><AccountManagement idToken={idToken || ''} userRole={userRole} /></Suspense></main>
         </div>

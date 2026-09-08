@@ -97,7 +97,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
   const selected = data?.shifts.find(shift => shift.code === selectedShift);
 
   return (
-    <div className="min-h-dvh bg-[#f3f5f1] font-sans text-[#17231c]">
+    <div className="workspace-module-canvas min-h-dvh bg-[#f3f5f1] font-sans text-[#17231c]">
       <header className="border-b border-[#17231c]/10 bg-white/85 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
           <button type="button" onClick={onBackToWorkspace} className="inline-flex items-center gap-2 text-sm font-bold transition hover:text-[#287153]"><ArrowLeft className="h-4 w-4" />Workspace</button>

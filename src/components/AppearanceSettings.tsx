@@ -67,7 +67,7 @@ export default function AppearanceSettings({ value, onChange, onClose }: { value
     <div className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm" onMouseDown={event => event.target === event.currentTarget && onClose()}>
       <section role="dialog" aria-modal="true" aria-labelledby="appearance-settings-title" className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-white/60 bg-white p-6 shadow-2xl sm:p-8">
         <div className="flex items-start justify-between gap-4">
-          <div><p className="text-xs font-extrabold uppercase tracking-[.16em] text-blue-600">Cá nhân hóa Workspace</p><h2 id="appearance-settings-title" className="mt-1 text-2xl font-extrabold text-slate-900">Tùy chỉnh giao diện</h2><p className="mt-2 text-sm text-slate-500">Áp dụng trước cho trang chủ và được ghi nhớ trên trình duyệt này.</p></div>
+          <div><p className="text-xs font-extrabold uppercase tracking-[.16em] text-blue-600">Cá nhân hóa Workspace</p><h2 id="appearance-settings-title" className="mt-1 text-2xl font-extrabold text-slate-900">Tùy chỉnh giao diện</h2><p className="mt-2 text-sm text-slate-500">Áp dụng cho toàn bộ Workspace và được ghi nhớ trên trình duyệt này.</p></div>
           <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100" aria-label="Đóng"><X className="h-5 w-5" /></button>
         </div>
 

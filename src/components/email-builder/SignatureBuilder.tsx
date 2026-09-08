@@ -30,7 +30,7 @@ export default function SignatureBuilder({ onOpenEmailBuilder }: SignatureBuilde
     window.setTimeout(() => setCopied(false), 1800);
   };
 
-  return <div className="min-h-screen bg-slate-100 font-sans text-slate-800">
+  return <div className="workspace-module-canvas min-h-screen bg-slate-100 font-sans text-slate-800">
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur sm:px-7">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
         <div className="flex items-center gap-3"><button type="button" onClick={onOpenEmailBuilder} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" title="Quay lại Trình tạo Email"><ArrowLeft className="h-5 w-5" /></button><div><h1 className="text-sm font-black text-slate-900">Trình tạo chữ ký</h1><p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Thuộc Trình tạo Email</p></div></div>
