@@ -248,6 +248,59 @@ class WorkScheduleApiTests(TestCase):
         self.assertFalse(WorkItem.objects.filter(pk=second["id"]).exists())
         self.assertEqual(WorkItem.objects.get(pk=first["id"]).daily_order, 1)
 
+    def test_day_table_edit_updates_number_order_for_drag_views(self):
+        first = self.create_item()
+        second = self.request(self.executor_token, "post", "/api/work-schedule/items", {
+            "title": "Nhiệm vụ thứ hai", "date": first["date"],
+            "executorEmail": self.executor.email, "supporterEmails": [], "managerEmails": [],
+        }).json()["item"]
+        response = self.request(self.executor_token, "post", "/api/work-schedule/day", {
+            "date": first["date"],
+            "executorEmail": self.executor.email,
+            "items": [
+                {"id": first["id"], "title": first["title"], "progressNote": "", "dailyOrder": 2},
+                {"id": second["id"], "title": second["title"], "progressNote": "", "dailyOrder": 1},
+            ],
+        })
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(WorkItem.objects.get(pk=first["id"]).daily_order, 2)
+        self.assertEqual(WorkItem.objects.get(pk=second["id"]).daily_order, 1)
+
+    def test_direct_manager_can_edit_report_schedule_and_create_for_report(self):
+        self.executor.manager = self.manager
+        self.executor.save(update_fields=["manager"])
+        existing = self.request(self.executor_token, "post", "/api/work-schedule/items", {
+            "title": "Việc nhân viên tự tạo", "date": "2026-09-07",
+            "executorEmail": self.executor.email, "supporterEmails": [], "managerEmails": [],
+        }).json()["item"]
+        response = self.request(self.manager_token, "post", "/api/work-schedule/day", {
+            "date": "2026-09-07", "executorEmail": self.executor.email,
+            "items": [
+                {"id": existing["id"], "title": "Việc đã được quản lý sửa", "progressNote": "", "dailyOrder": 1},
+                {"title": "Việc quản lý giao thêm", "progressNote": "", "dailyOrder": 2},
+            ],
+        })
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(WorkItem.objects.filter(executor=self.executor, title="Việc đã được quản lý sửa").exists())
+        created = WorkItem.objects.get(executor=self.executor, title="Việc quản lý giao thêm")
+        self.assertTrue(created.managers.filter(pk=self.manager.pk).exists())
+
+    def test_day_table_rejects_duplicate_or_out_of_range_numbers(self):
+        first = self.create_item()
+        duplicate = self.request(self.executor_token, "post", "/api/work-schedule/day", {
+            "date": first["date"], "executorEmail": self.executor.email,
+            "items": [
+                {"id": first["id"], "title": first["title"], "progressNote": "", "dailyOrder": 1},
+                {"title": "Trùng số", "progressNote": "", "dailyOrder": 1},
+            ],
+        })
+        self.assertEqual(duplicate.status_code, 400, duplicate.data)
+        invalid = self.request(self.executor_token, "post", "/api/work-schedule/day", {
+            "date": first["date"], "executorEmail": self.executor.email,
+            "items": [{"id": first["id"], "title": first["title"], "progressNote": "", "dailyOrder": 101}],
+        })
+        self.assertEqual(invalid.status_code, 400, invalid.data)
+
 
     def test_batch_date_and_people_assignment_are_supported(self):
         first = self.create_item()

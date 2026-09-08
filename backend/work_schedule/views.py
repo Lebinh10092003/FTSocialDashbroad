@@ -58,7 +58,13 @@ def _related_items(user):
 
 def _visible_items(user, role=None):
     rows = WorkItem.objects.select_related("creator", "executor", "reviewed_by").prefetch_related("supporters", "managers")
-    return rows if role == "ADMIN" else _related_items(user)
+    if role == "ADMIN":
+        return rows
+    if role == "MANAGER":
+        return rows.filter(
+            Q(creator=user) | Q(executor=user) | Q(supporters=user) | Q(managers=user) | Q(executor__manager=user)
+        ).distinct()
+    return _related_items(user)
 
 
 def _viewer_relation(item, user):
@@ -77,6 +83,7 @@ def _can_manage(item, user, role):
     return (
         role == "ADMIN"
         or item.creator_id == user.email
+        or item.executor.manager_id == user.email
         or any(person.email == user.email for person in item.managers.all())
     )
 
@@ -276,8 +283,19 @@ def work_day_edit(request):
     work_date = parse_date(str(request.data.get("date") or ""))
     rows = request.data.get("items")
     raw_delete_ids = request.data.get("deleteIds", [])
+    executor_email = str(request.data.get("executorEmail") or request.user.email).strip().lower()
+    executor = UserProfile.objects.filter(email=executor_email, employment_status="ACTIVE").first()
     if not work_date:
         return Response({"error": "Ngày làm việc không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+    if not executor:
+        return Response({"error": "Nhân sự cần cập nhật không tồn tại hoặc đã ngừng hoạt động."}, status=status.HTTP_400_BAD_REQUEST)
+    can_edit_executor = (
+        request.user_role == "ADMIN"
+        or executor.email == request.user.email
+        or executor.manager_id == request.user.email
+    )
+    if not can_edit_executor:
+        return Response({"error": "Bạn không có quyền chỉnh sửa lịch của nhân sự này."}, status=status.HTTP_403_FORBIDDEN)
     if not isinstance(rows, list) or len(rows) > 100:
         return Response({"error": "Danh sách nhiệm vụ không hợp lệ hoặc vượt quá 100 nhiệm vụ."}, status=status.HTTP_400_BAD_REQUEST)
     if not isinstance(raw_delete_ids, list):
@@ -291,7 +309,8 @@ def work_day_edit(request):
 
     existing_ids = []
     normalized_rows = []
-    for row in rows:
+    daily_orders = []
+    for row_index, row in enumerate(rows, start=1):
         if not isinstance(row, dict):
             return Response({"error": "Dữ liệu nhiệm vụ không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
         title = str(row.get("title") or "").strip()
@@ -304,7 +323,15 @@ def work_day_edit(request):
             "title": title[:1000],
             "progress_note": str(row.get("progressNote") or "").strip()[:1000],
             "status": row_status,
+            "daily_order": row.get("dailyOrder", row_index),
         }
+        try:
+            normalized["daily_order"] = int(normalized["daily_order"])
+        except (TypeError, ValueError):
+            return Response({"error": "Số thứ tự nhiệm vụ không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+        if normalized["daily_order"] < 1 or normalized["daily_order"] > 100:
+            return Response({"error": "Số thứ tự nhiệm vụ phải nằm trong khoảng từ 1 đến 100."}, status=status.HTTP_400_BAD_REQUEST)
+        daily_orders.append(normalized["daily_order"])
         if row.get("id") is not None:
             try:
                 normalized["id"] = int(row["id"])
@@ -312,6 +339,8 @@ def work_day_edit(request):
             except (TypeError, ValueError):
                 return Response({"error": "Mã nhiệm vụ không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
         normalized_rows.append(normalized)
+    if len(daily_orders) != len(set(daily_orders)):
+        return Response({"error": "Có nhiều nhiệm vụ dùng cùng số thứ tự. Vui lòng sắp xếp lại trước khi lưu."}, status=status.HTTP_400_BAD_REQUEST)
     if len(existing_ids) != len(set(existing_ids)):
         return Response({"error": "Danh sách có nhiệm vụ bị trùng."}, status=status.HTTP_400_BAD_REQUEST)
     if set(existing_ids) & set(delete_ids):
@@ -323,6 +352,8 @@ def work_day_edit(request):
         return Response({"error": "Có nhiệm vụ không tồn tại hoặc bạn không được truy cập."}, status=status.HTTP_403_FORBIDDEN)
     if any(item.work_date != work_date for item in visible.values()):
         return Response({"error": "Có nhiệm vụ không thuộc ngày đang chỉnh sửa."}, status=status.HTTP_400_BAD_REQUEST)
+    if any(item.executor_id != executor.email for item in visible.values()):
+        return Response({"error": "Có nhiệm vụ không thuộc nhân sự đang chỉnh sửa."}, status=status.HTTP_400_BAD_REQUEST)
     for row in normalized_rows:
         if "id" not in row:
             continue
@@ -344,15 +375,17 @@ def work_day_edit(request):
                     return Response({"error": "Nhiệm vụ mới không thể ở trạng thái đã review."}, status=status.HTTP_400_BAD_REQUEST)
                 item = WorkItem.objects.create(
                     creator=request.user,
-                    executor=request.user,
+                    executor=executor,
                     title=row["title"],
                     progress_note=row["progress_note"],
                     work_date=work_date,
                     status=row["status"] or WorkItem.STATUS_TODO,
                     priority="medium",
                     label="Công việc",
-                    daily_order=_next_daily_order(request.user, work_date),
+                    daily_order=row["daily_order"],
                 )
+                if request.user_role == "MANAGER" and executor.email != request.user.email:
+                    item.managers.add(request.user)
             else:
                 item = visible[row["id"]]
                 update_fields = ["progress_note", "updated_at"]
@@ -363,6 +396,9 @@ def work_day_edit(request):
                 if row["status"] is not None and row["status"] != item.status:
                     item.status = row["status"]
                     update_fields.append("status")
+                if row["daily_order"] != item.daily_order:
+                    item.daily_order = row["daily_order"]
+                    update_fields.append("daily_order")
                 item.save(update_fields=update_fields)
                 sync_training_from_work_item(item)
             updated_ids.append(item.id)
