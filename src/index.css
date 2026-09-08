@@ -1382,3 +1382,40 @@ body.workspace-app-theme .ft-sidebar-brand small {
   line-height: 1.25 !important;
   letter-spacing: .06em !important;
 }
+
+/* Light mode preserves the original Fermat deep-blue module navigation. */
+body.workspace-app-theme.workspace-theme-light .ft-module-sidebar {
+  border-color: #003a98 !important;
+  background: linear-gradient(180deg, #075ee5 0%, #0047bd 100%) !important;
+  color: #fff !important;
+  box-shadow: 5px 0 24px rgba(0,55,150,.19);
+}
+body.workspace-app-theme.workspace-theme-light .ft-module-sidebar .ft-nav-item {
+  color: #eaf1ff !important;
+}
+body.workspace-app-theme.workspace-theme-light .ft-module-sidebar .ft-nav-item svg { color: #dbeafe !important; }
+body.workspace-app-theme.workspace-theme-light .ft-module-sidebar .ft-nav-item:hover {
+  background: rgba(255,255,255,.13) !important;
+  color: #fff !important;
+}
+body.workspace-app-theme.workspace-theme-light .ft-module-sidebar .ft-nav-item-active {
+  border-left-color: #fb923c !important;
+  background: #fff !important;
+  color: #0055da !important;
+  box-shadow: 0 5px 16px rgba(0,31,102,.2) !important;
+}
+body.workspace-app-theme.workspace-theme-light .ft-module-sidebar .ft-nav-item-active svg { color: #0055da !important; }
+body.workspace-app-theme.workspace-theme-light .ft-sidebar-footer { border-color: rgba(255,255,255,.22) !important; }
+
+/* Dark mode keeps business frames light so semantic colors and table text remain intact. */
+.workspace-theme-dark .glass-card { color: var(--workspace-surface-text); }
+.workspace-theme-dark .glass-card .ft-heading { color: var(--workspace-surface-text); }
+.workspace-theme-dark .glass-card .workspace-muted { color: var(--workspace-surface-muted); }
+.workspace-theme > header img[src="/logo.png"] {
+  box-sizing: content-box;
+  border: 1px solid #d9e2f0;
+  border-radius: .7rem;
+  background: #fff !important;
+  padding: .35rem .55rem;
+  box-shadow: 0 3px 10px rgba(15,55,95,.1);
+}
