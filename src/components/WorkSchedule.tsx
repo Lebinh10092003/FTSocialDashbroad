@@ -70,6 +70,22 @@ type Props = {
   photoURL?: string | null;
 };
 
+function scheduleLocation() {
+  const path = window.location.pathname;
+  if (path.endsWith("/team")) return { view: "team" as View, period: "week" as const };
+  if (path.endsWith("/month")) return { view: "week" as View, period: "month" as const };
+  if (path.endsWith("/week")) return { view: "week" as View, period: "week" as const };
+  if (path.endsWith("/sheets")) return { view: "sheet" as View, period: "week" as const };
+  return { view: "board" as View, period: "week" as const };
+}
+
+function schedulePath(view: View, period: "week" | "month" = "week") {
+  if (view === "week") return `/work-schedule/${period}`;
+  if (view === "team") return "/work-schedule/team";
+  if (view === "sheet") return "/work-schedule/sheets";
+  return "/work-schedule/personal";
+}
+
 const SHEET_TEMPLATE = "https://docs.google.com/spreadsheets/d/1kWiJdTSM_6ZDeLTGCWvDA3num5n0DmRH2Tv-6AwuBYc/edit?usp=sharing";
 const statuses: Array<{
   id: WorkStatus;
@@ -337,14 +353,15 @@ function TaskCard({ task, displayOrder, selected, onSelect, onOpen, onDelete, on
 }
 
 export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClick, onLogout, userName, userEmail, userRole, photoURL }: Props) {
-  const [view, setView] = useState<View>("board"),
+  const initialLocation = scheduleLocation();
+  const [view, setView] = useState<View>(initialLocation.view),
     [tasks, setTasks] = useState<WorkTask[]>([]),
     [staff, setStaff] = useState<Person[]>([{ email: userEmail, name: userName }]),
     [teamMembers, setTeamMembers] = useState<TeamMember[]>([]),
     [teamTasks, setTeamTasks] = useState<WorkTask[]>([]),
     [selectedDate, setSelectedDate] = useState(iso(new Date())),
     [weekStart, setWeekStart] = useState(mondayOf(new Date())),
-    [calendarPeriod, setCalendarPeriod] = useState<"week" | "month">("week"),
+    [calendarPeriod, setCalendarPeriod] = useState<"week" | "month">(initialLocation.period),
     [calendarLayout, setCalendarLayout] = useState<"calendar" | "table">("table"),
     [editing, setEditing] = useState<WorkDraft | null>(null),
     [editingDay, setEditingDay] = useState<DayEditState | null>(null),
@@ -371,6 +388,21 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     if (!response.ok) throw new Error(data.error || "Không thể xử lý lịch làm việc.");
     return data;
   };
+  const navigateSchedule = (nextView: View, nextPeriod = calendarPeriod) => {
+    setView(nextView);
+    if (nextView === "week") setCalendarPeriod(nextPeriod);
+    const path = schedulePath(nextView, nextPeriod);
+    if (window.location.pathname !== path) window.history.pushState(null, "", path);
+  };
+  useEffect(() => {
+    const onPopState = () => {
+      const next = scheduleLocation();
+      setView(next.view);
+      setCalendarPeriod(next.period);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
   const load = async () => {
     setLoading(true);
     setError("");
@@ -508,7 +540,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     try {
       await changeTaskDates(overdueTasks.map((task) => task.id), todayIso);
       setSelectedDate(todayIso);
-      setView("board");
+      navigateSchedule("board");
     } catch (cause: any) {
       void appDialog.alert(cause.message, { title: "Không thể chuyển lịch công tác", tone: "danger" });
     }
@@ -673,7 +705,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
           {navItems.map((item) => {
             const Icon = item.icon;
             return (
-              <button key={item.id} type="button" onClick={() => setView(item.id)} className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-left text-sm font-semibold transition ${view === item.id ? "bg-white text-[#0055da] shadow-sm" : "text-blue-50 hover:bg-white/10"}`}>
+              <button key={item.id} type="button" onClick={() => navigateSchedule(item.id)} className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-left text-sm font-semibold transition ${view === item.id ? "bg-white text-[#0055da] shadow-sm" : "text-blue-50 hover:bg-white/10"}`}>
                 <Icon className="h-4.5 w-4.5" />
                 {item.label}
               </button>
@@ -822,7 +854,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
               </button>
             </div>
           )}
-          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={filtered} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={setCalendarPeriod} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={setView} setEditing={setEditing} setEditingDay={setEditingDay} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "team" ? <TeamView members={teamMembers} tasks={teamTasks} userEmail={userEmail} setEditing={setEditing} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} onSync={syncSheet} />}
+          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={filtered} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={(period: "week" | "month") => navigateSchedule("week", period)} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={(next: View) => navigateSchedule(next)} setEditing={setEditing} setEditingDay={setEditingDay} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "team" ? <TeamView members={teamMembers} tasks={teamTasks} userEmail={userEmail} setEditing={setEditing} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} onSync={syncSheet} />}
         </div>
       </main>
       {editing && <TaskDialog draft={editing} setDraft={setEditing} staff={staff} userEmail={userEmail} saveTask={saveTask} saveProgressNote={saveProgressNote} deleteTasks={deleteTasks} review={review} />}

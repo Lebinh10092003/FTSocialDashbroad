@@ -7,7 +7,7 @@ from authentication.models import UserProfile
 
 from .models import WorkItem, WorkScheduleSheetChange
 from .sheet_parser import assessment_notes, parse_sheet_tasks, status_from_note, training_end
-from .sheet_sync import _row_hash, deterministic_sheet_uid
+from .sheet_sync import _group_values, _row_hash, deterministic_sheet_uid
 from .training_sync import sync_work_item_from_training
 
 
@@ -15,6 +15,23 @@ class WorkScheduleSheetParserTests(TestCase):
     def test_sheet_identity_and_hash_are_stable_when_title_is_not_the_identity(self):
         self.assertEqual(str(deterministic_sheet_uid(1094, 1)), "6ae71379-0000-5000-8000-000446000001")
         self.assertEqual(_row_hash("a", "b", "c", "d"), "eb564109")
+
+    def test_sheet_output_omits_open_statuses_and_empty_leader_reviews(self):
+        class Item:
+            def __init__(self, status, note=""):
+                self.title = status
+                self.start_time = None
+                self.status = status
+                self.progress_note = note
+                self.review_percent = None
+                self.review_note = ""
+                self.sync_uid = deterministic_sheet_uid(1094, 1 if status == "todo" else 2)
+
+        _, self_notes, leader_notes, _ = _group_values([
+            Item("todo"), Item("doing"), Item("completed"), Item("doing", "Đang chờ khách phản hồi")
+        ])
+        self.assertEqual(self_notes, "3. Hoàn thành\n4. Đang chờ khách phản hồi")
+        self.assertEqual(leader_notes, "")
 
     def test_numbered_cell_keeps_wrapped_lines_and_accepts_duplicate_numbers(self):
         tasks = parse_sheet_tasks(
