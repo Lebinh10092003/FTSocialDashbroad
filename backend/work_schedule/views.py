@@ -1,3 +1,6 @@
+import hmac
+import logging
+import os
 from datetime import timedelta
 
 from django.db import transaction
@@ -5,14 +8,17 @@ from django.db.models import Max, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_time
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from authentication.models import UserProfile
 from authentication.permissions import IsAuthenticated
 
-from .models import WorkItem
+from .models import WorkItem, WorkScheduleSheetInboundEvent
 from .training_sync import delete_training_for_work_item, sync_training_from_work_item
+
+logger = logging.getLogger(__name__)
 
 
 VALID_STATUSES = {choice[0] for choice in WorkItem.STATUS_CHOICES}
@@ -514,3 +520,74 @@ def work_items_batch(request):
         else:
             return Response({"error": "Thao tác hàng loạt không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
     return Response({"message": f"Đã cập nhật {len(ids)} công việc.", "updated": len(ids)})
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def work_schedule_sheet_webhook(request):
+    """Realtime Sheet -> Web sync. Called by the Apps Script `onEdit` trigger for exactly
+    one edited row (never a full-sheet scan). Authenticated by a shared secret header
+    instead of a user token, since Apps Script cannot hold a logged-in session."""
+    from .sheet_sync import _ingest_row, _service, ensure_sync_columns, push_groups_to_sheet
+    from .signals import suppress_sheet_queue
+
+    expected_secret = os.getenv("SHEET_WEBHOOK_SECRET", "")
+    provided_secret = request.headers.get("X-Sheet-Webhook-Secret", "")
+    if not expected_secret or not hmac.compare_digest(provided_secret, expected_secret):
+        return Response({"error": "Không xác thực được webhook."}, status=status.HTTP_401_UNAUTHORIZED)
+
+    event_id = str(request.data.get("event_id") or "").strip()
+    row_number = request.data.get("row")
+    values = request.data.get("values")
+    if not event_id or not isinstance(row_number, int) or row_number < 2 or not isinstance(values, list):
+        return Response({"error": "Payload thiếu event_id/row/values hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+
+    event, created = WorkScheduleSheetInboundEvent.objects.get_or_create(
+        event_id=event_id,
+        defaults={"row_number": row_number, "payload": {"row": row_number, "values": values}, "status": WorkScheduleSheetInboundEvent.STATUS_PROCESSED},
+    )
+    if not created:
+        return Response({
+            "message": "Sự kiện đã được xử lý trước đó (bỏ qua để tránh trùng lặp).",
+            "status": event.status,
+            "createdCount": event.created_count,
+            "updatedCount": event.updated_count,
+        })
+
+    row = [str(value) for value in values]
+    try:
+        with transaction.atomic():
+            with suppress_sheet_queue():
+                created_count, updated_count, touched = _ingest_row(row_number, row, timezone.localdate())
+            event.created_count = created_count
+            event.updated_count = updated_count
+            event.processed_at = timezone.now()
+            event.save(update_fields=["created_count", "updated_count", "processed_at"])
+    except Exception as exc:
+        event.status = WorkScheduleSheetInboundEvent.STATUS_FAILED
+        event.error = str(exc)
+        event.processed_at = timezone.now()
+        event.save(update_fields=["status", "error", "processed_at"])
+        logger.exception("Không thể xử lý sự kiện webhook từ Sheet (event_id=%s, row=%s).", event_id, row_number)
+        return Response({"error": f"Không thể xử lý sự kiện từ Sheet: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
+
+    push_back_error = ""
+    if touched:
+        try:
+            service = _service(None)
+            ensure_sync_columns(service)
+            push_groups_to_sheet(service, touched, force=True)
+        except Exception as exc:
+            push_back_error = str(exc)
+            logger.exception("Ghi lại WEB_TASK_IDS lên Sheet thất bại sau webhook (event_id=%s).", event_id)
+            event.error = f"Ghi ngược task_id lên Sheet thất bại: {exc}"
+            event.save(update_fields=["error"])
+
+    return Response({
+        "message": "Đã đồng bộ dòng từ Sheet vào hệ thống.",
+        "createdCount": created_count,
+        "updatedCount": updated_count,
+        "groups": [[email, work_date.isoformat()] for email, work_date in touched],
+        "pushBackError": push_back_error,
+    })

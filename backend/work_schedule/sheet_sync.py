@@ -134,6 +134,69 @@ def ensure_sync_columns(service):
     service.spreadsheets().batchUpdate(spreadsheetId=SPREADSHEET_ID, body={"requests": requests}).execute()
 
 
+def _ingest_row(offset, row, today):
+    """Parse one sheet row (A:K, same shape as `_rows()` yields) and upsert its WorkItems.
+
+    Shared by `pull_from_sheet` (bulk, one row per iteration) and the realtime
+    webhook (exactly one row, no date-range filter). Caller is responsible for
+    wrapping this in `suppress_sheet_queue()`.
+    """
+    created = updated = 0
+    touched = set()
+    work_date = _parse_date(_cell(row, 1))
+    employee_id = _cell(row, 7)
+    email = EMPLOYEE_EMAILS.get(employee_id)
+    if not email or not work_date:
+        return created, updated, touched
+    executor = UserProfile.objects.filter(email=email, employment_status="ACTIVE").first()
+    if not executor:
+        return created, updated, touched
+    parsed = parse_sheet_tasks(_cell(row, 4))
+    notes = assessment_notes(_cell(row, 5), len(parsed))
+    leader_notes = assessment_notes(_cell(row, 6), len(parsed))
+    ids = _task_uids(_cell(row, 9))
+    for index, parsed_task in enumerate(parsed, 1):
+        sync_uid = ids[index - 1] if index <= len(ids) and ids[index - 1] else deterministic_sheet_uid(offset, index)
+        item = WorkItem.objects.filter(sync_uid=sync_uid).first()
+        if not item:
+            item = WorkItem.objects.filter(source_sheet_row=offset, source_task_index=index).first()
+        note = notes[index - 1] if index <= len(notes) else ""
+        task_status = status_from_note(note, work_date > today)
+        leader_note = leader_notes[index - 1] if index <= len(leader_notes) else ""
+        if leader_note and leader_note.strip().lower() not in {"chưa đánh giá", "chua danh gia"}:
+            task_status = WorkItem.STATUS_REVIEWED
+        custom_note = "" if note.strip().lower() in {"cần làm", "đang thực hiện", "hoàn thành", "đã hoàn thành", "xong"} else note
+        is_training = email == "liennt@fermat.edu.vn" and "tập huấn" in parsed_task.title.lower()
+        if item:
+            item.executor = executor
+            item.title = parsed_task.title[:1000]
+            item.progress_note = custom_note[:1000]
+            item.work_date = work_date
+            item.start_time = parsed_task.start_time
+            item.end_time = training_end(parsed_task.start_time) if is_training else item.end_time
+            item.status = task_status
+            item.daily_order = index
+            item.source_sheet_row = offset
+            item.source_task_index = index
+            item.source_record_id = _cell(row, 8)
+            item.sync_uid = sync_uid
+            item.save()
+            updated += 1
+        else:
+            item = WorkItem.objects.create(
+                creator=executor, executor=executor, title=parsed_task.title[:1000],
+                description="Nhập từ Lịch công tác FT 2026 mới.", progress_note=custom_note[:1000],
+                work_date=work_date, start_time=parsed_task.start_time,
+                end_time=training_end(parsed_task.start_time) if is_training else None,
+                status=task_status, priority="medium", label="Tập huấn" if is_training else "Công việc",
+                daily_order=index, source_sheet_row=offset, source_task_index=index,
+                source_record_id=_cell(row, 8), sync_uid=sync_uid,
+            )
+            created += 1
+        touched.add((email, work_date))
+    return created, updated, touched
+
+
 def pull_from_sheet(service, start_date, end_date):
     created = updated = 0
     touched = set()
@@ -141,56 +204,12 @@ def pull_from_sheet(service, start_date, end_date):
     with suppress_sheet_queue():
         for offset, row in enumerate(_rows(service), start=2):
             work_date = _parse_date(_cell(row, 1))
-            employee_id = _cell(row, 7)
-            email = EMPLOYEE_EMAILS.get(employee_id)
-            if not email or not work_date or not (start_date <= work_date <= end_date):
+            if not work_date or not (start_date <= work_date <= end_date):
                 continue
-            executor = UserProfile.objects.filter(email=email, employment_status="ACTIVE").first()
-            if not executor:
-                continue
-            parsed = parse_sheet_tasks(_cell(row, 4))
-            notes = assessment_notes(_cell(row, 5), len(parsed))
-            leader_notes = assessment_notes(_cell(row, 6), len(parsed))
-            ids = _task_uids(_cell(row, 9))
-            for index, parsed_task in enumerate(parsed, 1):
-                sync_uid = ids[index - 1] if index <= len(ids) and ids[index - 1] else deterministic_sheet_uid(offset, index)
-                item = WorkItem.objects.filter(sync_uid=sync_uid).first()
-                if not item:
-                    item = WorkItem.objects.filter(source_sheet_row=offset, source_task_index=index).first()
-                note = notes[index - 1] if index <= len(notes) else ""
-                task_status = status_from_note(note, work_date > today)
-                leader_note = leader_notes[index - 1] if index <= len(leader_notes) else ""
-                if leader_note and leader_note.strip().lower() not in {"chưa đánh giá", "chua danh gia"}:
-                    task_status = WorkItem.STATUS_REVIEWED
-                custom_note = "" if note.strip().lower() in {"cần làm", "đang thực hiện", "hoàn thành", "đã hoàn thành", "xong"} else note
-                is_training = email == "liennt@fermat.edu.vn" and "tập huấn" in parsed_task.title.lower()
-                if item:
-                    item.executor = executor
-                    item.title = parsed_task.title[:1000]
-                    item.progress_note = custom_note[:1000]
-                    item.work_date = work_date
-                    item.start_time = parsed_task.start_time
-                    item.end_time = training_end(parsed_task.start_time) if is_training else item.end_time
-                    item.status = task_status
-                    item.daily_order = index
-                    item.source_sheet_row = offset
-                    item.source_task_index = index
-                    item.source_record_id = _cell(row, 8)
-                    item.sync_uid = sync_uid
-                    item.save()
-                    updated += 1
-                else:
-                    item = WorkItem.objects.create(
-                        creator=executor, executor=executor, title=parsed_task.title[:1000],
-                        description="Nhập từ Lịch công tác FT 2026 mới.", progress_note=custom_note[:1000],
-                        work_date=work_date, start_time=parsed_task.start_time,
-                        end_time=training_end(parsed_task.start_time) if is_training else None,
-                        status=task_status, priority="medium", label="Tập huấn" if is_training else "Công việc",
-                        daily_order=index, source_sheet_row=offset, source_task_index=index,
-                        source_record_id=_cell(row, 8), sync_uid=sync_uid,
-                    )
-                    created += 1
-                touched.add((email, work_date))
+            row_created, row_updated, row_touched = _ingest_row(offset, row, today)
+            created += row_created
+            updated += row_updated
+            touched |= row_touched
     return {"created": created, "updated": updated, "groups": touched}
 
 
