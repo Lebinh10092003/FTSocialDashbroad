@@ -1235,18 +1235,20 @@ function ScheduleTable({ days, rowsFor, setEditing, setEditingDay, setDraggedId,
                     ))}
                 </td>
                 <td className="border-b border-slate-200 px-3 py-3">
-                  {tasks.map((task: WorkTask, index: number) => (
-                    <div key={task.id} className="mb-2 last:mb-0">
-                      <b>{index + 1}.</b>{" "}
-                      {task.reviewPercent === null ? (
-                        <span className="text-slate-300">Chưa đánh giá</span>
-                      ) : (
-                        <span>
-                          {task.reviewPercent}%{task.reviewNote ? ` · ${task.reviewNote}` : ""}
-                        </span>
-                      )}
-                    </div>
-                  ))}
+                  {tasks.length > 0 && tasks.every((task: WorkTask) => task.status === "reviewed") ? (
+                    <span className="font-semibold text-emerald-700">Hoàn thành</span>
+                  ) : tasks.map((task: WorkTask, index: number) => (
+                      <div key={task.id} className="mb-2 last:mb-0">
+                        <b>{index + 1}.</b>{" "}
+                        {task.reviewPercent === null ? (
+                          <span className="text-slate-300">Chưa đánh giá</span>
+                        ) : (
+                          <span>
+                            {task.reviewPercent}%{task.reviewNote ? ` · ${task.reviewNote}` : ""}
+                          </span>
+                        )}
+                      </div>
+                    ))}
                 </td>
               </tr>
             );
