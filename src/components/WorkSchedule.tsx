@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDot, ClipboardCheck, ExternalLink, FileSpreadsheet, LayoutDashboard, Link2, ListChecks, Pencil, Plus, Search, Settings2, Trash2, UserCheck, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDot, ClipboardCheck, ExternalLink, FileSpreadsheet, LayoutDashboard, Link2, ListChecks, Pencil, Plus, RefreshCw, Search, Settings2, Trash2, UserCheck, X } from "lucide-react";
 import AccountMenu from "./AccountMenu";
 import { appDialog } from "./AppDialog";
 
@@ -385,6 +385,16 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     } finally {
       setLoading(false);
     }
+  };
+  const syncSheet = async () => {
+    const data = await requestJson("/api/work-schedule/sync", {
+      method: "POST",
+      body: JSON.stringify({ direction: "both" }),
+    });
+    const pulled = data.result?.pulled || {};
+    const pushed = data.result?.pushed || {};
+    setSheetNotice(`Đã đọc ${pulled.updated || 0} nhiệm vụ, tạo ${pulled.created || 0} nhiệm vụ mới và ghi ${pushed.tasks || 0} nhiệm vụ lên Sheet.`);
+    await load();
   };
   useEffect(() => {
     void load();
@@ -812,7 +822,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
               </button>
             </div>
           )}
-          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={filtered} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={setCalendarPeriod} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={setView} setEditing={setEditing} setEditingDay={setEditingDay} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "team" ? <TeamView members={teamMembers} tasks={teamTasks} userEmail={userEmail} setEditing={setEditing} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} />}
+          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={filtered} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={setCalendarPeriod} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={setView} setEditing={setEditing} setEditingDay={setEditingDay} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "team" ? <TeamView members={teamMembers} tasks={teamTasks} userEmail={userEmail} setEditing={setEditing} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} onSync={syncSheet} />}
         </div>
       </main>
       {editing && <TaskDialog draft={editing} setDraft={setEditing} staff={staff} userEmail={userEmail} saveTask={saveTask} saveProgressNote={saveProgressNote} deleteTasks={deleteTasks} review={review} />}
@@ -1253,7 +1263,19 @@ function DayTableEditor({ state, onClose, onSave }: { state: DayEditState; onClo
     </div>
   );
 }
-function SheetView({ sheetUrl, setSheetUrl, sheetKey, notice, setNotice }: any) {
+function SheetView({ sheetUrl, setSheetUrl, sheetKey, notice, setNotice, onSync }: any) {
+  const [syncing, setSyncing] = useState(false);
+  const runSync = async () => {
+    setSyncing(true);
+    setNotice("");
+    try {
+      await onSync();
+    } catch (cause: any) {
+      setNotice(cause.message || "Không thể đồng bộ Google Sheets.");
+    } finally {
+      setSyncing(false);
+    }
+  };
   return (
     <section className="mx-auto max-w-4xl">
       <div className="overflow-hidden rounded-3xl border bg-white shadow-sm">
@@ -1287,8 +1309,12 @@ function SheetView({ sheetUrl, setSheetUrl, sheetKey, notice, setNotice }: any) 
               Lưu
             </button>
           </div>
-          {notice && <p className="mt-3 text-sm font-semibold text-emerald-700">{notice}</p>}
+          {notice && <p className={`mt-3 text-sm font-semibold ${notice.startsWith("Không") ? "text-rose-700" : "text-emerald-700"}`}>{notice}</p>}
           <div className="mt-5 flex gap-3">
+            <button disabled={syncing} onClick={() => void runSync()} className="inline-flex items-center gap-2 rounded-xl bg-[#0055da] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+              {syncing ? "Đang đồng bộ..." : "Đồng bộ hai chiều"}
+            </button>
             <button onClick={() => window.open(sheetUrl, "_blank", "noopener,noreferrer")} className="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold">
               <ExternalLink className="h-4 w-4" />
               Mở bảng tính

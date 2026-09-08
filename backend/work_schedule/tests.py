@@ -5,12 +5,17 @@ from rest_framework.authtoken.models import Token
 
 from authentication.models import UserProfile
 
-from .models import WorkItem
+from .models import WorkItem, WorkScheduleSheetChange
 from .sheet_parser import assessment_notes, parse_sheet_tasks, status_from_note, training_end
+from .sheet_sync import _row_hash, deterministic_sheet_uid
 from .training_sync import sync_work_item_from_training
 
 
 class WorkScheduleSheetParserTests(TestCase):
+    def test_sheet_identity_and_hash_are_stable_when_title_is_not_the_identity(self):
+        self.assertEqual(str(deterministic_sheet_uid(1094, 1)), "6ae71379-0000-5000-8000-000446000001")
+        self.assertEqual(_row_hash("a", "b", "c", "d"), "eb564109")
+
     def test_numbered_cell_keeps_wrapped_lines_and_accepts_duplicate_numbers(self):
         tasks = parse_sheet_tasks(
             "1. Nhiệm vụ đầu\nphần mô tả xuống dòng\n2. Nhiệm vụ hai\n2. 17h30: Tập huấn GCE1"
@@ -118,6 +123,14 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(moved.status_code, 200, moved.data)
         self.assertEqual(moved.json()["item"]["dailyOrder"], 1)
         self.assertEqual(WorkItem.objects.get(pk=second["id"]).daily_order, 1)
+
+    def test_web_changes_are_added_to_sheet_outbox(self):
+        self.create_item()
+        self.assertTrue(WorkScheduleSheetChange.objects.filter(
+            executor_email=self.executor.email,
+            work_date="2026-09-07",
+            status=WorkScheduleSheetChange.STATUS_PENDING,
+        ).exists())
 
     def test_delete_requires_no_password_and_batch_status_is_supported(self):
         first = self.create_item()

@@ -19,6 +19,26 @@ VALID_STATUSES = {choice[0] for choice in WorkItem.STATUS_CHOICES}
 VALID_PRIORITIES = {choice[0] for choice in WorkItem.PRIORITY_CHOICES}
 
 
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def work_schedule_sync(request):
+    from .sheet_sync import initial_two_way_sync, sync_status, sync_to_sheet
+
+    if request.method == "GET":
+        return Response(sync_status())
+    try:
+        direction = str(request.data.get("direction") or "both")
+        if direction == "to-sheet":
+            result = sync_to_sheet(getattr(request, "google_access_token", None))
+        else:
+            if request.user_role not in {"ADMIN", "MANAGER"}:
+                return Response({"error": "Chỉ quản lý hoặc admin được chạy lượt đồng bộ hai chiều toàn hệ thống."}, status=status.HTTP_403_FORBIDDEN)
+            result = initial_two_way_sync(getattr(request, "google_access_token", None))
+        return Response({"message": "Đồng bộ lịch làm việc thành công.", "result": result})
+    except Exception as exc:
+        return Response({"error": f"Không thể đồng bộ Google Sheets: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
+
+
 def _profile_payload(profile):
     return {"email": profile.email, "name": profile.name or profile.email.split("@", 1)[0]}
 
@@ -171,7 +191,7 @@ def _apply_data(request, item, creating=False, allow_people=True):
 
     previous_group = (item.executor_id, item.work_date) if item and item.pk else None
     next_group = (executor.email, work_date)
-    item.title = title[:255]
+    item.title = title[:1000]
     item.description = str(data.get("description", item.description if item else "") or "").strip()
     item.progress_note = str(data.get("progressNote", item.progress_note if item else "") or "").strip()[:1000]
     item.work_date = work_date
@@ -254,7 +274,7 @@ def work_day_edit(request):
         title = str(row.get("title") or "").strip()
         if not title:
             return Response({"error": "Nội dung nhiệm vụ không được để trống."}, status=status.HTTP_400_BAD_REQUEST)
-        normalized = {"title": title[:255], "progress_note": str(row.get("progressNote") or "").strip()[:1000]}
+        normalized = {"title": title[:1000], "progress_note": str(row.get("progressNote") or "").strip()[:1000]}
         if row.get("id") is not None:
             try:
                 normalized["id"] = int(row["id"])

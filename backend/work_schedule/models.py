@@ -1,3 +1,5 @@
+import uuid
+
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
@@ -50,6 +52,8 @@ class WorkItem(models.Model):
     source_sheet_row = models.PositiveIntegerField(blank=True, null=True)
     source_task_index = models.PositiveIntegerField(blank=True, null=True)
     source_record_id = models.CharField(max_length=100, blank=True, default="")
+    sync_uid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    source_sync_hash = models.CharField(max_length=64, blank=True, default="")
     reviewed_by = models.ForeignKey(
         UserProfile, blank=True, null=True, on_delete=models.SET_NULL, related_name="reviewed_work_items"
     )
@@ -66,3 +70,34 @@ class WorkItem(models.Model):
 
     def __str__(self):
         return f"{self.work_date} · {self.title}"
+
+
+class WorkScheduleSheetChange(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_PROCESSING = "processing"
+    STATUS_DONE = "done"
+    STATUS_FAILED = "failed"
+    STATUS_CONFLICT = "conflict"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Chờ đồng bộ"),
+        (STATUS_PROCESSING, "Đang đồng bộ"),
+        (STATUS_DONE, "Đã đồng bộ"),
+        (STATUS_FAILED, "Lỗi"),
+        (STATUS_CONFLICT, "Xung đột"),
+    ]
+
+    executor_email = models.EmailField(db_index=True)
+    work_date = models.DateField(db_index=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    last_error = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        ordering = ["created_at", "pk"]
+
+
+class WorkScheduleSheetSyncLease(models.Model):
+    key = models.CharField(max_length=40, primary_key=True, default="ft-work-schedule")
+    locked_until = models.DateTimeField(blank=True, null=True)

@@ -5,3 +5,5 @@ class WorkScheduleConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "work_schedule"
 
+    def ready(self):
+        from . import signals  # noqa: F401
