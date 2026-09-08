@@ -55,6 +55,7 @@ import { EmailBuilderDialogProvider, useEmailBuilderDialog } from './EmailBuilde
 
 interface EmailTemplateBuilderProps {
   onBackToWorkspace: () => void;
+  backLabel?: string;
   onAccountClick: () => void;
   onLogout: () => void;
   isGuest: boolean;
@@ -78,7 +79,7 @@ export default function EmailTemplateBuilder(props: EmailTemplateBuilderProps) {
   return <EmailBuilderDialogProvider><EmailTemplateBuilderContent {...props} /></EmailBuilderDialogProvider>;
 }
 
-function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogout, isGuest, userName, userRole, photoURL, userEmail, onOpenSignatureBuilder }: EmailTemplateBuilderProps) {
+function EmailTemplateBuilderContent({ onBackToWorkspace, backLabel = 'Quay lại Workspace', onAccountClick, onLogout, isGuest, userName, userRole, photoURL, userEmail, onOpenSignatureBuilder }: EmailTemplateBuilderProps) {
   const dialog = useEmailBuilderDialog();
   // 1. Storage & State Management
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
@@ -949,7 +950,7 @@ function EmailTemplateBuilderContent({ onBackToWorkspace, onAccountClick, onLogo
               onClick={onBackToWorkspace}
               className="px-4 py-2 text-xs font-bold text-slate-650 bg-slate-100 hover:bg-slate-200/80 rounded-xl cursor-pointer transition-all border border-slate-200"
             >
-              Quay lại Workspace
+              {backLabel}
             </button>
             <AccountMenu userName={userName} userRole={userRole} photoURL={photoURL} isGuest={isGuest} onAccountClick={onAccountClick} onLogout={onLogout} variant="avatar"/>
           </div>

@@ -1230,3 +1230,23 @@ body {
 .assessment-grading .grading-scroll::-webkit-scrollbar-track { background: #e2e8f0; border-radius: 8px; }
 .assessment-grading .grading-scroll::-webkit-scrollbar-thumb { background: #94a3b8; border: 2px solid #e2e8f0; border-radius: 8px; }
 .assessment-grading .grading-scroll::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+/* Workspace appearance presets are intentionally scoped to the home screen. */
+.workspace-theme {
+  background: var(--workspace-background);
+  background-attachment: fixed;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  color: var(--workspace-text);
+  transition: background .25s ease, color .25s ease;
+}
+.workspace-theme .glass-panel { background: var(--workspace-panel); border-color: color-mix(in srgb, var(--workspace-accent) 15%, transparent); }
+.workspace-theme .glass-card { background: var(--workspace-card); border-color: color-mix(in srgb, var(--workspace-accent) 14%, transparent); }
+.workspace-theme .ft-heading, .workspace-theme .workspace-title { color: var(--workspace-text); }
+.workspace-theme .workspace-muted { color: var(--workspace-muted); }
+.workspace-theme .workspace-accent { color: var(--workspace-accent); }
+.workspace-theme .ft-gradient-text { background: linear-gradient(135deg, var(--workspace-accent), color-mix(in srgb, var(--workspace-accent) 58%, #ec4899)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.workspace-theme-dark .glass-card { box-shadow: 0 18px 50px rgba(0,0,0,.24); }
+.workspace-theme-dark .glass-card:hover { border-color: color-mix(in srgb, var(--workspace-accent) 45%, transparent); box-shadow: 0 22px 60px rgba(0,0,0,.34); }
+img[src="/logo.png"] { cursor: pointer; }

@@ -736,9 +736,9 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
           })}
         </nav>
         <div className="p-3">
-          <button type="button" onClick={onBackToWorkspace} className="mb-3 flex w-full items-center gap-3 rounded-xl border border-white/15 px-3.5 py-3 text-sm font-semibold text-blue-50 hover:bg-white/10">
+          <button type="button" onClick={onBackToWorkspace} className="ft-sidebar-back mb-3 flex w-full items-center gap-3 rounded-xl border p-3 text-left text-sm font-bold">
             <ArrowLeft className="h-4 w-4" />
-            Về Workspace
+            Quay lại Workspace
           </button>
           <AccountMenu userName={userName} photoURL={photoURL} userRole={userRole} isGuest={false} onAccountClick={onAccountClick} onLogout={onLogout} variant="sidebar" />
         </div>

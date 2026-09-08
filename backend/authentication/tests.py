@@ -428,6 +428,24 @@ class EmployeeDirectoryTests(TestCase):
         self.assertEqual(delete_second.status_code, 200)
         self.assertTrue(UserProfile.objects.filter(email="hr-admin@example.com").exists())
 class ModuleAccessTests(TestCase):
+    def test_legacy_communication_permission_grants_the_combined_toolkit(self):
+        user = get_user_model().objects.create_user(
+            username="qr-user@example.com", email="qr-user@example.com", password="StrongPassword9921"
+        )
+        UserProfile.objects.create(
+            email=user.email,
+            name="QR User",
+            role="EMPLOYEE",
+            access_modules=["qr-generator"],
+        )
+        token = Token.objects.create(user=user).key
+
+        response = self.client.get(
+            "/api/email-templates", HTTP_AUTHORIZATION=f"Bearer {token}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+
     def test_employee_is_limited_to_explicit_modules_while_admin_is_unrestricted(self):
         user = get_user_model().objects.create_user(
             username="module-user@example.com", email="module-user@example.com", password="StrongPassword9921"

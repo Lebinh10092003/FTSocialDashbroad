@@ -41,7 +41,10 @@ def has_module_access(request) -> bool:
     if request_role(request) == "ADMIN":
         return True
     module = requested_module(request)
-    return module is None or module == "work-schedule" or module in request_modules(request)
+    modules = request_modules(request)
+    if module == "email-builder":
+        return bool({"email-builder", "signature-builder", "qr-generator"}.intersection(modules))
+    return module is None or module == "work-schedule" or module in modules
 
 
 class IsAuthenticated(permissions.BasePermission):

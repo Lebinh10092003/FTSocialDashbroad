@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowLeft, Check, Clipboard, Download, ExternalLink, FileImage, Link2, LockKeyhole, QrCode, ShieldCheck } from 'lucide-react';
 import QRCode from 'qrcode';
 
-type QRCodeGeneratorProps = { onBackToWorkspace: () => void };
+type QRCodeGeneratorProps = { onBackToWorkspace: () => void; backLabel?: string };
 type UrlAssessment = { normalizedUrl: string; hostname: string; error: string; warnings: string[]; checks: Array<{ label: string; passed: boolean }> };
 type LinkVerification = {
   status: 'idle' | 'checking' | 'valid' | 'invalid';
@@ -51,7 +51,7 @@ function triggerDownload(dataUrl: string, filename: string) {
   const anchor = document.createElement('a'); anchor.href = dataUrl; anchor.download = filename; anchor.click();
 }
 
-export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorProps) {
+export default function QRCodeGenerator({ onBackToWorkspace, backLabel = 'Workspace' }: QRCodeGeneratorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [rawUrl, setRawUrl] = useState('');
   const [title, setTitle] = useState('');
@@ -215,7 +215,7 @@ export default function QRCodeGenerator({ onBackToWorkspace }: QRCodeGeneratorPr
       <header className="border-b border-[#102A43]/10 bg-[#f7f4ee]/90 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
           <button type="button" onClick={onBackToWorkspace} className="inline-flex items-center gap-2 text-sm font-bold transition hover:text-[#de6b35]">
-            <ArrowLeft className="h-4 w-4" />Workspace
+            <ArrowLeft className="h-4 w-4" />{backLabel}
           </button>
           <div className="flex items-center gap-2.5">
             <div className="grid h-9 w-9 place-items-center rounded-lg bg-[#102A43] text-white"><QrCode className="h-5 w-5" /></div>

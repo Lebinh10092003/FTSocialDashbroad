@@ -1,12 +1,13 @@
 import React, { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { appDialog } from './components/AppDialog';
-import { BadgeDollarSign, CalendarCheck, CalendarRange, ChartColumnBig, ClipboardList, FileCheck2, GraduationCap, Mail, QrCode, ShieldUser } from 'lucide-react';
+import { ArrowLeft, BadgeDollarSign, CalendarCheck, CalendarRange, ChartColumnBig, ClipboardList, FileCheck2, GraduationCap, Mail, Megaphone, QrCode, ShieldUser } from 'lucide-react';
 
 import { Channel, UserRole } from './types';
 import Sidebar from './components/social-dashboard/Sidebar';
 import LoginModal from './components/LoginModal';
 import AccountProfileModal from './components/AccountProfileModal';
 import AccountMenu from './components/AccountMenu';
+import { readWorkspaceAppearance, WorkspaceAppearance } from './components/AppearanceSettings';
 
 const lazyWithRecovery = <T extends React.ComponentType<any>>(loader: () => Promise<{ default: T }>) => lazy(async () => {
   const retryKey = `ft-workspace-lazy-reload:${window.location.pathname}`;
@@ -42,7 +43,7 @@ const QRCodeGenerator = lazyWithRecovery(() => import('./components/QRCodeGenera
 const Attendance = lazyWithRecovery(() => import('./components/Attendance'));
 const WorkSchedule = lazyWithRecovery(() => import('./components/WorkSchedule'));
 
-type ViewMode = 'workspace' | 'work-schedule' | 'social-dashboard' | 'email-builder' | 'signature-builder' | 'examination' | 'digital-training' | 'finance-report' | 'training-assessments' | 'training-assessment-public' | 'qr-generator' | 'attendance' | 'account-management';
+type ViewMode = 'workspace' | 'work-schedule' | 'social-dashboard' | 'communication-tools' | 'email-builder' | 'signature-builder' | 'examination' | 'digital-training' | 'finance-report' | 'training-assessments' | 'training-assessment-public' | 'qr-generator' | 'attendance' | 'account-management';
 
 const SOCIAL_TABS = ['dashboard', 'media', 'posts', 'sync', 'config'] as const;
 type SocialTab = typeof SOCIAL_TABS[number];
@@ -74,6 +75,31 @@ const GUEST_USER: AppUser = {
   displayName: 'Khách',
   photoURL: '',
 };
+
+const workspacePalettes: Record<WorkspaceAppearance['theme'], { background: string; card: string; panel: string; text: string; muted: string; accent: string; imageOverlay: string }> = {
+  light: { background: 'linear-gradient(150deg,#f6f8fc 0%,#eef3fb 45%,#eaf1ff 72%,#fff 100%)', card: 'rgba(255,255,255,.74)', panel: 'rgba(255,255,255,.84)', text: '#0f172a', muted: '#64748b', accent: '#0055da', imageOverlay: 'rgba(246,248,252,.72)' },
+  dark: { background: 'linear-gradient(150deg,#07111f 0%,#111827 48%,#172554 100%)', card: 'rgba(15,23,42,.78)', panel: 'rgba(15,23,42,.88)', text: '#f8fafc', muted: '#cbd5e1', accent: '#7dd3fc', imageOverlay: 'rgba(2,6,23,.72)' },
+  blue: { background: 'linear-gradient(150deg,#eff6ff 0%,#dbeafe 48%,#e0f2fe 100%)', card: 'rgba(255,255,255,.7)', panel: 'rgba(239,246,255,.88)', text: '#172554', muted: '#475569', accent: '#2563eb', imageOverlay: 'rgba(219,234,254,.7)' },
+  green: { background: 'linear-gradient(150deg,#f0fdf4 0%,#dcfce7 50%,#d1fae5 100%)', card: 'rgba(255,255,255,.7)', panel: 'rgba(240,253,244,.88)', text: '#14532d', muted: '#4b6356', accent: '#16a34a', imageOverlay: 'rgba(220,252,231,.7)' },
+  pink: { background: 'linear-gradient(150deg,#fdf2f8 0%,#fce7f3 50%,#ffe4e6 100%)', card: 'rgba(255,255,255,.72)', panel: 'rgba(253,242,248,.9)', text: '#831843', muted: '#6b5560', accent: '#db2777', imageOverlay: 'rgba(252,231,243,.7)' },
+  lavender: { background: 'linear-gradient(150deg,#faf5ff 0%,#ede9fe 48%,#f3e8ff 100%)', card: 'rgba(255,255,255,.72)', panel: 'rgba(250,245,255,.9)', text: '#4c1d95', muted: '#655a73', accent: '#7c3aed', imageOverlay: 'rgba(237,233,254,.7)' },
+  peach: { background: 'linear-gradient(150deg,#fff7ed 0%,#ffedd5 52%,#fef3c7 100%)', card: 'rgba(255,255,255,.72)', panel: 'rgba(255,247,237,.9)', text: '#7c2d12', muted: '#705c51', accent: '#ea580c', imageOverlay: 'rgba(255,237,213,.7)' },
+  custom: { background: 'linear-gradient(150deg,color-mix(in srgb,var(--workspace-accent) 8%,white),color-mix(in srgb,var(--workspace-accent) 18%,white))', card: 'rgba(255,255,255,.72)', panel: 'rgba(255,255,255,.86)', text: '#172033', muted: '#64748b', accent: '#8b5cf6', imageOverlay: 'rgba(255,255,255,.68)' },
+};
+
+function workspaceAppearanceStyle(appearance: WorkspaceAppearance): React.CSSProperties {
+  const palette = workspacePalettes[appearance.theme];
+  const accent = appearance.theme === 'custom' ? appearance.customColor : palette.accent;
+  return {
+    '--workspace-background': palette.background,
+    '--workspace-card': palette.card,
+    '--workspace-panel': palette.panel,
+    '--workspace-text': palette.text,
+    '--workspace-muted': palette.muted,
+    '--workspace-accent': accent,
+    backgroundImage: appearance.backgroundImage ? `linear-gradient(${palette.imageOverlay},${palette.imageOverlay}),url("${appearance.backgroundImage}")` : undefined,
+  } as React.CSSProperties;
+}
 
 function readStoredSession(): StoredSession | null {
   try {
@@ -110,6 +136,7 @@ function getInitialViewMode(): ViewMode {
   if (path.startsWith('/digital-training')) return 'digital-training';
   if (path.startsWith('/work-schedule')) return 'work-schedule';
   if (path.startsWith('/social-dashboard')) return 'social-dashboard';
+  if (path.startsWith('/communication-tools')) return 'communication-tools';
   if (path.startsWith('/finance-report')) return 'finance-report';
   if (path.startsWith('/signature-builder')) return 'signature-builder';
   if (path.startsWith('/email-builder')) return 'email-builder';
@@ -167,6 +194,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [accessNotice, setAccessNotice] = useState('');
+  const [appearance, setAppearance] = useState<WorkspaceAppearance>(readWorkspaceAppearance);
 
   const [viewMode, setViewModeState] = useState<ViewMode>(getInitialViewMode());
   const [activeTab, setActiveTab] = useState<SocialTab>(() => socialTabFromPath(window.location.pathname));
@@ -177,11 +205,16 @@ export default function App() {
   const normalisedEmployeeIdentity = [user.jobTitle?.name || '', ...(user.departments || []).map(item => item.name)]
     .join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(new RegExp(String.fromCharCode(273), 'g'), 'd').toLocaleLowerCase('vi-VN');
   const isAccountant = normalisedEmployeeIdentity.includes('ke toan');
-  const hasModuleAccess = (module: string) => userRole === 'ADMIN' || (user.accessModules || []).includes(module);
+  const communicationModules = ['email-builder', 'signature-builder', 'qr-generator'];
+  const hasModuleAccess = (module: string) => userRole === 'ADMIN' || (
+    communicationModules.includes(module)
+      ? communicationModules.some(item => (user.accessModules || []).includes(item))
+      : (user.accessModules || []).includes(module)
+  );
   const canViewFinance = !isGuest && hasModuleAccess('finance-report') && (userRole === 'ADMIN' || userRole === 'MANAGER' || isAccountant || normalisedEmployeeIdentity.includes('giam doc') || normalisedEmployeeIdentity.includes('quan ly'));
   const canEditFinance = canViewFinance && (userRole === 'ADMIN' || isAccountant);
   const moduleForView: Partial<Record<ViewMode, string>> = { 'social-dashboard': 'social-dashboard', attendance: 'attendance', 'email-builder': 'email-builder', 'signature-builder': 'signature-builder', 'qr-generator': 'qr-generator', examination: 'examination', 'digital-training': 'digital-training', 'training-assessments': 'digital-training' };
-  const canAccessView = (mode: ViewMode) => { if (mode === 'account-management') return userRole === 'ADMIN'; if (mode === 'finance-report') return canViewFinance; if (mode === 'work-schedule') return !isGuest; if (isGuest) return false; const module = moduleForView[mode]; return !!module && hasModuleAccess(module); };
+  const canAccessView = (mode: ViewMode) => { if (mode === 'account-management') return userRole === 'ADMIN'; if (mode === 'finance-report') return canViewFinance; if (mode === 'work-schedule') return !isGuest; if (mode === 'communication-tools') return !isGuest && hasModuleAccess('email-builder'); if (isGuest) return false; const module = moduleForView[mode]; return !!module && hasModuleAccess(module); };
   const googleAccessToken = null;
 
   const persistSession = (token: string, nextUser: AppUser, role: UserRole) => {
@@ -244,6 +277,20 @@ export default function App() {
     const path = mode === 'workspace' ? '/' : `/${mode}`;
     if (window.location.pathname !== path) window.history.pushState(null, '', path);
   };
+
+  useEffect(() => {
+    const updateAppearance = (event: Event) => setAppearance((event as CustomEvent<WorkspaceAppearance>).detail || readWorkspaceAppearance());
+    const returnHomeFromLogo = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      if (target?.closest('img[src="/logo.png"], img[src$="/logo.png"]')) setViewMode('workspace');
+    };
+    window.addEventListener('ft-appearance-change', updateAppearance);
+    document.addEventListener('click', returnHomeFromLogo, true);
+    return () => {
+      window.removeEventListener('ft-appearance-change', updateAppearance);
+      document.removeEventListener('click', returnHomeFromLogo, true);
+    };
+  }, []);
 
   const setSocialTab = (tab: string) => {
     const requestedTab = (SOCIAL_TABS as readonly string[]).includes(tab) ? tab as SocialTab : 'dashboard';
@@ -433,18 +480,11 @@ export default function App() {
         icon: ChartColumnBig,
       },
       {
-        mode: 'email-builder',
-        title: 'Trình tạo Email',
-        description: 'Thiết kế email trực quan và lưu mẫu dùng chung.',
-        gradient: 'from-[#FF0052] to-[#d90045]',
-        icon: Mail,
-      },
-      {
-        mode: 'qr-generator',
-        title: 'Trình tạo mã QR',
-        description: 'Tạo QR đi thẳng tới form khảo sát, tài liệu hoặc bất kỳ đường dẫn nào.',
-        gradient: 'from-[#102A43] to-[#DE6B35]',
-        icon: QrCode,
+        mode: 'communication-tools',
+        title: 'Bộ công cụ truyền thông',
+        description: 'Thiết kế Email, tạo chữ ký và mã QR trong một không gian công cụ chung.',
+        gradient: 'from-[#FF0052] via-[#8B5CF6] to-[#0055DA]',
+        icon: Megaphone,
       },
       {
         mode: 'training-assessments',
@@ -484,14 +524,14 @@ export default function App() {
 
     const visibleApps = apps.filter(app => canAccessView(app.mode));
     return (
-      <div className="min-h-dvh liquid-bg flex flex-col font-sans relative overflow-x-hidden">
+      <div className={`workspace-theme workspace-theme-${appearance.theme} min-h-dvh liquid-bg flex flex-col font-sans relative overflow-x-hidden`} style={workspaceAppearanceStyle(appearance)}>
         <header className="sticky top-0 z-30 w-full glass-panel border-b border-white/50">
           <div className="relative mx-auto flex max-w-[1600px] items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
             <div className="flex shrink-0 items-center">
               <img src="/logo.png" alt="FermatTech Logo" className="h-8 object-contain" />
             </div>
             <div className="pointer-events-none absolute left-1/2 max-w-[48vw] -translate-x-1/2 truncate whitespace-nowrap text-center">
-              <h1 className="text-sm font-extrabold tracking-tight text-slate-900 sm:text-lg lg:text-2xl">
+              <h1 className="workspace-title text-sm font-extrabold tracking-tight sm:text-lg lg:text-2xl">
                 Không gian làm việc <span className="ft-gradient-text">FermatTech Workspace</span>
               </h1>
             </div>
@@ -523,15 +563,36 @@ export default function App() {
                   <div>
                     <div className={`grid w-14 h-14 place-items-center rounded-2xl bg-gradient-to-tr ${app.gradient} shadow-lg mb-5`}><AppIcon className="h-7 w-7 text-white" /></div>
                     <h3 className="ft-heading ft-heading-sm">{app.title}</h3>
-                    <p className="ft-body-sm text-slate-500 mt-2 leading-relaxed">{app.description}</p>
+                    <p className="workspace-muted ft-body-sm mt-2 leading-relaxed">{app.description}</p>
                   </div>
-                  <span className="pt-5 text-sm font-semibold text-amber-600">{'Truy cập ứng dụng →'}</span>
+                  <span className="workspace-accent pt-5 text-sm font-semibold">{'Truy cập ứng dụng →'}</span>
                 </button>
               );
             })}
           </div>
         </main>
         {loginModal}{profileModal}
+      </div>
+    );
+  }
+
+  if (viewMode === 'communication-tools' && !canAccessView('communication-tools')) return null;
+
+  if (viewMode === 'communication-tools') {
+    const tools = [
+      { mode: 'email-builder' as ViewMode, title: 'Thiết kế Email', description: 'Tạo, quản lý mẫu Email và chữ ký dùng chung.', icon: Mail, color: 'from-pink-500 to-violet-600', allowed: canAccessView('email-builder') },
+      { mode: 'qr-generator' as ViewMode, title: 'Tạo mã QR', description: 'Tạo mã QR, kiểm tra đường dẫn và xuất poster truyền thông.', icon: QrCode, color: 'from-blue-600 to-cyan-500', allowed: canAccessView('qr-generator') },
+    ].filter(tool => tool.allowed);
+    return (
+      <div className="ft-module-shell flex min-h-dvh bg-slate-50 font-sans">
+        <aside className="ft-module-sidebar fixed inset-y-0 left-0 hidden w-64 flex-col md:flex">
+          <button type="button" onClick={() => setViewMode('workspace')} className="ft-sidebar-brand flex items-center gap-3 text-left"><img src="/logo.png" alt="FermatTech" className="h-9 object-contain" /><span><b className="block text-sm">FermatTech</b><small className="text-[10px] font-bold uppercase tracking-wider text-blue-500">Công cụ truyền thông</small></span></button>
+          <nav className="flex-1 space-y-2 p-4">{tools.map(tool => { const Icon = tool.icon; return <button key={tool.mode} type="button" onClick={() => setViewMode(tool.mode)} className="ft-nav-item flex w-full items-center gap-3 rounded-xl border-l-4 px-4 py-3 text-left text-sm font-bold"><Icon className="h-5 w-5" />{tool.title}</button>; })}</nav>
+          <div className="ft-sidebar-footer border-t p-4"><button type="button" onClick={() => setViewMode('workspace')} className="ft-sidebar-back mb-3 flex w-full items-center gap-3 rounded-xl border p-3 text-left text-sm font-bold"><ArrowLeft className="h-5 w-5" />Quay lại Workspace</button><AccountMenu userName={user.displayName} userRole={userRole} photoURL={user.photoURL} isGuest={isGuest} onAccountClick={openAccount} onLogout={handleLogout} variant="sidebar" /></div>
+        </aside>
+        <main className="min-w-0 flex-1 md:ml-64"><header className="ft-module-header sticky top-0 z-20 flex items-center justify-between border-b px-5 py-4 md:px-8"><div><p className="text-xs font-extrabold uppercase tracking-[.15em] text-blue-600">FermatTech Workspace</p><h1 className="text-xl font-extrabold text-slate-900">Bộ công cụ truyền thông</h1></div><AccountMenu userName={user.displayName} userRole={userRole} photoURL={user.photoURL} isGuest={isGuest} onAccountClick={openAccount} onLogout={handleLogout} variant="avatar" /></header>
+          <div className="ft-module-content mx-auto p-5 md:p-8"><div className="mb-7 max-w-2xl"><h2 className="text-3xl font-extrabold text-[#001e40]">Bạn muốn tạo gì?</h2><p className="mt-2 text-slate-500">Các công cụ phục vụ thiết kế và phân phối nội dung truyền thông được gom vào một nơi.</p></div><div className="grid max-w-5xl gap-5 md:grid-cols-2">{tools.map(tool => { const Icon = tool.icon; return <button key={tool.mode} type="button" onClick={() => setViewMode(tool.mode)} className="group rounded-3xl border border-slate-200 bg-white p-7 text-left shadow-sm transition hover:-translate-y-1 hover:border-blue-300 hover:shadow-xl"><span className={`grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br ${tool.color} text-white shadow-lg`}><Icon className="h-7 w-7" /></span><h3 className="mt-5 text-xl font-extrabold text-slate-900">{tool.title}</h3><p className="mt-2 text-sm leading-6 text-slate-500">{tool.description}</p><span className="mt-6 block text-sm font-bold text-blue-600">Mở công cụ →</span></button>; })}</div></div>
+        </main>
       </div>
     );
   }
@@ -640,7 +701,7 @@ export default function App() {
   if (viewMode === 'qr-generator') {
     return (
       <Suspense fallback={<div className="grid h-screen place-items-center bg-[#f7f4ee]">Đang nạp Trình tạo mã QR...</div>}>
-        <QRCodeGenerator onBackToWorkspace={() => setViewMode('workspace')} />
+        <QRCodeGenerator onBackToWorkspace={() => setViewMode('communication-tools')} backLabel="Bộ công cụ truyền thông" />
       </Suspense>
     );
   }
@@ -668,7 +729,8 @@ export default function App() {
       <>
         <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp Trình tạo Email...</div>}>
           <EmailTemplateBuilder
-            onBackToWorkspace={() => setViewMode('workspace')}
+            onBackToWorkspace={() => setViewMode('communication-tools')}
+            backLabel="Bộ công cụ truyền thông"
             onAccountClick={openAccount}
             onLogout={handleLogout}
             isGuest={isGuest}
