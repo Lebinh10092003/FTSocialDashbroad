@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react';
 import { ImagePlus, Palette, RotateCcw, X } from 'lucide-react';
 
-export type WorkspaceThemeId = 'light' | 'dark' | 'blue' | 'green' | 'pink' | 'lavender' | 'peach' | 'custom';
+export type WorkspaceThemeId =
+  | 'light' | 'dark' | 'blue' | 'teal' | 'mint' | 'green' | 'sage' | 'yellow'
+  | 'beige' | 'peach' | 'red' | 'pink' | 'lavender' | 'navy' | 'gray' | 'custom';
 export type WorkspaceAppearance = { theme: WorkspaceThemeId; customColor: string; backgroundImage: string };
 
 export const DEFAULT_APPEARANCE: WorkspaceAppearance = { theme: 'light', customColor: '#8b5cf6', backgroundImage: '' };
@@ -20,11 +22,19 @@ const themes: Array<{ id: WorkspaceThemeId; name: string; colors: [string, strin
   { id: 'light', name: 'Sáng', colors: ['#f8fafc', '#eaf1ff', '#ffffff'] },
   { id: 'dark', name: 'Tối', colors: ['#0f172a', '#1e293b', '#334155'] },
   { id: 'blue', name: 'Xanh trời', colors: ['#dbeafe', '#e0f2fe', '#eff6ff'] },
+  { id: 'teal', name: 'Xanh ngọc', colors: ['#ccfbf1', '#dff7f3', '#f0fdfa'] },
+  { id: 'mint', name: 'Bạc hà', colors: ['#d1fae5', '#e6fff5', '#f0fdf8'] },
   { id: 'green', name: 'Xanh lá', colors: ['#dcfce7', '#d1fae5', '#f0fdf4'] },
+  { id: 'sage', name: 'Xô thơm', colors: ['#dce7cf', '#e8efdf', '#f5f7f1'] },
+  { id: 'yellow', name: 'Vàng kem', colors: ['#fef3c7', '#fef9c3', '#fffbeb'] },
+  { id: 'beige', name: 'Be cát', colors: ['#efe0ca', '#f5eadb', '#faf6ef'] },
+  { id: 'peach', name: 'Cam đào', colors: ['#ffedd5', '#fef3c7', '#fff7ed'] },
+  { id: 'red', name: 'Đỏ pastel', colors: ['#ea7b7b', '#d25353', '#ffead3'] },
   { id: 'pink', name: 'Hồng', colors: ['#fce7f3', '#ffe4e6', '#fdf2f8'] },
   { id: 'lavender', name: 'Oải hương', colors: ['#ede9fe', '#f3e8ff', '#faf5ff'] },
-  { id: 'peach', name: 'Cam đào', colors: ['#ffedd5', '#fef3c7', '#fff7ed'] },
-  { id: 'custom', name: 'Màu tùy chỉnh', colors: ['#ede9fe', '#ddd6fe', '#f5f3ff'] },
+  { id: 'navy', name: 'Xanh navy', colors: ['#cbd5e1', '#dbe4f0', '#eff4fa'] },
+  { id: 'gray', name: 'Ghi sương', colors: ['#e2e8f0', '#f1f5f9', '#f8fafc'] },
+  { id: 'custom', name: 'Tự chọn', colors: ['#ede9fe', '#ddd6fe', '#f5f3ff'] },
 ];
 
 async function resizeBackground(file: File) {
@@ -71,10 +81,10 @@ export default function AppearanceSettings({ value, onChange, onClose }: { value
           <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100" aria-label="Đóng"><X className="h-5 w-5" /></button>
         </div>
 
-        <div className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {themes.map(theme => <button key={theme.id} type="button" onClick={() => onChange({ ...value, theme: theme.id })} className={`rounded-2xl border p-3 text-left transition ${value.theme === theme.id ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200 hover:border-blue-300'}`}>
+        <div className="mt-7 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {themes.map(theme => <button key={theme.id} type="button" aria-pressed={value.theme === theme.id} onClick={() => onChange({ ...value, theme: theme.id })} className={`rounded-2xl border p-3 text-left transition ${value.theme === theme.id ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200 hover:border-blue-300'}`}>
             <span className="flex h-12 overflow-hidden rounded-xl border border-white/70 shadow-inner">{theme.colors.map(color => <i key={color} className="flex-1" style={{ background: color }} />)}</span>
-            <b className="mt-2 block text-sm text-slate-800">{theme.name}</b>
+            <b className="mt-2 block min-h-5 text-sm text-slate-800">{theme.name}</b>
           </button>)}
         </div>
 
