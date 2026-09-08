@@ -27,7 +27,7 @@ type WorkTask = {
   executor: Person;
   supporters: Person[];
   managers: Person[];
-  viewerRelation: "executor" | "supporter" | "manager" | "creator";
+  viewerRelation: "executor" | "supporter" | "manager" | "creator" | "team_viewer";
   needsRevision: boolean;
   revisionCount: number;
   revisionOfId: number | null;
@@ -283,7 +283,7 @@ function PeoplePicker({ label, staff, selected, onChange, multiple = true, disab
   );
 }
 
-function TaskCard({ task, selected, onSelect, onOpen, onDelete, onDragStart }: { task: WorkTask; selected: boolean; onSelect: () => void; onOpen: () => void; onDelete: () => void; onDragStart: () => void }) {
+function TaskCard({ task, displayOrder, selected, onSelect, onOpen, onDelete, onDragStart }: { task: WorkTask; displayOrder: number; selected: boolean; onSelect: () => void; onOpen: () => void; onDelete: () => void; onDragStart: () => void }) {
   const time = task.startTime || task.endTime ? `${task.startTime || "—"}${task.endTime ? `–${task.endTime}` : ""}` : "Cả ngày";
   return (
     <article draggable={task.canEdit && task.status !== "reviewed" && !task.canReview} onDragStart={onDragStart} onClick={onOpen} className={`group cursor-pointer rounded-2xl border bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selected ? "border-blue-500 ring-2 ring-blue-100" : "border-slate-200"}`}>
@@ -307,7 +307,7 @@ function TaskCard({ task, selected, onSelect, onOpen, onDelete, onDragStart }: {
         )}
       </div>
       <h3 className="text-sm font-bold leading-5 text-slate-900">
-        <span className="mr-1.5 text-blue-600">{task.dailyOrder}.</span>
+        <span className="mr-1.5 text-blue-600">{displayOrder}.</span>
         {task.displayTitle}
       </h3>
       <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{task.description || "Không có mô tả."}</p>
@@ -341,6 +341,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     [tasks, setTasks] = useState<WorkTask[]>([]),
     [staff, setStaff] = useState<Person[]>([{ email: userEmail, name: userName }]),
     [teamMembers, setTeamMembers] = useState<TeamMember[]>([]),
+    [teamTasks, setTeamTasks] = useState<WorkTask[]>([]),
     [selectedDate, setSelectedDate] = useState(iso(new Date())),
     [weekStart, setWeekStart] = useState(mondayOf(new Date())),
     [calendarPeriod, setCalendarPeriod] = useState<"week" | "month">("week"),
@@ -378,6 +379,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
       setTasks(Array.isArray(items.items) ? items.items : []);
       setStaff(Array.isArray(people) ? people : []);
       setTeamMembers(Array.isArray(team.members) ? team.members : []);
+      setTeamTasks(Array.isArray(team.items) ? team.items : []);
     } catch (cause: any) {
       setError(cause.message || "Không thể tải lịch làm việc.");
     } finally {
@@ -810,7 +812,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
               </button>
             </div>
           )}
-          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={filtered} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={setCalendarPeriod} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={setView} setEditing={setEditing} setEditingDay={setEditingDay} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "team" ? <TeamView members={teamMembers} tasks={tasks} userEmail={userEmail} setEditing={setEditing} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} />}
+          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={filtered} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={setCalendarPeriod} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={setView} setEditing={setEditing} setEditingDay={setEditingDay} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "team" ? <TeamView members={teamMembers} tasks={teamTasks} userEmail={userEmail} setEditing={setEditing} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} />}
         </div>
       </main>
       {editing && <TaskDialog draft={editing} setDraft={setEditing} staff={staff} userEmail={userEmail} saveTask={saveTask} saveProgressNote={saveProgressNote} deleteTasks={deleteTasks} review={review} />}
@@ -873,7 +875,7 @@ function BoardView({ tasks, selectedDate, setSelectedDate, userEmail, selectedId
               {tasks
                 .filter((task) => task.displayStatus === column.id)
                 .map((task) => (
-                  <TaskCard key={task.id} task={task} selected={selectedIds.includes(task.id)} onSelect={() => setSelectedIds((ids) => (ids.includes(task.id) ? ids.filter((id) => id !== task.id) : [...ids, task.id]))} onOpen={() => setEditing(draftFromTask(task))} onDelete={() => void deleteTasks([task.id])} onDragStart={() => setDraggedId(task.id)} />
+                  <TaskCard key={task.id} task={task} displayOrder={tasks.findIndex((item) => item.id === task.id) + 1} selected={selectedIds.includes(task.id)} onSelect={() => setSelectedIds((ids) => (ids.includes(task.id) ? ids.filter((id) => id !== task.id) : [...ids, task.id]))} onOpen={() => setEditing(draftFromTask(task))} onDelete={() => void deleteTasks([task.id])} onDragStart={() => setDraggedId(task.id)} />
                 ))}
             </div>
           </section>
@@ -1008,10 +1010,10 @@ function WeekView({ tasks, visibleDays, anchor, setAnchor, period, setPeriod, la
   const heading = period === "week" ? `LỊCH CÔNG TÁC TUẦN ${weekNumber(iso(visibleDays[0]))} NĂM ${visibleDays[0].getFullYear()}` : `LỊCH CÔNG TÁC THÁNG ${anchor.getMonth() + 1} NĂM ${anchor.getFullYear()}`;
   const dateRange = period === "week" ? `Từ ${fullDate(iso(visibleDays[0]))} đến ${fullDate(iso(visibleDays[visibleDays.length - 1]))}` : "";
   const rowsFor = (day: Date) => tasks.filter((task: WorkTask) => task.date === iso(day)).sort((a: WorkTask, b: WorkTask) => a.dailyOrder - b.dailyOrder);
-  const taskButton = (task: WorkTask) => (
+  const taskButton = (task: WorkTask, displayOrder: number) => (
     <button key={task.id} draggable={task.canEdit && task.status !== "reviewed"} onDragStart={() => setDraggedId(task.id)} onDragEnd={() => setDragTargetDate(null)} onClick={() => setEditing(draftFromTask(task))} className={`w-full rounded-lg border-l-4 p-2.5 text-left text-xs shadow-sm transition duration-150 active:cursor-grabbing ${task.canEdit ? "cursor-grab" : "cursor-pointer"} ${task.displayStatus === "reviewed" ? "border-violet-500 bg-violet-50" : task.displayStatus === "completed" ? "border-emerald-500 bg-emerald-50" : task.displayStatus === "doing" ? "border-blue-500 bg-blue-50" : "border-slate-400 bg-slate-50"}`}>
       <span className="font-bold text-slate-500">
-        {task.dailyOrder}. {task.startTime || "Cả ngày"}
+        {displayOrder}. {task.startTime || "Cả ngày"}
       </span>
       <b className="mt-1 block leading-5">{task.displayTitle}</b>
     </button>
@@ -1086,7 +1088,7 @@ function WeekView({ tasks, visibleDays, anchor, setAnchor, period, setPeriod, la
                   >
                     {day.getDate()}
                   </button>
-                  <div className="space-y-2">{rows.map(taskButton)}</div>
+                  <div className="space-y-2">{rows.map((task: WorkTask, index: number) => taskButton(task, index + 1))}</div>
                 </div>
               );
             })}
@@ -1128,10 +1130,10 @@ function ScheduleTable({ days, rowsFor, setEditing, setEditingDay, setDraggedId,
                   </button>
                   {tasks.length ? (
                     <ol className="space-y-2">
-                      {tasks.map((task: WorkTask) => (
+                      {tasks.map((task: WorkTask, index: number) => (
                         <li key={task.id}>
                           <button draggable={task.canEdit && task.status !== "reviewed"} onDragStart={() => setDraggedId(task.id)} onClick={() => setEditing(draftFromTask(task))} className="text-left font-semibold leading-5 text-slate-800 hover:text-blue-700">
-                            <span className="mr-1 text-blue-600">{task.dailyOrder}.</span>
+                            <span className="mr-1 text-blue-600">{index + 1}.</span>
                             {task.displayTitle}
                           </button>
                         </li>
@@ -1142,17 +1144,17 @@ function ScheduleTable({ days, rowsFor, setEditing, setEditingDay, setDraggedId,
                   )}
                 </td>
                 <td className="border-b border-r border-slate-200 px-3 py-3">
-                  {tasks.map((task: WorkTask) => (
+                  {tasks.map((task: WorkTask, index: number) => (
                     <div key={task.id} className="mb-2 last:mb-0">
-                      <b>{task.dailyOrder}.</b>{" "}
+                      <b>{index + 1}.</b>{" "}
                       {task.progressNote || selfAssessment[task.status]}
                     </div>
                   ))}
                 </td>
                 <td className="border-b border-slate-200 px-3 py-3">
-                  {tasks.map((task: WorkTask) => (
+                  {tasks.map((task: WorkTask, index: number) => (
                     <div key={task.id} className="mb-2 last:mb-0">
-                      <b>{task.dailyOrder}.</b>{" "}
+                      <b>{index + 1}.</b>{" "}
                       {task.reviewPercent === null ? (
                         <span className="text-slate-300">Chưa đánh giá</span>
                       ) : (

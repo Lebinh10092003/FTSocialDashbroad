@@ -26,24 +26,25 @@ def _profile_payload(profile):
 def _visible_items(user):
     rows = WorkItem.objects.select_related("creator", "executor", "reviewed_by").prefetch_related("supporters", "managers")
     return rows.filter(
-        Q(creator=user) | Q(executor=user) | Q(supporters=user) | Q(managers=user) | Q(executor__manager=user)
+        Q(creator=user) | Q(executor=user) | Q(supporters=user) | Q(managers=user)
     ).distinct()
 
 
 def _viewer_relation(item, user):
     if item.executor_id == user.email:
         return "executor"
-    if item.executor.manager_id == user.email or any(person.email == user.email for person in item.managers.all()):
+    if any(person.email == user.email for person in item.managers.all()):
         return "manager"
     if any(person.email == user.email for person in item.supporters.all()):
         return "supporter"
-    return "creator"
+    if item.creator_id == user.email:
+        return "creator"
+    return "team_viewer"
 
 
 def _can_manage(item, user, role):
     return (
         item.creator_id == user.email
-        or item.executor.manager_id == user.email
         or any(person.email == user.email for person in item.managers.all())
     )
 
@@ -218,6 +219,10 @@ def work_items(request):
 def work_team(request):
     rows = UserProfile.objects.filter(employment_status="ACTIVE", manager=request.user)
     rows = rows.select_related("department", "job_title").order_by("name", "email")
+    member_ids = list(rows.values_list("email", flat=True))
+    team_items = WorkItem.objects.select_related("creator", "executor", "reviewed_by").prefetch_related("supporters", "managers").filter(
+        executor_id__in=member_ids
+    ).order_by("work_date", "daily_order", "start_time", "created_at")[:2000]
     return Response({"members": [
         {
             "email": profile.email,
@@ -227,7 +232,7 @@ def work_team(request):
             "jobTitle": profile.job_title.name if profile.job_title else "",
         }
         for profile in rows
-    ]})
+    ], "items": [_payload(item, request.user, request.user_role) for item in team_items]})
 
 
 @api_view(["POST"])

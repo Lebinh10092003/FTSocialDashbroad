@@ -204,7 +204,7 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertIsNone(WorkItem.objects.get(pk=response.json()["item"]["id"]).training_session_id)
 
-    def test_organisational_manager_sees_and_reviews_direct_report_work(self):
+    def test_organisational_manager_views_report_only_in_team_schedule(self):
         self.executor.manager = self.manager
         self.executor.save(update_fields=["manager"])
         response = self.request(self.executor_token, "post", "/api/work-schedule/items", {
@@ -213,9 +213,12 @@ class WorkScheduleApiTests(TestCase):
         })
         self.assertEqual(response.status_code, 201, response.data)
         manager_rows = self.request(self.manager_token, "get", "/api/work-schedule/items").json()["items"]
-        row = next(item for item in manager_rows if item["id"] == response.json()["item"]["id"])
-        self.assertEqual(row["viewerRelation"], "manager")
-        self.assertTrue(row["canDelete"])
+        self.assertNotIn(response.json()["item"]["id"], [row["id"] for row in manager_rows])
+        team_rows = self.request(self.manager_token, "get", "/api/work-schedule/team").json()["items"]
+        row = next(item for item in team_rows if item["id"] == response.json()["item"]["id"])
+        self.assertEqual(row["viewerRelation"], "team_viewer")
+        self.assertFalse(row["canDelete"])
+        self.assertFalse(row["canReview"])
 
     def test_team_endpoint_lists_only_direct_reports_for_manager(self):
         self.executor.manager = self.manager
