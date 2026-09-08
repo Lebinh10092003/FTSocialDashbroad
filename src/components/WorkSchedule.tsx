@@ -1355,7 +1355,7 @@ function DayTableEditor({ state, onClose, onSave }: { state: DayEditState; onClo
                           const note = event.target.value;
                           updateRow(index, { assessment: note.trim() ? { mode: "custom", note } : { mode: "default", note: "" } });
                         }}
-                        placeholder="Nhấn để nhập đánh giá hoặc ghi chú..."
+                        placeholder="Nhấn vào Hoàn thành để xác nhận hoàn thành công việc hoặc Ghi chú tiến trình hiện tại"
                         aria-label={`Đánh giá hoặc ghi chú nhiệm vụ ${index + 1}`}
                         className="ws-input min-h-12 flex-1 resize-y py-2 text-sm"
                       />
