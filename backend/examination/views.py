@@ -9,7 +9,7 @@ import unicodedata
 import urllib.parse
 from datetime import datetime, timedelta
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 from .models import Competition, ExamSession, Candidate, CandidateParticipation, RoundResult, ExamRoom, LogNote, ExaminationSheet, ExaminationSheetPublication
 from .eligibility import ELIGIBILITY_ELIGIBLE, normalize_eligibility
@@ -776,7 +776,7 @@ def upsert_participation_history(candidate, session_id, history, source='', regi
 
 def normalized_exam_history(candidate):
     rows = []
-    participations = CandidateParticipation.objects.filter(candidate=candidate).select_related('session').prefetch_related('round_results')
+    participations = candidate.participations.all() if 'participations' in getattr(candidate, '_prefetched_objects_cache', {}) else CandidateParticipation.objects.filter(candidate=candidate).select_related('session').prefetch_related('round_results')
     for participation in participations:
         for result in participation.round_results.all():
             rows.append({
@@ -900,8 +900,8 @@ def request_can_view_sensitive_data(request):
 
 
 def serialize_session(sess, include_private=True):
-    competition = session_competition(sess)
-    output_sheet = ExaminationSheet.objects.filter(session_id=sess.id, stage='session-output').first()
+    competition = sess._bootstrap_competition if hasattr(sess, '_bootstrap_competition') else session_competition(sess)
+    output_sheet = sess._bootstrap_output_sheet if hasattr(sess, '_bootstrap_output_sheet') else ExaminationSheet.objects.filter(session_id=sess.id, stage='session-output').first()
     return {
         'id': sess.id,
         'competitionId': sess.competition_id,
@@ -929,7 +929,7 @@ def serialize_session(sess, include_private=True):
     }
 
 def serialize_candidate_participations(cand, include_private=True):
-    participations = CandidateParticipation.objects.filter(candidate=cand).select_related('session').prefetch_related('round_results')
+    participations = cand.participations.all() if 'participations' in getattr(cand, '_prefetched_objects_cache', {}) else CandidateParticipation.objects.filter(candidate=cand).select_related('session').prefetch_related('round_results')
     rows = []
     for participation in participations:
         rows.append({
@@ -1100,9 +1100,21 @@ def examination_bootstrap(request):
             refresh_automatic_session_phase(session)
         
         include_private = request_can_view_sensitive_data(request)
-        competitions = [serialize_competition(c) for c in Competition.objects.all().order_by('sort_key')[:1000]]
-        sessions = [serialize_session(s, include_private=include_private) for s in ExamSession.objects.all().order_by('sort_key')[:1000]]
-        candidates = [serialize_candidate(cand, include_private=include_private) for cand in Candidate.objects.all().order_by('sort_key')[:1000]]
+        competition_rows = list(Competition.objects.all().order_by('sort_key')[:1000])
+        competition_by_id = {item.id: item for item in competition_rows}
+        output_sheets = {}
+        for item in ExaminationSheet.objects.filter(stage='session-output').order_by('session_id', '-updated_at'):
+            output_sheets.setdefault(item.session_id, item)
+        session_rows = list(ExamSession.objects.all().order_by('sort_key')[:1000])
+        for session in session_rows:
+            if session.competition_id in competition_by_id:
+                session._bootstrap_competition = competition_by_id[session.competition_id]
+            session._bootstrap_output_sheet = output_sheets.get(session.id)
+        participation_rows = CandidateParticipation.objects.select_related('session').prefetch_related('round_results')
+        candidate_rows = Candidate.objects.prefetch_related(Prefetch('participations', queryset=participation_rows)).order_by('sort_key')[:1000]
+        competitions = [serialize_competition(item) for item in competition_rows]
+        sessions = [serialize_session(item, include_private=include_private) for item in session_rows]
+        candidates = [serialize_candidate(item, include_private=include_private) for item in candidate_rows]
         
         return Response({
             'competitions': competitions,

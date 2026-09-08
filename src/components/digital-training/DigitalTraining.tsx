@@ -1699,6 +1699,24 @@ function WorkScheduleDetail({
     </section>
   );
 }
+type DigitalTrainingSnapshot = {
+  owner: string;
+  savedAt: number;
+  sessions: Session[];
+  employees: EmployeeOption[];
+  meetings: CustomerMeeting[];
+  partners: Partner[];
+  partnerProductSubscriptions: ProductSubscription[];
+  productCatalog: ProductOption[];
+  productOpportunities: ProductOpportunity[];
+  leads: Lead[];
+  classes: TrainingClass[];
+  materials: Material[];
+  surveys: Survey[];
+};
+const DIGITAL_TRAINING_MEMORY_TTL_MS = 5 * 60 * 1000;
+let digitalTrainingSnapshot: DigitalTrainingSnapshot | null = null;
+
 export default function DigitalTraining({
   onBackToWorkspace,
   onOpenTrainingAssessment,
@@ -1741,6 +1759,10 @@ export default function DigitalTraining({
     || normalisedJobTitle.includes("quan ly")
   );
   const canEditFinance = canViewFinance && (userRole === "ADMIN" || isAccountant);
+  const cacheOwner = isGuest ? "guest" : idToken;
+  const cachedSnapshot = digitalTrainingSnapshot?.owner === cacheOwner && Date.now() - digitalTrainingSnapshot.savedAt < DIGITAL_TRAINING_MEMORY_TTL_MS
+    ? digitalTrainingSnapshot
+    : null;
   const route = currentRoute(),
     [tab, setTab] = useState<Tab>(route.tab),
     [scheduleOpen, setScheduleOpen] = useState(
@@ -1760,21 +1782,21 @@ export default function DigitalTraining({
     [selectedSurvey, setSelectedSurvey] = useState<number | null>(
       route.surveyId,
     ),
-    [sessions, setSessions] = useState<Session[]>([]),
-    [employees, setEmployees] = useState<EmployeeOption[]>([]),
-    [meetings, setMeetings] = useState<CustomerMeeting[]>([]),
-    [partners, setPartners] = useState<Partner[]>([]),
-    [partnerProductSubscriptions, setPartnerProductSubscriptions] = useState<ProductSubscription[]>([]),
-    [productCatalog, setProductCatalog] = useState<ProductOption[]>([]),
-    [productOpportunities, setProductOpportunities] = useState<ProductOpportunity[]>([]),
-    [leads, setLeads] = useState<Lead[]>([]),
-    [classes, setClasses] = useState<TrainingClass[]>([]),
-    [materials, setMaterials] = useState<Material[]>([]),
-    [surveys, setSurveys] = useState<Survey[]>([]),
+    [sessions, setSessions] = useState<Session[]>(cachedSnapshot?.sessions || []),
+    [employees, setEmployees] = useState<EmployeeOption[]>(cachedSnapshot?.employees || []),
+    [meetings, setMeetings] = useState<CustomerMeeting[]>(cachedSnapshot?.meetings || []),
+    [partners, setPartners] = useState<Partner[]>(cachedSnapshot?.partners || []),
+    [partnerProductSubscriptions, setPartnerProductSubscriptions] = useState<ProductSubscription[]>(cachedSnapshot?.partnerProductSubscriptions || []),
+    [productCatalog, setProductCatalog] = useState<ProductOption[]>(cachedSnapshot?.productCatalog || []),
+    [productOpportunities, setProductOpportunities] = useState<ProductOpportunity[]>(cachedSnapshot?.productOpportunities || []),
+    [leads, setLeads] = useState<Lead[]>(cachedSnapshot?.leads || []),
+    [classes, setClasses] = useState<TrainingClass[]>(cachedSnapshot?.classes || []),
+    [materials, setMaterials] = useState<Material[]>(cachedSnapshot?.materials || []),
+    [surveys, setSurveys] = useState<Survey[]>(cachedSnapshot?.surveys || []),
     [mode, setMode] = useState<Mode>("week"),
     [modal, setModal] = useState<Modal>(null),
     [notice, setNotice] = useState(""),
-    [loading, setLoading] = useState(true),
+    [loading, setLoading] = useState(!cachedSnapshot),
     [query, setQuery] = useState(""),
     [filter, setFilter] = useState(""),
     [sessionPartnerTypeFilter, setSessionPartnerTypeFilter] = useState(""),
@@ -1905,8 +1927,8 @@ export default function DigitalTraining({
     notes: "",
   });
   const auth = () => (idToken ? { Authorization: `Bearer ${idToken}` } : {}),
-    load = async () => {
-      setLoading(true);
+    load = async (silent = false) => {
+      if (!silent) setLoading(true);
       try {
         const sessionResponse = await fetch("/api/digital-training/sessions", {
           headers: auth(),
@@ -1940,27 +1962,46 @@ export default function DigitalTraining({
             return r.json();
           }),
         );
+        const leadOffset = isGuest ? 0 : 1;
+        const nextEmployees = Array.isArray(staffRows) ? staffRows : [];
+        const nextLeads = isGuest ? [] : list[1];
+        const nextPartners = list[1 + leadOffset];
+        const nextClasses = list[2 + leadOffset];
+        const nextMaterials = list[3 + leadOffset];
+        const nextSurveys = list[4 + leadOffset];
         setSessions(sessionRows);
-        setEmployees(Array.isArray(staffRows) ? staffRows : []);
+        setEmployees(nextEmployees);
         setPartnerProductSubscriptions(productSubscriptionRows);
         setProductCatalog(productRows);
         setProductOpportunities(opportunityRows);
-        const leadOffset = isGuest ? 0 : 1;
         setMeetings(list[0]);
-        setLeads(isGuest ? [] : list[1]);
-        setPartners(list[1 + leadOffset]);
-        setClasses(list[2 + leadOffset]);
-        setMaterials(list[3 + leadOffset]);
-        setSurveys(list[4 + leadOffset]);
+        setLeads(nextLeads);
+        setPartners(nextPartners);
+        setClasses(nextClasses);
+        setMaterials(nextMaterials);
+        setSurveys(nextSurveys);
+        digitalTrainingSnapshot = {
+          owner: cacheOwner, savedAt: Date.now(), sessions: sessionRows, employees: nextEmployees,
+          meetings: list[0], partners: nextPartners, partnerProductSubscriptions: productSubscriptionRows,
+          productCatalog: productRows, productOpportunities: opportunityRows, leads: nextLeads,
+          classes: nextClasses, materials: nextMaterials, surveys: nextSurveys,
+        };
       } catch (e: any) {
         setNotice(e.message);
       } finally {
-        setLoading(false);
+        if (!silent) setLoading(false);
       }
     };
   useEffect(() => {
-    void load();
+    void load(Boolean(cachedSnapshot));
   }, [idToken, isGuest]);
+  useEffect(() => {
+    if (loading) return;
+    digitalTrainingSnapshot = {
+      owner: cacheOwner, savedAt: Date.now(), sessions, employees, meetings, partners,
+      partnerProductSubscriptions, productCatalog, productOpportunities, leads, classes, materials, surveys,
+    };
+  }, [cacheOwner, classes, employees, leads, loading, materials, meetings, partnerProductSubscriptions, partners, productCatalog, productOpportunities, sessions, surveys]);
   useEffect(() => {
     const h = () => {
       const r = currentRoute();

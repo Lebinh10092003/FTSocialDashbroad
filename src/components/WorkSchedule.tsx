@@ -50,6 +50,8 @@ type WorkDraft = {
   priority: Priority;
   label: string;
   executorEmail: string;
+  executorEmails?: string[];
+  assignmentMode?: boolean;
   supporterEmails: string[];
   managerEmails: string[];
   canEdit: boolean;
@@ -73,6 +75,17 @@ type Props = {
   userRole: string;
   photoURL?: string | null;
 };
+type WorkScheduleSnapshot = {
+  owner: string;
+  savedAt: number;
+  tasks: WorkTask[];
+  staff: Person[];
+  teamMembers: TeamMember[];
+  teamTasks: WorkTask[];
+};
+
+const WORK_SCHEDULE_MEMORY_TTL_MS = 5 * 60 * 1000;
+let workScheduleSnapshot: WorkScheduleSnapshot | null = null;
 
 function scheduleLocation() {
   const path = window.location.pathname;
@@ -367,11 +380,14 @@ function TaskCard({ task, displayOrder, selected, onSelect, onOpen, onDelete, on
 
 export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClick, onLogout, userName, userEmail, userRole, photoURL }: Props) {
   const initialLocation = scheduleLocation();
+  const cachedSnapshot = workScheduleSnapshot?.owner === userEmail && Date.now() - workScheduleSnapshot.savedAt < WORK_SCHEDULE_MEMORY_TTL_MS
+    ? workScheduleSnapshot
+    : null;
   const [view, setView] = useState<View>(initialLocation.view),
-    [tasks, setTasks] = useState<WorkTask[]>([]),
-    [staff, setStaff] = useState<Person[]>([{ email: userEmail, name: userName }]),
-    [teamMembers, setTeamMembers] = useState<TeamMember[]>([]),
-    [teamTasks, setTeamTasks] = useState<WorkTask[]>([]),
+    [tasks, setTasks] = useState<WorkTask[]>(cachedSnapshot?.tasks || []),
+    [staff, setStaff] = useState<Person[]>(cachedSnapshot?.staff || [{ email: userEmail, name: userName }]),
+    [teamMembers, setTeamMembers] = useState<TeamMember[]>(cachedSnapshot?.teamMembers || []),
+    [teamTasks, setTeamTasks] = useState<WorkTask[]>(cachedSnapshot?.teamTasks || []),
     [selectedDate, setSelectedDate] = useState(iso(new Date())),
     [weekStart, setWeekStart] = useState(mondayOf(new Date())),
     [calendarPeriod, setCalendarPeriod] = useState<"week" | "month">(initialLocation.period),
@@ -381,7 +397,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     [draggedId, setDraggedId] = useState<number | null>(null),
     [query, setQuery] = useState(""),
     [bulkPeopleMode, setBulkPeopleMode] = useState<"supporters" | "managers" | null>(null),
-    [loading, setLoading] = useState(true),
+    [loading, setLoading] = useState(!cachedSnapshot),
     [savingTask, setSavingTask] = useState(false),
     [error, setError] = useState("");
   const savingTaskRef = useRef(false);
@@ -417,19 +433,24 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
-  const load = async () => {
-    setLoading(true);
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError("");
     try {
       const [items, people, team] = await Promise.all([requestJson("/api/work-schedule/items"), requestJson("/api/auth/assignable-staff"), requestJson("/api/work-schedule/team")]);
-      setTasks(Array.isArray(items.items) ? items.items : []);
-      setStaff(Array.isArray(people) ? people : []);
-      setTeamMembers(Array.isArray(team.members) ? team.members : []);
-      setTeamTasks(Array.isArray(team.items) ? team.items : []);
+      const nextTasks = Array.isArray(items.items) ? items.items : [];
+      const nextStaff = Array.isArray(people) ? people : [];
+      const nextTeamMembers = Array.isArray(team.members) ? team.members : [];
+      const nextTeamTasks = Array.isArray(team.items) ? team.items : [];
+      setTasks(nextTasks);
+      setStaff(nextStaff);
+      setTeamMembers(nextTeamMembers);
+      setTeamTasks(nextTeamTasks);
+      workScheduleSnapshot = { owner: userEmail, savedAt: Date.now(), tasks: nextTasks, staff: nextStaff, teamMembers: nextTeamMembers, teamTasks: nextTeamTasks };
     } catch (cause: any) {
       setError(cause.message || "Không thể tải lịch làm việc.");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
   const syncSheet = async () => {
@@ -443,8 +464,12 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     await load();
   };
   useEffect(() => {
-    void load();
+    void load(Boolean(cachedSnapshot));
   }, [idToken]);
+  useEffect(() => {
+    if (loading) return;
+    workScheduleSnapshot = { owner: userEmail, savedAt: Date.now(), tasks, staff, teamMembers, teamTasks };
+  }, [loading, staff, tasks, teamMembers, teamTasks, userEmail]);
   const filtered = useMemo(
     () =>
       tasks.filter((task) => {
@@ -471,11 +496,18 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     savingTaskRef.current = true;
     setSavingTask(true);
     try {
+      const assignees = !editing.id && editing.assignmentMode ? (editing.executorEmails || []).filter(Boolean) : [editing.executorEmail];
+      if (!assignees.length) throw new Error("Vui lòng chọn ít nhất một nhân viên nhận việc.");
       const data = await requestJson(editing.id ? `/api/work-schedule/items/${editing.id}` : "/api/work-schedule/items", {
         method: editing.id ? "PATCH" : "POST",
-        body: JSON.stringify(editing),
+        body: JSON.stringify(editing.assignmentMode
+          ? { ...editing, executorEmails: assignees, managerEmails: [...new Set([userEmail, ...editing.managerEmails])] }
+          : editing),
       });
-      setTasks((rows) => (editing.id ? rows.map((item) => (item.id === data.item.id ? data.item : item)) : [...rows, data.item]));
+      const createdItems = Array.isArray(data.items) ? data.items : data.item ? [data.item] : [];
+      setTasks((rows) => editing.id
+        ? rows.map((item) => (item.id === data.item.id ? data.item : item))
+        : [...rows, ...createdItems]);
       setEditing(null);
     } catch (cause: any) {
       void appDialog.alert(cause.message, {
@@ -729,13 +761,13 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
               <h1 className="text-xl font-extrabold tracking-tight text-[#001e40]">{navItems.find((item) => item.id === view)?.label}</h1>
             </div>
             <div className="flex items-center gap-2">
-              <label className="relative hidden md:block">
+              {view !== "team" && <label className="relative hidden md:block">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm công việc..." className="w-56 rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-blue-400" />
-              </label>
-              <button type="button" onClick={() => setEditing(blankDraft(userEmail, selectedDate))} className="inline-flex items-center gap-2 rounded-xl bg-[#0055da] px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-200">
+              </label>}
+              <button type="button" onClick={() => setEditing(view === "team" ? { ...blankDraft(userEmail, selectedDate), executorEmails: [], assignmentMode: true, managerEmails: [userEmail] } : blankDraft(userEmail, selectedDate))} className="inline-flex items-center gap-2 rounded-xl bg-[#0055da] px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-200">
                 <Plus className="h-4 w-4" />
-                Công việc mới
+                {view === "team" ? "Giao việc" : "Công việc mới"}
               </button>
             </div>
           </div>
@@ -1053,33 +1085,37 @@ function TeamSpreadsheetView({ members, tasks, userEmail, setEditing, saveInline
   reloadTasks: () => Promise<void>;
 }) {
   const [personEmail, setPersonEmail] = useState("all");
-  const [period, setPeriod] = useState<"week" | "day">("week");
+  const [period, setPeriod] = useState<"week" | "day" | "month">("week");
   const [anchor, setAnchor] = useState(mondayOf(new Date()));
   const [selectedDay, setSelectedDay] = useState(iso(new Date()));
   const visiblePeople = personEmail === "all" ? members : members.filter((member) => member.email === personEmail);
-  const days = period === "week" ? Array.from({ length: 7 }, (_, index) => addDays(mondayOf(anchor), index)) : [fromIso(selectedDay)];
+  const days = period === "week"
+    ? Array.from({ length: 7 }, (_, index) => addDays(mondayOf(anchor), index))
+    : period === "month"
+      ? Array.from({ length: new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate() }, (_, index) => new Date(anchor.getFullYear(), anchor.getMonth(), index + 1))
+      : [fromIso(selectedDay)];
   const start = iso(days[0]), end = iso(days[days.length - 1]);
   const rows = tasks.filter((task) => visiblePeople.some((person) => person.email === task.executor.email) && task.date >= start && task.date <= end);
   const pending = rows.filter((task) => task.canReview).length;
   const reviewed = rows.filter((task) => task.status === "reviewed").length;
   const completed = rows.filter((task) => task.status === "completed" || task.status === "reviewed").length;
-  const selectedPerson = members.find((member) => member.email === personEmail);
 
   if (!members.length) return <section className="grid min-h-[420px] place-items-center border border-dashed border-slate-300 bg-white p-8 text-center"><div><UserCheck className="mx-auto h-10 w-10 text-slate-300" /><h2 className="mt-4 text-lg font-extrabold text-[#001e40]">Chưa có nhân sự để quản lý</h2><p className="mt-2 text-sm text-slate-500">Danh sách xuất hiện khi nhân sự được phân người quản lý.</p></div></section>;
 
   return <div className="space-y-4">
-    <section className="flex flex-wrap items-end gap-3 border border-slate-300 bg-white p-3 shadow-sm">
-      <label className="min-w-64"><span className="mb-1 block text-xs font-bold text-slate-500">Nhân sự</span><select value={personEmail} onChange={(event) => setPersonEmail(event.target.value)} className="w-full border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"><option value="all">Tất cả nhân sự ({members.length})</option>{members.map((member) => <option key={member.email} value={member.email}>{member.name}{member.employeeCode ? ` · ${member.employeeCode}` : ""}</option>)}</select></label>
-      <label><span className="mb-1 block text-xs font-bold text-slate-500">Kiểu lọc thời gian</span><select value={period} onChange={(event) => setPeriod(event.target.value as "week" | "day")} className="border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"><option value="week">Theo tuần</option><option value="day">Theo ngày</option></select></label>
-      {period === "day" ? <label><span className="mb-1 block text-xs font-bold text-slate-500">Ngày</span><input type="date" value={selectedDay} onChange={(event) => setSelectedDay(event.target.value)} className="border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500" /></label> : <div><span className="mb-1 block text-xs font-bold text-slate-500">Tuần</span><div className="flex border border-slate-300"><button type="button" onClick={() => setAnchor(addDays(anchor, -7))} className="border-r border-slate-300 p-2 hover:bg-slate-50"><ChevronLeft className="h-4 w-4" /></button><div className="min-w-40 px-3 py-1 text-center text-xs font-bold">Tuần {weekNumber(start)}<br/><span className="font-normal text-slate-500">{shortDate(start)}–{fullDate(end)}</span></div><button type="button" onClick={() => setAnchor(addDays(anchor, 7))} className="border-l border-slate-300 p-2 hover:bg-slate-50"><ChevronRight className="h-4 w-4" /></button></div></div>}
-      {selectedPerson && <button type="button" onClick={() => setEditing({ ...blankDraft(userEmail, period === "day" ? selectedDay : start), executorEmail: selectedPerson.email, managerEmails: [userEmail] })} className="ml-auto inline-flex items-center gap-2 bg-blue-600 px-4 py-2.5 text-sm font-bold text-white"><Plus className="h-4 w-4" />Giao việc</button>}
-    </section>
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <div className="ws-stat"><span className="ws-stat-icon bg-blue-50 text-blue-700"><ListChecks /></span><div><span>Tổng công việc</span><b>{rows.length}</b></div></div>
       <div className="ws-stat"><span className="ws-stat-icon bg-sky-50 text-sky-700"><CircleDot /></span><div><span>Đang thực hiện</span><b>{rows.filter((task) => task.status === "doing").length}</b></div></div>
       <div className="ws-stat"><span className="ws-stat-icon bg-amber-50 text-amber-700"><ClipboardCheck /></span><div><span>Chờ quản lý review</span><b>{pending}</b></div></div>
       <div className="ws-stat"><span className="ws-stat-icon bg-violet-50 text-violet-700"><CheckCircle2 /></span><div><span>Đã review</span><b>{reviewed}</b><small className="text-[11px] font-semibold text-violet-600">{rows.length ? Math.round((completed / rows.length) * 100) : 0}% hoàn thành</small></div></div>
     </div>
+    <section className="flex flex-wrap items-end gap-3 border border-slate-300 bg-white p-3 shadow-sm">
+      <label className="min-w-64"><span className="mb-1 block text-xs font-bold text-slate-500">Nhân sự</span><select value={personEmail} onChange={(event) => setPersonEmail(event.target.value)} className="w-full border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"><option value="all">Tất cả nhân sự ({members.length})</option>{members.map((member) => <option key={member.email} value={member.email}>{member.name}</option>)}</select></label>
+      <label><span className="mb-1 block text-xs font-bold text-slate-500">Kiểu lọc thời gian</span><select value={period} onChange={(event) => setPeriod(event.target.value as "week" | "day" | "month")} className="border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"><option value="week">Theo tuần</option><option value="month">Theo tháng</option><option value="day">Theo ngày</option></select></label>
+      {period === "day"
+        ? <label><span className="mb-1 block text-xs font-bold text-slate-500">Ngày</span><input type="date" value={selectedDay} onChange={(event) => setSelectedDay(event.target.value)} className="border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500" /></label>
+        : <div><span className="mb-1 block text-xs font-bold text-slate-500">{period === "month" ? "Tháng" : "Tuần"}</span><div className="flex border border-slate-300"><button type="button" onClick={() => setAnchor(period === "month" ? addMonths(anchor, -1) : addDays(anchor, -7))} className="border-r border-slate-300 p-2 hover:bg-slate-50"><ChevronLeft className="h-4 w-4" /></button><div className="min-w-40 px-3 py-1 text-center text-xs font-bold">{period === "month" ? `Tháng ${anchor.getMonth() + 1}/${anchor.getFullYear()}` : `Tuần ${weekNumber(start)}`}<br/><span className="font-normal text-slate-500">{shortDate(start)}–{fullDate(end)}</span></div><button type="button" onClick={() => setAnchor(period === "month" ? addMonths(anchor, 1) : addDays(anchor, 7))} className="border-l border-slate-300 p-2 hover:bg-slate-50"><ChevronRight className="h-4 w-4" /></button></div></div>}
+    </section>
     <SpreadsheetScheduleTable days={days} people={visiblePeople} tasks={tasks} saveInlineDay={saveInlineDay} reloadTasks={reloadTasks} />
   </div>;
 }
@@ -1198,270 +1234,15 @@ const splitNumberedCell = (value: string) => {
 };
 const isCompletionNote = (value: string) => ["hoàn thành", "đã hoàn thành", "xong"].includes(value.trim().toLocaleLowerCase("vi-VN"));
 
-function ScheduleTable({ days, tasks, saveInlineDay, reloadTasks }: { days: Date[]; tasks: WorkTask[]; saveInlineDay: (date: string, items: Array<{ id?: number; title: string; progressNote: string; status: WorkStatus }>, deleteIds: number[]) => Promise<unknown>; reloadTasks: () => Promise<void> }) {
-  const rowsFor = (date: string) => tasks.filter((task) => task.date === date).sort((a, b) => a.dailyOrder - b.dailyOrder);
-  const makeDrafts = () => Object.fromEntries(days.map((day) => {
-    const rows = rowsFor(iso(day));
-    return [iso(day), {
-      content: numberedCell(rows.map((task) => task.title)),
-      selfAssessment: numberedCell(rows.map((task) => displayedSelfAssessment(task))),
-    }];
-  })) as Record<string, InlineDayDraft>;
-  const dayKey = days.map(iso).join("|");
-  const [drafts, setDrafts] = useState<Record<string, InlineDayDraft>>(makeDrafts);
-  const [dirtyDates, setDirtyDates] = useState<string[]>([]);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    setDrafts(makeDrafts());
-    setDirtyDates([]);
-  }, [tasks, dayKey]);
-
-  const updateCell = (date: string, patch: Partial<InlineDayDraft>) => {
-    setDrafts((current) => ({ ...current, [date]: { ...(current[date] || { content: "", selfAssessment: "" }), ...patch } }));
-    setDirtyDates((current) => current.includes(date) ? current : [...current, date]);
-  };
-  const completeTask = (date: string, taskIndex: number) => {
-    const draft = drafts[date] || { content: "", selfAssessment: "" };
-    const taskCount = splitNumberedCell(draft.content).filter((entry) => entry.text).length;
-    const existingNotes = splitNumberedCell(draft.selfAssessment);
-    const notes = Array.from({ length: taskCount }, (_, index) => existingNotes.find((entry) => entry.number === index + 1)?.text || existingNotes[index]?.text || "");
-    notes[taskIndex] = isCompletionNote(notes[taskIndex] || "") ? "" : "Hoàn thành";
-    updateCell(date, { selfAssessment: numberedCell(notes) });
-  };
-  const removeTask = (date: string, taskIndex: number) => {
-    const draft = drafts[date] || { content: "", selfAssessment: "" };
-    const contentEntries = splitNumberedCell(draft.content);
-    const targetNumber = contentEntries[taskIndex]?.number ?? taskIndex + 1;
-    const nextContent = contentEntries.filter((_, index) => index !== taskIndex).map((entry) => `${entry.number}. ${entry.text}`).join("\n");
-    const noteEntries = splitNumberedCell(draft.selfAssessment);
-    const numberedNoteIndex = noteEntries.findIndex((entry) => entry.number === targetNumber);
-    const noteIndex = numberedNoteIndex >= 0 ? numberedNoteIndex : taskIndex;
-    const nextNotes = noteEntries.filter((_, index) => index !== noteIndex).map((entry) => `${entry.number}. ${entry.text}`).join("\n");
-    updateCell(date, { content: nextContent, selfAssessment: nextNotes });
-  };
-  const saveTable = async () => {
-    if (saving || !dirtyDates.length) return;
-    setSaving(true);
-    try {
-      for (const date of dirtyDates) {
-        const original = rowsFor(date);
-        const contentEntries = splitNumberedCell(drafts[date]?.content || "").filter((entry) => entry.text);
-        const noteEntries = splitNumberedCell(drafts[date]?.selfAssessment || "");
-        if (contentEntries.length > 100) throw new Error(`Ngày ${fullDate(date)} vượt quá 100 nhiệm vụ.`);
-        const usedIds = new Set<number>();
-        const items = contentEntries.map((entry, index) => {
-          let current = original.find((task) => !usedIds.has(task.id) && task.title.trim() === entry.text.trim());
-          if (!current) current = original[entry.number - 1];
-          if (current && usedIds.has(current.id)) current = undefined;
-          if (!current) current = original.find((task, taskIndex) => taskIndex >= index && !usedIds.has(task.id));
-          if (current) usedIds.add(current.id);
-          const note = noteEntries.find((item) => item.number === entry.number)?.text || noteEntries[index]?.text || "";
-          return {
-            ...(current ? { id: current.id } : {}),
-            title: entry.text,
-            progressNote: note,
-            status: current?.status === "reviewed" ? "reviewed" : isCompletionNote(note) ? "completed" : current?.status || "todo",
-          } as { id?: number; title: string; progressNote: string; status: WorkStatus };
-        });
-        const removed = original.filter((task) => !usedIds.has(task.id));
-        const blocked = removed.find((task) => !task.canDelete);
-        if (blocked) throw new Error(`Bạn không có quyền xóa nhiệm vụ số ${blocked.dailyOrder} của ngày ${fullDate(date)}.`);
-        await saveInlineDay(date, items, removed.map((task) => task.id));
-      }
-      await reloadTasks();
-      setDirtyDates([]);
-    } catch (cause: any) {
-      void appDialog.alert(cause.message || "Không thể lưu bảng lịch tuần.", { title: "Không thể lưu bảng", tone: "danger" });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <section className="overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-blue-50/70 px-4 py-3">
-        <div><b className="block text-sm text-blue-900">Bảng chỉnh sửa trực tiếp</b><span className="text-xs text-slate-600">Mỗi ngày là một hàng; mỗi nhiệm vụ bắt đầu bằng số thứ tự và có thể xuống nhiều dòng trong cùng một ô.</span></div>
-        <button type="button" disabled={!dirtyDates.length || saving} onClick={() => void saveTable()} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white disabled:bg-slate-200 disabled:text-slate-400">{saving ? "Đang lưu bảng..." : `Lưu bảng${dirtyDates.length ? ` (${dirtyDates.length} ngày)` : ""}`}</button>
-      </div>
-      <div className="overflow-x-auto">
-      <table className="min-w-[1220px] w-full border-collapse text-sm">
-        <thead className="bg-emerald-50 text-[#001e40]">
-          <tr>
-            <th className="w-24 border-b border-r border-slate-300 px-3 py-3 text-left">Thứ</th>
-            <th className="w-32 border-b border-r border-slate-300 px-3 py-3 text-left">Ngày</th>
-            <th className="w-20 border-b border-r border-slate-300 px-3 py-3 text-center">Tuần</th>
-            <th className="border-b border-r border-slate-300 px-3 py-3 text-left">Nội dung công việc</th>
-            <th className="w-48 border-b border-r border-slate-300 px-3 py-3 text-left">Tự đánh giá</th>
-            <th className="w-64 border-b border-slate-300 px-3 py-3 text-left">Lãnh đạo đánh giá</th>
-          </tr>
-        </thead>
-        <tbody>
-          {days.map((day: Date) => {
-            const date = iso(day);
-            const rows = rowsFor(date);
-            const draft = drafts[date] || { content: "", selfAssessment: "" };
-            const draftTaskCount = splitNumberedCell(draft.content).filter((entry) => entry.text).length;
-            const leaderAssessment = numberedCell(rows.map((task) => task.reviewPercent === null ? "Chưa đánh giá" : `${task.reviewPercent}%${task.reviewNote ? ` · ${task.reviewNote}` : ""}`));
-            return (
-              <tr key={date} className="align-top hover:bg-blue-50/20">
-                <td className="border-b border-r border-slate-200 px-3 py-3 font-bold">{weekday(date)}</td>
-                <td className="border-b border-r border-slate-200 px-3 py-3">{fullDate(date)}</td>
-                <td className="border-b border-r border-slate-200 px-3 py-3 text-center font-semibold">{weekNumber(date)}</td>
-                <td className="border-b border-r border-slate-200 p-2">
-                  <textarea rows={Math.max(3, draft.content.split("\n").length)} value={draft.content} onChange={(event) => updateCell(date, { content: event.target.value })} placeholder={'1. Nhập nội dung công việc\n2. Nhiệm vụ tiếp theo'} className="min-h-24 w-full resize-y rounded-lg border border-transparent bg-transparent px-2 py-1.5 font-medium leading-5 outline-none hover:border-blue-200 focus:border-blue-400 focus:bg-white" />
-                  {!!rows.length && <div className="mt-2 flex flex-wrap gap-1.5">{rows.map((task, index) => task.canDelete ? <button key={task.id} type="button" onClick={() => removeTask(date, index)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-bold text-slate-400 hover:bg-rose-50 hover:text-rose-600" title={`Xóa nhiệm vụ ${index + 1} khi lưu bảng`}><Trash2 className="h-3 w-3" /> Xóa {index + 1}</button> : null)}</div>}
-                </td>
-                <td className="border-b border-r border-slate-200 p-2">
-                  <textarea rows={Math.max(3, draft.selfAssessment.split("\n").length)} value={draft.selfAssessment} onChange={(event) => updateCell(date, { selfAssessment: event.target.value })} placeholder={'1. Ghi chú tiến trình hiện tại'} className="min-h-24 w-full resize-y rounded-lg border border-transparent bg-transparent px-2 py-1.5 text-xs leading-5 outline-none hover:border-blue-200 focus:border-blue-400 focus:bg-white" />
-                  {draftTaskCount > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{Array.from({ length: draftTaskCount }, (_, index) => <button key={index} type="button" onClick={() => completeTask(date, index)} className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100"><CheckCircle2 className="h-3 w-3" /> {index + 1}. Hoàn thành</button>)}</div>}
-                </td>
-                <td className="border-b border-slate-200 p-2"><textarea readOnly rows={Math.max(3, leaderAssessment.split("\n").length)} value={leaderAssessment} placeholder="Chưa đánh giá" className="min-h-24 w-full resize-y rounded-lg border border-transparent bg-transparent px-2 py-1.5 text-xs leading-5 text-slate-600 outline-none" /></td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      </div>
-    </section>
-  );
-}
-
-function DayTableEditor({ state, onClose, onSave }: { state: DayEditState; onClose: () => void; onSave: (items: Array<{ id?: number; title: string; progressNote: string }>) => Promise<void> }) {
-  const ordered = [...state.tasks].sort((a, b) => a.dailyOrder - b.dailyOrder);
-  const [rows, setRows] = useState<DayEditorRow[]>(() => ordered.map((task) => ({
-    key: `task-${task.id}`,
-    id: task.id,
-    title: task.title,
-    status: task.status,
-    canEdit: task.canEdit,
-    assessment: dayAssessmentEntry(task),
-  })));
-  const [saving, setSaving] = useState(false);
-
-  const updateRow = (index: number, patch: Partial<DayEditorRow>) => {
-    setRows((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row));
-  };
-
-  const addRow = () => {
-    if (rows.length >= 100) return;
-    setRows((current) => [...current, {
-      key: `new-${Date.now()}-${current.length}`,
-      title: "",
-      status: "todo",
-      canEdit: true,
-      assessment: { mode: "default", note: "" },
-    }]);
-  };
-
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!rows.length || rows.some((row) => !row.title.trim())) {
-      void appDialog.alert("Mỗi mảnh nhiệm vụ phải có nội dung. Vui lòng điền các ô còn trống trước khi lưu.", { title: "Nội dung chưa hợp lệ", tone: "warning" });
-      return;
-    }
-    const items = rows.map((row) => ({
-      ...(row.id ? { id: row.id } : {}),
-      title: row.title.trim(),
-      progressNote: row.assessment.mode === "custom"
-        ? row.assessment.note.trim()
-        : row.assessment.mode === "completed"
-          ? "Hoàn thành"
-          : "",
-    }));
-    setSaving(true);
-    try {
-      await onSave(items);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-2 backdrop-blur-sm sm:p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <form onSubmit={submit} className="flex max-h-[96vh] w-full max-w-[1500px] flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
-        <div className="flex shrink-0 items-start justify-between border-b px-5 py-4 sm:px-7">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-blue-600">Chỉnh sửa trực tiếp trên bảng tuần</p>
-            <h2 className="mt-1 text-xl font-extrabold text-[#001e40]">Lịch ngày {fullDate(state.date)}</h2>
-          </div>
-          <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100" aria-label="Đóng"><X className="h-5 w-5" /></button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 p-4 sm:p-6">
-          <div className="mb-3 hidden grid-cols-[3rem_minmax(0,1.65fr)_minmax(320px,1fr)] gap-4 px-4 text-xs font-extrabold uppercase tracking-wide text-slate-500 lg:grid">
-            <span>STT</span>
-            <span>Nội dung công việc</span>
-            <span>Tự đánh giá / ghi chú tiến trình</span>
-          </div>
-          <div className="space-y-3">
-            {rows.map((row, index) => {
-              const automaticNote = automaticSelfAssessment(row.status);
-              const isCompleted = row.assessment.mode === "completed" || (row.assessment.mode === "default" && !!automaticNote);
-              return (
-                <section key={row.key} className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-[3rem_minmax(0,1.65fr)_minmax(320px,1fr)] lg:gap-4">
-                  <span className="grid h-9 w-9 place-items-center rounded-full bg-blue-50 text-sm font-extrabold text-blue-700">{index + 1}</span>
-                  <label className="block min-w-0">
-                    <span className="ws-label lg:hidden">Nội dung công việc</span>
-                    <textarea
-                      autoFocus={index === 0}
-                      rows={3}
-                      value={row.title}
-                      disabled={!row.canEdit}
-                      onChange={(event) => updateRow(index, { title: event.target.value })}
-                      placeholder="Nhập nội dung nhiệm vụ..."
-                      className="ws-input min-h-24 resize-y font-medium leading-6 disabled:bg-slate-50 disabled:text-slate-500"
-                    />
-                  </label>
-                  <div className="min-w-0">
-                    <span className="ws-label">Đánh giá / ghi chú tiến trình</span>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
-                      <button
-                        type="button"
-                        onClick={() => updateRow(index, {
-                          assessment: row.assessment.mode === "completed" && !automaticNote
-                            ? { mode: "default", note: "" }
-                            : { mode: "completed", note: "Hoàn thành" },
-                        })}
-                        aria-pressed={isCompleted}
-                        className={`inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-extrabold transition ${isCompleted ? "border-emerald-600 bg-emerald-600 text-white shadow-sm" : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-400 hover:bg-emerald-100"}`}
-                      >
-                        <CheckCircle2 className="h-4 w-4" />
-                        Hoàn thành
-                      </button>
-                      <textarea
-                        rows={2}
-                        value={row.assessment.mode === "custom" ? row.assessment.note : ""}
-                        onChange={(event) => {
-                          const note = event.target.value;
-                          updateRow(index, { assessment: note.trim() ? { mode: "custom", note } : { mode: "default", note: "" } });
-                        }}
-                        placeholder="Nhấn vào Hoàn thành để xác nhận hoàn thành công việc hoặc Ghi chú tiến trình hiện tại"
-                        aria-label={`Đánh giá hoặc ghi chú nhiệm vụ ${index + 1}`}
-                        className="ws-input min-h-12 flex-1 resize-y py-2 text-sm"
-                      />
-                    </div>
-                  </div>
-                </section>
-              );
-            })}
-          </div>
-          <button type="button" onClick={addRow} disabled={rows.length >= 100} className="mt-4 inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-4 py-2.5 text-sm font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-50">
-            <Plus className="h-4 w-4" /> Thêm nhiệm vụ
-          </button>
-          <p className="mt-3 text-xs leading-5 text-slate-500">Mỗi mảnh nhiệm vụ luôn ghép cố định với phần tự đánh giá bên cạnh. Nhiệm vụ mới mặc định là Cần làm; thay đổi tự đánh giá tại đây không đổi trạng thái công việc.</p>
-        </div>
-        <div className="flex shrink-0 justify-end gap-3 border-t px-5 py-4 sm:px-7">
-          <button type="button" onClick={onClose} className="rounded-xl border px-4 py-2.5 text-sm font-bold text-slate-600">Hủy</button>
-          <button type="submit" disabled={saving} className="rounded-xl bg-[#0055da] px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">{saving ? "Đang lưu..." : "Lưu lịch trong ngày"}</button>
-        </div>
-      </form>
-    </div>
-  );
-}
 type GridSaveItem = { id?: number; title: string; progressNote: string; status: WorkStatus; dailyOrder: number };
 type ScheduleGridRow = { key: string; date: string; executorEmail: string; person?: TeamMember };
 
 const numberedGridCell = (values: Array<{ number: number; text: string }>) => values.map((value) => `${value.number}. ${value.text}`).join("\n");
+const resizeGridTextarea = (element: HTMLTextAreaElement | null) => {
+  if (!element) return;
+  element.style.height = "auto";
+  element.style.height = `${Math.max(80, element.scrollHeight)}px`;
+};
 
 function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInlineDay, reloadTasks }: {
   days: Date[];
@@ -1486,6 +1267,10 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
   const [drafts, setDrafts] = useState<Record<string, InlineDayDraft>>(makeDrafts);
   const [dirtyRows, setDirtyRows] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const draftsRef = useRef(drafts);
+
+  useEffect(() => { draftsRef.current = drafts; }, [drafts]);
 
   useEffect(() => {
     setDrafts(makeDrafts());
@@ -1496,22 +1281,16 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
     setDrafts((current) => ({ ...current, [key]: { ...(current[key] || { content: "", selfAssessment: "" }), ...patch } }));
     setDirtyRows((current) => current.includes(key) ? current : [...current, key]);
   };
-  const completeTask = (key: string, taskIndex: number) => {
-    const draft = drafts[key] || { content: "", selfAssessment: "" };
-    const content = splitNumberedCell(draft.content).filter((entry) => entry.text);
-    const currentNotes = splitNumberedCell(draft.selfAssessment);
-    const notes = content.map((entry, index) => ({ number: entry.number, text: currentNotes.find((note) => note.number === entry.number)?.text || currentNotes[index]?.text || "" }));
-    notes[taskIndex].text = isCompletionNote(notes[taskIndex].text) ? "" : "Hoàn thành";
-    updateCell(key, { selfAssessment: numberedGridCell(notes) });
-  };
-
   const saveTable = async () => {
-    if (saving || !dirtyRows.length) return;
+    if (savingRef.current || !dirtyRows.length) return;
+    const savingRows = [...dirtyRows];
+    const savedDrafts = Object.fromEntries(savingRows.map((key) => [key, drafts[key]]));
+    savingRef.current = true;
     setSaving(true);
     try {
       let nextDrafts = { ...drafts };
       const duplicateMessages: string[] = [];
-      for (const key of dirtyRows) {
+      for (const key of savingRows) {
         const row = gridRows.find((item) => item.key === key)!;
         const counts = new Map<number, number>();
         splitNumberedCell(nextDrafts[key]?.content || "").filter((entry) => entry.text).forEach((entry) => counts.set(entry.number, (counts.get(entry.number) || 0) + 1));
@@ -1528,7 +1307,7 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
         });
         if (!reorder) return;
         nextDrafts = { ...nextDrafts };
-        dirtyRows.forEach((key) => {
+        savingRows.forEach((key) => {
           const content = splitNumberedCell(nextDrafts[key]?.content || "").filter((entry) => entry.text);
           const notes = splitNumberedCell(nextDrafts[key]?.selfAssessment || "");
           nextDrafts[key] = {
@@ -1538,7 +1317,7 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
         });
         setDrafts(nextDrafts);
       }
-      for (const key of dirtyRows) {
+      for (const key of savingRows) {
         const row = gridRows.find((item) => item.key === key)!;
         const original = rowsFor(row);
         const content = splitNumberedCell(nextDrafts[key]?.content || "").filter((entry) => entry.text);
@@ -1564,19 +1343,33 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
         await saveInlineDay(row.date, items, removed.map((task) => task.id), row.executorEmail || undefined);
       }
       await reloadTasks();
-      setDirtyRows([]);
+      setDirtyRows((current) => current.filter((key) => {
+        if (!savingRows.includes(key)) return true;
+        return JSON.stringify(draftsRef.current[key]) !== JSON.stringify(savedDrafts[key]);
+      }));
     } catch (cause: any) {
       void appDialog.alert(cause.message || "Không thể lưu bảng lịch.", { title: "Không thể lưu bảng", tone: "danger" });
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
 
+  useEffect(() => {
+    if (!dirtyRows.length || saving) return;
+    const timer = window.setTimeout(() => void saveTable(), 5000);
+    const saveWhenLeaving = () => void saveTable();
+    const saveWhenHidden = () => { if (document.visibilityState === "hidden") void saveTable(); };
+    window.addEventListener("blur", saveWhenLeaving);
+    document.addEventListener("visibilitychange", saveWhenHidden);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("blur", saveWhenLeaving);
+      document.removeEventListener("visibilitychange", saveWhenHidden);
+    };
+  }, [dirtyRows, drafts, saving]);
+
   return <section className="overflow-hidden border border-slate-400 bg-white shadow-sm">
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-400 bg-slate-100 px-3 py-2">
-      <div><b className="block text-sm text-slate-800">Bảng lịch chỉnh sửa trực tiếp</b><span className="text-xs text-slate-500">Nhấn vào ô để nhập như bảng tính. Dòng không có số là phần tiếp theo của nhiệm vụ phía trên.</span></div>
-      <button type="button" disabled={!dirtyRows.length || saving} onClick={() => void saveTable()} className="border border-blue-700 bg-blue-600 px-4 py-2 text-sm font-bold text-white disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-400">{saving ? "Đang lưu bảng..." : `Lưu bảng${dirtyRows.length ? ` (${dirtyRows.length} hàng)` : ""}`}</button>
-    </div>
     <div className="overflow-x-auto"><table className="w-full min-w-[1220px] table-fixed border-collapse text-sm">
       <thead className="bg-[#e5f4e8] text-[#001e40]"><tr>
         <th className="w-24 border-b border-r border-slate-400 px-2 py-2 text-left">Thứ</th><th className="w-28 border-b border-r border-slate-400 px-2 py-2 text-left">Ngày</th><th className="w-16 border-b border-r border-slate-400 px-2 py-2 text-center">Tuần</th>
@@ -1585,15 +1378,14 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
       </tr></thead>
       <tbody>{gridRows.map((row) => {
         const workItems = rowsFor(row), draft = drafts[row.key] || { content: "", selfAssessment: "" };
-        const taskCount = splitNumberedCell(draft.content).filter((entry) => entry.text).length;
         const leader = numberedGridCell(workItems.map((task) => ({ number: task.dailyOrder, text: task.reviewPercent === null ? "Chưa đánh giá" : `${task.reviewPercent}%${task.reviewNote ? ` · ${task.reviewNote}` : ""}` })));
-        const editorClass = "block min-h-20 w-full resize-y border-0 bg-transparent p-2 leading-5 outline-none hover:bg-blue-50/30 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-blue-500";
+        const editorClass = "block min-h-20 w-full resize-none overflow-hidden border-0 bg-transparent p-2 leading-5 outline-none hover:bg-blue-50/30 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-blue-500";
         return <tr key={row.key} className="align-top">
           <td className="border-b border-r border-slate-400 px-2 py-2 font-bold">{weekday(row.date)}</td><td className="border-b border-r border-slate-400 px-2 py-2">{fullDate(row.date)}</td><td className="border-b border-r border-slate-400 px-2 py-2 text-center font-semibold">{weekNumber(row.date)}</td>
-          {people && <td className="border-b border-r border-slate-400 px-2 py-2"><b className="block">{row.person?.name}</b><span className="text-[11px] text-slate-500">{row.person?.employeeCode || row.person?.email}</span></td>}
-          <td className="border-b border-r border-slate-400 p-0"><textarea rows={Math.max(3, draft.content.split("\n").length)} value={draft.content} onChange={(event) => updateCell(row.key, { content: event.target.value })} placeholder={'1. Nhập nội dung công việc\n2. Nhiệm vụ tiếp theo'} className={`${editorClass} font-medium`} /></td>
-          <td className="border-b border-r border-slate-400 p-0"><textarea rows={Math.max(3, draft.selfAssessment.split("\n").length)} value={draft.selfAssessment} onChange={(event) => updateCell(row.key, { selfAssessment: event.target.value })} placeholder="1. Ghi chú tiến trình hiện tại" className={`${editorClass} text-xs`} />{taskCount > 0 && <div className="flex flex-wrap gap-1 border-t border-slate-300 bg-slate-50 p-1">{Array.from({ length: taskCount }, (_, index) => <button key={index} type="button" onClick={() => completeTask(row.key, index)} className="inline-flex items-center gap-1 border border-emerald-300 bg-white px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 hover:bg-emerald-50"><CheckCircle2 className="h-3 w-3" />{index + 1}</button>)}</div>}</td>
-          <td className="border-b border-slate-400 p-0"><textarea readOnly rows={Math.max(3, leader.split("\n").length)} value={leader} placeholder="Chưa đánh giá" className={`${editorClass} bg-slate-50/50 text-xs text-slate-600`} /></td>
+          {people && <td className="border-b border-r border-slate-400 px-2 py-2"><b className="block">{row.person?.name}</b></td>}
+          <td className="border-b border-r border-slate-400 p-0"><textarea ref={resizeGridTextarea} value={draft.content} onInput={(event) => resizeGridTextarea(event.currentTarget)} onChange={(event) => updateCell(row.key, { content: event.target.value })} onBlur={() => void saveTable()} placeholder={'1. Nhập nội dung công việc\n2. Nhiệm vụ tiếp theo'} className={`${editorClass} font-medium`} /></td>
+          <td className="border-b border-r border-slate-400 p-0"><textarea ref={resizeGridTextarea} value={draft.selfAssessment} onInput={(event) => resizeGridTextarea(event.currentTarget)} onChange={(event) => updateCell(row.key, { selfAssessment: event.target.value })} onBlur={() => void saveTable()} placeholder="1. Ghi chú tiến trình hiện tại" className={`${editorClass} text-xs`} /></td>
+          <td className="border-b border-slate-400 p-0"><textarea ref={resizeGridTextarea} readOnly value={leader} placeholder="Chưa đánh giá" className={`${editorClass} bg-slate-50/50 text-xs text-slate-600`} /></td>
         </tr>;
       })}</tbody>
     </table></div>
@@ -1707,7 +1499,7 @@ function TaskDialog({ draft, setDraft, staff, userEmail, saveTask, saving, saveP
         <div className="flex items-center justify-between border-b px-6 py-5">
           <div>
             <p className="text-xs font-bold uppercase tracking-wider text-blue-600">{draft.canReview ? "Review kết quả công việc" : "Chi tiết lịch làm việc"}</p>
-            <h2 className="mt-1 text-xl font-extrabold text-[#001e40]">{draft.id ? draft.title : "Thêm công việc mới"}</h2>
+            <h2 className="mt-1 text-xl font-extrabold text-[#001e40]">{draft.id ? draft.title : draft.assignmentMode ? "Giao việc cho nhân viên" : "Thêm công việc mới"}</h2>
           </div>
           <div className="flex items-center gap-1">
             {draft.id && draft.canDelete && (
@@ -1758,9 +1550,13 @@ function TaskDialog({ draft, setDraft, staff, userEmail, saveTask, saving, saveP
             </label>
           </div>
           <div className="space-y-4">
-            <PeoplePicker label="Người thực hiện * (chọn 1)" staff={staff} selected={[draft.executorEmail]} onChange={(emails) => setDraft({ ...draft, executorEmail: emails[0] || userEmail })} multiple={false} disabled={lockedPeople} />
+            {draft.assignmentMode
+              ? <PeoplePicker label="Nhân viên nhận việc * (chọn một hoặc nhiều)" staff={staff.filter((item: Person) => item.email !== userEmail)} selected={draft.executorEmails || []} onChange={(emails) => setDraft({ ...draft, executorEmails: emails, executorEmail: emails[0] || "" })} disabled={lockedPeople} />
+              : <PeoplePicker label="Người thực hiện * (chọn 1)" staff={staff} selected={[draft.executorEmail]} onChange={(emails) => setDraft({ ...draft, executorEmail: emails[0] || userEmail })} multiple={false} disabled={lockedPeople} />}
             <PeoplePicker label="Người hỗ trợ/theo dõi (chọn nhiều)" staff={staff.filter((item) => item.email !== draft.executorEmail)} selected={draft.supporterEmails} onChange={(emails) => setDraft({ ...draft, supporterEmails: emails })} disabled={lockedPeople} />
-            <PeoplePicker label="Người quản lý (chọn nhiều)" staff={staff.filter((item) => item.email !== draft.executorEmail)} selected={draft.managerEmails} onChange={(emails) => setDraft({ ...draft, managerEmails: emails })} disabled={lockedPeople} />
+            {draft.assignmentMode
+              ? <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">Người giao việc được tự động ghi nhận là người quản lý.</div>
+              : <PeoplePicker label="Người quản lý (chọn nhiều)" staff={staff.filter((item) => item.email !== draft.executorEmail)} selected={draft.managerEmails} onChange={(emails) => setDraft({ ...draft, managerEmails: emails })} disabled={lockedPeople} />}
           </div>
           <label className="block rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
             <span className="ws-label text-amber-900">Ghi chú tiến trình</span>
@@ -1820,7 +1616,7 @@ function TaskDialog({ draft, setDraft, staff, userEmail, saveTask, saving, saveP
           </button>
           {draft.canEdit && !draft.canReview && (
             <button type="submit" disabled={saving} className="rounded-xl bg-[#0055da] px-5 py-2.5 text-sm font-bold text-white disabled:cursor-wait disabled:opacity-60">
-              {saving ? "Đang lưu..." : draft.id ? "Lưu thay đổi" : "Thêm công việc"}
+              {saving ? "Đang lưu..." : draft.id ? "Lưu thay đổi" : draft.assignmentMode ? "Giao việc" : "Thêm công việc"}
             </button>
           )}
         </div>

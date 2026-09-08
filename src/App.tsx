@@ -312,6 +312,29 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (authChecking || isGuest) return;
+    const preloaders: Array<() => Promise<unknown>> = [
+      () => import('./components/WorkSchedule'),
+      ...(hasModuleAccess('examination') ? [() => import('./components/ExaminationModule')] : []),
+      ...(hasModuleAccess('digital-training') ? [() => import('./components/digital-training/DigitalTraining'), () => import('./components/digital-training/TrainingAssessmentWorkspace')] : []),
+      ...(hasModuleAccess('attendance') ? [() => import('./components/Attendance')] : []),
+      ...(canViewFinance ? [() => import('./components/digital-training/FinanceWorkspace')] : []),
+      ...(hasModuleAccess('social-dashboard') ? [() => import('./components/social-dashboard/Dashboard')] : []),
+      ...(hasModuleAccess('email-builder') ? [() => import('./components/email-builder/EmailTemplateBuilder'), () => import('./components/QRCodeGenerator')] : []),
+      ...(userRole === 'ADMIN' ? [() => import('./components/social-dashboard/AccountManagement')] : []),
+    ];
+    let cancelled = false;
+    let timer = window.setTimeout(async () => {
+      for (const preload of preloaders) {
+        if (cancelled) return;
+        try { await preload(); } catch { /* The normal lazy loader retains its retry UI. */ }
+        await new Promise(resolve => window.setTimeout(resolve, 120));
+      }
+    }, 500);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [authChecking, canViewFinance, isGuest, user.accessModules, userRole]);
+
+  useEffect(() => {
     const updateAppearance = (event: Event) => setAppearance((event as CustomEvent<WorkspaceAppearance>).detail || readWorkspaceAppearance());
     const returnHomeFromLogo = (event: MouseEvent) => {
       const target = event.target as Element | null;

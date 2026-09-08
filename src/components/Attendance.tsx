@@ -26,6 +26,10 @@ type AttendanceData = {
   summary: { workDays: number; totalMinutes: number; completedShifts: number; lateShifts: number };
 };
 type AttendanceProps = { onBackToWorkspace: () => void; idToken: string; userName: string };
+type AttendanceSnapshot = { owner: string; month: string; savedAt: number; data: AttendanceData };
+
+const ATTENDANCE_MEMORY_TTL_MS = 2 * 60 * 1000;
+let attendanceSnapshot: AttendanceSnapshot | null = null;
 
 const statusLabels = {
   WORKING: { label: 'Đang trong ca', className: 'bg-emerald-100 text-emerald-800' },
@@ -40,11 +44,15 @@ const formatDuration = (minutes: number) => `${Math.floor(minutes / 60)}g ${Stri
 const currentMonth = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`; };
 
 export default function Attendance({ onBackToWorkspace, idToken, userName }: AttendanceProps) {
-  const [data, setData] = useState<AttendanceData | null>(null);
-  const [month, setMonth] = useState(currentMonth);
+  const initialMonth = currentMonth();
+  const cachedSnapshot = attendanceSnapshot?.owner === idToken && attendanceSnapshot.month === initialMonth && Date.now() - attendanceSnapshot.savedAt < ATTENDANCE_MEMORY_TTL_MS
+    ? attendanceSnapshot
+    : null;
+  const [data, setData] = useState<AttendanceData | null>(cachedSnapshot?.data || null);
+  const [month, setMonth] = useState(initialMonth);
   const [selectedShift, setSelectedShift] = useState('OFFICE');
   const [note, setNote] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedSnapshot);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -57,6 +65,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || 'Không thể tải dữ liệu chấm công.');
       setData(body);
+      attendanceSnapshot = { owner: idToken, month, savedAt: Date.now(), data: body };
       setError('');
     } catch (loadError: any) {
       setError(loadError.message || 'Không thể tải dữ liệu chấm công.');
@@ -65,7 +74,11 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
     }
   };
 
-  useEffect(() => { void load(); }, [month, idToken]);
+  useEffect(() => {
+    const reusable = attendanceSnapshot?.owner === idToken && attendanceSnapshot.month === month && Date.now() - attendanceSnapshot.savedAt < ATTENDANCE_MEMORY_TTL_MS;
+    if (reusable) setData(attendanceSnapshot!.data);
+    void load(Boolean(reusable));
+  }, [month, idToken]);
   useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), 1000); return () => window.clearInterval(timer); }, []);
   useEffect(() => { if (!notice) return; const timer = window.setTimeout(() => setNotice(''), 3000); return () => window.clearTimeout(timer); }, [notice]);
 

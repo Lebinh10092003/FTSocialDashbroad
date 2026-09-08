@@ -731,7 +731,10 @@ def sync_session_candidate_totals():
                 totals[session_id] = totals.get(session_id, 0) + 1
 
     for session in sessions:
-        session.candidates_count = totals.get(session.id, 0)
+        next_count = totals.get(session.id, 0)
+        if session.candidates_count == next_count:
+            continue
+        session.candidates_count = next_count
         session.save(update_fields=['candidates_count', 'updated_at'])
 
 PROFILE_EXPORT_HEADERS = [

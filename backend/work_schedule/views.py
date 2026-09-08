@@ -165,8 +165,8 @@ def _profiles(emails, field_label):
     return profiles, None
 
 
-def _apply_data(request, item, creating=False, allow_people=True):
-    data = request.data or {}
+def _apply_data(request, item, creating=False, allow_people=True, data_override=None):
+    data = data_override if data_override is not None else (request.data or {})
     title = str(data.get("title", item.title if item else "") or "").strip()
     raw_date = data.get("date", item.work_date.isoformat() if item else "")
     work_date = parse_date(str(raw_date or ""))
@@ -235,6 +235,35 @@ def _apply_data(request, item, creating=False, allow_people=True):
 @permission_classes([IsAuthenticated])
 def work_items(request):
     if request.method == "POST":
+        raw_executor_emails = request.data.get("executorEmails")
+        if raw_executor_emails is not None:
+            if request.user_role not in {"ADMIN", "MANAGER"}:
+                return Response({"error": "Bạn không có quyền giao việc cho nhiều nhân viên."}, status=status.HTTP_403_FORBIDDEN)
+            if not isinstance(raw_executor_emails, list):
+                return Response({"error": "Danh sách nhân viên nhận việc không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+            executor_emails = list(dict.fromkeys(str(value or "").strip().lower() for value in raw_executor_emails if str(value or "").strip()))
+            if not executor_emails or len(executor_emails) > 100:
+                return Response({"error": "Vui lòng chọn từ 1 đến 100 nhân viên nhận việc."}, status=status.HTTP_400_BAD_REQUEST)
+            allowed_profiles = UserProfile.objects.filter(email__in=executor_emails, employment_status="ACTIVE")
+            if request.user_role != "ADMIN":
+                allowed_profiles = allowed_profiles.filter(manager=request.user)
+            if set(allowed_profiles.values_list("email", flat=True)) != set(executor_emails):
+                return Response({"error": "Có nhân viên không thuộc phạm vi quản lý của bạn."}, status=status.HTTP_403_FORBIDDEN)
+            created_items = []
+            with transaction.atomic():
+                for executor_email in executor_emails:
+                    payload = dict(request.data)
+                    payload["executorEmail"] = executor_email
+                    payload["managerEmails"] = list(dict.fromkeys([request.user.email, *(request.data.get("managerEmails") or [])]))
+                    item = WorkItem(creator=request.user, executor=request.user, work_date=timezone.localdate(), title="")
+                    error = _apply_data(request, item, creating=True, data_override=payload)
+                    if error:
+                        transaction.set_rollback(True)
+                        return error
+                    created_items.append(item)
+            visible = _visible_items(request.user, request.user_role).filter(pk__in=[item.pk for item in created_items])
+            payload_by_id = {item.pk: _payload(item, request.user, request.user_role) for item in visible}
+            return Response({"message": f"Đã giao việc cho {len(created_items)} nhân viên.", "items": [payload_by_id[item.pk] for item in created_items]}, status=status.HTTP_201_CREATED)
         item = WorkItem(creator=request.user, executor=request.user, work_date=timezone.localdate(), title="")
         error = _apply_data(request, item, creating=True)
         if error:

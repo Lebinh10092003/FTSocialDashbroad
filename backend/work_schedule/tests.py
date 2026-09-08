@@ -327,6 +327,38 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(added_manager.status_code, 200, added_manager.data)
         self.assertEqual(WorkItem.objects.filter(id__in=[first["id"], second["id"]], managers=observer).count(), 2)
 
+    def test_manager_can_assign_one_task_to_multiple_direct_reports_atomically(self):
+        second_executor, _ = self.profile("second-executor@example.com")
+        self.executor.manager = self.manager
+        self.executor.save(update_fields=["manager"])
+        second_executor.manager = self.manager
+        second_executor.save(update_fields=["manager"])
+
+        response = self.request(self.manager_token, "post", "/api/work-schedule/items", {
+            "title": "Chuẩn bị tài liệu chung",
+            "date": "2026-09-10",
+            "executorEmails": [self.executor.email, second_executor.email],
+            "supporterEmails": [],
+            "managerEmails": [],
+        })
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(len(response.json()["items"]), 2)
+        created = WorkItem.objects.filter(title="Chuẩn bị tài liệu chung").order_by("executor_id")
+        self.assertEqual(created.count(), 2)
+        self.assertTrue(all(item.managers.filter(email=self.manager.email).exists() for item in created))
+
+        outsider, _ = self.profile("outsider@example.com")
+        rejected = self.request(self.manager_token, "post", "/api/work-schedule/items", {
+            "title": "Không được tạo dở dang",
+            "date": "2026-09-10",
+            "executorEmails": [self.executor.email, outsider.email],
+            "supporterEmails": [],
+            "managerEmails": [],
+        })
+        self.assertEqual(rejected.status_code, 403, rejected.data)
+        self.assertFalse(WorkItem.objects.filter(title="Không được tạo dở dang").exists())
+
     def test_training_schedule_syncs_both_ways_with_three_hour_duration(self):
         response = self.request(self.manager_token, "post", "/api/work-schedule/items", {
             "title": "Tập huấn B1 TH Trung Văn", "date": "2026-09-15",
