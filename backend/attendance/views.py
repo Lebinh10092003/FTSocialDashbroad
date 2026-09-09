@@ -72,12 +72,8 @@ def _is_privileged(request):
 
 
 def _can_edit_date(request, work_date):
-    """Regular users can only edit today and yesterday. Privileged users can edit any date."""
-    if _is_privileged(request):
-        return True
-    today = timezone.localdate()
-    yesterday = today - timedelta(days=1)
-    return work_date in (today, yesterday)
+    """Everyone can edit any date now."""
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +104,8 @@ def _entry_payload(entry, include_employee=False):
 def _log_payload(log):
     return {
         "id": log.id,
+        "employeeEmail": log.employee_id,
+        "employeeName": log.employee.name if log.employee else log.employee_id,
         "workDate": log.work_date.isoformat(),
         "editedBy": log.edited_by_id,
         "editedByName": log.edited_by.name if log.edited_by else log.edited_by_id,
@@ -175,7 +173,7 @@ def timesheet_list(request):
     offline_minutes = sum(e.worked_minutes for e in own_entries if e.work_mode == "direct" and not e.is_day_off)
 
     # Edit logs for this month
-    log_qs = TimesheetEditLog.objects.select_related("edited_by").filter(
+    log_qs = TimesheetEditLog.objects.select_related("employee", "edited_by").filter(
         work_date__gte=start, work_date__lt=end,
     )
     if scope == "mine":
@@ -409,7 +407,7 @@ def timesheet_prefill(request):
 
     # Edit logs for this date
     edit_logs = list(
-        TimesheetEditLog.objects.select_related("edited_by").filter(
+        TimesheetEditLog.objects.select_related("employee", "edited_by").filter(
             employee=target_user, work_date=target_date,
         ).order_by("-created_at")[:50]
     )
@@ -426,6 +424,40 @@ def timesheet_prefill(request):
         "isPrivileged": privileged,
         "editLogs": [_log_payload(lg) for lg in edit_logs],
     })
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def timesheet_range(request):
+    """Return timesheet entries for a date range, grouped by date.
+    Used by the WorkSchedule grid to populate the Chấm công column."""
+    raw_start = request.query_params.get("start")
+    raw_end = request.query_params.get("end")
+    try:
+        start_date = datetime.strptime(raw_start, "%Y-%m-%d").date()
+        end_date = datetime.strptime(raw_end, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return Response({"error": "Ngày không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+
+    entries = list(
+        TimesheetEntry.objects.filter(
+            employee=request.user,
+            work_date__gte=start_date,
+            work_date__lte=end_date,
+        ).order_by("work_date", "shift_number")
+    )
+
+    by_date = {}
+    for e in entries:
+        key = e.work_date.isoformat()
+        by_date.setdefault(key, []).append({
+            "shiftStart": e.shift_start.isoformat(timespec="minutes"),
+            "shiftEnd": e.shift_end.isoformat(timespec="minutes"),
+            "workMode": e.work_mode,
+            "isDayOff": e.is_day_off,
+        })
+
+    return Response({"dates": by_date})
 
 
 # ---------------------------------------------------------------------------

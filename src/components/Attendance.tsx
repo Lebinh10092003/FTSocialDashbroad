@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Clock, Coffee, Edit3, FileText, Globe, Laptop, Loader2, MapPin, Moon, Plus, RefreshCw, Save, Search, Trash2, TriangleAlert, UserCheck, Users, X } from 'lucide-react';
+import { ArrowLeft, Check, Clock, Edit3, FileText, Globe, Laptop, Loader2, MapPin, Moon, Plus, RefreshCw, Save, Search, Trash2, TriangleAlert, UserCheck, Users, X } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -20,6 +20,8 @@ type TimesheetEntry = {
 
 type EditLog = {
   id: number;
+  employeeEmail: string;
+  employeeName: string;
   workDate: string;
   editedBy: string;
   editedByName: string;
@@ -69,9 +71,36 @@ let cache: { owner: string; month: string; savedAt: number; data: TimesheetData 
 /* ------------------------------------------------------------------ */
 const currentMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
 const fmtHours = (mins: number) => (mins / 60).toFixed(2).replace(/\.?0+$/, '') || '0';
-const formatDate = (v: string) => { const [y, m, d] = v.split('-'); return `${d}/${m}/${y}`; };
+const fmtDate = (v: string) => { const [y, m, d] = v.split('-'); return `${d}/${m}/${y}`; };
+const fmtMonthLabel = (v: string) => { const [y, m] = v.split('-'); return `${m}/${y}`; };
 const modeLabel = (m: string) => m === 'online' ? 'Online' : 'Trực tiếp';
 
+/** Format edit log old/new data into readable text */
+const formatLogShifts = (data: any) => {
+  if (!data?.shifts?.length) return 'Trống';
+  const shifts = data.shifts as { shift: number; start: string; end: string; mode: string; dayOff: boolean; notes: string }[];
+  if (shifts[0]?.dayOff) return 'Nghỉ';
+  return shifts.map(s => `${s.mode === 'online' ? 'Online' : 'Trực tiếp'}: ${s.start} - ${s.end}`).join(', ');
+};
+const WEEKDAYS_VI = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+const weekdayName = (iso: string) => { const d = new Date(`${iso}T00:00:00`); return WEEKDAYS_VI[d.getDay()]; };
+const isWeekend = (iso: string) => { const d = new Date(`${iso}T00:00:00`).getDay(); return d === 0 || d === 6; };
+
+/** Get all dates in a month as YYYY-MM-DD strings */
+const monthDates = (month: string) => {
+  const [y, m] = month.split('-').map(Number);
+  const days = new Date(y, m, 0).getDate();
+  return Array.from({ length: days }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`);
+};
+
+/** Format shift entries for display */
+const formatShifts = (entries: TimesheetEntry[]) => {
+  if (!entries.length) return '';
+  if (entries[0].isDayOff) return 'Nghỉ';
+  return entries
+    .map(e => `${modeLabel(e.workMode)}: ${e.shiftStart} - ${e.shiftEnd}`)
+    .join('\n');
+};
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -100,7 +129,6 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
   const [popupError, setPopupError] = useState('');
   const [editNote, setEditNote] = useState('');
   const [isEdit, setIsEdit] = useState(false);
-
 
   /* ---------- Data loading ---------- */
   const load = useCallback(async (silent = false) => {
@@ -136,8 +164,8 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
     return data.employees.filter(e => e.name.toLowerCase().includes(q) || e.email.toLowerCase().includes(q));
   }, [data?.employees, empSearch]);
 
-  /* ---------- Group entries by date ---------- */
-  const filteredEntries = useMemo(() => {
+  /* ---------- Entries for selected view ---------- */
+  const viewEntries = useMemo(() => {
     if (!data) return [];
     if (data.scope === 'mine') return data.entries;
     const target = selectedEmployee || userEmail || '';
@@ -145,44 +173,52 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
     return data.entries.filter(e => e.employee?.email === target);
   }, [data, selectedEmployee, userEmail]);
 
-  const grouped = useMemo(() => {
+  /* ---------- Map entries by date ---------- */
+  const entriesByDate = useMemo(() => {
     const map = new Map<string, TimesheetEntry[]>();
-    for (const e of filteredEntries) {
+    for (const e of viewEntries) {
       const list = map.get(e.workDate) || [];
       list.push(e);
       map.set(e.workDate, list);
     }
-    return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
-  }, [filteredEntries]);
+    return map;
+  }, [viewEntries]);
 
-  /* ---------- Filtered summary ---------- */
-  const filteredSummary = useMemo(() => {
-    const total = filteredEntries.reduce((s, e) => s + (e.isDayOff ? 0 : e.workedMinutes), 0);
-    const online = filteredEntries.reduce((s, e) => s + (e.workMode === 'online' && !e.isDayOff ? e.workedMinutes : 0), 0);
-    const offline = filteredEntries.reduce((s, e) => s + (e.workMode === 'direct' && !e.isDayOff ? e.workedMinutes : 0), 0);
+  /* ---------- Summary ---------- */
+  const summary = useMemo(() => {
+    const total = viewEntries.reduce((s, e) => s + (e.isDayOff ? 0 : e.workedMinutes), 0);
+    const online = viewEntries.reduce((s, e) => s + (e.workMode === 'online' && !e.isDayOff ? e.workedMinutes : 0), 0);
+    const offline = viewEntries.reduce((s, e) => s + (e.workMode === 'direct' && !e.isDayOff ? e.workedMinutes : 0), 0);
     return { totalMinutes: total, onlineMinutes: online, offlineMinutes: offline };
-  }, [filteredEntries]);
+  }, [viewEntries]);
 
-  /* ---------- Can user edit a date ---------- */
-  const canEditDate = useCallback((dateStr: string) => {
-    if (data?.isPrivileged) return true;
+  /* ---------- All dates in the month ---------- */
+  const allDates = useMemo(() => monthDates(month), [month]);
+
+  /* ---------- Edit logs for selected person ---------- */
+  const viewEditLogs = useMemo(() => {
+    if (!data?.editLogs?.length) return [];
+    if (data.scope === 'mine') return data.editLogs;
+    const target = selectedEmployee || userEmail || '';
+    if (!target) return data.editLogs;
+    return data.editLogs.filter(log => log.employeeEmail === target);
+  }, [data, selectedEmployee, userEmail]);
+
+  /* ---------- Missing weekday dates (for warning) ---------- */
+  const missingWeekdays = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    return dateStr === today || dateStr === yesterday;
-  }, [data?.isPrivileged]);
+    return allDates.filter(d => {
+      if (d >= today) return false; // don't warn about future/today
+      if (isWeekend(d)) return false;
+      return !entriesByDate.has(d);
+    });
+  }, [allDates, entriesByDate]);
 
   /* ---------- Open popup ---------- */
   const openPopup = async (dateOverride?: string) => {
     setPopupError('');
     setEditNote('');
     const targetDate = dateOverride || new Date().toISOString().slice(0, 10);
-
-    // Quick permission check before opening
-    if (!canEditDate(targetDate)) {
-      setNotice('Bạn không có quyền chỉnh sửa ngày này. Hãy liên hệ kế toán nếu muốn chỉnh sửa giờ làm.');
-      return;
-    }
-
     setPopupDate(targetDate);
     setPopupOpen(true);
     setIsDayOff(false);
@@ -194,11 +230,6 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
       const res = await fetch(`/api/attendance/timesheet/prefill?date=${targetDate}`, { headers: { Authorization: `Bearer ${idToken}` } });
       const body: PrefillData = await res.json();
       setPrefill(body);
-
-      if (!body.canEdit) {
-        setPopupError('Bạn không có quyền chỉnh sửa ngày này. Hãy liên hệ kế toán nếu muốn chỉnh sửa giờ làm.');
-        return;
-      }
 
       if (body.existing.length > 0) {
         setIsEdit(true);
@@ -219,6 +250,22 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
     } catch {
       setShifts([{ start: '08:00', end: '12:00', workMode: 'direct', notes: '' }]);
     }
+  };
+
+  /* ---------- Quick mark day off ---------- */
+  const quickDayOff = async (dateStr: string) => {
+    try {
+      const existing = entriesByDate.get(dateStr);
+      const payload: any = { workDate: dateStr, isDayOff: true };
+      if (existing?.length) payload.editNote = 'Xác nhận nghỉ làm';
+      await fetch('/api/attendance/timesheet/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify(payload),
+      });
+      setNotice(`Đã ghi nhận nghỉ làm ngày ${fmtDate(dateStr)}`);
+      await load(true);
+    } catch { /* ignore */ }
   };
 
   /* ---------- Save ---------- */
@@ -262,8 +309,6 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
     setShifts(prev => [...prev, { start: '13:30', end: '17:30', workMode: mode, notes: '' }]);
   };
 
-  const summary = selectedEmployee ? filteredSummary : (data?.summary ?? filteredSummary);
-
   const isPrivileged = data?.isPrivileged ?? false;
   const selectedEmpName = data?.employees?.find(e => e.email === selectedEmployee)?.name;
 
@@ -292,7 +337,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
                 {emp.department && <span className="text-[11px] text-slate-400">{emp.department}</span>}
               </button>
             ))}
-            {filteredEmployees.length === 0 && <p className="px-4 py-6 text-center text-xs text-slate-400">Không tìm thấy nhân viên.</p>}
+            {filteredEmployees.length === 0 && <p className="px-4 py-6 text-center text-xs text-slate-400">Không tìm thấy.</p>}
           </div>
         </aside>
       )}
@@ -300,248 +345,234 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
       <div className="flex min-h-dvh flex-1 flex-col">
         {/* Header */}
         <header className="border-b bg-white/90 backdrop-blur-xl">
-          <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
+          <div className="mx-auto flex h-16 max-w-[1400px] items-center justify-between px-5 sm:px-8">
             {!isPrivileged && <button type="button" onClick={onBackToWorkspace} className="ft-btn ft-btn-secondary"><ArrowLeft className="h-4 w-4" />Workspace</button>}
             <div className="flex items-center gap-2.5"><div className="grid h-9 w-9 place-items-center rounded-lg bg-emerald-700 text-white"><UserCheck className="h-5 w-5" /></div><span className="text-sm font-extrabold">Công ca{selectedEmpName ? ` — ${selectedEmpName}` : ''}</span></div>
             <div className="hidden text-right sm:block"><p className="text-xs font-bold text-slate-500">{new Intl.DateTimeFormat('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' }).format(new Date())}</p></div>
           </div>
         </header>
 
-        <main className={`mx-auto w-full flex-1 px-5 py-8 sm:px-8 sm:py-10 ${isPrivileged ? 'max-w-[1400px]' : 'max-w-7xl'}`}>
-        {/* Title row */}
-        <section className="mb-7 flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="text-xs font-bold uppercase text-emerald-600">Xin chào, {userName}</p>
-            <h1 className="mt-1 text-2xl font-extrabold sm:text-3xl">Bảng công cá nhân</h1>
-            <p className="mt-1 text-sm text-slate-500">Tự khai báo giờ làm hàng ngày — sáng 8:00–12:00, chiều 13:30–17:30.</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => void load()} disabled={loading} className="ft-btn ft-btn-secondary"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />Làm mới</button>
-            <button type="button" onClick={() => void openPopup()} className="ft-btn ft-btn-primary"><Plus className="h-4 w-4" />Thêm công ca</button>
-          </div>
-        </section>
+        <main className="mx-auto w-full max-w-[1400px] flex-1 px-5 py-8 sm:px-8 sm:py-10">
+          {/* Title row */}
+          <section className="mb-7 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase text-emerald-600">Xin chào, {userName}</p>
+              <h1 className="mt-1 text-2xl font-extrabold sm:text-3xl">Bảng công cá nhân</h1>
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => void load()} disabled={loading} className="ft-btn ft-btn-secondary"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />Làm mới</button>
+              <button type="button" onClick={() => void openPopup()} className="ft-btn ft-btn-primary"><Plus className="h-4 w-4" />Thêm công ca</button>
+            </div>
+          </section>
 
-        {error && <div className="mb-5 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800"><TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" /><span>{error}</span></div>}
+          {error && <div className="mb-5 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800"><TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" /><span>{error}</span></div>}
 
-        {/* Main grid: Records + Sidebar */}
-        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
-          {/* Records table */}
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          {/* Missing weekday warnings (no buttons) */}
+          {missingWeekdays.length > 0 && (
+            <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <div className="flex items-start gap-2">
+                <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                <div>
+                  <p className="text-sm font-bold text-amber-900">Các ngày chưa có công ca trong tháng:</p>
+                  <p className="mt-1 text-sm text-amber-800">{missingWeekdays.map(d => fmtDate(d)).join(', ')}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Summary — top */}
+          <div className="mb-6 rounded-2xl border bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-bold uppercase text-emerald-600">Lịch sử{selectedEmpName ? ` — ${selectedEmpName}` : ''}</p>
-                <h2 className="mt-1 text-xl font-extrabold">Công ca trong tháng</h2>
+                <p className="text-sm font-bold uppercase text-emerald-600">Tổng quan{selectedEmpName ? ` — ${selectedEmpName}` : ''}</p>
+                <h2 className="mt-1 text-2xl font-extrabold">Tháng {fmtMonthLabel(month)}</h2>
               </div>
               <label className="relative"><span className="sr-only">Chọn tháng</span><input type="month" value={month} onChange={e => setMonth(e.target.value)} className="ft-input" /></label>
             </div>
+            <div className="mt-5 flex flex-wrap gap-8">
+              <div className="flex items-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-xl bg-emerald-100 text-emerald-700"><Clock className="h-6 w-6" /></div><div><p className="text-3xl font-extrabold">{fmtHours(summary.totalMinutes)}<span className="ml-1 text-base font-bold text-slate-400">giờ</span></p><p className="text-sm text-slate-500">Tổng giờ làm</p></div></div>
+              <div className="flex items-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-xl bg-blue-100 text-blue-700"><MapPin className="h-6 w-6" /></div><div><p className="text-3xl font-extrabold">{fmtHours(summary.offlineMinutes)}<span className="ml-1 text-base font-bold text-slate-400">giờ</span></p><p className="text-sm text-slate-500">Trực tiếp</p></div></div>
+              <div className="flex items-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-xl bg-violet-100 text-violet-700"><Laptop className="h-6 w-6" /></div><div><p className="text-3xl font-extrabold">{fmtHours(summary.onlineMinutes)}<span className="ml-1 text-base font-bold text-slate-400">giờ</span></p><p className="text-sm text-slate-500">Online</p></div></div>
+            </div>
+          </div>
+
+          {/* Edit logs — below summary */}
+          {viewEditLogs.length > 0 && (
+            <div className="mb-6 rounded-2xl border bg-white p-5 shadow-sm">
+              <p className="flex items-center gap-2 text-sm font-bold text-slate-700"><FileText className="h-4 w-4 text-slate-400" />Nhật ký chỉnh sửa ({viewEditLogs.length})</p>
+              <div className="mt-3 max-h-48 space-y-2 overflow-y-auto">
+                {viewEditLogs.map(log => (
+                  <div key={log.id} className="rounded-lg border bg-slate-50 px-3 py-2 text-xs">
+                    <p className="text-slate-700">
+                      <span className="font-bold">{log.editedByName}</span>
+                      {' thay đổi lịch làm việc ngày '}
+                      <span className="font-bold">{fmtDate(log.workDate)}</span>
+                      {log.oldData?.shifts ? <> từ <span className="font-medium text-rose-600">{formatLogShifts(log.oldData)}</span></> : ''}
+                      {log.newData?.shifts ? <> thành <span className="font-medium text-emerald-700">{formatLogShifts(log.newData)}</span></> : ''}
+                    </p>
+                    {log.note && <p className="mt-0.5 text-slate-500 italic">Ghi chú: {log.note}</p>}
+                    <p className="mt-0.5 text-slate-400">{new Date(log.createdAt).toLocaleString('vi-VN')}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Monthly grid table */}
+          <div className="rounded-2xl border bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase text-emerald-600">Bảng công{selectedEmpName ? ` — ${selectedEmpName}` : ''}</p>
+                <h2 className="mt-1 text-xl font-extrabold">Tháng {fmtMonthLabel(month)}</h2>
+              </div>
+            </div>
 
             <div className="mt-5 overflow-x-auto rounded-xl border">
-              <table className="ft-table min-w-[750px]">
-                <thead><tr><th>Ngày</th><th>Ca</th><th>Bắt đầu</th><th>Kết thúc</th><th>Thời lượng</th><th>Hình thức</th><th>Ghi chú</th><th></th></tr></thead>
+              <table className="ft-table min-w-[800px]">
+                <thead><tr><th className="w-16">Thứ</th><th className="w-24">Ngày</th><th>Công ca</th><th className="w-20">Giờ</th><th className="w-10"></th><th className="w-10"></th></tr></thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={8} className="px-5 py-14 text-center text-slate-400">Đang tải...</td></tr>
-                  ) : grouped.length === 0 ? (
-                    <tr><td colSpan={8} className="px-5 py-14 text-center text-slate-400">Chưa có dữ liệu công trong tháng này.</td></tr>
-                  ) : grouped.map(([dateStr, entries]) => {
-                    const dayTotal = entries.reduce((sum, e) => sum + (e.isDayOff ? 0 : e.workedMinutes), 0);
+                    <tr><td colSpan={6} className="px-5 py-14 text-center text-slate-400">Đang tải...</td></tr>
+                  ) : allDates.map(dateStr => {
+                    const entries = entriesByDate.get(dateStr) || [];
+                    const weekend = isWeekend(dateStr);
                     const hasDayOff = entries.some(e => e.isDayOff);
-                    const rowCount = entries.length + (entries.length > 1 || !hasDayOff ? 1 : 0);
+                    const hasEntries = entries.length > 0;
+                    const dayMinutes = entries.reduce((s, e) => s + (e.isDayOff ? 0 : e.workedMinutes), 0);
+                    const today = new Date().toISOString().slice(0, 10);
+                    const isPast = dateStr < today;
+
                     return (
-                      <React.Fragment key={dateStr}>
-                        {entries.map((entry, idx) => (
-                          <tr key={entry.id} className="hover:bg-blue-50/50">
-                            {idx === 0 && <td rowSpan={rowCount} className="whitespace-nowrap font-bold align-top">{formatDate(dateStr)}{entry.employee && <span className="mt-0.5 block text-xs font-normal text-slate-400">{entry.employee.name}</span>}</td>}
-                            {entry.isDayOff ? (
-                              <>
-                                <td colSpan={5}><span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800"><Moon className="h-3.5 w-3.5" />Nghỉ làm</span></td>
-                                <td className="text-xs text-slate-400">—</td>
-                              </>
-                            ) : (
-                              <>
-                                <td className="font-bold">Ca {entry.shiftNumber}</td>
-                                <td className="tabular-nums">{entry.shiftStart}</td>
-                                <td className="tabular-nums">{entry.shiftEnd}{entry.crossesMidnight && <span className="ml-1 text-xs text-amber-600" title="Qua nửa đêm">+1</span>}</td>
-                                <td className="tabular-nums">{fmtHours(entry.workedMinutes)}h</td>
-                                <td>
-                                  <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${entry.workMode === 'online' ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'}`}>
-                                    {entry.workMode === 'online' ? <Globe className="h-3 w-3" /> : <MapPin className="h-3 w-3" />}
-                                    {modeLabel(entry.workMode)}
-                                  </span>
-                                </td>
-                                <td className="max-w-[180px] truncate text-xs text-slate-500" title={entry.notes}>{entry.notes || '—'}</td>
-                              </>
-                            )}
-                            {idx === 0 && (
-                              <td rowSpan={rowCount} className="align-top">
-                                {canEditDate(dateStr) ? (
-                                  <button type="button" onClick={() => void openPopup(dateStr)} className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline"><Edit3 className="h-3.5 w-3.5" />Sửa</button>
-                                ) : (
-                                  <span className="text-xs text-slate-300" title="Liên hệ kế toán để chỉnh sửa">—</span>
-                                )}
-                              </td>
-                            )}
-                          </tr>
-                        ))}
-                        {!hasDayOff && (
-                          <tr className="bg-slate-50/80">
-                            <td colSpan={3} className="text-right text-xs font-bold text-slate-500">Tổng ngày:</td>
-                            <td className="tabular-nums text-xs font-extrabold text-slate-700">{fmtHours(dayTotal)}h</td>
-                            <td colSpan={3}></td>
-                          </tr>
-                        )}
-                      </React.Fragment>
+                      <tr key={dateStr} className={`${weekend ? 'bg-slate-50' : ''} ${!hasEntries && isPast && !weekend ? 'bg-amber-50/40' : ''} hover:bg-blue-50/50`}>
+                        <td className={`font-bold ${weekend ? 'text-rose-500' : ''}`}>{weekdayName(dateStr)}</td>
+                        <td className="tabular-nums">{fmtDate(dateStr)}</td>
+                        <td className="whitespace-pre-wrap text-xs leading-5">
+                          {hasDayOff ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800"><Moon className="h-3 w-3" />Nghỉ</span>
+                          ) : hasEntries ? (
+                            entries.map((e, i) => (
+                              <div key={i} className="flex items-center gap-1">
+                                <span className={`inline-block h-1.5 w-1.5 rounded-full ${e.workMode === 'online' ? 'bg-blue-500' : 'bg-emerald-500'}`} />
+                                <span className="text-slate-700">{modeLabel(e.workMode)}: {e.shiftStart} - {e.shiftEnd}</span>
+                              </div>
+                            ))
+                          ) : weekend ? (
+                            <span className="text-xs text-slate-300">Nghỉ</span>
+                          ) : isPast ? (
+                            <span className="text-xs text-amber-500">Chưa có</span>
+                          ) : (
+                            <span className="text-xs text-slate-300">—</span>
+                          )}
+                        </td>
+                        <td className="tabular-nums text-xs font-bold">{dayMinutes > 0 ? `${fmtHours(dayMinutes)}h` : ''}</td>
+                        <td>
+                          <button type="button" onClick={() => void openPopup(dateStr)} className="rounded p-1 text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Chỉnh sửa"><Edit3 className="h-3.5 w-3.5" /></button>
+                        </td>
+                        <td>
+                          {!hasDayOff ? (
+                            <button type="button" onClick={() => void quickDayOff(dateStr)} className="rounded p-1 text-slate-300 hover:bg-amber-50 hover:text-amber-600" title="Xác nhận nghỉ"><Moon className="h-3.5 w-3.5" /></button>
+                          ) : (
+                            <Check className="h-3.5 w-3.5 text-amber-500" />
+                          )}
+                        </td>
+                      </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-
-            {/* Edit logs */}
-            {data?.editLogs && data.editLogs.length > 0 && (
-              <details className="mt-4">
-                <summary className="cursor-pointer text-xs font-bold text-slate-500 hover:text-slate-700"><FileText className="mr-1 inline h-3.5 w-3.5" />Nhật ký chỉnh sửa ({data.editLogs.length})</summary>
-                <div className="mt-2 max-h-48 space-y-1.5 overflow-y-auto">
-                  {data.editLogs.map(log => (
-                    <div key={log.id} className="rounded-lg border bg-slate-50 px-3 py-2 text-xs">
-                      <span className="font-bold text-slate-700">{log.editedByName}</span>
-                      <span className="text-slate-400"> · {formatDate(log.workDate)} · {new Date(log.createdAt).toLocaleString('vi-VN')}</span>
-                      <p className="mt-0.5 text-slate-600">{log.note}</p>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            )}
           </div>
-
-          {/* Sidebar */}
-          <aside className="space-y-4">
-            {/* Guidance */}
-            <div className="rounded-2xl border bg-emerald-50 p-5">
-              <div className="flex gap-3"><Coffee className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" /><div><h3 className="text-sm font-extrabold">Hướng dẫn</h3><p className="mt-1 text-xs leading-5 text-slate-600">Ca mặc định: Sáng 8:00–12:00, Chiều 13:30–17:30. Ngoài giờ hành chính hoặc cuối tuần sẽ mặc định Online. Bạn chỉ có thể chỉnh sửa công ca của hôm nay và hôm qua. Liên hệ kế toán để chỉnh sửa ngày trước đó.</p></div></div>
-            </div>
-
-            {/* Summary */}
-            <div className="rounded-2xl border bg-white p-5 shadow-sm">
-              <p className="text-sm font-bold uppercase text-emerald-600">Tổng quan</p>
-              <h2 className="mt-1 text-2xl font-extrabold">Tháng {(() => { const [y, m] = month.split('-'); return `${m}/${y}`; })()}</h2>
-              <div className="mt-5 space-y-5">
-                <div className="flex items-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-xl bg-emerald-100 text-emerald-700"><Clock className="h-6 w-6" /></div><div><p className="text-3xl font-extrabold">{fmtHours(summary?.totalMinutes ?? 0)}<span className="ml-1 text-base font-bold text-slate-400">giờ</span></p><p className="text-sm text-slate-500">Tổng giờ làm</p></div></div>
-                <div className="flex items-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-xl bg-blue-100 text-blue-700"><MapPin className="h-6 w-6" /></div><div><p className="text-3xl font-extrabold">{fmtHours(summary?.offlineMinutes ?? 0)}<span className="ml-1 text-base font-bold text-slate-400">giờ</span></p><p className="text-sm text-slate-500">Trực tiếp</p></div></div>
-                <div className="flex items-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-xl bg-violet-100 text-violet-700"><Laptop className="h-6 w-6" /></div><div><p className="text-3xl font-extrabold">{fmtHours(summary?.onlineMinutes ?? 0)}<span className="ml-1 text-base font-bold text-slate-400">giờ</span></p><p className="text-sm text-slate-500">Online</p></div></div>
-              </div>
-            </div>
-          </aside>
-        </div>
-      </main>
-
+        </main>
       </div>{/* end flex-1 wrapper */}
 
       {/* ---------- Popup ---------- */}
       {popupOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={e => { if (e.target === e.currentTarget) setPopupOpen(false); }}>
           <div className="w-full max-w-3xl rounded-2xl border bg-white shadow-2xl">
-            {/* Popup header */}
             <div className="flex items-center justify-between border-b px-6 py-4">
               <div>
                 <p className="text-xs font-bold uppercase text-emerald-600">{isEdit ? 'Chỉnh sửa' : 'Thêm mới'}</p>
-                <h2 className="mt-0.5 text-lg font-extrabold">Công ca ngày {popupDate}</h2>
+                <h2 className="mt-0.5 text-lg font-extrabold">Công ca ngày {fmtDate(popupDate)}</h2>
               </div>
               <button type="button" onClick={() => setPopupOpen(false)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X className="h-5 w-5" /></button>
             </div>
 
             <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
-              {/* Cannot edit message */}
-              {prefill && !prefill.canEdit ? (
-                <div className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800">
-                  <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" />
-                  <span>Bạn không có quyền chỉnh sửa ngày này. Hãy liên hệ kế toán nếu muốn chỉnh sửa giờ làm.</span>
+              {/* Date picker + day off */}
+              <div className="grid grid-cols-2 gap-4">
+                <label className="block"><span className="mb-1 block text-sm font-bold">Ngày</span><input type="date" className="ft-input" value={popupDate} onChange={e => { setPopupDate(e.target.value); void openPopup(e.target.value); }} /></label>
+                <div className="flex items-end pb-0.5">
+                  <label className="flex items-center gap-2 text-sm font-bold">
+                    <input type="checkbox" checked={isDayOff} onChange={e => setIsDayOff(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-emerald-600" />
+                    <Moon className="h-4 w-4 text-amber-600" /> Nghỉ làm ngày này
+                  </label>
                 </div>
-              ) : (
-                <>
-                  {/* Date picker */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <label className="block"><span className="mb-1 block text-sm font-bold">Ngày</span><input type="date" className="ft-input" value={popupDate} onChange={e => { setPopupDate(e.target.value); void openPopup(e.target.value); }} /></label>
-                    <div className="flex items-end pb-0.5">
-                      <label className="flex items-center gap-2 text-sm font-bold">
-                        <input type="checkbox" checked={isDayOff} onChange={e => setIsDayOff(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-emerald-600" />
-                        <Moon className="h-4 w-4 text-amber-600" /> Nghỉ làm ngày này
-                      </label>
-                    </div>
-                  </div>
+              </div>
 
-                  {/* Shift rows */}
-                  {!isDayOff && (
-                    <div className="mt-5 space-y-3">
-                      <p className="text-xs font-bold uppercase text-slate-500">Các ca làm việc</p>
-                      {shifts.map((shift, idx) => (
-                        <div key={idx} className="grid grid-cols-[1fr_1fr_auto] items-start gap-3 rounded-xl border bg-slate-50 px-4 py-3">
-                          {/* Row 1: times + mode + delete */}
-                          <div className="grid grid-cols-2 gap-3">
-                            <label><span className="mb-1 block text-xs font-bold text-slate-500">Bắt đầu</span><input type="time" className="ft-input" value={shift.start} onChange={e => updateShift(idx, 'start', e.target.value)} /></label>
-                            <label><span className="mb-1 block text-xs font-bold text-slate-500">Kết thúc</span><input type="time" className="ft-input" value={shift.end} onChange={e => updateShift(idx, 'end', e.target.value)} /></label>
-                          </div>
-                          <div>
-                            <span className="mb-1 block text-xs font-bold text-slate-500">Hình thức</span>
-                            <div className="grid grid-cols-2 gap-1.5">
-                              <button type="button" onClick={() => updateShift(idx, 'workMode', 'direct')} className={`flex items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-bold transition ${shift.workMode === 'direct' ? 'border-emerald-300 bg-emerald-100 text-emerald-800' : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200'}`}><MapPin className="h-3 w-3" />Trực tiếp</button>
-                              <button type="button" onClick={() => updateShift(idx, 'workMode', 'online')} className={`flex items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-bold transition ${shift.workMode === 'online' ? 'border-blue-300 bg-blue-100 text-blue-800' : 'border-slate-200 bg-white text-slate-500 hover:border-blue-200'}`}><Globe className="h-3 w-3" />Online</button>
-                            </div>
-                          </div>
-                          <div className="flex items-end pb-1">
-                            {shifts.length > 1 && <button type="button" onClick={() => removeShift(idx)} className="rounded-lg p-1.5 text-rose-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>}
-                          </div>
-                          {/* Row 2: notes spanning full width */}
-                          <div className="col-span-3">
-                            <input type="text" className="ft-input text-xs" value={shift.notes} onChange={e => updateShift(idx, 'notes', e.target.value)} placeholder="Ghi chú ca (tùy chọn)" maxLength={500} />
-                          </div>
+              {/* Shift rows */}
+              {!isDayOff && (
+                <div className="mt-5 space-y-3">
+                  <p className="text-xs font-bold uppercase text-slate-500">Các ca làm việc</p>
+                  {shifts.map((shift, idx) => (
+                    <div key={idx} className="grid grid-cols-[1fr_1fr_auto] items-start gap-3 rounded-xl border bg-slate-50 px-4 py-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <label><span className="mb-1 block text-xs font-bold text-slate-500">Bắt đầu</span><input type="time" className="ft-input" value={shift.start} onChange={e => updateShift(idx, 'start', e.target.value)} /></label>
+                        <label><span className="mb-1 block text-xs font-bold text-slate-500">Kết thúc</span><input type="time" className="ft-input" value={shift.end} onChange={e => updateShift(idx, 'end', e.target.value)} /></label>
+                      </div>
+                      <div>
+                        <span className="mb-1 block text-xs font-bold text-slate-500">Hình thức</span>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button type="button" onClick={() => updateShift(idx, 'workMode', 'direct')} className={`flex items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-bold transition ${shift.workMode === 'direct' ? 'border-emerald-300 bg-emerald-100 text-emerald-800' : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200'}`}><MapPin className="h-3 w-3" />Trực tiếp</button>
+                          <button type="button" onClick={() => updateShift(idx, 'workMode', 'online')} className={`flex items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-bold transition ${shift.workMode === 'online' ? 'border-blue-300 bg-blue-100 text-blue-800' : 'border-slate-200 bg-white text-slate-500 hover:border-blue-200'}`}><Globe className="h-3 w-3" />Online</button>
                         </div>
-                      ))}
-
-                      {shifts.length < 10 && (
-                        <button type="button" onClick={addShift} className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 py-2.5 text-sm font-bold text-slate-500 transition hover:border-emerald-400 hover:text-emerald-700"><Plus className="h-4 w-4" />Thêm ca</button>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Edit note (required for edits) */}
-                  {isEdit && (
-                    <div className="mt-5">
-                      <label><span className="mb-1 block text-sm font-bold text-amber-800">Ghi chú chỉnh sửa <span className="text-rose-500">*</span></span>
-                      <textarea className="ft-input min-h-16" value={editNote} onChange={e => setEditNote(e.target.value)} placeholder="Lý do chỉnh sửa công ca..." maxLength={1000} /></label>
-                    </div>
-                  )}
-
-                  {/* Existing edit logs for this date */}
-                  {prefill?.editLogs && prefill.editLogs.length > 0 && (
-                    <div className="mt-4">
-                      <p className="text-xs font-bold text-slate-500"><FileText className="mr-1 inline h-3.5 w-3.5" />Lịch sử chỉnh sửa ngày này</p>
-                      <div className="mt-1.5 max-h-28 space-y-1 overflow-y-auto">
-                        {prefill.editLogs.map(log => (
-                          <div key={log.id} className="rounded-lg border bg-slate-50 px-3 py-1.5 text-xs">
-                            <span className="font-bold">{log.editedByName}</span>
-                            <span className="text-slate-400"> · {new Date(log.createdAt).toLocaleString('vi-VN')}</span>
-                            <p className="text-slate-600">{log.note}</p>
-                          </div>
-                        ))}
+                      </div>
+                      <div className="flex items-end pb-1">
+                        {shifts.length > 1 && <button type="button" onClick={() => removeShift(idx)} className="rounded-lg p-1.5 text-rose-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>}
+                      </div>
+                      <div className="col-span-3">
+                        <input type="text" className="ft-input text-xs" value={shift.notes} onChange={e => updateShift(idx, 'notes', e.target.value)} placeholder="Ghi chú ca (tùy chọn)" maxLength={500} />
                       </div>
                     </div>
+                  ))}
+                  {shifts.length < 10 && (
+                    <button type="button" onClick={addShift} className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 py-2.5 text-sm font-bold text-slate-500 transition hover:border-emerald-400 hover:text-emerald-700"><Plus className="h-4 w-4" />Thêm ca</button>
                   )}
-                </>
+                </div>
+              )}
+
+              {/* Edit note */}
+              {isEdit && (
+                <div className="mt-5">
+                  <label><span className="mb-1 block text-sm font-bold text-amber-800">Ghi chú chỉnh sửa <span className="text-rose-500">*</span></span>
+                  <textarea className="ft-input min-h-16" value={editNote} onChange={e => setEditNote(e.target.value)} placeholder="Lý do chỉnh sửa công ca..." maxLength={1000} /></label>
+                </div>
+              )}
+
+              {/* Edit logs for this date */}
+              {prefill?.editLogs && prefill.editLogs.length > 0 && (
+                <div className="mt-4">
+                  <p className="text-xs font-bold text-slate-500"><FileText className="mr-1 inline h-3.5 w-3.5" />Lịch sử chỉnh sửa ngày này</p>
+                  <div className="mt-1.5 max-h-28 space-y-1 overflow-y-auto">
+                    {prefill.editLogs.map(log => (
+                      <div key={log.id} className="rounded-lg border bg-slate-50 px-3 py-1.5 text-xs">
+                        <span className="font-bold">{log.editedByName}</span>
+                        <span className="text-slate-400"> · {new Date(log.createdAt).toLocaleString('vi-VN')}</span>
+                        <p className="text-slate-600">{log.note}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
 
               {popupError && <div className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700">{popupError}</div>}
             </div>
 
-            {/* Popup footer */}
             <div className="flex items-center justify-end gap-2 border-t px-6 py-4">
               <button type="button" onClick={() => setPopupOpen(false)} className="ft-btn ft-btn-secondary">Hủy</button>
-              {(!prefill || prefill.canEdit) && (
-                <button type="button" onClick={() => void saveTimesheet()} disabled={saving || (!isDayOff && shifts.length === 0)} className="ft-btn ft-btn-primary">
-                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  {saving ? 'Đang lưu...' : 'Lưu'}
-                </button>
-              )}
+              <button type="button" onClick={() => void saveTimesheet()} disabled={saving || (!isDayOff && shifts.length === 0)} className="ft-btn ft-btn-primary">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {saving ? 'Đang lưu...' : 'Lưu'}
+              </button>
             </div>
           </div>
         </div>

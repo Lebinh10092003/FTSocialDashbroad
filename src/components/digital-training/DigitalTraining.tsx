@@ -1132,10 +1132,10 @@ export function Calendar({
     }, 0);
   };
   const dropMove = (event: React.DragEvent, date: string, minute?: number) => {
-    const item = movingRef.current;
-    if (!item) return false;
     event.preventDefault();
     event.stopPropagation();
+    const item = movingRef.current;
+    if (!item) return false;
     movingRef.current = null;
     setMoving(null);
     const targetStart =
@@ -1296,9 +1296,10 @@ export function Calendar({
         role={active ? "button" : undefined}
         tabIndex={active ? 0 : -1}
         onDragOver={(event) => {
-          if (active && movingRef.current) event.preventDefault();
+          event.preventDefault();
         }}
         onDrop={(event) => {
+          event.preventDefault();
           if (active) dropMove(event, date);
         }}
         onClick={() => {
@@ -1543,9 +1544,12 @@ export function Calendar({
                     finish(date, minute);
                   }}
                   onDragOver={(event) => {
-                    if (movingRef.current) event.preventDefault();
+                    event.preventDefault();
                   }}
-                  onDrop={(event) => dropMove(event, date, minute)}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    dropMove(event, date, minute);
+                  }}
                   onClick={() => {
                     if (!draggedRef.current)
                       onPick(date, toTime(minute), toTime(minute + 30));
