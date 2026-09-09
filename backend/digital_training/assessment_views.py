@@ -357,11 +357,37 @@ def _admin_attempt_payloads(attempts, request):
             awarded = automatic_question_score(question, (attempt.answers or {}).get(question_id, ""))
             if awarded is not None:
                 automatic_grading[question_id] = float(awarded)
+        own_rows = attempt_links.get(attempt.id, [])
+        own_question_ids_by_normalized = {}
+        for normalized, _link, question_id in own_rows:
+            own_question_ids_by_normalized.setdefault(normalized, []).append(question_id)
+        own_question_orders = {
+            str(question.get("id") or ""): question.get("order")
+            for question in questions_by_variant.get(attempt.variant, [])
+        }
         warnings = []
-        for normalized, link, question_id in attempt_links.get(attempt.id, []):
-            matches = [item for item in link_index.get(normalized, []) if item["attempt_id"] != attempt.id]
-            if matches:
-                warnings.append({"question_id": question_id, "link": link, "matches": matches})
+        for normalized, link, question_id in own_rows:
+            other_matches = [item for item in link_index.get(normalized, []) if item["attempt_id"] != attempt.id]
+            if other_matches:
+                warnings.append({
+                    "question_id": question_id, "link": link, "matches": other_matches, "scope": "other_attempt",
+                })
+            same_attempt_question_ids = [
+                other_id for other_id in own_question_ids_by_normalized.get(normalized, []) if other_id != question_id
+            ]
+            if same_attempt_question_ids:
+                same_attempt_matches = [
+                    {
+                        "attempt_id": attempt.id,
+                        "respondent_name": attempt.respondent_name,
+                        "question_id": other_id,
+                        "question_order": own_question_orders.get(other_id),
+                    }
+                    for other_id in same_attempt_question_ids
+                ]
+                warnings.append({
+                    "question_id": question_id, "link": link, "matches": same_attempt_matches, "scope": "same_attempt",
+                })
         data["automatic_grading"] = automatic_grading
         data["duplicate_link_warnings"] = warnings
         data["grading_notes"] = attempt.grading_notes or []
@@ -680,9 +706,11 @@ def assessment_result_grade(request, pk, attempt_pk):
         return _assessment_error("Chỉ chấm bài sau khi bài kiểm tra đã đóng.")
     grading_note = str(request.data.get("grading_note") or "").strip()
     if grading_note:
+        note_question_id = str(request.data.get("question_id") or "").strip()
         notes = list(attempt.grading_notes or [])
         notes.append({
             "id": secrets.token_hex(8),
+            "question_id": note_question_id,
             "content": grading_note[:2000],
             "grader": getattr(request.user, "name", "") or _actor(request),
             "created_at": timezone.now().isoformat(),
