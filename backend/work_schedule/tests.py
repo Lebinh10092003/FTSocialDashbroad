@@ -14,6 +14,7 @@ from .sheet_parser import assessment_notes, parse_sheet_tasks, status_from_note,
 from .sheet_sync import (
     EMPLOYEE_EMAILS,
     _build_content_format_runs,
+    _canonical_row,
     _formula_content_rows,
     _group_values,
     _row_hash,
@@ -27,6 +28,26 @@ from .training_sync import sync_work_item_from_training
 
 
 class WorkScheduleSheetParserTests(TestCase):
+    def test_attendance_column_does_not_shift_assessment_or_hidden_metadata(self):
+        columns = {
+            "weekday": 0, "date": 1, "week": 2, "staff": 3,
+            "content": 4, "self_notes": 5, "attendance": 6,
+            "leader_notes": 7, "employee_id": 8, "task_ids": 9,
+            "sync_hash": 10, "record_id": 11,
+        }
+        physical = [
+            "Tư", "09/09/2026", "37", "1. Thuận", "1. Công việc",
+            "Hoàn thành", "Có mặt", "Lãnh đạo duyệt", "EMP-1",
+            "1. task-id", "hash", "REC-WEB-1",
+        ]
+
+        canonical = _canonical_row(physical, columns)
+
+        self.assertEqual(canonical[4], "1. Công việc")
+        self.assertEqual(canonical[5], "Hoàn thành")
+        self.assertEqual(canonical[6], "Lãnh đạo duyệt")
+        self.assertEqual(canonical[7:], ["EMP-1", "REC-WEB-1", "1. task-id", "hash"])
+
     def test_sheet_mapping_includes_director_thuan(self):
         self.assertEqual(EMPLOYEE_EMAILS["EMP-E6557326"], "thuanld@fermat.edu.vn")
         self.assertEqual(

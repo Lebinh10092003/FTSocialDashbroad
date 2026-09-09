@@ -49,6 +49,25 @@ SHEET_STAFF_EMAILS = {
 WEEKDAYS = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
 INCREMENTAL_SYNC_LEASE_SECONDS = 300
 TWO_WAY_SYNC_LEASE_SECONDS = 1800
+SHEET_COLUMN_ALIASES = {
+    "weekday": ("thứ",),
+    "date": ("ngày",),
+    "week": ("tuần",),
+    "staff": ("chủ trì", "nhân sự"),
+    "content": ("nội dung công việc",),
+    "self_notes": ("tự đánh giá",),
+    "attendance": ("chấm công",),
+    "leader_notes": ("lãnh đạo đánh giá",),
+    "employee_id": ("employeeid", "employee id"),
+    "record_id": ("web_record_id",),
+    "task_ids": ("web_task_ids",),
+    "sync_hash": ("web_sync_hash",),
+}
+CANONICAL_COLUMNS = (
+    "weekday", "date", "week", "staff", "content", "self_notes",
+    "leader_notes", "employee_id", "record_id", "task_ids", "sync_hash",
+)
+LEGACY_COLUMNS = {name: index for index, name in enumerate(CANONICAL_COLUMNS)}
 
 
 def deterministic_sheet_uid(row_number, task_index):
@@ -62,15 +81,57 @@ def _service(google_token=None):
     return build_sheets_service(token, config_data)
 
 
+def _header_key(value):
+    return _normalise_staff_name(value).replace(" ", "")
+
+
+def _column_letter(index):
+    """Convert a zero-based column index to its A1 letter."""
+    result = ""
+    value = index + 1
+    while value:
+        value, remainder = divmod(value - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+
+def _sheet_columns(service):
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{SHEET_NAME}'!A2:ZZ2",
+        valueRenderOption="FORMATTED_VALUE",
+    ).execute()
+    headers = (result.get("values") or [[]])[0]
+    positions = {}
+    for index, header in enumerate(headers):
+        positions.setdefault(_header_key(header), index)
+    columns = {}
+    for name, aliases in SHEET_COLUMN_ALIASES.items():
+        match = next((positions.get(_header_key(alias)) for alias in aliases if _header_key(alias) in positions), None)
+        if match is not None:
+            columns[name] = match
+    required = {"weekday", "date", "week", "staff", "content", "self_notes", "leader_notes"}
+    missing = sorted(required - columns.keys())
+    if missing:
+        raise RuntimeError(f"Sheet thiếu cột bắt buộc: {', '.join(missing)}")
+    return columns, headers
+
+
+def _canonical_row(row, columns):
+    return [_cell(row, columns.get(name, -1)) if name in columns else "" for name in CANONICAL_COLUMNS]
+
+
 def _rows(service):
+    columns, _ = _sheet_columns(service)
+    last_column = _column_letter(max(columns.values()))
     result = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
         # Open-ended so rows appended after the original 6109-row grid are also
         # part of future full-sync scans.
-        range=f"'{SHEET_NAME}'!A2:K",
+        range=f"'{SHEET_NAME}'!A2:{last_column}",
         valueRenderOption="FORMATTED_VALUE",
     ).execute()
-    return result.get("values", [])
+    return [_canonical_row(row, columns) for row in result.get("values", [])]
 
 
 def _cell(row, index):
@@ -245,14 +306,34 @@ def ensure_sync_columns(service):
     target = next((s["properties"] for s in metadata.get("sheets", []) if s["properties"].get("sheetId") == SHEET_ID), None)
     if not target:
         raise RuntimeError("Không tìm thấy tab Lịch công tác.")
+    columns, headers = _sheet_columns(service)
+    internal_headers = {
+        "employee_id": "EmployeeID",
+        "record_id": "WEB_RECORD_ID",
+        "task_ids": "WEB_TASK_IDS",
+        "sync_hash": "WEB_SYNC_HASH",
+    }
+    header_updates = []
+    next_index = max([index for index, value in enumerate(headers) if str(value).strip()] or [-1]) + 1
+    for name, header in internal_headers.items():
+        if name not in columns:
+            columns[name] = next_index
+            header_updates.append({"range": f"'{SHEET_NAME}'!{_column_letter(next_index)}2", "values": [[header]]})
+            next_index += 1
+    required_count = max(columns.values()) + 1
     requests = []
-    if target.get("gridProperties", {}).get("columnCount", 0) < 11:
-        requests.append({"updateSheetProperties": {"properties": {"sheetId": SHEET_ID, "gridProperties": {"columnCount": 11}}, "fields": "gridProperties.columnCount"}})
-    requests.extend([
-        {"updateCells": {"range": {"sheetId": SHEET_ID, "startRowIndex": 1, "endRowIndex": 2, "startColumnIndex": 9, "endColumnIndex": 11}, "rows": [{"values": [{"userEnteredValue": {"stringValue": "WEB_TASK_IDS"}}, {"userEnteredValue": {"stringValue": "WEB_SYNC_HASH"}}]}], "fields": "userEnteredValue"}},
-        {"updateDimensionProperties": {"range": {"sheetId": SHEET_ID, "dimension": "COLUMNS", "startIndex": 9, "endIndex": 11}, "properties": {"hiddenByUser": True}, "fields": "hiddenByUser"}},
-    ])
-    service.spreadsheets().batchUpdate(spreadsheetId=SPREADSHEET_ID, body={"requests": requests}).execute()
+    if target.get("gridProperties", {}).get("columnCount", 0) < required_count:
+        requests.append({"updateSheetProperties": {"properties": {"sheetId": SHEET_ID, "gridProperties": {"columnCount": required_count}}, "fields": "gridProperties.columnCount"}})
+    for index in sorted({columns[name] for name in internal_headers}):
+        requests.append({"updateDimensionProperties": {"range": {"sheetId": SHEET_ID, "dimension": "COLUMNS", "startIndex": index, "endIndex": index + 1}, "properties": {"hiddenByUser": True}, "fields": "hiddenByUser"}})
+    if requests:
+        service.spreadsheets().batchUpdate(spreadsheetId=SPREADSHEET_ID, body={"requests": requests}).execute()
+    if header_updates:
+        service.spreadsheets().values().batchUpdate(
+            spreadsheetId=SPREADSHEET_ID,
+            body={"valueInputOption": "RAW", "data": header_updates},
+        ).execute()
+    return columns
 
 
 def ensure_sheet_row_capacity(service, required_row):
@@ -458,16 +539,18 @@ def _build_content_format_runs(content, items=None):
     return runs
 
 
-def _formula_content_rows(service):
+def _formula_content_rows(service, columns=None):
     """Return 1-based rows whose column E value is produced by a formula.
 
     Google rejects textFormatRuns for computed values, even when their displayed
     value is text. Those rows remain fully synchronized but keep formula-owned
     formatting.
     """
+    columns = columns or LEGACY_COLUMNS
+    content_column = _column_letter(columns["content"])
     result = service.spreadsheets().get(
         spreadsheetId=SPREADSHEET_ID,
-        ranges=[f"'{SHEET_NAME}'!E2:E"],
+        ranges=[f"'{SHEET_NAME}'!{content_column}2:{content_column}"],
         includeGridData=True,
         fields="sheets.data(startRow,rowData.values.userEnteredValue)",
     ).execute()
@@ -483,6 +566,9 @@ def _formula_content_rows(service):
 
 
 def push_groups_to_sheet(service, groups, force=False):
+    columns = ensure_sync_columns(service)
+    if not isinstance(columns, dict):  # compatibility with isolated test/mocked callers
+        columns = LEGACY_COLUMNS
     rows = _rows(service)
     groups = set(groups)
     updates = []
@@ -527,16 +613,27 @@ def push_groups_to_sheet(service, groups, force=False):
             continue
         content, self_notes, leader_notes, task_ids = _group_values(items) if items else ("", "", "", "")
         new_hash = _row_hash(content, self_notes, leader_notes, task_ids)
-        updates.extend([
-            {"range": f"'{SHEET_NAME}'!E{row_number}:G{row_number}", "values": [[content, self_notes, leader_notes]]},
-            {"range": f"'{SHEET_NAME}'!J{row_number}:K{row_number}", "values": [[task_ids, new_hash]]},
-        ])
+        for name, value in (
+            ("content", content), ("self_notes", self_notes),
+            ("leader_notes", leader_notes), ("task_ids", task_ids),
+            ("sync_hash", new_hash),
+        ):
+            column = _column_letter(columns[name])
+            updates.append({"range": f"'{SHEET_NAME}'!{column}{row_number}", "values": [[value]]})
         if not current:
             profile = profiles.get(email)
             iso_week = work_date.isocalendar().week
             record_id = f"REC-WEB-{uuid.uuid4().hex[:12].upper()}"
-            updates.append({"range": f"'{SHEET_NAME}'!A{row_number}:D{row_number}", "values": [[WEEKDAYS[work_date.weekday()], work_date.strftime("%d/%m/%Y"), iso_week, profile.name if profile else email]]})
-            updates.append({"range": f"'{SHEET_NAME}'!H{row_number}:I{row_number}", "values": [[_sheet_employee_code(email, profile), record_id]]})
+            for name, value in (
+                ("weekday", WEEKDAYS[work_date.weekday()]),
+                ("date", work_date.strftime("%d/%m/%Y")),
+                ("week", iso_week),
+                ("staff", profile.name if profile else email),
+                ("employee_id", _sheet_employee_code(email, profile)),
+                ("record_id", record_id),
+            ):
+                column = _column_letter(columns[name])
+                updates.append({"range": f"'{SHEET_NAME}'!{column}{row_number}", "values": [[value]]})
         synced.append((email, work_date, row_number, new_hash, items))
     if updates:
         ensure_sheet_row_capacity(service, max(row[2] for row in synced))
@@ -547,7 +644,7 @@ def push_groups_to_sheet(service, groups, force=False):
             ).execute()
     # Apply bold+italic formatting to time-prefixed task lines in column E
     format_requests = []
-    formula_rows = _formula_content_rows(service) if synced else set()
+    formula_rows = _formula_content_rows(service, columns) if synced else set()
     for email, work_date, row_number, sync_hash, items in synced:
         if row_number in formula_rows:
             continue
@@ -560,8 +657,8 @@ def push_groups_to_sheet(service, groups, force=False):
                         'sheetId': SHEET_ID,
                         'startRowIndex': row_number - 1,
                         'endRowIndex': row_number,
-                        'startColumnIndex': 4,  # column E (0-indexed)
-                        'endColumnIndex': 5,
+                        'startColumnIndex': columns["content"],
+                        'endColumnIndex': columns["content"] + 1,
                     },
                     'rows': [{'values': [{'textFormatRuns': [
                         {'startIndex': run['startIndex'], 'format': run['format']}

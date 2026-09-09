@@ -686,7 +686,10 @@ def work_schedule_sheet_webhook(request):
     """Realtime Sheet -> Web sync. Called by the Apps Script `onEdit` trigger for exactly
     one edited row (never a full-sheet scan). Authenticated by a shared secret header
     instead of a user token, since Apps Script cannot hold a logged-in session."""
-    from .sheet_sync import _ingest_row, _service, ensure_sync_columns, full_two_way_sync, push_groups_to_sheet
+    from .sheet_sync import (
+        _canonical_row, _ingest_row, _service, ensure_sync_columns,
+        full_two_way_sync, push_groups_to_sheet,
+    )
     from .signals import suppress_sheet_queue
 
     expected_secret = os.getenv("SHEET_WEBHOOK_SECRET", "")
@@ -803,8 +806,14 @@ def work_schedule_sheet_webhook(request):
         event.error = ""
         event.save(update_fields=["row_number", "payload", "error"])
 
-    row = [str(value) for value in values]
+    service = None
     try:
+        service = _service(None)
+        columns = ensure_sync_columns(service)
+        if not isinstance(columns, dict):
+            from .sheet_sync import LEGACY_COLUMNS
+            columns = LEGACY_COLUMNS
+        row = _canonical_row([str(value) for value in values], columns)
         with transaction.atomic():
             with suppress_sheet_queue():
                 created_count, updated_count, deleted_count, touched = _ingest_row(row_number, row, timezone.localdate())
@@ -824,8 +833,7 @@ def work_schedule_sheet_webhook(request):
     push_back_error = ""
     if touched:
         try:
-            service = _service(None)
-            ensure_sync_columns(service)
+            service = service or _service(None)
             push_groups_to_sheet(service, touched, force=True)
         except Exception as exc:
             push_back_error = str(exc)

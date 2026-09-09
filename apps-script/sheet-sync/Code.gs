@@ -23,7 +23,6 @@
 var SHEET_NAME = 'Lịch công tác';
 var OUTBOX_SHEET_NAME = '_SYNC_OUTBOX';
 var FIRST_DATA_ROW = 2; // row 1 is the header; matches backend sheet_sync.py's `A2:K...` range.
-var LAST_COLUMN = 11; // A:K
 
 // Installable trigger entry point. Wire this up via Triggers -> Add Trigger -> On edit.
 function onEditInstallable(e) {
@@ -44,7 +43,10 @@ function handleRowEdit_(sheet, row) {
   // Keep the payload identical to the backend's Google Sheets read path
   // (valueRenderOption=FORMATTED_VALUE). getValues() turns date cells into
   // Date objects which JSON serializes as UTC and can shift the calendar day.
-  var values = sheet.getRange(row, 1, 1, LAST_COLUMN).getDisplayValues()[0];
+  // Read through the actual last header instead of assuming A:K. The visible
+  // layout can gain columns (for example "Chấm công") while backend metadata
+  // columns move to the right.
+  var values = sheet.getRange(row, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
   var eventId = Utilities.getUuid();
   var outboxRow = appendToOutbox_(eventId, row, values);
   var result = sendWebhook_(eventId, row, values);
