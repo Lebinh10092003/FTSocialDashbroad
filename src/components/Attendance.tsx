@@ -1,210 +1,378 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, CalendarDays, CheckCircle2, Clock3, Coffee, LogIn, LogOut, RefreshCw, Timer, TriangleAlert, UserCheck } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, CalendarDays, Clock, Coffee, Globe, Laptop, Loader2, MapPin, Moon, Plus, RefreshCw, Save, Trash2, TriangleAlert, UserCheck, X } from 'lucide-react';
 
-type Shift = { code: string; name: string; start: string; end: string; expectedMinutes: number };
-type AttendanceRecord = {
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
+type TimesheetEntry = {
   id: number;
-  employee: { email: string; name: string; employeeCode: string; department: string };
   workDate: string;
-  shiftCode: string;
-  shiftName: string;
-  scheduledStart: string;
-  scheduledEnd: string;
-  expectedMinutes: number;
-  clockIn: string;
-  clockOut: string | null;
+  shiftNumber: number;
+  shiftStart: string;
+  shiftEnd: string;
+  crossesMidnight: boolean;
+  workMode: 'direct' | 'online';
+  isDayOff: boolean;
+  notes: string;
   workedMinutes: number;
-  status: 'WORKING' | 'COMPLETE' | 'LATE' | 'INCOMPLETE';
-  note: string;
 };
-type AttendanceData = {
+
+type TimesheetData = {
   serverTime: string;
+  scope: string;
   month: string;
-  shifts: Shift[];
-  current: AttendanceRecord | null;
-  records: AttendanceRecord[];
-  summary: { workDays: number; totalMinutes: number; completedShifts: number; lateShifts: number };
+  entries: TimesheetEntry[];
+  summary: { workDays: number; totalMinutes: number; dayOffCount: number; onlineDays: number };
+  yesterdayFilled: boolean;
 };
+
+type PrefillData = {
+  targetDate: string;
+  autoFill: boolean;
+  shifts: { start: string; end: string; workMode: string; notes: string }[];
+  yesterdayMissing: boolean;
+  yesterdayDate: string;
+  defaultWorkMode: string;
+  existing: TimesheetEntry[];
+};
+
+type ShiftRow = { start: string; end: string; workMode: 'direct' | 'online'; notes: string };
+
 type AttendanceProps = { onBackToWorkspace: () => void; idToken: string; userName: string };
-type AttendanceSnapshot = { owner: string; month: string; savedAt: number; data: AttendanceData };
 
-const ATTENDANCE_MEMORY_TTL_MS = 2 * 60 * 1000;
-let attendanceSnapshot: AttendanceSnapshot | null = null;
+/* ------------------------------------------------------------------ */
+/*  In-memory cache                                                    */
+/* ------------------------------------------------------------------ */
+const CACHE_TTL = 2 * 60 * 1000;
+let cache: { owner: string; month: string; savedAt: number; data: TimesheetData } | null = null;
 
-const statusLabels = {
-  WORKING: { label: 'Đang trong ca', className: 'bg-emerald-100 text-emerald-800' },
-  COMPLETE: { label: 'Đủ công', className: 'bg-blue-100 text-blue-800' },
-  LATE: { label: 'Vào muộn', className: 'bg-amber-100 text-amber-800' },
-  INCOMPLETE: { label: 'Thiếu giờ', className: 'bg-rose-100 text-rose-800' },
-};
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                            */
+/* ------------------------------------------------------------------ */
+const currentMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+const formatDuration = (mins: number) => `${Math.floor(mins / 60)}g ${String(mins % 60).padStart(2, '0')}p`;
+const formatDate = (v: string) => new Intl.DateTimeFormat('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' }).format(new Date(`${v}T00:00:00`));
+const modeLabel = (m: string) => m === 'online' ? 'Online' : 'Trực tiếp';
 
-const formatTime = (value: string | null) => value ? new Intl.DateTimeFormat('vi-VN', { hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '—';
-const formatDate = (value: string) => new Intl.DateTimeFormat('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' }).format(new Date(`${value}T00:00:00`));
-const formatDuration = (minutes: number) => `${Math.floor(minutes / 60)}g ${String(minutes % 60).padStart(2, '0')}p`;
-const currentMonth = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`; };
-
+/* ------------------------------------------------------------------ */
+/*  Component                                                          */
+/* ------------------------------------------------------------------ */
 export default function Attendance({ onBackToWorkspace, idToken, userName }: AttendanceProps) {
   const initialMonth = currentMonth();
-  const cachedSnapshot = attendanceSnapshot?.owner === idToken && attendanceSnapshot.month === initialMonth && Date.now() - attendanceSnapshot.savedAt < ATTENDANCE_MEMORY_TTL_MS
-    ? attendanceSnapshot
-    : null;
-  const [data, setData] = useState<AttendanceData | null>(cachedSnapshot?.data || null);
+  const cached = cache?.owner === idToken && cache.month === initialMonth && Date.now() - cache.savedAt < CACHE_TTL ? cache : null;
+
+  const [data, setData] = useState<TimesheetData | null>(cached?.data ?? null);
   const [month, setMonth] = useState(initialMonth);
-  const [selectedShift, setSelectedShift] = useState('OFFICE');
-  const [note, setNote] = useState('');
-  const [loading, setLoading] = useState(!cachedSnapshot);
-  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(!cached);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [now, setNow] = useState(new Date());
 
-  const load = async (silent = false) => {
+  // Popup state
+  const [popupOpen, setPopupOpen] = useState(false);
+  const [popupDate, setPopupDate] = useState('');
+  const [isDayOff, setIsDayOff] = useState(false);
+  const [shifts, setShifts] = useState<ShiftRow[]>([]);
+  const [prefill, setPrefill] = useState<PrefillData | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [popupError, setPopupError] = useState('');
+
+  /* ---------- Data loading ---------- */
+  const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const response = await fetch(`/api/attendance/records?month=${month}`, { headers: { Authorization: `Bearer ${idToken}` } });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || 'Không thể tải dữ liệu chấm công.');
+      const res = await fetch(`/api/attendance/timesheet?month=${month}`, { headers: { Authorization: `Bearer ${idToken}` } });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Không thể tải dữ liệu.');
       setData(body);
-      attendanceSnapshot = { owner: idToken, month, savedAt: Date.now(), data: body };
+      cache = { owner: idToken, month, savedAt: Date.now(), data: body };
       setError('');
-    } catch (loadError: any) {
-      setError(loadError.message || 'Không thể tải dữ liệu chấm công.');
+    } catch (e: any) {
+      setError(e.message || 'Không thể tải dữ liệu.');
     } finally {
       if (!silent) setLoading(false);
     }
-  };
+  }, [month, idToken]);
 
   useEffect(() => {
-    const reusable = attendanceSnapshot?.owner === idToken && attendanceSnapshot.month === month && Date.now() - attendanceSnapshot.savedAt < ATTENDANCE_MEMORY_TTL_MS;
-    if (reusable) setData(attendanceSnapshot!.data);
+    const reusable = cache?.owner === idToken && cache.month === month && Date.now() - cache.savedAt < CACHE_TTL;
+    if (reusable) setData(cache!.data);
     void load(Boolean(reusable));
-  }, [month, idToken]);
-  useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), 1000); return () => window.clearInterval(timer); }, []);
-  useEffect(() => { if (!notice) return; const timer = window.setTimeout(() => setNotice(''), 3000); return () => window.clearTimeout(timer); }, [notice]);
+  }, [month, idToken, load]);
 
-  const clock = async (action: 'IN' | 'OUT') => {
-    if (busy) return;
-    setBusy(true);
-    setError('');
+  useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(''), 3000); return () => clearTimeout(t); }, [notice]);
+
+  /* ---------- Group entries by date ---------- */
+  const grouped = useMemo(() => {
+    if (!data) return [];
+    const map = new Map<string, TimesheetEntry[]>();
+    for (const e of data.entries) {
+      const list = map.get(e.workDate) || [];
+      list.push(e);
+      map.set(e.workDate, list);
+    }
+    return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+  }, [data]);
+
+  /* ---------- Open popup ---------- */
+  const openPopup = async (dateOverride?: string) => {
+    setPopupError('');
+    const targetDate = dateOverride || new Date().toISOString().slice(0, 10);
+    setPopupDate(targetDate);
+    setPopupOpen(true);
+    setIsDayOff(false);
+    setShifts([]);
+    setPrefill(null);
+
     try {
-      const response = await fetch('/api/attendance/clock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({ action, shiftCode: selectedShift, note }),
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || 'Không thể ghi nhận chấm công.');
-      setNotice(body.message || 'Đã ghi nhận chấm công.');
-      if (action === 'IN') setNote('');
-      await load(true);
-    } catch (clockError: any) {
-      setError(clockError.message || 'Không thể ghi nhận chấm công.');
-    } finally {
-      setBusy(false);
+      const res = await fetch(`/api/attendance/timesheet/prefill?date=${targetDate}`, { headers: { Authorization: `Bearer ${idToken}` } });
+      const body: PrefillData = await res.json();
+      setPrefill(body);
+
+      if (body.existing.length > 0) {
+        // Edit mode — load existing
+        const first = body.existing[0];
+        if (first.isDayOff) {
+          setIsDayOff(true);
+          setShifts([]);
+        } else {
+          setIsDayOff(false);
+          setShifts(body.existing.map(e => ({ start: e.shiftStart, end: e.shiftEnd, workMode: e.workMode, notes: e.notes })));
+        }
+      } else if (body.autoFill && body.shifts.length > 0) {
+        // Auto-fill suggested
+        setShifts(body.shifts.map(s => ({ start: s.start, end: s.end, workMode: s.workMode as 'direct' | 'online', notes: '' })));
+      } else {
+        // New entry — single blank shift with defaults
+        const mode = (body.defaultWorkMode || 'direct') as 'direct' | 'online';
+        setShifts([{ start: '08:00', end: '12:00', workMode: mode, notes: '' }]);
+      }
+    } catch {
+      // Fallback — single blank shift
+      setShifts([{ start: '08:00', end: '12:00', workMode: 'direct', notes: '' }]);
     }
   };
 
-  const current = data?.current || null;
-  const liveElapsed = useMemo(() => current ? Math.max(0, Math.floor((now.getTime() - new Date(current.clockIn).getTime()) / 60000)) : 0, [current, now]);
-  const greeting = now.getHours() < 12 ? 'Chào buổi sáng' : now.getHours() < 18 ? 'Chào buổi chiều' : 'Chào buổi tối';
-  const selected = data?.shifts.find(shift => shift.code === selectedShift);
+  /* ---------- Save ---------- */
+  const saveTimesheet = async () => {
+    setSaving(true);
+    setPopupError('');
+    try {
+      const payload: any = { workDate: popupDate, isDayOff };
+      if (!isDayOff) {
+        payload.shifts = shifts.map(s => ({ start: s.start, end: s.end, workMode: s.workMode, notes: s.notes }));
+      }
+      const res = await fetch('/api/attendance/timesheet/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Không thể lưu.');
+      setNotice(body.message || 'Đã lưu công ca.');
+      setPopupOpen(false);
+      await load(true);
+    } catch (e: any) {
+      setPopupError(e.message || 'Không thể lưu.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /* ---------- Shift row helpers ---------- */
+  const updateShift = (idx: number, field: keyof ShiftRow, value: string) => {
+    setShifts(prev => prev.map((s, i) => i === idx ? { ...s, [field]: value } : s));
+  };
+  const removeShift = (idx: number) => setShifts(prev => prev.filter((_, i) => i !== idx));
+  const addShift = () => {
+    const mode = (prefill?.defaultWorkMode || 'direct') as 'direct' | 'online';
+    setShifts(prev => [...prev, { start: '13:30', end: '17:30', workMode: mode, notes: '' }]);
+  };
+
+  const summary = data?.summary;
 
   return (
-    <div className="workspace-module-canvas min-h-dvh bg-[#f3f5f1] font-sans text-[#17231c]">
-      <header className="border-b border-[#17231c]/10 bg-white/85 backdrop-blur-xl">
+    <div className="workspace-module-canvas min-h-dvh bg-slate-50 font-sans text-slate-900">
+      {/* Header */}
+      <header className="border-b bg-white/90 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
-          <button type="button" onClick={onBackToWorkspace} className="inline-flex items-center gap-2 text-sm font-bold transition hover:text-[#287153]"><ArrowLeft className="h-4 w-4" />Workspace</button>
-          <div className="flex items-center gap-2.5"><div className="grid h-9 w-9 place-items-center rounded-lg bg-[#1d4f3b] text-white"><UserCheck className="h-5 w-5" /></div><span className="text-sm font-extrabold">Công ca</span></div>
-          <div className="hidden text-right sm:block"><p className="text-xs font-bold text-[#66756d]">{new Intl.DateTimeFormat('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' }).format(now)}</p><p className="text-sm font-extrabold tabular-nums">{now.toLocaleTimeString('vi-VN')}</p></div>
+          <button type="button" onClick={onBackToWorkspace} className="ft-btn ft-btn-secondary"><ArrowLeft className="h-4 w-4" />Workspace</button>
+          <div className="flex items-center gap-2.5"><div className="grid h-9 w-9 place-items-center rounded-lg bg-emerald-700 text-white"><UserCheck className="h-5 w-5" /></div><span className="text-sm font-extrabold">Công ca</span></div>
+          <div className="hidden text-right sm:block"><p className="text-xs font-bold text-slate-500">{new Intl.DateTimeFormat('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' }).format(new Date())}</p></div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-10">
+        {/* Title row */}
         <section className="mb-7 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-sm font-bold text-[#287153]">{greeting}, {userName}</p>
-            <h1 className="mt-1 text-3xl font-extrabold tracking-[-0.035em] sm:text-4xl">Ngày làm việc của bạn</h1>
-            <p className="mt-2 text-sm text-[#66756d]">Chọn ca và ghi nhận giờ vào — ra ngay tại đây.</p>
+            <p className="text-xs font-bold uppercase text-emerald-600">Xin chào, {userName}</p>
+            <h1 className="mt-1 text-2xl font-extrabold sm:text-3xl">Bảng công cá nhân</h1>
+            <p className="mt-1 text-sm text-slate-500">Tự khai báo giờ làm hàng ngày — sáng 8:00–12:00, chiều 13:30–17:30.</p>
           </div>
-          <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex items-center gap-2 border border-[#17231c]/15 bg-white px-3.5 py-2.5 text-xs font-bold text-[#53645b] shadow-sm transition hover:border-[#287153]/40 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />Làm mới</button>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => void load()} disabled={loading} className="ft-btn ft-btn-secondary"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />Làm mới</button>
+            <button type="button" onClick={() => void openPopup()} className="ft-btn ft-btn-primary"><Plus className="h-4 w-4" />Thêm công ca</button>
+          </div>
         </section>
 
-        {error && <div className="mb-5 flex items-start gap-3 border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800"><TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" /><span>{error}</span></div>}
+        {error && <div className="mb-5 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800"><TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" /><span>{error}</span></div>}
 
-        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(330px,.85fr)]">
-          <section className="overflow-hidden bg-[#173f30] text-white shadow-[0_24px_70px_rgba(23,63,48,.2)]">
-            <div className="border-b border-white/10 px-6 py-5 sm:px-8">
-              <div className="flex items-center justify-between gap-4">
-                <div><p className="text-xs font-extrabold uppercase tracking-[.16em] text-[#9ed9b9]">Máy chấm công</p><h2 className="mt-1 text-xl font-extrabold">{current ? current.shiftName : selected?.name || 'Chọn ca làm việc'}</h2></div>
-                <span className={`inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold ${current ? 'bg-emerald-400/15 text-emerald-200' : 'bg-white/10 text-white/70'}`}><span className={`h-2 w-2 rounded-full ${current ? 'animate-pulse bg-emerald-400' : 'bg-white/40'}`} />{current ? 'Đang làm việc' : 'Chưa vào ca'}</span>
+        {/* Summary cards + Records table */}
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+          {/* Records */}
+          <div className="rounded-2xl border bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase text-emerald-600">Lịch sử</p>
+                <h2 className="mt-1 text-xl font-extrabold">Công ca trong tháng</h2>
+              </div>
+              <label className="relative"><span className="sr-only">Chọn tháng</span><input type="month" value={month} onChange={e => setMonth(e.target.value)} className="ft-input" /></label>
+            </div>
+
+            <div className="mt-5 overflow-x-auto rounded-xl border">
+              <table className="ft-table min-w-[700px]">
+                <thead><tr><th>Ngày</th><th>Ca</th><th>Bắt đầu</th><th>Kết thúc</th><th>Thời lượng</th><th>Hình thức</th><th>Ghi chú</th><th></th></tr></thead>
+                <tbody>
+                  {loading ? (
+                    <tr><td colSpan={8} className="px-5 py-14 text-center text-slate-400">Đang tải...</td></tr>
+                  ) : grouped.length === 0 ? (
+                    <tr><td colSpan={8} className="px-5 py-14 text-center text-slate-400">Chưa có dữ liệu công trong tháng này.</td></tr>
+                  ) : grouped.map(([dateStr, entries]) => (
+                    entries.map((entry, idx) => (
+                      <tr key={entry.id} className="hover:bg-blue-50/50">
+                        {idx === 0 && <td rowSpan={entries.length} className="whitespace-nowrap font-bold align-top">{formatDate(dateStr)}</td>}
+                        {entry.isDayOff ? (
+                          <>
+                            <td colSpan={5}><span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800"><Moon className="h-3.5 w-3.5" />Nghỉ làm</span></td>
+                            <td className="text-xs text-slate-400">—</td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="font-bold">Ca {entry.shiftNumber}</td>
+                            <td className="tabular-nums">{entry.shiftStart}</td>
+                            <td className="tabular-nums">{entry.shiftEnd}{entry.crossesMidnight && <span className="ml-1 text-xs text-amber-600" title="Qua nửa đêm">+1</span>}</td>
+                            <td className="tabular-nums">{formatDuration(entry.workedMinutes)}</td>
+                            <td>
+                              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${entry.workMode === 'online' ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                                {entry.workMode === 'online' ? <Globe className="h-3 w-3" /> : <MapPin className="h-3 w-3" />}
+                                {modeLabel(entry.workMode)}
+                              </span>
+                            </td>
+                            <td className="max-w-[180px] truncate text-xs text-slate-500" title={entry.notes}>{entry.notes || '—'}</td>
+                          </>
+                        )}
+                        {idx === 0 && (
+                          <td rowSpan={entries.length} className="align-top">
+                            <button type="button" onClick={() => void openPopup(dateStr)} className="text-xs font-bold text-blue-600 hover:underline">Sửa</button>
+                          </td>
+                        )}
+                      </tr>
+                    ))
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Sidebar */}
+          <aside className="space-y-4">
+            <div className="rounded-2xl border bg-white p-5 shadow-sm">
+              <p className="text-xs font-bold uppercase text-emerald-600">Tổng quan</p>
+              <h2 className="mt-1 text-xl font-extrabold">Tháng {month}</h2>
+              <div className="mt-5 space-y-4">
+                <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-100 text-emerald-700"><CalendarDays className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{summary?.workDays ?? 0}</p><p className="text-xs text-slate-500">Ngày có công</p></div></div>
+                <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-100 text-blue-700"><Clock className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{formatDuration(summary?.totalMinutes ?? 0)}</p><p className="text-xs text-slate-500">Tổng giờ làm</p></div></div>
+                <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-amber-100 text-amber-700"><Moon className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{summary?.dayOffCount ?? 0}</p><p className="text-xs text-slate-500">Ngày nghỉ</p></div></div>
+                <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-violet-100 text-violet-700"><Laptop className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{summary?.onlineDays ?? 0}</p><p className="text-xs text-slate-500">Ngày online</p></div></div>
               </div>
             </div>
 
-            <div className="px-6 py-8 text-center sm:px-8 sm:py-10">
-              <p className="text-6xl font-extrabold leading-none tracking-[-0.06em] tabular-nums sm:text-7xl">{now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</p>
-              <p className="mt-3 text-sm font-semibold capitalize text-white/55">{new Intl.DateTimeFormat('vi-VN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(now)}</p>
+            <div className="rounded-2xl border bg-emerald-50 p-5">
+              <div className="flex gap-3"><Coffee className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" /><div><h3 className="text-sm font-extrabold">Hướng dẫn</h3><p className="mt-1 text-xs leading-5 text-slate-600">Ca mặc định: Sáng 8:00–12:00, Chiều 13:30–17:30. Ngoài giờ hành chính hoặc cuối tuần sẽ mặc định Online. Có thể thêm nhiều ca và chỉnh sửa tự do.</p></div></div>
+            </div>
+          </aside>
+        </div>
+      </main>
 
-              {current ? (
-                <div className="mx-auto mt-8 grid max-w-lg grid-cols-3 divide-x divide-white/10 border border-white/10 bg-white/[0.05] py-4">
-                  <div><p className="text-[10px] font-bold uppercase tracking-wider text-white/45">Giờ vào</p><p className="mt-1 text-lg font-extrabold">{formatTime(current.clockIn)}</p></div>
-                  <div><p className="text-[10px] font-bold uppercase tracking-wider text-white/45">Đã trong ca</p><p className="mt-1 text-lg font-extrabold">{formatDuration(liveElapsed)}</p></div>
-                  <div><p className="text-[10px] font-bold uppercase tracking-wider text-white/45">Giờ dự kiến</p><p className="mt-1 text-lg font-extrabold">{current.scheduledEnd}</p></div>
-                </div>
-              ) : (
-                <div className="mx-auto mt-8 grid max-w-xl gap-2 sm:grid-cols-2">
-                  {(data?.shifts || []).map(shift => <button key={shift.code} type="button" onClick={() => setSelectedShift(shift.code)} className={`flex items-center justify-between border px-4 py-3 text-left transition ${selectedShift === shift.code ? 'border-[#8bd6ad] bg-[#8bd6ad] text-[#173f30]' : 'border-white/15 bg-white/[0.04] text-white hover:bg-white/[0.09]'}`}><span><b className="block text-sm">{shift.name}</b><span className={`text-xs ${selectedShift === shift.code ? 'text-[#173f30]/65' : 'text-white/50'}`}>{shift.start} — {shift.end}</span></span>{selectedShift === shift.code && <CheckCircle2 className="h-5 w-5" />}</button>)}
+      {/* ---------- Popup ---------- */}
+      {popupOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border bg-white shadow-2xl">
+            {/* Popup header */}
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <div>
+                <p className="text-xs font-bold uppercase text-emerald-600">{prefill?.existing.length ? 'Chỉnh sửa' : 'Thêm mới'}</p>
+                <h2 className="mt-0.5 text-lg font-extrabold">Công ca ngày {popupDate}</h2>
+              </div>
+              <button type="button" onClick={() => setPopupOpen(false)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X className="h-5 w-5" /></button>
+            </div>
+
+            <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
+              {/* Yesterday warning */}
+              {prefill?.yesterdayMissing && (
+                <div className="mb-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                  <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" />
+                  <span>Bạn chưa khai báo công ca ngày {prefill.yesterdayDate}. <button type="button" onClick={() => { setPopupOpen(false); void openPopup(prefill!.yesterdayDate); }} className="font-bold text-amber-900 underline">Khai báo ngay</button></span>
                 </div>
               )}
 
-              {!current && <textarea value={note} onChange={event => setNote(event.target.value)} maxLength={500} rows={2} placeholder="Ghi chú cho ca làm việc (tùy chọn)" className="mx-auto mt-4 block w-full max-w-xl resize-none border border-white/15 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#8bd6ad]" />}
+              {/* Date picker */}
+              <label className="block"><span className="mb-1 block text-sm font-bold">Ngày</span><input type="date" className="ft-input" value={popupDate} onChange={e => { setPopupDate(e.target.value); void openPopup(e.target.value); }} /></label>
 
-              <button type="button" onClick={() => void clock(current ? 'OUT' : 'IN')} disabled={busy || loading || (!current && !selected)} className={`mx-auto mt-6 inline-flex min-h-16 w-full max-w-xl items-center justify-center gap-3 px-6 text-base font-extrabold shadow-xl transition active:scale-[.99] disabled:cursor-not-allowed disabled:opacity-50 ${current ? 'bg-[#f3a261] text-[#3b2418] hover:bg-[#ffb47b]' : 'bg-[#8bd6ad] text-[#173f30] hover:bg-[#a1e5c0]'}`}>
-                {busy ? <RefreshCw className="h-5 w-5 animate-spin" /> : current ? <LogOut className="h-5 w-5" /> : <LogIn className="h-5 w-5" />}
-                {busy ? 'Đang ghi nhận...' : current ? 'Bấm để ra ca' : 'Bấm để vào ca'}
+              {/* Day off checkbox */}
+              <label className="mt-4 flex items-center gap-2 text-sm font-bold">
+                <input type="checkbox" checked={isDayOff} onChange={e => setIsDayOff(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-emerald-600" />
+                Nghỉ làm ngày này
+              </label>
+
+              {/* Shift rows */}
+              {!isDayOff && (
+                <div className="mt-5 space-y-3">
+                  <p className="text-xs font-bold uppercase text-slate-500">Các ca làm việc</p>
+                  {shifts.map((shift, idx) => (
+                    <div key={idx} className="rounded-xl border bg-slate-50 p-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-extrabold">Ca {idx + 1}</span>
+                        {shifts.length > 1 && <button type="button" onClick={() => removeShift(idx)} className="text-rose-500 hover:text-rose-700"><Trash2 className="h-4 w-4" /></button>}
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-3">
+                        <label><span className="mb-1 block text-xs font-bold text-slate-500">Bắt đầu</span><input type="time" className="ft-input" value={shift.start} onChange={e => updateShift(idx, 'start', e.target.value)} /></label>
+                        <label><span className="mb-1 block text-xs font-bold text-slate-500">Kết thúc</span><input type="time" className="ft-input" value={shift.end} onChange={e => updateShift(idx, 'end', e.target.value)} /></label>
+                      </div>
+                      <div className="mt-3">
+                        <span className="mb-1 block text-xs font-bold text-slate-500">Hình thức</span>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button type="button" onClick={() => updateShift(idx, 'workMode', 'direct')} className={`flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-bold transition ${shift.workMode === 'direct' ? 'border-emerald-300 bg-emerald-100 text-emerald-800' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-200'}`}><MapPin className="h-3.5 w-3.5" />Trực tiếp</button>
+                          <button type="button" onClick={() => updateShift(idx, 'workMode', 'online')} className={`flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-bold transition ${shift.workMode === 'online' ? 'border-blue-300 bg-blue-100 text-blue-800' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-200'}`}><Globe className="h-3.5 w-3.5" />Online</button>
+                        </div>
+                      </div>
+                      <label className="mt-3 block"><span className="mb-1 block text-xs font-bold text-slate-500">Ghi chú</span><input type="text" className="ft-input" value={shift.notes} onChange={e => updateShift(idx, 'notes', e.target.value)} placeholder="Tùy chọn" maxLength={500} /></label>
+                    </div>
+                  ))}
+
+                  {shifts.length < 10 && (
+                    <button type="button" onClick={addShift} className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 py-3 text-sm font-bold text-slate-500 transition hover:border-emerald-400 hover:text-emerald-700"><Plus className="h-4 w-4" />Thêm ca</button>
+                  )}
+                </div>
+              )}
+
+              {popupError && <div className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700">{popupError}</div>}
+            </div>
+
+            {/* Popup footer */}
+            <div className="flex items-center justify-end gap-2 border-t px-6 py-4">
+              <button type="button" onClick={() => setPopupOpen(false)} className="ft-btn ft-btn-secondary">Hủy</button>
+              <button type="button" onClick={() => void saveTimesheet()} disabled={saving || (!isDayOff && shifts.length === 0)} className="ft-btn ft-btn-primary">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {saving ? 'Đang lưu...' : 'Lưu'}
               </button>
             </div>
-          </section>
-
-          <aside className="space-y-4">
-            <section className="border border-[#17231c]/10 bg-white p-5 shadow-sm sm:p-6">
-              <div className="flex items-center justify-between gap-4">
-                <div><p className="text-xs font-extrabold uppercase tracking-[.14em] text-[#287153]">Tổng quan</p><h2 className="mt-1 text-xl font-extrabold">Công tháng này</h2></div>
-                <label className="relative"><span className="sr-only">Chọn tháng</span><input type="month" value={month} onChange={event => setMonth(event.target.value)} className="border border-[#17231c]/15 bg-[#f7f8f6] px-3 py-2 text-xs font-bold outline-none focus:border-[#287153]" /></label>
-              </div>
-              <div className="mt-5 grid grid-cols-2 gap-px overflow-hidden border border-[#17231c]/10 bg-[#17231c]/10">
-                <div className="bg-white p-4"><CalendarDays className="h-5 w-5 text-[#287153]" /><p className="mt-4 text-2xl font-extrabold">{data?.summary.workDays || 0}</p><p className="mt-1 text-xs font-semibold text-[#66756d]">Ngày có công</p></div>
-                <div className="bg-white p-4"><Timer className="h-5 w-5 text-[#287153]" /><p className="mt-4 text-2xl font-extrabold">{formatDuration(data?.summary.totalMinutes || 0)}</p><p className="mt-1 text-xs font-semibold text-[#66756d]">Giờ đã hoàn tất</p></div>
-                <div className="bg-white p-4"><CheckCircle2 className="h-5 w-5 text-blue-600" /><p className="mt-4 text-2xl font-extrabold">{data?.summary.completedShifts || 0}</p><p className="mt-1 text-xs font-semibold text-[#66756d]">Ca đã chốt</p></div>
-                <div className="bg-white p-4"><Clock3 className="h-5 w-5 text-amber-600" /><p className="mt-4 text-2xl font-extrabold">{data?.summary.lateShifts || 0}</p><p className="mt-1 text-xs font-semibold text-[#66756d]">Lượt vào muộn</p></div>
-              </div>
-            </section>
-
-            <section className="border border-[#17231c]/10 bg-[#e7eee8] p-5 sm:p-6">
-              <div className="flex gap-3"><Coffee className="mt-0.5 h-5 w-5 shrink-0 text-[#287153]" /><div><h3 className="text-sm font-extrabold">Quy tắc tính công</h3><p className="mt-1 text-xs leading-5 text-[#596b61]">Ca hành chính được tính 8 giờ và tự loại trừ thời gian nghỉ trưa 12:00–13:30. Giờ vào muộn hơn 15 phút sẽ được đánh dấu để đối chiếu.</p></div></div>
-            </section>
-          </aside>
+          </div>
         </div>
+      )}
 
-        <section className="mt-6 overflow-hidden border border-[#17231c]/10 bg-white shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#17231c]/10 px-5 py-4 sm:px-6">
-            <div><p className="text-xs font-extrabold uppercase tracking-[.14em] text-[#287153]">Lịch sử</p><h2 className="mt-1 text-lg font-extrabold">Bảng công cá nhân</h2></div>
-            <p className="text-xs font-semibold text-[#78857e]">Tối đa 500 bản ghi trong tháng</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[780px] text-sm">
-              <thead className="bg-[#f7f8f6] text-left text-[11px] font-extrabold uppercase tracking-wider text-[#66756d]"><tr><th className="px-5 py-3">Ngày</th><th className="px-5 py-3">Ca làm việc</th><th className="px-5 py-3">Giờ vào</th><th className="px-5 py-3">Giờ ra</th><th className="px-5 py-3">Thời lượng</th><th className="px-5 py-3">Trạng thái</th><th className="px-5 py-3">Ghi chú</th></tr></thead>
-              <tbody className="divide-y divide-[#17231c]/8">
-                {loading ? <tr><td colSpan={7} className="px-5 py-14 text-center text-[#78857e]">Đang tải bảng công...</td></tr> : data?.records.length ? data.records.map(record => {
-                  const status = statusLabels[record.status];
-                  return <tr key={record.id} className="hover:bg-[#f8faf7]"><td className="whitespace-nowrap px-5 py-4 font-bold">{formatDate(record.workDate)}</td><td className="px-5 py-4"><b className="block">{record.shiftName}</b><span className="text-xs text-[#78857e]">{record.scheduledStart}–{record.scheduledEnd}</span></td><td className="px-5 py-4 font-bold tabular-nums text-[#287153]">{formatTime(record.clockIn)}</td><td className="px-5 py-4 font-bold tabular-nums">{formatTime(record.clockOut)}</td><td className="px-5 py-4 tabular-nums">{record.clockOut ? formatDuration(record.workedMinutes) : 'Đang tính'}</td><td className="px-5 py-4"><span className={`inline-flex px-2.5 py-1 text-xs font-bold ${status.className}`}>{status.label}</span></td><td className="max-w-[220px] truncate px-5 py-4 text-xs text-[#66756d]" title={record.note}>{record.note || '—'}</td></tr>;
-                }) : <tr><td colSpan={7} className="px-5 py-14 text-center text-[#78857e]">Chưa có dữ liệu công trong tháng này.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </main>
-
-      {notice && <div className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 bg-[#173f30] px-4 py-3 text-sm font-bold text-white shadow-2xl" role="status"><CheckCircle2 className="h-4 w-4 text-[#8bd6ad]" />{notice}</div>}
+      {/* Toast */}
+      {notice && <div className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl bg-emerald-800 px-4 py-3 text-sm font-bold text-white shadow-2xl" role="status"><UserCheck className="h-4 w-4 text-emerald-300" />{notice}</div>}
     </div>
   );
 }

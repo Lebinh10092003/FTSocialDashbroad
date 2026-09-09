@@ -9,9 +9,12 @@ from rest_framework.response import Response
 from authentication.models import UserProfile
 from authentication.permissions import IsAuthenticated
 
-from .models import AttendanceRecord
+from .models import AttendanceRecord, TimesheetEntry
 
 
+# ---------------------------------------------------------------------------
+# Legacy shift config (kept for backward compat with old endpoints)
+# ---------------------------------------------------------------------------
 SHIFTS = {
     "OFFICE": {"name": "Ca hành chính", "start": time(8, 0), "end": time(17, 30), "expected": 480},
     "MORNING": {"name": "Ca sáng", "start": time(8, 0), "end": time(12, 0), "expected": 240},
@@ -20,13 +23,237 @@ SHIFTS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+def _local(value):
+    return timezone.localtime(value) if value else None
+
+
+def _month_range(value):
+    try:
+        start = datetime.strptime(value, "%Y-%m").date().replace(day=1)
+    except (TypeError, ValueError):
+        start = timezone.localdate().replace(day=1)
+    next_month = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return start, next_month
+
+
+def _parse_time(raw):
+    raw = str(raw or "").strip()
+    if not raw:
+        return None
+    for fmt in ("%H:%M", "%H:%M:%S"):
+        try:
+            return datetime.strptime(raw, fmt).time()
+        except ValueError:
+            continue
+    return None
+
+
+def _is_business_hours(work_date, start_time):
+    """Check if the shift start falls within Mon-Fri 8:00-17:30."""
+    if work_date.weekday() >= 5:
+        return False
+    return time(8, 0) <= start_time <= time(17, 30)
+
+
+# ---------------------------------------------------------------------------
+# Timesheet entry payload
+# ---------------------------------------------------------------------------
+def _entry_payload(entry):
+    return {
+        "id": entry.id,
+        "workDate": entry.work_date.isoformat(),
+        "shiftNumber": entry.shift_number,
+        "shiftStart": entry.shift_start.isoformat(timespec="minutes"),
+        "shiftEnd": entry.shift_end.isoformat(timespec="minutes"),
+        "crossesMidnight": entry.crosses_midnight,
+        "workMode": entry.work_mode,
+        "isDayOff": entry.is_day_off,
+        "notes": entry.notes,
+        "workedMinutes": entry.worked_minutes,
+    }
+
+
+# ---------------------------------------------------------------------------
+# New timesheet endpoints
+# ---------------------------------------------------------------------------
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def timesheet_list(request):
+    """Return timesheet entries for a month, with summary stats."""
+    start, end = _month_range(request.query_params.get("month"))
+    today = timezone.localdate()
+    yesterday = today - timedelta(days=1)
+
+    scope = str(request.query_params.get("scope") or "mine").lower()
+    role = getattr(request, "user_role", "EMPLOYEE")
+    queryset = TimesheetEntry.objects.select_related("employee", "employee__department").filter(
+        work_date__gte=start, work_date__lt=end,
+    )
+    if scope == "team" and role == "ADMIN":
+        pass  # no filter — see all
+    elif scope == "team" and role == "MANAGER":
+        emails = list(UserProfile.objects.filter(manager_id=request.user.email).values_list("email", flat=True))
+        queryset = queryset.filter(employee_id__in=emails + [request.user.email])
+    else:
+        queryset = queryset.filter(employee=request.user)
+        scope = "mine"
+
+    entries = list(queryset.order_by("-work_date", "shift_number")[:2000])
+    own_entries = [e for e in entries if e.employee_id == request.user.email] if scope != "mine" else entries
+
+    work_dates = {e.work_date for e in own_entries if not e.is_day_off}
+    day_off_dates = {e.work_date for e in own_entries if e.is_day_off}
+    online_dates = {e.work_date for e in own_entries if e.work_mode == "online" and not e.is_day_off}
+    total_minutes = sum(e.worked_minutes for e in own_entries)
+
+    yesterday_filled = TimesheetEntry.objects.filter(
+        employee=request.user, work_date=yesterday,
+    ).exists()
+
+    return Response({
+        "serverTime": _local(timezone.now()).isoformat(),
+        "scope": scope,
+        "month": start.strftime("%Y-%m"),
+        "entries": [_entry_payload(e) for e in entries],
+        "summary": {
+            "workDays": len(work_dates),
+            "totalMinutes": total_minutes,
+            "dayOffCount": len(day_off_dates),
+            "onlineDays": len(online_dates),
+        },
+        "yesterdayFilled": yesterday_filled,
+    })
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def timesheet_save(request):
+    """Save (replace) all shifts for a single day."""
+    raw_date = str(request.data.get("workDate") or "").strip()
+    try:
+        work_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return Response({"error": "Ngày không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+
+    is_day_off = bool(request.data.get("isDayOff"))
+    shifts = request.data.get("shifts") or []
+
+    if not is_day_off and not shifts:
+        return Response({"error": "Vui lòng thêm ít nhất một ca hoặc đánh dấu nghỉ."}, status=status.HTTP_400_BAD_REQUEST)
+    if not is_day_off and len(shifts) > 10:
+        return Response({"error": "Tối đa 10 ca trong một ngày."}, status=status.HTTP_400_BAD_REQUEST)
+
+    parsed_shifts = []
+    if not is_day_off:
+        for idx, shift in enumerate(shifts, start=1):
+            start_time = _parse_time(shift.get("start"))
+            end_time = _parse_time(shift.get("end"))
+            if not start_time or not end_time:
+                return Response({"error": f"Ca {idx}: giờ bắt đầu hoặc kết thúc không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+            if start_time == end_time:
+                return Response({"error": f"Ca {idx}: giờ bắt đầu và kết thúc không được giống nhau."}, status=status.HTTP_400_BAD_REQUEST)
+            work_mode = str(shift.get("workMode") or "direct").lower()
+            if work_mode not in ("direct", "online"):
+                work_mode = "direct"
+            notes = str(shift.get("notes") or "").strip()[:500]
+            parsed_shifts.append({
+                "shift_number": idx,
+                "shift_start": start_time,
+                "shift_end": end_time,
+                "work_mode": work_mode,
+                "notes": notes,
+            })
+
+    with transaction.atomic():
+        TimesheetEntry.objects.filter(employee=request.user, work_date=work_date).delete()
+        if is_day_off:
+            TimesheetEntry.objects.create(
+                employee=request.user,
+                work_date=work_date,
+                shift_number=1,
+                shift_start=time(0, 0),
+                shift_end=time(0, 0),
+                is_day_off=True,
+            )
+        else:
+            for shift_data in parsed_shifts:
+                TimesheetEntry.objects.create(
+                    employee=request.user,
+                    work_date=work_date,
+                    **shift_data,
+                )
+
+    saved = list(TimesheetEntry.objects.filter(employee=request.user, work_date=work_date).order_by("shift_number"))
+    return Response({
+        "message": "Đã lưu công ca." if not is_day_off else "Đã ghi nhận nghỉ làm.",
+        "entries": [_entry_payload(e) for e in saved],
+    })
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def timesheet_prefill(request):
+    """Return suggested shifts for the 'Add Timesheet' popup."""
+    raw_date = request.query_params.get("date")
+    today = timezone.localdate()
+    now_local = _local(timezone.now())
+
+    if raw_date:
+        try:
+            target_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            target_date = today
+    else:
+        target_date = today
+
+    yesterday = today - timedelta(days=1)
+    yesterday_filled = TimesheetEntry.objects.filter(employee=request.user, work_date=yesterday).exists()
+    target_filled = TimesheetEntry.objects.filter(employee=request.user, work_date=target_date).exists()
+
+    # Existing entries for the target date (for edit mode)
+    existing = list(
+        TimesheetEntry.objects.filter(employee=request.user, work_date=target_date).order_by("shift_number")
+    )
+
+    # Determine default work mode
+    is_weekend = target_date.weekday() >= 5
+    default_mode = "online" if is_weekend else "direct"
+
+    # Auto-fill: suggest 2 standard shifts if after 16:00 and yesterday is done
+    auto_fill = (
+        now_local.hour >= 16
+        and yesterday_filled
+        and target_date == today
+        and not target_filled
+    )
+
+    suggested_shifts = []
+    if auto_fill:
+        suggested_shifts = [
+            {"start": "08:00", "end": "12:00", "workMode": default_mode, "notes": ""},
+            {"start": "13:30", "end": "17:30", "workMode": default_mode, "notes": ""},
+        ]
+
+    return Response({
+        "targetDate": target_date.isoformat(),
+        "autoFill": auto_fill,
+        "shifts": suggested_shifts,
+        "yesterdayMissing": not yesterday_filled and target_date == today,
+        "yesterdayDate": yesterday.isoformat(),
+        "defaultWorkMode": default_mode,
+        "existing": [_entry_payload(e) for e in existing],
+    })
+
+
+# ---------------------------------------------------------------------------
+# Legacy endpoints (kept for backward compatibility)
+# ---------------------------------------------------------------------------
 def _client_ip(request):
     forwarded = str(request.META.get("HTTP_X_FORWARDED_FOR") or "")
     return (forwarded.split(",", 1)[0].strip() or str(request.META.get("REMOTE_ADDR") or ""))[:64]
-
-
-def _local(value):
-    return timezone.localtime(value) if value else None
 
 
 def _worked_minutes(item, until=None):
@@ -78,15 +305,6 @@ def _record_payload(item, now=None):
         "status": _record_status(item, worked),
         "note": item.note,
     }
-
-
-def _month_range(value):
-    try:
-        start = datetime.strptime(value, "%Y-%m").date().replace(day=1)
-    except (TypeError, ValueError):
-        start = timezone.localdate().replace(day=1)
-    next_month = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
-    return start, next_month
 
 
 def _records_for_request(request, start, end):
