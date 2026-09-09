@@ -323,9 +323,12 @@ def _ingest_row(offset, row, today):
         source_record_id = _cell(row, 8)
         is_web_origin = source_record_id.upper().startswith("REC-WEB-")
         explicit_time = parsed_task.has_time_prefix
-        # Older Web -> Sheet writes used to inject start_time into the visible
-        # title. Do not mistake that generated prefix for user-authored text.
-        if is_web_origin and item and not item.time_prefix_in_title:
+        # Web-origin tasks store raw user text as title (no time stripping). If the
+        # sheet cell was generated from such a task, the parser may have extracted a
+        # time prefix that was just part of the user's text (e.g. "7:30 - 12:30").
+        # Honour the existing web title and start_time rather than overwriting them.
+        preserve_web_title = is_web_origin and item and not item.time_prefix_in_title and explicit_time
+        if preserve_web_title:
             explicit_time = False
         is_sheet_training = (
             email == "liennt@fermat.edu.vn"
@@ -336,10 +339,10 @@ def _ingest_row(offset, row, today):
         is_training = is_sheet_training or is_web_training
         if item:
             item.executor = executor
-            item.title = parsed_task.title[:1000]
+            item.title = item.title if preserve_web_title else parsed_task.title[:1000]
             item.progress_note = custom_note[:1000]
             item.work_date = work_date
-            item.start_time = parsed_task.start_time
+            item.start_time = item.start_time if preserve_web_title else parsed_task.start_time
             item.end_time = training_end(parsed_task.start_time) if is_training else item.end_time
             item.status = task_status
             item.daily_order = index

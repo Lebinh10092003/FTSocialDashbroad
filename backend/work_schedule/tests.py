@@ -544,18 +544,37 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertIsNone(WorkItem.objects.get(pk=response.json()["item"]["id"]).training_session_id)
 
-    def test_time_prefixed_title_automatically_becomes_high_priority(self):
-        response = self.request(self.executor_token, "post", "/api/work-schedule/items", {
-            "title": "8h30: Họp triển khai", "date": "2026-09-07",
-            "executorEmail": self.executor.email, "supporterEmails": [], "managerEmails": [],
-            "priority": "medium",
+    def test_title_with_time_notation_is_preserved_verbatim(self):
+        # The system must never reformat or strip text that users write as task titles.
+        # Time-like patterns (e.g. "8h30: …", "7:30 - 12:30") are user content, not
+        # structured fields — they should be stored exactly as typed.
+        for raw_title in ["8h30: Họp triển khai", "7:30 - 12:30", "7h Họp nhóm"]:
+            with self.subTest(title=raw_title):
+                response = self.request(self.executor_token, "post", "/api/work-schedule/items", {
+                    "title": raw_title, "date": "2026-09-07",
+                    "executorEmail": self.executor.email, "supporterEmails": [], "managerEmails": [],
+                    "priority": "medium",
+                })
+                self.assertEqual(response.status_code, 201, response.data)
+                item = WorkItem.objects.get(pk=response.json()["item"]["id"])
+                self.assertEqual(item.title, raw_title)
+                self.assertIsNone(item.start_time)
+                self.assertEqual(item.priority, "medium")
+                self.assertFalse(item.time_prefix_in_title)
+                item.delete()
+
+    def test_grid_title_with_time_range_is_preserved_verbatim(self):
+        # Users often write "7:30 - 12:30" (start–end) in the schedule grid. The
+        # system must store this exactly; it must NOT split it into a start_time and
+        # a stripped title ("12:30").
+        response = self.request(self.executor_token, "post", "/api/work-schedule/day", {
+            "date": "2026-09-07",
+            "items": [{"title": "7:30 - 12:30", "progressNote": "", "dailyOrder": 1}],
         })
-        self.assertEqual(response.status_code, 201, response.data)
-        item = WorkItem.objects.get(pk=response.json()["item"]["id"])
-        self.assertEqual(item.title, "Họp triển khai")
-        self.assertEqual(item.start_time.isoformat(timespec="minutes"), "08:30")
-        self.assertEqual(item.priority, "high")
-        self.assertTrue(item.time_prefix_in_title)
+        self.assertEqual(response.status_code, 200, response.data)
+        item = WorkItem.objects.get(executor=self.executor, work_date="2026-09-07", title="7:30 - 12:30")
+        self.assertIsNone(item.start_time)
+        self.assertFalse(item.time_prefix_in_title)
 
     @override_settings(WORK_SCHEDULE_TRAINING_PROJECTION_ENABLED=True)
     def test_untimed_native_sheet_training_reference_does_not_create_calendar_session(self):
