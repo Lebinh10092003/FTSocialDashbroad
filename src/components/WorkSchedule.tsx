@@ -217,7 +217,7 @@ const authHeaders = (token: string, json = false): HeadersInit => ({
 });
 const draftFromTask = (task: WorkTask): WorkDraft => ({
   id: task.id,
-  title: task.timePrefixInTitle && task.startTime ? `${task.startTime}: ${task.title}` : task.title,
+  title: task.title,
   description: task.description,
   progressNote: task.progressNote,
   date: task.date,

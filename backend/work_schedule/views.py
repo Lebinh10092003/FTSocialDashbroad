@@ -17,7 +17,6 @@ from authentication.models import UserProfile
 from authentication.permissions import IsAuthenticated
 
 from .models import WorkItem, WorkScheduleSheetInboundEvent
-from .sheet_parser import parse_sheet_tasks
 from .training_sync import delete_training_for_work_item, sync_training_from_work_item
 
 logger = logging.getLogger(__name__)
@@ -171,14 +170,6 @@ def _profiles(emails, field_label):
 def _apply_data(request, item, creating=False, allow_people=True, data_override=None):
     data = data_override if data_override is not None else (request.data or {})
     title = str(data.get("title", item.title if item else "") or "").strip()
-    parsed_title = parse_sheet_tasks(f"1. {title}")[0] if title else None
-    has_time_prefix = (
-        bool(item and item.time_prefix_in_title)
-        if item and "title" not in data
-        else bool(parsed_title and parsed_title.has_time_prefix)
-    )
-    if parsed_title and has_time_prefix:
-        title = parsed_title.title
     raw_date = data.get("date", item.work_date.isoformat() if item else "")
     work_date = parse_date(str(raw_date or ""))
     executor_email = str(data.get("executorEmail", item.executor_id if item else request.user.email) if allow_people else item.executor_id).strip().lower()
@@ -192,8 +183,6 @@ def _apply_data(request, item, creating=False, allow_people=True, data_override=
 
     default_start = item.start_time.isoformat(timespec="minutes") if item and item.start_time else ""
     start_raw = str(data.get("startTime", default_start) or "").strip()
-    if has_time_prefix and parsed_title and parsed_title.start_time:
-        start_raw = parsed_title.start_time.isoformat(timespec="minutes")
     end_raw = str(data.get("endTime", item.end_time.isoformat(timespec="minutes") if item and item.end_time else "") or "").strip()
     start_time = parse_time(start_raw) if start_raw else None
     end_time = parse_time(end_raw) if end_raw else None
@@ -204,8 +193,6 @@ def _apply_data(request, item, creating=False, allow_people=True, data_override=
 
     requested_status = str(data.get("status", item.status if item else WorkItem.STATUS_TODO) or "").lower()
     requested_priority = str(data.get("priority", item.priority if item else "medium") or "").lower()
-    if has_time_prefix:
-        requested_priority = "high"
     if requested_status not in VALID_STATUSES or requested_status == WorkItem.STATUS_REVIEWED:
         return Response({"error": "Trạng thái công việc không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
     if requested_priority not in VALID_PRIORITIES:
@@ -231,7 +218,7 @@ def _apply_data(request, item, creating=False, allow_people=True, data_override=
     item.end_time = end_time
     item.status = requested_status
     item.priority = requested_priority
-    item.time_prefix_in_title = has_time_prefix
+    item.time_prefix_in_title = item.time_prefix_in_title if (item and "title" not in data) else False
     item.label = str(data.get("label", item.label if item else "Công việc") or "Công việc").strip()[:100]
     item.executor = executor
     if creating or previous_group != next_group:
@@ -371,14 +358,11 @@ def work_day_edit(request):
         row_status = str(row.get("status") or "").strip().lower() if "status" in row else None
         if row_status is not None and row_status not in VALID_STATUSES:
             return Response({"error": "Trạng thái nhiệm vụ không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
-        parsed_title = parse_sheet_tasks(f"1. {title}")[0]
         normalized = {
-            "title": parsed_title.title[:1000],
+            "title": title[:1000],
             "progress_note": str(row.get("progressNote") or "").strip()[:1000],
             "status": row_status,
             "daily_order": row.get("dailyOrder", row_index),
-            "time_prefix_in_title": parsed_title.has_time_prefix,
-            "parsed_start_time": parsed_title.start_time,
         }
         try:
             normalized["daily_order"] = int(normalized["daily_order"])
@@ -435,11 +419,9 @@ def work_day_edit(request):
                     progress_note=row["progress_note"],
                     work_date=work_date,
                     status=row["status"] or WorkItem.STATUS_TODO,
-                    priority="high" if row["time_prefix_in_title"] else "medium",
+                    priority="medium",
                     label="Công việc",
                     daily_order=row["daily_order"],
-                    start_time=row["parsed_start_time"],
-                    time_prefix_in_title=row["time_prefix_in_title"],
                 )
                 if request.user_role == "MANAGER" and executor.email != request.user.email:
                     item.managers.add(request.user)
@@ -450,15 +432,6 @@ def work_day_edit(request):
                 if row["title"] != item.title:
                     item.title = row["title"]
                     update_fields.append("title")
-                if row["time_prefix_in_title"]:
-                    item.time_prefix_in_title = True
-                    item.start_time = row["parsed_start_time"]
-                    item.priority = "high"
-                    update_fields.extend(["time_prefix_in_title", "start_time", "priority"])
-                elif item.time_prefix_in_title:
-                    item.time_prefix_in_title = False
-                    item.start_time = None
-                    update_fields.extend(["time_prefix_in_title", "start_time"])
                 if row["status"] is not None and row["status"] != item.status:
                     item.status = row["status"]
                     update_fields.append("status")
