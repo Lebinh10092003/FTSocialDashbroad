@@ -62,8 +62,14 @@ jobs:
           : "${VPS_HOST:?Missing repository secret DEPLOY_HOST}"
           : "${VPS_PORT:?Missing repository secret DEPLOY_PORT}"
           : "${VPS_USERNAME:?Missing repository secret DEPLOY_USER}"
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq sshpass
+          if ! command -v sshpass >/dev/null 2>&1; then
+            # The hosted runner sometimes receives an out-of-sync Chrome index.
+            # Chrome is not needed for deployment, so exclude that source before
+            # refreshing apt instead of letting it block the SSH setup.
+            sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+            sudo apt-get update -qq -o Acquire::Retries=3
+            sudo apt-get install -y -qq sshpass
+          fi
           install -d -m 700 ~/.ssh
           ssh-keyscan -p "$VPS_PORT" -H "$VPS_HOST" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
