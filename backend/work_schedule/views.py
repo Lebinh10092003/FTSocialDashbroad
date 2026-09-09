@@ -323,6 +323,12 @@ def work_day_edit(request):
         request.user_role == "ADMIN"
         or executor.email == request.user.email
         or executor.manager_id == request.user.email
+        or (
+            request.user_role == "MANAGER"
+            and WorkItem.objects.filter(executor=executor).filter(
+                Q(creator=request.user) | Q(managers=request.user)
+            ).exists()
+        )
     )
     if not can_edit_executor:
         return Response({"error": "Bạn không có quyền chỉnh sửa lịch của nhân sự này."}, status=status.HTTP_403_FORBIDDEN)

@@ -1298,26 +1298,40 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const draftsRef = useRef(drafts);
+  const dirtyRowsRef = useRef(dirtyRows);
 
   useEffect(() => { draftsRef.current = drafts; }, [drafts]);
+  useEffect(() => { dirtyRowsRef.current = dirtyRows; }, [dirtyRows]);
 
   useEffect(() => {
-    setDrafts(makeDrafts());
-    setDirtyRows([]);
+    setDrafts((current) => {
+      const refreshed = makeDrafts();
+      dirtyRowsRef.current.forEach((key) => {
+        if (current[key]) refreshed[key] = current[key];
+      });
+      draftsRef.current = refreshed;
+      return refreshed;
+    });
   }, [tasks, gridKey]);
 
   const updateCell = (key: string, patch: Partial<InlineDayDraft>) => {
-    setDrafts((current) => ({ ...current, [key]: { ...(current[key] || { content: "", selfAssessment: "", leaderAssessment: "" }), ...patch } }));
-    setDirtyRows((current) => current.includes(key) ? current : [...current, key]);
+    const nextDrafts = { ...draftsRef.current, [key]: { ...(draftsRef.current[key] || { content: "", selfAssessment: "", leaderAssessment: "" }), ...patch } };
+    draftsRef.current = nextDrafts;
+    setDrafts(nextDrafts);
+    if (!dirtyRowsRef.current.includes(key)) {
+      dirtyRowsRef.current = [...dirtyRowsRef.current, key];
+      setDirtyRows(dirtyRowsRef.current);
+    }
   };
   const saveTable = async () => {
-    if (savingRef.current || !dirtyRows.length) return;
-    const savingRows = [...dirtyRows];
-    const savedDrafts = Object.fromEntries(savingRows.map((key) => [key, drafts[key]]));
+    if (savingRef.current || !dirtyRowsRef.current.length) return;
+    const savingRows = [...dirtyRowsRef.current];
+    const sourceDrafts = draftsRef.current;
+    const savedDrafts = Object.fromEntries(savingRows.map((key) => [key, sourceDrafts[key]]));
     savingRef.current = true;
     setSaving(true);
     try {
-      let nextDrafts = { ...drafts };
+      let nextDrafts = { ...sourceDrafts };
       const duplicateMessages: string[] = [];
       for (const key of savingRows) {
         const row = gridRows.find((item) => item.key === key)!;
@@ -1347,6 +1361,7 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
           };
         });
         setDrafts(nextDrafts);
+        draftsRef.current = nextDrafts;
       }
       for (const key of savingRows) {
         const row = gridRows.find((item) => item.key === key)!;
@@ -1375,10 +1390,12 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
         await saveInlineDay(row.date, items, removed.map((task) => task.id), row.executorEmail || undefined, nextDrafts[key]?.leaderAssessment);
       }
       await reloadTasks(true);
-      setDirtyRows((current) => current.filter((key) => {
+      const remainingDirtyRows = dirtyRowsRef.current.filter((key) => {
         if (!savingRows.includes(key)) return true;
         return JSON.stringify(draftsRef.current[key]) !== JSON.stringify(savedDrafts[key]);
-      }));
+      });
+      dirtyRowsRef.current = remainingDirtyRows;
+      setDirtyRows(remainingDirtyRows);
     } catch (cause: any) {
       void appDialog.alert(cause.message || "Không thể lưu bảng lịch.", { title: "Không thể lưu bảng", tone: "danger" });
     } finally {
