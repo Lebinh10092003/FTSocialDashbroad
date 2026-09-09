@@ -32,6 +32,9 @@ EMPLOYEE_EMAILS = {
     "EMP-9EC1EEB6": "hadk1@fermat.edu.vn",
 }
 EMAIL_EMPLOYEES = {email: employee_id for employee_id, email in EMPLOYEE_EMAILS.items()}
+SHEET_STAFF_EMAILS = {
+    "thuận": "thuanld@fermat.edu.vn",
+}
 WEEKDAYS = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
 INCREMENTAL_SYNC_LEASE_SECONDS = 300
 TWO_WAY_SYNC_LEASE_SECONDS = 1800
@@ -61,6 +64,14 @@ def _rows(service):
 
 def _cell(row, index):
     return str(row[index] if index < len(row) else "").strip()
+
+
+def _row_employee_email(row):
+    email = EMPLOYEE_EMAILS.get(_cell(row, 7))
+    if email:
+        return email
+    staff_name = re.sub(r"^\s*\d+\s*[.)-]?\s*", "", _cell(row, 3)).strip().casefold()
+    return SHEET_STAFF_EMAILS.get(staff_name)
 
 
 def _parse_date(value):
@@ -217,8 +228,7 @@ def _ingest_row(offset, row, today):
     created = updated = deleted = 0
     touched = set()
     work_date = _parse_date(_cell(row, 1))
-    employee_id = _cell(row, 7)
-    email = EMPLOYEE_EMAILS.get(employee_id)
+    email = _row_employee_email(row)
     if not email or not work_date:
         return created, updated, deleted, touched
     executor = UserProfile.objects.filter(email=email, employment_status="ACTIVE").first()

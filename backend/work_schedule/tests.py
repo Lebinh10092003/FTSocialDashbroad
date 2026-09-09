@@ -15,6 +15,7 @@ from .sheet_sync import (
     EMPLOYEE_EMAILS,
     _group_values,
     _row_hash,
+    _row_employee_email,
     _unique_sheet_tasks,
     deterministic_sheet_uid,
     ensure_sheet_row_capacity,
@@ -26,6 +27,10 @@ from .training_sync import sync_work_item_from_training
 class WorkScheduleSheetParserTests(TestCase):
     def test_sheet_mapping_includes_director_thuan(self):
         self.assertEqual(EMPLOYEE_EMAILS["EMP-E6557326"], "thuanld@fermat.edu.vn")
+        self.assertEqual(
+            _row_employee_email(["", "09/09/2026", "37", "1. Thuận", "Nội dung", "", "", "#REF!"]),
+            "thuanld@fermat.edu.vn",
+        )
 
     def test_sheet_identity_and_hash_are_stable_when_title_is_not_the_identity(self):
         self.assertEqual(str(deterministic_sheet_uid(1094, 1)), "6ae71379-0000-5000-8000-000446000001")
