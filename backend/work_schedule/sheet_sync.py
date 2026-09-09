@@ -35,6 +35,15 @@ EMPLOYEE_EMAILS = {
 EMAIL_EMPLOYEES = {email: employee_id for employee_id, email in EMPLOYEE_EMAILS.items()}
 SHEET_STAFF_EMAILS = {
     "thuận": "thuanld@fermat.edu.vn",
+    "dũng": "dungpv@fermat.edu.vn",
+    "liên": "liennt@fermat.edu.vn",
+    "hà": "hanh@fermat.edu.vn",
+    "bình": "binhlv@fermat.edu.vn",
+    "phong": "phongnt@fermat.edu.vn",
+    "phương": "phuongnt@fermat.edu.vn",
+    "tiến": "tienthm@fermat.edu.vn",
+    "sơn": "sondc@fermat.edu.vn",
+    "khánh hà": "hadk1@fermat.edu.vn",
 }
 WEEKDAYS = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
 INCREMENTAL_SYNC_LEASE_SECONDS = 300

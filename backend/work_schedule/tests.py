@@ -111,6 +111,14 @@ class WorkScheduleSheetParserTests(TestCase):
         self.assertTrue(priority_runs[0]["format"]["bold"])
         self.assertEqual(priority_runs[1]["format"], {})
 
+    def test_future_roster_row_resolves_employee_without_hidden_id(self):
+        from work_schedule.sheet_sync import _row_employee_email
+
+        self.assertEqual(
+            _row_employee_email(["Hai", "14/09/2026", "38", "6. Phong"]),
+            "phongnt@fermat.edu.vn",
+        )
+
     def test_identical_tasks_in_one_sheet_cell_are_collapsed(self):
         tasks = _unique_sheet_tasks(parse_sheet_tasks(
             "1. Tập huấn B3, B4 TH Kim Đồng\n"
