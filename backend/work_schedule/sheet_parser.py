@@ -4,7 +4,10 @@ from datetime import datetime, time, timedelta
 
 
 NUMBERED_LINE = re.compile(r"^\s*(\d{1,3})\s*[.,)]\s*(.*?)(?:\s*)$")
-LEADING_TIME = re.compile(r"^\s*(\d{1,2})(?:[:hH])(\d{2})\s*:?[ ]*(.+)$", re.DOTALL)
+LEADING_TIME = re.compile(
+    r"^\s*(\d{1,2})(?:\s*[hH]\s*(\d{1,2})?|\s*:\s*(\d{2}))\s*[:;,.\-]?\s+(.+)$",
+    re.DOTALL,
+)
 
 
 @dataclass(frozen=True)
@@ -12,6 +15,7 @@ class ParsedSheetTask:
     source_number: int
     title: str
     start_time: time | None
+    has_time_prefix: bool
 
 
 def split_numbered_tasks(value: str) -> list[tuple[int, str]]:
@@ -42,11 +46,12 @@ def parse_sheet_tasks(value: str) -> list[ParsedSheetTask]:
         title = raw_title.strip().rstrip(";").strip()
         match = LEADING_TIME.match(title)
         if match:
-            hour, minute = int(match.group(1)), int(match.group(2))
+            hour = int(match.group(1))
+            minute = int(match.group(2) or match.group(3) or 0)
             if 0 <= hour <= 23 and 0 <= minute <= 59:
                 start = time(hour, minute)
-                title = match.group(3).strip().rstrip(";").strip()
-        result.append(ParsedSheetTask(number, title, start))
+                title = match.group(4).strip().rstrip(";").strip()
+        result.append(ParsedSheetTask(number, title, start, start is not None))
     return result
 
 

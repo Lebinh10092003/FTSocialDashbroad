@@ -1,5 +1,5 @@
 import os
-from datetime import timedelta
+from datetime import time, timedelta
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -13,6 +13,7 @@ from .models import WorkItem, WorkScheduleSheetChange, WorkScheduleSheetInboundE
 from .sheet_parser import assessment_notes, parse_sheet_tasks, status_from_note, training_end
 from .sheet_sync import (
     EMPLOYEE_EMAILS,
+    _build_content_format_runs,
     _group_values,
     _row_hash,
     _row_employee_email,
@@ -75,6 +76,26 @@ class WorkScheduleSheetParserTests(TestCase):
         ])
         self.assertEqual(tasks[-1].start_time.isoformat(timespec="minutes"), "17:30")
         self.assertEqual(training_end(tasks[-1].start_time).isoformat(timespec="minutes"), "20:30")
+
+    def test_time_prefix_accepts_vietnamese_hour_notation_and_plain_hour(self):
+        tasks = parse_sheet_tasks(
+            "1. 8h30: Việc một\n2. 8h Việc hai\n3. 7h00 - Việc ba\n4. 7:00 Việc bốn"
+        )
+        self.assertEqual(
+            [task.start_time.isoformat(timespec="minutes") for task in tasks],
+            ["08:30", "08:00", "07:00", "07:00"],
+        )
+        self.assertTrue(all(task.has_time_prefix for task in tasks))
+
+    def test_only_authored_time_prefix_gets_bold_italic_pure_black(self):
+        content = "1. Việc có giờ hệ thống\n2. 8h30: Việc ghi giờ trong tên\n3. 7:00 Việc khác"
+        runs = _build_content_format_runs(content)
+        emphasized = [run for run in runs if run["format"].get("bold")]
+        self.assertEqual(len(emphasized), 1)
+        self.assertEqual(
+            emphasized[0]["format"]["foregroundColorStyle"]["rgbColor"],
+            {"red": 0.0, "green": 0.0, "blue": 0.0},
+        )
 
     def test_identical_tasks_in_one_sheet_cell_are_collapsed(self):
         tasks = _unique_sheet_tasks(parse_sheet_tasks(
@@ -472,6 +493,29 @@ class WorkScheduleApiTests(TestCase):
         })
         self.assertEqual(response.status_code, 201, response.data)
         self.assertIsNone(WorkItem.objects.get(pk=response.json()["item"]["id"]).training_session_id)
+
+    def test_untimed_native_sheet_training_reference_does_not_create_calendar_session(self):
+        item = WorkItem.objects.create(
+            creator=self.executor,
+            executor=self.executor,
+            title="Dự kiến nhân sự và chương trình tập huấn STEM AI",
+            work_date="2026-09-08",
+            label="Tập huấn",
+            source_sheet_row=5002,
+            source_record_id="REC-SHEET-001",
+            time_prefix_in_title=False,
+        )
+
+        from .training_sync import sync_training_from_work_item
+        self.assertIsNone(sync_training_from_work_item(item))
+        item.refresh_from_db()
+        self.assertIsNone(item.training_session_id)
+
+        item.title = "Tập huấn STEM AI"
+        item.start_time = time(8, 30)
+        item.time_prefix_in_title = True
+        item.save()
+        self.assertIsNotNone(sync_training_from_work_item(item))
 
     def test_organisational_manager_views_report_only_in_team_schedule(self):
         self.executor.manager = self.manager

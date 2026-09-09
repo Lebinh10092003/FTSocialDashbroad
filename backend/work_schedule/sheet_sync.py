@@ -114,7 +114,8 @@ def _numbered(values):
 
 def _group_values(items):
     content = _numbered([
-        f"{item.start_time.strftime('%H:%M')}: {item.title}" if item.start_time else item.title
+        f"{item.start_time.strftime('%H:%M')}: {item.title}"
+        if item.start_time and getattr(item, "time_prefix_in_title", False) else item.title
         for item in items
     ])
     all_completed = bool(items) and all(
@@ -253,7 +254,20 @@ def _ingest_row(offset, row, today):
         if leader_note and leader_note.strip().lower() not in {"chưa đánh giá", "chua danh gia"}:
             task_status = WorkItem.STATUS_REVIEWED
         custom_note = "" if note.strip().lower() in {"cần làm", "đang thực hiện", "hoàn thành", "đã hoàn thành", "xong"} else note
-        is_training = email == "liennt@fermat.edu.vn" and "tập huấn" in parsed_task.title.lower()
+        source_record_id = _cell(row, 8)
+        is_web_origin = source_record_id.upper().startswith("REC-WEB-")
+        explicit_time = parsed_task.has_time_prefix
+        # Older Web -> Sheet writes used to inject start_time into the visible
+        # title. Do not mistake that generated prefix for user-authored text.
+        if is_web_origin and item and not item.time_prefix_in_title:
+            explicit_time = False
+        is_sheet_training = (
+            email == "liennt@fermat.edu.vn"
+            and explicit_time
+            and "tập huấn" in parsed_task.title.lower()
+        )
+        is_web_training = bool(is_web_origin and item and item.label == "Tập huấn")
+        is_training = is_sheet_training or is_web_training
         if item:
             item.executor = executor
             item.title = parsed_task.title[:1000]
@@ -265,7 +279,9 @@ def _ingest_row(offset, row, today):
             item.daily_order = index
             item.source_sheet_row = offset
             item.source_task_index = index
-            item.source_record_id = _cell(row, 8)
+            item.source_record_id = source_record_id
+            item.time_prefix_in_title = explicit_time
+            item.label = "Tập huấn" if is_training else "Công việc"
             item.sync_uid = sync_uid
             item.save()
             updated += 1
@@ -277,9 +293,16 @@ def _ingest_row(offset, row, today):
                 end_time=training_end(parsed_task.start_time) if is_training else None,
                 status=task_status, priority="medium", label="Tập huấn" if is_training else "Công việc",
                 daily_order=index, source_sheet_row=offset, source_task_index=index,
-                source_record_id=_cell(row, 8), sync_uid=sync_uid,
+                source_record_id=source_record_id,
+                time_prefix_in_title=explicit_time,
+                sync_uid=sync_uid,
             )
             created += 1
+        # Reconcile the calendar projection immediately. In particular this
+        # removes old 09:00-12:00 sessions that were generated merely because
+        # an untimed task happened to mention "tập huấn".
+        from .training_sync import sync_training_from_work_item
+        sync_training_from_work_item(item)
         retained_ids.add(item.pk)
     stale_items = [item for item in source_items if item.pk not in retained_ids]
     if stale_items:
@@ -322,7 +345,9 @@ def _find_row(rows, email, work_date, items):
     return None, None
 
 
-_TIME_LINE_RE = re.compile(r'^\d+\.\s+\d{1,2}:\d{2}')
+_TIME_LINE_RE = re.compile(
+    r'^\s*\d+\s*[.,)]\s*\d{1,2}(?:\s*[hH]\s*\d{0,2}|\s*:\s*\d{2})(?=\s|[:;,.\-])'
+)
 
 
 def _build_content_format_runs(content):
@@ -334,7 +359,7 @@ def _build_content_format_runs(content):
     for line in lines:
         is_bold = bool(_TIME_LINE_RE.match(line))
         if is_bold != prev_bold:
-            fmt = {'bold': True, 'italic': True, 'foregroundColorStyle': {'rgbColor': {'red': 0.0, 'green': 0.13, 'blue': 0.25}}} if is_bold else {}
+            fmt = {'bold': True, 'italic': True, 'foregroundColorStyle': {'rgbColor': {'red': 0.0, 'green': 0.0, 'blue': 0.0}}} if is_bold else {}
             runs.append({'startIndex': offset, 'format': fmt})
             prev_bold = is_bold
         offset += len(line) + 1  # +1 for newline character

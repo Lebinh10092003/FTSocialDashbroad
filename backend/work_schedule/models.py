@@ -52,6 +52,7 @@ class WorkItem(models.Model):
     source_sheet_row = models.PositiveIntegerField(blank=True, null=True)
     source_task_index = models.PositiveIntegerField(blank=True, null=True)
     source_record_id = models.CharField(max_length=100, blank=True, default="")
+    time_prefix_in_title = models.BooleanField(default=False)
     sync_uid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     source_sync_hash = models.CharField(max_length=64, blank=True, default="")
     reviewed_by = models.ForeignKey(

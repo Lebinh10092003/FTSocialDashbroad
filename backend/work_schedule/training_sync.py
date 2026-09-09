@@ -24,6 +24,19 @@ def _normalise(value):
 def _is_training(item):
     label = _normalise(item.label)
     title = _normalise(item.title)
+    # Native Sheet rows are calendar sessions only when the user actually put
+    # a time at the start of that numbered line. Previously every Liên task
+    # containing the words "tập huấn" was labelled as a session and silently
+    # received the default 09:00-12:00 slot.
+    is_native_sheet_item = bool(
+        item.source_sheet_row
+        and not str(item.source_record_id or "").upper().startswith("REC-WEB-")
+    )
+    if is_native_sheet_item:
+        return bool(
+            item.time_prefix_in_title
+            and "tap huan" in title
+        )
     return "tap huan" in label or title.startswith(("tap huan ", "tham gia tap huan ", "ho tro tap huan "))
 
 
