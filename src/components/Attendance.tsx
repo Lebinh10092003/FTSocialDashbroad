@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Clock, Coffee, Edit3, FileText, Globe, Laptop, Loader2, MapPin, Moon, Plus, RefreshCw, Save, Trash2, TriangleAlert, UserCheck, X } from 'lucide-react';
+import { ArrowLeft, Clock, Coffee, Edit3, FileText, Globe, Laptop, Loader2, MapPin, Moon, Plus, RefreshCw, Save, Search, Trash2, TriangleAlert, UserCheck, Users, X } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -29,6 +29,8 @@ type EditLog = {
   createdAt: string;
 };
 
+type Employee = { email: string; name: string; department: string };
+
 type TimesheetData = {
   serverTime: string;
   scope: string;
@@ -37,6 +39,7 @@ type TimesheetData = {
   entries: TimesheetEntry[];
   summary: { totalMinutes: number; onlineMinutes: number; offlineMinutes: number };
   editLogs: EditLog[];
+  employees: Employee[];
 };
 
 type PrefillData = {
@@ -53,7 +56,7 @@ type PrefillData = {
 };
 
 type ShiftRow = { start: string; end: string; workMode: 'direct' | 'online'; notes: string };
-type AttendanceProps = { onBackToWorkspace: () => void; idToken: string; userName: string };
+type AttendanceProps = { onBackToWorkspace: () => void; idToken: string; userName: string; userEmail?: string };
 
 /* ------------------------------------------------------------------ */
 /*  In-memory cache                                                    */
@@ -73,7 +76,7 @@ const modeLabel = (m: string) => m === 'online' ? 'Online' : 'Trực tiếp';
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
-export default function Attendance({ onBackToWorkspace, idToken, userName }: AttendanceProps) {
+export default function Attendance({ onBackToWorkspace, idToken, userName, userEmail }: AttendanceProps) {
   const initialMonth = currentMonth();
   const cached = cache?.owner === idToken && cache.month === initialMonth && Date.now() - cache.savedAt < CACHE_TTL ? cache : null;
 
@@ -82,6 +85,10 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
   const [loading, setLoading] = useState(!cached);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+
+  // Employee sidebar (privileged)
+  const [selectedEmployee, setSelectedEmployee] = useState<string>('');
+  const [empSearch, setEmpSearch] = useState('');
 
   // Popup
   const [popupOpen, setPopupOpen] = useState(false);
@@ -121,17 +128,40 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
 
   useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(''), 3000); return () => clearTimeout(t); }, [notice]);
 
+  /* ---------- Filtered employees ---------- */
+  const filteredEmployees = useMemo(() => {
+    if (!data?.employees?.length) return [];
+    const q = empSearch.toLowerCase().trim();
+    if (!q) return data.employees;
+    return data.employees.filter(e => e.name.toLowerCase().includes(q) || e.email.toLowerCase().includes(q));
+  }, [data?.employees, empSearch]);
+
   /* ---------- Group entries by date ---------- */
-  const grouped = useMemo(() => {
+  const filteredEntries = useMemo(() => {
     if (!data) return [];
+    if (data.scope === 'mine') return data.entries;
+    const target = selectedEmployee || userEmail || '';
+    if (!target) return data.entries;
+    return data.entries.filter(e => e.employee?.email === target);
+  }, [data, selectedEmployee, userEmail]);
+
+  const grouped = useMemo(() => {
     const map = new Map<string, TimesheetEntry[]>();
-    for (const e of data.entries) {
+    for (const e of filteredEntries) {
       const list = map.get(e.workDate) || [];
       list.push(e);
       map.set(e.workDate, list);
     }
     return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
-  }, [data]);
+  }, [filteredEntries]);
+
+  /* ---------- Filtered summary ---------- */
+  const filteredSummary = useMemo(() => {
+    const total = filteredEntries.reduce((s, e) => s + (e.isDayOff ? 0 : e.workedMinutes), 0);
+    const online = filteredEntries.reduce((s, e) => s + (e.workMode === 'online' && !e.isDayOff ? e.workedMinutes : 0), 0);
+    const offline = filteredEntries.reduce((s, e) => s + (e.workMode === 'direct' && !e.isDayOff ? e.workedMinutes : 0), 0);
+    return { totalMinutes: total, onlineMinutes: online, offlineMinutes: offline };
+  }, [filteredEntries]);
 
   /* ---------- Can user edit a date ---------- */
   const canEditDate = useCallback((dateStr: string) => {
@@ -232,20 +262,52 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
     setShifts(prev => [...prev, { start: '13:30', end: '17:30', workMode: mode, notes: '' }]);
   };
 
-  const summary = data?.summary;
+  const summary = selectedEmployee ? filteredSummary : (data?.summary ?? filteredSummary);
+
+  const isPrivileged = data?.isPrivileged ?? false;
+  const selectedEmpName = data?.employees?.find(e => e.email === selectedEmployee)?.name;
 
   return (
-    <div className="workspace-module-canvas min-h-dvh bg-slate-50 font-sans text-slate-900">
-      {/* Header */}
-      <header className="border-b bg-white/90 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
-          <button type="button" onClick={onBackToWorkspace} className="ft-btn ft-btn-secondary"><ArrowLeft className="h-4 w-4" />Workspace</button>
-          <div className="flex items-center gap-2.5"><div className="grid h-9 w-9 place-items-center rounded-lg bg-emerald-700 text-white"><UserCheck className="h-5 w-5" /></div><span className="text-sm font-extrabold">Công ca</span></div>
-          <div className="hidden text-right sm:block"><p className="text-xs font-bold text-slate-500">{new Intl.DateTimeFormat('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' }).format(new Date())}</p></div>
-        </div>
-      </header>
+    <div className="workspace-module-canvas flex min-h-dvh bg-slate-50 font-sans text-slate-900">
+      {/* Employee sidebar (privileged only) */}
+      {isPrivileged && (
+        <aside className="hidden w-72 shrink-0 flex-col border-r bg-white lg:flex">
+          <div className="border-b px-4 py-4">
+            <button type="button" onClick={onBackToWorkspace} className="ft-btn ft-btn-secondary w-full justify-center"><ArrowLeft className="h-4 w-4" />Workspace</button>
+          </div>
+          <div className="border-b px-4 py-3">
+            <div className="flex items-center gap-2 text-sm font-extrabold text-emerald-700"><Users className="h-4 w-4" />Nhân viên</div>
+            <div className="relative mt-2">
+              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input type="text" value={empSearch} onChange={e => setEmpSearch(e.target.value)} placeholder="Tìm theo họ tên..." className="ft-input pl-8 text-sm" />
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            <button type="button" onClick={() => setSelectedEmployee('')} className={`flex w-full items-center gap-2 border-b px-4 py-2.5 text-left text-sm transition ${!selectedEmployee ? 'bg-emerald-50 font-bold text-emerald-800' : 'text-slate-600 hover:bg-slate-50'}`}>
+              <UserCheck className="h-4 w-4 shrink-0" />Bảng công của tôi
+            </button>
+            {filteredEmployees.map(emp => (
+              <button key={emp.email} type="button" onClick={() => setSelectedEmployee(emp.email)} className={`flex w-full flex-col border-b px-4 py-2 text-left transition ${selectedEmployee === emp.email ? 'bg-emerald-50' : 'hover:bg-slate-50'}`}>
+                <span className={`text-sm ${selectedEmployee === emp.email ? 'font-bold text-emerald-800' : 'font-medium text-slate-700'}`}>{emp.name}</span>
+                {emp.department && <span className="text-[11px] text-slate-400">{emp.department}</span>}
+              </button>
+            ))}
+            {filteredEmployees.length === 0 && <p className="px-4 py-6 text-center text-xs text-slate-400">Không tìm thấy nhân viên.</p>}
+          </div>
+        </aside>
+      )}
 
-      <main className="mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-10">
+      <div className="flex min-h-dvh flex-1 flex-col">
+        {/* Header */}
+        <header className="border-b bg-white/90 backdrop-blur-xl">
+          <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
+            {!isPrivileged && <button type="button" onClick={onBackToWorkspace} className="ft-btn ft-btn-secondary"><ArrowLeft className="h-4 w-4" />Workspace</button>}
+            <div className="flex items-center gap-2.5"><div className="grid h-9 w-9 place-items-center rounded-lg bg-emerald-700 text-white"><UserCheck className="h-5 w-5" /></div><span className="text-sm font-extrabold">Công ca{selectedEmpName ? ` — ${selectedEmpName}` : ''}</span></div>
+            <div className="hidden text-right sm:block"><p className="text-xs font-bold text-slate-500">{new Intl.DateTimeFormat('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' }).format(new Date())}</p></div>
+          </div>
+        </header>
+
+        <main className={`mx-auto w-full flex-1 px-5 py-8 sm:px-8 sm:py-10 ${isPrivileged ? 'max-w-[1400px]' : 'max-w-7xl'}`}>
         {/* Title row */}
         <section className="mb-7 flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -262,12 +324,12 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
         {error && <div className="mb-5 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800"><TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" /><span>{error}</span></div>}
 
         {/* Main grid: Records + Sidebar */}
-        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
           {/* Records table */}
           <div className="rounded-2xl border bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-bold uppercase text-emerald-600">Lịch sử</p>
+                <p className="text-xs font-bold uppercase text-emerald-600">Lịch sử{selectedEmpName ? ` — ${selectedEmpName}` : ''}</p>
                 <h2 className="mt-1 text-xl font-extrabold">Công ca trong tháng</h2>
               </div>
               <label className="relative"><span className="sr-only">Chọn tháng</span><input type="month" value={month} onChange={e => setMonth(e.target.value)} className="ft-input" /></label>
@@ -372,6 +434,8 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
           </aside>
         </div>
       </main>
+
+      </div>{/* end flex-1 wrapper */}
 
       {/* ---------- Popup ---------- */}
       {popupOpen && (

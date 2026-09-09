@@ -54,13 +54,20 @@ def _parse_time(raw):
 
 
 def _is_privileged(request):
-    """Admin or accounting department → full access."""
+    """Admin or accounting department (incl. probation) → full access."""
     role = getattr(request, "user_role", "EMPLOYEE")
     if role == "ADMIN":
         return True
-    dept = getattr(request.user, "department", None)
+    user = request.user
+    # Check primary department
+    dept = getattr(user, "department", None)
     if dept and dept.name.lower().strip() in ACCOUNTING_DEPT_NAMES:
         return True
+    # Check secondary departments (ManyToMany)
+    if hasattr(user, "departments"):
+        for d in user.departments.all():
+            if d.name.lower().strip() in ACCOUNTING_DEPT_NAMES:
+                return True
     return False
 
 
@@ -175,6 +182,21 @@ def timesheet_list(request):
         log_qs = log_qs.filter(employee=request.user)
     logs = list(log_qs.order_by("-created_at")[:200])
 
+    # Employee list for privileged users
+    employees = []
+    if scope == "all" and privileged:
+        all_employees = UserProfile.objects.filter(
+            employment_status="ACTIVE",
+        ).select_related("department").order_by("name")
+        employees = [
+            {
+                "email": emp.email,
+                "name": emp.name or emp.email,
+                "department": emp.department.name if emp.department else "",
+            }
+            for emp in all_employees
+        ]
+
     return Response({
         "serverTime": _local(timezone.now()).isoformat(),
         "scope": scope,
@@ -187,6 +209,7 @@ def timesheet_list(request):
             "offlineMinutes": offline_minutes,
         },
         "editLogs": [_log_payload(lg) for lg in logs],
+        "employees": employees,
     })
 
 

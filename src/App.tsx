@@ -846,7 +846,7 @@ export default function App() {
   if (viewMode === 'attendance') {
     return (
       <Suspense fallback={<div className="grid h-screen place-items-center bg-[#f3f5f1]">Đang nạp mô-đun Công ca...</div>}>
-        <Attendance onBackToWorkspace={() => setViewMode('workspace')} idToken={idToken || ''} userName={user.displayName} />
+        <Attendance onBackToWorkspace={() => setViewMode('workspace')} idToken={idToken || ''} userName={user.displayName} userEmail={user.email} />
       </Suspense>
     );
   }
