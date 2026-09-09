@@ -1249,8 +1249,8 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
   tasks: WorkTask[];
   executorEmail?: string;
   people?: TeamMember[];
-  saveInlineDay: (date: string, items: GridSaveItem[], deleteIds: number[], executorEmail?: string) => Promise<unknown>;
-  reloadTasks: () => Promise<void>;
+  saveInlineDay: (date: string, items: GridSaveItem[], deleteIds: number[], executorEmail?: string, leaderAssessment?: string) => Promise<unknown>;
+  reloadTasks: (silent?: boolean) => Promise<void>;
 }) {
   const gridRows: ScheduleGridRow[] = people?.length
     ? days.flatMap((day) => people.map((person) => ({ key: `${person.email}|${iso(day)}`, date: iso(day), executorEmail: person.email, person })))
