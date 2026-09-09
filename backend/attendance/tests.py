@@ -7,7 +7,7 @@ from rest_framework.authtoken.models import Token
 
 from authentication.models import UserProfile
 
-from .models import AttendanceRecord
+from .models import AttendanceRecord, TimesheetEditLog
 from .views import _worked_minutes
 from work_schedule.models import WorkScheduleSheetChange
 
@@ -121,3 +121,36 @@ class AttendanceApiTests(TestCase):
             work_date=work_date,
             status=WorkScheduleSheetChange.STATUS_PENDING,
         ).exists())
+
+    def test_weekends_and_fixed_holidays_default_to_day_off(self):
+        for work_date in ("2026-09-12", "2027-01-01", "2027-04-30", "2027-05-01", "2027-09-02"):
+            with self.subTest(work_date=work_date):
+                response = self.request("get", f"/api/attendance/timesheet/prefill?date={work_date}")
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertTrue(response.json()["defaultDayOff"])
+                self.assertEqual(response.json()["shifts"], [])
+
+    def test_edit_log_is_created_only_when_working_times_change(self):
+        work_date = timezone.localdate().isoformat()
+        initial = {
+            "workDate": work_date,
+            "isDayOff": False,
+            "shifts": [{"start": "09:30", "end": "12:00", "workMode": "direct", "notes": ""}],
+        }
+        self.assertEqual(self.request("post", "/api/attendance/timesheet/save", initial).status_code, 200)
+
+        same_times = {
+            **initial,
+            "shifts": [{"start": "09:30", "end": "12:00", "workMode": "online", "notes": "Không tạo log"}],
+        }
+        unchanged = self.request("post", "/api/attendance/timesheet/save", same_times)
+        self.assertEqual(unchanged.status_code, 200, unchanged.content)
+        self.assertEqual(TimesheetEditLog.objects.count(), 0)
+
+        changed_times = {
+            **initial,
+            "shifts": [{"start": "09:00", "end": "12:30", "workMode": "online", "notes": ""}],
+        }
+        changed = self.request("post", "/api/attendance/timesheet/save", changed_times)
+        self.assertEqual(changed.status_code, 200, changed.content)
+        self.assertEqual(TimesheetEditLog.objects.count(), 1)

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Check, Clock, Edit3, FileText, Globe, Laptop, Loader2, MapPin, Moon, Plus, Save, Search, Trash2, TriangleAlert, UserCheck, Users, X } from 'lucide-react';
+import { ArrowLeft, Clock, Edit3, FileText, Globe, Laptop, Loader2, MapPin, Moon, Plus, Save, Search, Trash2, TriangleAlert, UserCheck, Users, X } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -51,13 +51,14 @@ type PrefillData = {
   yesterdayWarning: boolean;
   yesterdayDate: string;
   defaultWorkMode: string;
+  defaultDayOff: boolean;
   existing: TimesheetEntry[];
   canEdit: boolean;
   isPrivileged: boolean;
   editLogs: EditLog[];
 };
 
-type ShiftRow = { start: string; end: string; workMode: 'direct' | 'online'; notes: string };
+type ShiftRow = { start: string; end: string; workMode: 'direct' | 'online' };
 type AttendanceProps = { onBackToWorkspace: () => void; idToken: string; userName: string; userEmail?: string };
 
 /* ------------------------------------------------------------------ */
@@ -74,6 +75,7 @@ const fmtHours = (mins: number) => (mins / 60).toFixed(2).replace(/\.?0+$/, '') 
 const fmtDate = (v: string) => { const [y, m, d] = v.split('-'); return `${d}/${m}/${y}`; };
 const fmtMonthLabel = (v: string) => { const [y, m] = v.split('-'); return `${m}/${y}`; };
 const modeLabel = (m: string) => m === 'online' ? 'Online' : 'Trực tiếp';
+const FIXED_HOLIDAYS = new Set(['01-01', '04-30', '05-01', '09-02']);
 
 /** Format edit log old/new data into readable text */
 const formatLogShifts = (data: any) => {
@@ -85,6 +87,12 @@ const formatLogShifts = (data: any) => {
 const WEEKDAYS_VI = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 const weekdayName = (iso: string) => { const d = new Date(`${iso}T00:00:00`); return WEEKDAYS_VI[d.getDay()]; };
 const isWeekend = (iso: string) => { const d = new Date(`${iso}T00:00:00`).getDay(); return d === 0 || d === 6; };
+const isFixedHoliday = (iso: string) => FIXED_HOLIDAYS.has(iso.slice(5));
+const isDefaultDayOff = (iso: string) => isWeekend(iso) || isFixedHoliday(iso);
+const scheduleSignature = (data: any) => (data?.shifts || []).map((shift: any) =>
+  shift.dayOff ? 'off' : `${shift.start || ''}-${shift.end || ''}`,
+).join('|');
+const hasScheduleChange = (log: EditLog) => scheduleSignature(log.oldData) !== scheduleSignature(log.newData);
 
 /** Get all dates in a month as YYYY-MM-DD strings */
 const monthDates = (month: string) => {
@@ -124,7 +132,6 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
   const [prefill, setPrefill] = useState<PrefillData | null>(null);
   const [saving, setSaving] = useState(false);
   const [popupError, setPopupError] = useState('');
-  const [editNote, setEditNote] = useState('');
   const [isEdit, setIsEdit] = useState(false);
 
   /* ---------- Data loading ---------- */
@@ -215,7 +222,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
 
   const editLogsByDate = useMemo(() => {
     const map = new Map<string, EditLog[]>();
-    for (const log of viewEditLogs) map.set(log.workDate, [...(map.get(log.workDate) || []), log]);
+    for (const log of viewEditLogs.filter(hasScheduleChange)) map.set(log.workDate, [...(map.get(log.workDate) || []), log]);
     return map;
   }, [viewEditLogs]);
 
@@ -224,15 +231,14 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
     const today = new Date().toISOString().slice(0, 10);
     return allDates.filter(d => {
       if (d >= today) return false; // don't warn about future/today
-      if (isWeekend(d)) return false;
+      if (isDefaultDayOff(d)) return false;
       return !entriesByDate.has(d);
     });
   }, [allDates, entriesByDate]);
 
   /* ---------- Open popup ---------- */
-  const openPopup = async (dateOverride?: string) => {
+  const openPopup = async (dateOverride?: string, dayOffOverride?: boolean) => {
     setPopupError('');
-    setEditNote('');
     const targetDate = dateOverride || new Date().toISOString().slice(0, 10);
     setPopupDate(targetDate);
     setPopupOpen(true);
@@ -250,21 +256,28 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
       if (body.existing.length > 0) {
         setIsEdit(true);
         const first = body.existing[0];
-        if (first.isDayOff) {
+        if (first.isDayOff && dayOffOverride === false) {
+          const mode = (body.defaultWorkMode || 'direct') as 'direct' | 'online';
+          setIsDayOff(false);
+          setShifts([{ start: '08:00', end: '12:00', workMode: mode }]);
+        } else if (first.isDayOff) {
           setIsDayOff(true);
           setShifts([]);
         } else {
           setIsDayOff(false);
-          setShifts(body.existing.map(e => ({ start: e.shiftStart, end: e.shiftEnd, workMode: e.workMode, notes: e.notes })));
+          setShifts(body.existing.map(e => ({ start: e.shiftStart, end: e.shiftEnd, workMode: e.workMode })));
         }
+      } else if (dayOffOverride ?? body.defaultDayOff ?? isDefaultDayOff(targetDate)) {
+        setIsDayOff(true);
+        setShifts([]);
       } else if (body.shifts.length > 0) {
-        setShifts(body.shifts.map(s => ({ start: s.start, end: s.end, workMode: s.workMode as 'direct' | 'online', notes: '' })));
+        setShifts(body.shifts.map(s => ({ start: s.start, end: s.end, workMode: s.workMode as 'direct' | 'online' })));
       } else {
         const mode = (body.defaultWorkMode || 'direct') as 'direct' | 'online';
-        setShifts([{ start: '08:00', end: '12:00', workMode: mode, notes: '' }]);
+        setShifts([{ start: '08:00', end: '12:00', workMode: mode }]);
       }
     } catch {
-      setShifts([{ start: '08:00', end: '12:00', workMode: 'direct', notes: '' }]);
+      setShifts([{ start: '08:00', end: '12:00', workMode: 'direct' }]);
     }
   };
 
@@ -274,7 +287,6 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
       const existing = entriesByDate.get(dateStr);
       const payload: any = { workDate: dateStr, isDayOff: true };
       if (selectedEmployee) payload.employeeEmail = selectedEmployee;
-      if (existing?.length) payload.editNote = 'Xác nhận nghỉ làm';
       const res = await fetch('/api/attendance/timesheet/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
@@ -291,19 +303,14 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
 
   /* ---------- Save ---------- */
   const saveTimesheet = async () => {
-    if (isEdit && !editNote.trim()) {
-      setPopupError('Vui lòng nhập ghi chú chỉnh sửa khi cập nhật công ca đã có.');
-      return;
-    }
     setSaving(true);
     setPopupError('');
     try {
       const payload: any = { workDate: popupDate, isDayOff };
       if (selectedEmployee) payload.employeeEmail = selectedEmployee;
       if (!isDayOff) {
-        payload.shifts = shifts.map(s => ({ start: s.start, end: s.end, workMode: s.workMode, notes: s.notes }));
+        payload.shifts = shifts.map(s => ({ start: s.start, end: s.end, workMode: s.workMode }));
       }
-      if (isEdit) payload.editNote = editNote;
       const res = await fetch('/api/attendance/timesheet/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
@@ -328,7 +335,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
   const removeShift = (idx: number) => setShifts(prev => prev.filter((_, i) => i !== idx));
   const addShift = () => {
     const mode = (prefill?.defaultWorkMode || 'direct') as 'direct' | 'online';
-    setShifts(prev => [...prev, { start: '13:30', end: '17:30', workMode: mode, notes: '' }]);
+    setShifts(prev => [...prev, { start: '13:30', end: '17:30', workMode: mode }]);
   };
 
   const isPrivileged = data?.isPrivileged ?? false;
@@ -411,44 +418,73 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
               </div>
 
               <div className="mt-5 overflow-x-auto rounded-xl border">
-                <table className="ft-table min-w-[1040px] text-sm">
-                  <thead><tr><th className="w-20">Thứ</th><th className="w-40">Ngày</th><th className="w-20">Ca</th><th className="w-36">Thời gian</th><th className="w-28">Số giờ làm</th><th className="w-28">Hình thức</th><th>Ghi chú</th></tr></thead>
+                <table className="ft-table min-w-[1160px] table-fixed text-sm">
+                  <colgroup>
+                    <col className="w-16" />
+                    <col className="w-56" />
+                    <col className="w-20" />
+                    <col className="w-28" />
+                    <col className="w-28" />
+                    <col className="w-28" />
+                    <col className="w-28" />
+                    <col className="w-56" />
+                  </colgroup>
+                  <thead><tr><th>Thứ</th><th>Ngày</th><th>Ca</th><th>Giờ bắt đầu</th><th>Giờ kết thúc</th><th>Số giờ làm</th><th>Hình thức</th><th>Ghi chú</th></tr></thead>
                   <tbody>
                     {loading ? (
-                      <tr><td colSpan={7} className="px-5 py-14 text-center text-slate-400">Đang tải...</td></tr>
-                    ) : allDates.flatMap(dateStr => {
+                      <tr><td colSpan={8} className="px-5 py-14 text-center text-slate-400">Đang tải...</td></tr>
+                    ) : allDates.map(dateStr => {
                       const originalEntries = entriesByDate.get(dateStr) || [];
                       const entries: Array<TimesheetEntry | null> = originalEntries.length ? originalEntries : [null];
                       const weekend = isWeekend(dateStr);
                       const hasDayOff = originalEntries.some(e => e.isDayOff);
                       const hasEntries = originalEntries.length > 0;
+                      const defaultDayOff = isDefaultDayOff(dateStr);
+                      const markedDayOff = hasDayOff || (!hasEntries && defaultDayOff);
+                      const dayTotal = originalEntries.reduce((total, entry) => total + (entry.isDayOff ? 0 : entry.workedMinutes), 0);
                       const today = new Date().toISOString().slice(0, 10);
                       const isPast = dateStr < today;
                       const logs = editLogsByDate.get(dateStr) || [];
+                      const rowSpan = entries.length + 1;
 
-                      return entries.map((entry, index) => (
-                        <tr key={`${dateStr}-${entry?.id || 'empty'}`} className={`${weekend ? 'bg-slate-50' : ''} ${!hasEntries && isPast && !weekend ? 'bg-amber-50/40' : ''} hover:bg-blue-50/50`}>
-                          {index === 0 && <td rowSpan={entries.length} className={`align-top text-base font-extrabold ${weekend ? 'text-rose-500' : ''}`}>{weekdayName(dateStr)}</td>}
-                          {index === 0 && <td rowSpan={entries.length} className="align-top">
-                            <div className="flex items-start justify-between gap-2">
-                              <span className="text-base font-bold tabular-nums">{fmtDate(dateStr)}</span>
-                              <button type="button" onClick={() => void openPopup(dateStr)} className="rounded-lg p-1.5 text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Chỉnh sửa công ca"><Edit3 className="h-4 w-4" /></button>
-                            </div>
-                            <button type="button" onClick={() => void quickDayOff(dateStr)} disabled={hasDayOff} className="mt-2 inline-flex items-center gap-1 rounded-lg border border-amber-200 px-2 py-1 text-xs font-bold text-amber-700 hover:bg-amber-50 disabled:cursor-default disabled:bg-amber-50 disabled:opacity-70">
-                              {hasDayOff ? <Check className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}{hasDayOff ? 'Đã nghỉ' : 'Chọn ngày nghỉ'}
-                            </button>
-                          </td>}
-                          <td className="font-bold text-slate-700">{entry ? (entry.isDayOff ? 'Ngày nghỉ' : `Ca ${entry.shiftNumber}`) : '—'}</td>
-                          <td className="font-semibold tabular-nums">{entry && !entry.isDayOff ? `${entry.shiftStart} - ${entry.shiftEnd}` : '—'}</td>
-                          <td className="font-bold tabular-nums">{entry && !entry.isDayOff ? `${fmtHours(entry.workedMinutes)} giờ` : '—'}</td>
-                          <td>{entry && !entry.isDayOff ? <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${entry.workMode === 'online' ? 'bg-violet-100 text-violet-700' : 'bg-emerald-100 text-emerald-700'}`}>{modeLabel(entry.workMode)}</span> : '—'}</td>
-                          <td className="min-w-72 align-top text-xs leading-5 text-slate-600">
-                            {entry?.notes && <p>{entry.notes}</p>}
-                            {index === 0 && logs.map(log => <p key={log.id} className="mt-1 rounded-lg bg-amber-50 px-2 py-1 text-amber-800"><FileText className="mr-1 inline h-3.5 w-3.5" />{editLogText(log)}</p>)}
-                            {!entry?.notes && index === 0 && logs.length === 0 && <span className={hasEntries ? 'text-slate-300' : isPast && !weekend ? 'text-amber-500' : 'text-slate-300'}>{hasEntries ? '—' : isPast && !weekend ? 'Chưa có công ca' : '—'}</span>}
-                          </td>
-                        </tr>
-                      ));
+                      return (
+                        <React.Fragment key={dateStr}>
+                          {entries.map((entry, index) => (
+                            <tr key={`${dateStr}-${entry?.id || 'empty'}`} className={`${defaultDayOff ? 'bg-slate-50' : ''} ${!hasEntries && isPast && !defaultDayOff ? 'bg-amber-50/40' : ''} hover:bg-blue-50/50`}>
+                              {index === 0 && <td rowSpan={rowSpan} className={`align-top text-base font-extrabold ${weekend ? 'text-rose-500' : ''}`}>{weekdayName(dateStr)}</td>}
+                              {index === 0 && <td rowSpan={rowSpan} className="align-top">
+                                <div className="flex items-start justify-between gap-2">
+                                  <span className="whitespace-nowrap text-base font-bold tabular-nums">{fmtDate(dateStr)}</span>
+                                  <button type="button" onClick={() => void openPopup(dateStr)} className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="Chỉnh sửa công ca"><Edit3 className="h-4 w-4" /></button>
+                                </div>
+                                <label className="mt-2 flex cursor-pointer items-start gap-2 text-xs font-semibold leading-4 text-amber-800">
+                                  <input
+                                    type="checkbox"
+                                    checked={markedDayOff}
+                                    onChange={event => event.target.checked ? void quickDayOff(dateStr) : void openPopup(dateStr, false)}
+                                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-amber-600"
+                                  />
+                                  <span>Tích vào đây nếu là ngày nghỉ</span>
+                                </label>
+                              </td>}
+                              <td className="font-bold text-slate-700">{entry ? (entry.isDayOff ? 'Ngày nghỉ' : `Ca ${entry.shiftNumber}`) : (markedDayOff ? 'Ngày nghỉ' : '—')}</td>
+                              <td className="font-semibold tabular-nums">{entry && !entry.isDayOff ? entry.shiftStart : '—'}</td>
+                              <td className="font-semibold tabular-nums">{entry && !entry.isDayOff ? entry.shiftEnd : '—'}</td>
+                              <td className="font-bold tabular-nums">{entry && !entry.isDayOff ? `${fmtHours(entry.workedMinutes)} giờ` : '—'}</td>
+                              <td>{entry && !entry.isDayOff ? <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${entry.workMode === 'online' ? 'bg-violet-100 text-violet-700' : 'bg-emerald-100 text-emerald-700'}`}>{modeLabel(entry.workMode)}</span> : '—'}</td>
+                              {index === 0 && <td rowSpan={rowSpan} className="align-top text-xs leading-5 text-slate-600">
+                                {logs.map(log => <p key={log.id} className="mb-1 rounded-lg bg-amber-50 px-2 py-1 text-amber-800"><FileText className="mr-1 inline h-3.5 w-3.5" />{editLogText(log)}</p>)}
+                                {logs.length === 0 && <span className={!hasEntries && isPast && !defaultDayOff ? 'text-amber-500' : 'text-slate-300'}>{!hasEntries && isPast && !defaultDayOff ? 'Chưa có công ca' : '—'}</span>}
+                              </td>}
+                            </tr>
+                          ))}
+                          <tr className={`${defaultDayOff ? 'bg-slate-50' : 'bg-emerald-50/40'} font-bold`}>
+                            <td colSpan={3} className="text-right text-xs uppercase tracking-wide text-slate-500">Tổng giờ trong ngày</td>
+                            <td className="whitespace-nowrap tabular-nums text-emerald-800">{fmtHours(dayTotal)} giờ</td>
+                            <td aria-hidden="true">—</td>
+                          </tr>
+                        </React.Fragment>
+                      );
                     })}
                   </tbody>
                 </table>
@@ -487,8 +523,15 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
                 <label className="block"><span className="mb-1 block text-sm font-bold">Ngày</span><input type="date" className="ft-input" value={popupDate} onChange={e => { setPopupDate(e.target.value); void openPopup(e.target.value); }} /></label>
                 <div className="flex items-end pb-0.5">
                   <label className="flex items-center gap-2 text-sm font-bold">
-                    <input type="checkbox" checked={isDayOff} onChange={e => setIsDayOff(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-emerald-600" />
-                    <Moon className="h-4 w-4 text-amber-600" /> Nghỉ làm ngày này
+                    <input type="checkbox" checked={isDayOff} onChange={e => {
+                      const checked = e.target.checked;
+                      setIsDayOff(checked);
+                      if (!checked && shifts.length === 0) {
+                        const mode = (prefill?.defaultWorkMode || 'direct') as 'direct' | 'online';
+                        setShifts([{ start: '08:00', end: '12:00', workMode: mode }]);
+                      }
+                    }} className="h-4 w-4 rounded border-slate-300 text-emerald-600" />
+                    <Moon className="h-4 w-4 text-amber-600" /> Tích vào đây nếu là ngày nghỉ
                   </label>
                 </div>
               </div>
@@ -513,9 +556,6 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
                       <div className="flex items-end pb-1">
                         {shifts.length > 1 && <button type="button" onClick={() => removeShift(idx)} className="rounded-lg p-1.5 text-rose-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>}
                       </div>
-                      <div className="col-span-3">
-                        <input type="text" className="ft-input text-xs" value={shift.notes} onChange={e => updateShift(idx, 'notes', e.target.value)} placeholder="Ghi chú ca (tùy chọn)" maxLength={500} />
-                      </div>
                     </div>
                   ))}
                   {shifts.length < 10 && (
@@ -524,24 +564,14 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
                 </div>
               )}
 
-              {/* Edit note */}
-              {isEdit && (
-                <div className="mt-5">
-                  <label><span className="mb-1 block text-sm font-bold text-amber-800">Ghi chú chỉnh sửa <span className="text-rose-500">*</span></span>
-                  <textarea className="ft-input min-h-16" value={editNote} onChange={e => setEditNote(e.target.value)} placeholder="Lý do chỉnh sửa công ca..." maxLength={1000} /></label>
-                </div>
-              )}
-
               {/* Edit logs for this date */}
-              {prefill?.editLogs && prefill.editLogs.length > 0 && (
+              {prefill?.editLogs && prefill.editLogs.filter(hasScheduleChange).length > 0 && (
                 <div className="mt-4">
                   <p className="text-xs font-bold text-slate-500"><FileText className="mr-1 inline h-3.5 w-3.5" />Lịch sử chỉnh sửa ngày này</p>
                   <div className="mt-1.5 max-h-28 space-y-1 overflow-y-auto">
-                    {prefill.editLogs.map(log => (
+                    {prefill.editLogs.filter(hasScheduleChange).map(log => (
                       <div key={log.id} className="rounded-lg border bg-slate-50 px-3 py-1.5 text-xs">
-                        <span className="font-bold">{log.editedByName}</span>
-                        <span className="text-slate-400"> · {new Date(log.createdAt).toLocaleString('vi-VN')}</span>
-                        <p className="text-slate-600">{log.note}</p>
+                        <p className="text-slate-600">{editLogText(log)}</p>
                       </div>
                     ))}
                   </div>

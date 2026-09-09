@@ -23,6 +23,7 @@ SHIFTS = {
 }
 
 ACCOUNTING_DEPT_NAMES = {"kế toán", "ke toan", "accounting"}
+FIXED_HOLIDAYS = {(1, 1), (4, 30), (5, 1), (9, 2)}
 
 
 # ---------------------------------------------------------------------------
@@ -30,6 +31,10 @@ ACCOUNTING_DEPT_NAMES = {"kế toán", "ke toan", "accounting"}
 # ---------------------------------------------------------------------------
 def _local(value):
     return timezone.localtime(value) if value else None
+
+
+def _is_default_day_off(value):
+    return value.weekday() >= 5 or (value.month, value.day) in FIXED_HOLIDAYS
 
 
 def _month_range(value):
@@ -128,6 +133,14 @@ def _snapshot_entries(entries):
             "notes": e.notes,
         }
         for e in entries
+    ]
+
+
+def _schedule_signature(snapshot):
+    """Compare only the working-time plan, not mode or free-form notes."""
+    return [
+        (bool(shift.get("dayOff")), str(shift.get("start") or ""), str(shift.get("end") or ""))
+        for shift in snapshot
     ]
 
 
@@ -275,13 +288,6 @@ def timesheet_save(request):
         )
         is_edit = len(existing) > 0
 
-        # Require edit note when modifying existing entries
-        if is_edit and not edit_note:
-            return Response(
-                {"error": "Vui lòng nhập ghi chú chỉnh sửa khi cập nhật công ca đã có."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         old_snapshot = _snapshot_entries(existing) if is_edit else []
 
         TimesheetEntry.objects.filter(employee=target_user, work_date=work_date).delete()
@@ -306,14 +312,15 @@ def timesheet_save(request):
             TimesheetEntry.objects.filter(employee=target_user, work_date=work_date).order_by("shift_number")
         )
 
-        if is_edit:
+        new_snapshot = _snapshot_entries(saved)
+        if is_edit and _schedule_signature(old_snapshot) != _schedule_signature(new_snapshot):
             TimesheetEditLog.objects.create(
                 employee=target_user,
                 work_date=work_date,
                 edited_by=request.user,
                 note=edit_note[:1000],
                 old_data={"shifts": old_snapshot},
-                new_data={"shifts": _snapshot_entries(saved)},
+                new_data={"shifts": new_snapshot},
             )
 
     # Timesheet changes are web-authoritative for the visible "Chấm công"
@@ -363,6 +370,7 @@ def timesheet_prefill(request):
     )
 
     is_weekend = target_date.weekday() >= 5
+    default_day_off = _is_default_day_off(target_date)
     default_mode = "online" if is_weekend else "direct"
 
     # Auto-fill logic:
@@ -370,7 +378,7 @@ def timesheet_prefill(request):
     # 7:00-15:59 today → 1 shift (morning only)
     # Filling for a past date → 2 shifts
     suggested_shifts = []
-    if not target_filled and not existing:
+    if not target_filled and not existing and not default_day_off:
         if target_date == today:
             if now_local.hour >= 16 and yesterday_filled:
                 suggested_shifts = [
@@ -397,7 +405,9 @@ def timesheet_prefill(request):
     if target_date == today and not yesterday_filled:
         days_ago = (today - yesterday).days
         if days_ago == 1:  # only warn for exactly yesterday
-            if yesterday.weekday() >= 5:
+            if (yesterday.month, yesterday.day) in FIXED_HOLIDAYS:
+                yesterday_warning = False
+            elif yesterday.weekday() >= 5:
                 # Weekend: only warn if 3+ work items or has training
                 from work_schedule.models import WorkItem
                 yesterday_items = WorkItem.objects.filter(
@@ -424,6 +434,7 @@ def timesheet_prefill(request):
         "yesterdayWarning": yesterday_warning,
         "yesterdayDate": yesterday.isoformat(),
         "defaultWorkMode": default_mode,
+        "defaultDayOff": default_day_off,
         "existing": [_entry_payload(e) for e in existing],
         "canEdit": _can_edit_date(request, target_date),
         "isPrivileged": privileged,
