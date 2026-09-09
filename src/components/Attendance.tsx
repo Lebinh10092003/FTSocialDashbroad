@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, CalendarDays, Clock, Coffee, Globe, Laptop, Loader2, MapPin, Moon, Plus, RefreshCw, Save, Trash2, TriangleAlert, UserCheck, X } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Clock, Coffee, Edit3, FileText, Globe, Laptop, Loader2, MapPin, Moon, Plus, RefreshCw, Save, Trash2, TriangleAlert, UserCheck, X } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -15,44 +15,60 @@ type TimesheetEntry = {
   isDayOff: boolean;
   notes: string;
   workedMinutes: number;
+  employee?: { email: string; name: string; department: string };
+};
+
+type EditLog = {
+  id: number;
+  workDate: string;
+  editedBy: string;
+  editedByName: string;
+  note: string;
+  oldData: any;
+  newData: any;
+  createdAt: string;
 };
 
 type TimesheetData = {
   serverTime: string;
   scope: string;
   month: string;
+  isPrivileged: boolean;
   entries: TimesheetEntry[];
-  summary: { workDays: number; totalMinutes: number; dayOffCount: number; onlineDays: number };
-  yesterdayFilled: boolean;
+  summary: { totalMinutes: number; onlineMinutes: number; offlineMinutes: number };
+  editLogs: EditLog[];
 };
 
 type PrefillData = {
   targetDate: string;
   autoFill: boolean;
   shifts: { start: string; end: string; workMode: string; notes: string }[];
-  yesterdayMissing: boolean;
+  yesterdayWarning: boolean;
   yesterdayDate: string;
   defaultWorkMode: string;
   existing: TimesheetEntry[];
+  canEdit: boolean;
+  isPrivileged: boolean;
+  editLogs: EditLog[];
 };
 
 type ShiftRow = { start: string; end: string; workMode: 'direct' | 'online'; notes: string };
-
 type AttendanceProps = { onBackToWorkspace: () => void; idToken: string; userName: string };
 
 /* ------------------------------------------------------------------ */
 /*  In-memory cache                                                    */
 /* ------------------------------------------------------------------ */
-const CACHE_TTL = 2 * 60 * 1000;
+const CACHE_TTL = 5 * 60 * 1000;
 let cache: { owner: string; month: string; savedAt: number; data: TimesheetData } | null = null;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 const currentMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
-const formatDuration = (mins: number) => `${Math.floor(mins / 60)}g ${String(mins % 60).padStart(2, '0')}p`;
+const fmtHours = (mins: number) => (mins / 60).toFixed(2).replace(/\.?0+$/, '') || '0';
 const formatDate = (v: string) => new Intl.DateTimeFormat('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' }).format(new Date(`${v}T00:00:00`));
 const modeLabel = (m: string) => m === 'online' ? 'Online' : 'Trực tiếp';
+const DISMISS_KEY = 'timesheet_dismiss_yesterday_warning';
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -67,7 +83,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  // Popup state
+  // Popup
   const [popupOpen, setPopupOpen] = useState(false);
   const [popupDate, setPopupDate] = useState('');
   const [isDayOff, setIsDayOff] = useState(false);
@@ -75,12 +91,20 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
   const [prefill, setPrefill] = useState<PrefillData | null>(null);
   const [saving, setSaving] = useState(false);
   const [popupError, setPopupError] = useState('');
+  const [editNote, setEditNote] = useState('');
+  const [isEdit, setIsEdit] = useState(false);
+
+  // Yesterday warning
+  const [showWarning, setShowWarning] = useState(false);
+  const [warningDate, setWarningDate] = useState('');
+  const [dismissPermanent, setDismissPermanent] = useState(false);
 
   /* ---------- Data loading ---------- */
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const res = await fetch(`/api/attendance/timesheet?month=${month}`, { headers: { Authorization: `Bearer ${idToken}` } });
+      const scope = data?.isPrivileged ? '&scope=all' : '';
+      const res = await fetch(`/api/attendance/timesheet?month=${month}${scope}`, { headers: { Authorization: `Bearer ${idToken}` } });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || 'Không thể tải dữ liệu.');
       setData(body);
@@ -91,15 +115,32 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [month, idToken]);
+  }, [month, idToken, data?.isPrivileged]);
 
   useEffect(() => {
     const reusable = cache?.owner === idToken && cache.month === month && Date.now() - cache.savedAt < CACHE_TTL;
     if (reusable) setData(cache!.data);
     void load(Boolean(reusable));
-  }, [month, idToken, load]);
+  }, [month, idToken]);
 
   useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(''), 3000); return () => clearTimeout(t); }, [notice]);
+
+  // Check yesterday warning on first load
+  useEffect(() => {
+    if (!data) return;
+    const dismissed = sessionStorage.getItem(DISMISS_KEY);
+    if (dismissed) return;
+    // Fetch prefill for today to check yesterdayWarning
+    fetch(`/api/attendance/timesheet/prefill`, { headers: { Authorization: `Bearer ${idToken}` } })
+      .then(r => r.json())
+      .then((pf: PrefillData) => {
+        if (pf.yesterdayWarning) {
+          setWarningDate(pf.yesterdayDate);
+          setShowWarning(true);
+        }
+      })
+      .catch(() => {});
+  }, [data?.serverTime]);
 
   /* ---------- Group entries by date ---------- */
   const grouped = useMemo(() => {
@@ -113,23 +154,45 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
     return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
   }, [data]);
 
+  /* ---------- Can user edit a date ---------- */
+  const canEditDate = useCallback((dateStr: string) => {
+    if (data?.isPrivileged) return true;
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    return dateStr === today || dateStr === yesterday;
+  }, [data?.isPrivileged]);
+
   /* ---------- Open popup ---------- */
   const openPopup = async (dateOverride?: string) => {
     setPopupError('');
+    setEditNote('');
     const targetDate = dateOverride || new Date().toISOString().slice(0, 10);
+
+    // Quick permission check before opening
+    if (!canEditDate(targetDate)) {
+      setNotice('Bạn không có quyền chỉnh sửa ngày này. Hãy liên hệ kế toán nếu muốn chỉnh sửa giờ làm.');
+      return;
+    }
+
     setPopupDate(targetDate);
     setPopupOpen(true);
     setIsDayOff(false);
     setShifts([]);
     setPrefill(null);
+    setIsEdit(false);
 
     try {
       const res = await fetch(`/api/attendance/timesheet/prefill?date=${targetDate}`, { headers: { Authorization: `Bearer ${idToken}` } });
       const body: PrefillData = await res.json();
       setPrefill(body);
 
+      if (!body.canEdit) {
+        setPopupError('Bạn không có quyền chỉnh sửa ngày này. Hãy liên hệ kế toán nếu muốn chỉnh sửa giờ làm.');
+        return;
+      }
+
       if (body.existing.length > 0) {
-        // Edit mode — load existing
+        setIsEdit(true);
         const first = body.existing[0];
         if (first.isDayOff) {
           setIsDayOff(true);
@@ -138,22 +201,23 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
           setIsDayOff(false);
           setShifts(body.existing.map(e => ({ start: e.shiftStart, end: e.shiftEnd, workMode: e.workMode, notes: e.notes })));
         }
-      } else if (body.autoFill && body.shifts.length > 0) {
-        // Auto-fill suggested
+      } else if (body.shifts.length > 0) {
         setShifts(body.shifts.map(s => ({ start: s.start, end: s.end, workMode: s.workMode as 'direct' | 'online', notes: '' })));
       } else {
-        // New entry — single blank shift with defaults
         const mode = (body.defaultWorkMode || 'direct') as 'direct' | 'online';
         setShifts([{ start: '08:00', end: '12:00', workMode: mode, notes: '' }]);
       }
     } catch {
-      // Fallback — single blank shift
       setShifts([{ start: '08:00', end: '12:00', workMode: 'direct', notes: '' }]);
     }
   };
 
   /* ---------- Save ---------- */
   const saveTimesheet = async () => {
+    if (isEdit && !editNote.trim()) {
+      setPopupError('Vui lòng nhập ghi chú chỉnh sửa khi cập nhật công ca đã có.');
+      return;
+    }
     setSaving(true);
     setPopupError('');
     try {
@@ -161,6 +225,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
       if (!isDayOff) {
         payload.shifts = shifts.map(s => ({ start: s.start, end: s.end, workMode: s.workMode, notes: s.notes }));
       }
+      if (isEdit) payload.editNote = editNote;
       const res = await fetch('/api/attendance/timesheet/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
@@ -188,6 +253,25 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
     setShifts(prev => [...prev, { start: '13:30', end: '17:30', workMode: mode, notes: '' }]);
   };
 
+  /* ---------- Warning actions ---------- */
+  const dismissWarning = (permanent: boolean) => {
+    setShowWarning(false);
+    if (permanent) sessionStorage.setItem(DISMISS_KEY, '1');
+  };
+  const markYesterdayOff = async () => {
+    setShowWarning(false);
+    if (dismissPermanent) sessionStorage.setItem(DISMISS_KEY, '1');
+    try {
+      await fetch('/api/attendance/timesheet/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ workDate: warningDate, isDayOff: true }),
+      });
+      setNotice('Đã ghi nhận nghỉ làm ngày ' + warningDate);
+      await load(true);
+    } catch { /* ignore */ }
+  };
+
   const summary = data?.summary;
 
   return (
@@ -202,6 +286,28 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
       </header>
 
       <main className="mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-10">
+        {/* Yesterday warning banner */}
+        {showWarning && (
+          <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+            <div className="flex items-start gap-3">
+              <TriangleAlert className="mt-0.5 h-6 w-6 shrink-0 text-amber-600" />
+              <div className="flex-1">
+                <h3 className="text-base font-extrabold text-amber-900">Bạn chưa cập nhật công ca cho ngày hôm qua ({warningDate})</h3>
+                <p className="mt-1 text-sm text-amber-800">Vui lòng cập nhật công ca trong thời gian sớm nhất để đảm bảo dữ liệu chấm công chính xác.</p>
+                <label className="mt-3 flex items-center gap-2 text-xs font-bold text-amber-700">
+                  <input type="checkbox" checked={dismissPermanent} onChange={e => setDismissPermanent(e.target.checked)} className="h-3.5 w-3.5 rounded border-amber-400" />
+                  Không nhắc lại cảnh báo này
+                </label>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => { dismissWarning(dismissPermanent); void openPopup(warningDate); }} className="ft-btn ft-btn-primary"><CalendarDays className="h-4 w-4" />Cập nhật ngay</button>
+                  <button type="button" onClick={markYesterdayOff} className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-bold text-amber-800 transition hover:bg-amber-100"><Moon className="mr-1.5 inline h-4 w-4" />Hôm qua tôi nghỉ</button>
+                  <button type="button" onClick={() => dismissWarning(dismissPermanent)} className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-bold text-amber-700 transition hover:bg-amber-100">Bỏ qua</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Title row */}
         <section className="mb-7 flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -217,9 +323,9 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
 
         {error && <div className="mb-5 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800"><TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" /><span>{error}</span></div>}
 
-        {/* Summary cards + Records table */}
+        {/* Main grid: Records + Sidebar */}
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
-          {/* Records */}
+          {/* Records table */}
           <div className="rounded-2xl border bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -230,7 +336,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
             </div>
 
             <div className="mt-5 overflow-x-auto rounded-xl border">
-              <table className="ft-table min-w-[700px]">
+              <table className="ft-table min-w-[750px]">
                 <thead><tr><th>Ngày</th><th>Ca</th><th>Bắt đầu</th><th>Kết thúc</th><th>Thời lượng</th><th>Hình thức</th><th>Ghi chú</th><th></th></tr></thead>
                 <tbody>
                   {loading ? (
@@ -240,7 +346,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
                   ) : grouped.map(([dateStr, entries]) => (
                     entries.map((entry, idx) => (
                       <tr key={entry.id} className="hover:bg-blue-50/50">
-                        {idx === 0 && <td rowSpan={entries.length} className="whitespace-nowrap font-bold align-top">{formatDate(dateStr)}</td>}
+                        {idx === 0 && <td rowSpan={entries.length} className="whitespace-nowrap font-bold align-top">{formatDate(dateStr)}{entry.employee && <span className="mt-0.5 block text-xs font-normal text-slate-400">{entry.employee.name}</span>}</td>}
                         {entry.isDayOff ? (
                           <>
                             <td colSpan={5}><span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800"><Moon className="h-3.5 w-3.5" />Nghỉ làm</span></td>
@@ -251,7 +357,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
                             <td className="font-bold">Ca {entry.shiftNumber}</td>
                             <td className="tabular-nums">{entry.shiftStart}</td>
                             <td className="tabular-nums">{entry.shiftEnd}{entry.crossesMidnight && <span className="ml-1 text-xs text-amber-600" title="Qua nửa đêm">+1</span>}</td>
-                            <td className="tabular-nums">{formatDuration(entry.workedMinutes)}</td>
+                            <td className="tabular-nums">{fmtHours(entry.workedMinutes)}h</td>
                             <td>
                               <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${entry.workMode === 'online' ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'}`}>
                                 {entry.workMode === 'online' ? <Globe className="h-3 w-3" /> : <MapPin className="h-3 w-3" />}
@@ -263,7 +369,11 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
                         )}
                         {idx === 0 && (
                           <td rowSpan={entries.length} className="align-top">
-                            <button type="button" onClick={() => void openPopup(dateStr)} className="text-xs font-bold text-blue-600 hover:underline">Sửa</button>
+                            {canEditDate(dateStr) ? (
+                              <button type="button" onClick={() => void openPopup(dateStr)} className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline"><Edit3 className="h-3.5 w-3.5" />Sửa</button>
+                            ) : (
+                              <span className="text-xs text-slate-300" title="Liên hệ kế toán để chỉnh sửa">—</span>
+                            )}
                           </td>
                         )}
                       </tr>
@@ -272,23 +382,40 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
                 </tbody>
               </table>
             </div>
+
+            {/* Edit logs */}
+            {data?.editLogs && data.editLogs.length > 0 && (
+              <details className="mt-4">
+                <summary className="cursor-pointer text-xs font-bold text-slate-500 hover:text-slate-700"><FileText className="mr-1 inline h-3.5 w-3.5" />Nhật ký chỉnh sửa ({data.editLogs.length})</summary>
+                <div className="mt-2 max-h-48 space-y-1.5 overflow-y-auto">
+                  {data.editLogs.map(log => (
+                    <div key={log.id} className="rounded-lg border bg-slate-50 px-3 py-2 text-xs">
+                      <span className="font-bold text-slate-700">{log.editedByName}</span>
+                      <span className="text-slate-400"> · {formatDate(log.workDate)} · {new Date(log.createdAt).toLocaleString('vi-VN')}</span>
+                      <p className="mt-0.5 text-slate-600">{log.note}</p>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
 
           {/* Sidebar */}
           <aside className="space-y-4">
+            {/* Guidance */}
+            <div className="rounded-2xl border bg-emerald-50 p-5">
+              <div className="flex gap-3"><Coffee className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" /><div><h3 className="text-sm font-extrabold">Hướng dẫn</h3><p className="mt-1 text-xs leading-5 text-slate-600">Ca mặc định: Sáng 8:00–12:00, Chiều 13:30–17:30. Ngoài giờ hành chính hoặc cuối tuần sẽ mặc định Online. Bạn chỉ có thể chỉnh sửa công ca của hôm nay và hôm qua. Liên hệ kế toán để chỉnh sửa ngày trước đó.</p></div></div>
+            </div>
+
+            {/* Summary */}
             <div className="rounded-2xl border bg-white p-5 shadow-sm">
               <p className="text-xs font-bold uppercase text-emerald-600">Tổng quan</p>
               <h2 className="mt-1 text-xl font-extrabold">Tháng {month}</h2>
               <div className="mt-5 space-y-4">
-                <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-100 text-emerald-700"><CalendarDays className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{summary?.workDays ?? 0}</p><p className="text-xs text-slate-500">Ngày có công</p></div></div>
-                <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-100 text-blue-700"><Clock className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{formatDuration(summary?.totalMinutes ?? 0)}</p><p className="text-xs text-slate-500">Tổng giờ làm</p></div></div>
-                <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-amber-100 text-amber-700"><Moon className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{summary?.dayOffCount ?? 0}</p><p className="text-xs text-slate-500">Ngày nghỉ</p></div></div>
-                <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-violet-100 text-violet-700"><Laptop className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{summary?.onlineDays ?? 0}</p><p className="text-xs text-slate-500">Ngày online</p></div></div>
+                <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-100 text-emerald-700"><Clock className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{fmtHours(summary?.totalMinutes ?? 0)}<span className="ml-1 text-sm font-bold text-slate-400">giờ</span></p><p className="text-xs text-slate-500">Tổng giờ làm</p></div></div>
+                <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-100 text-blue-700"><MapPin className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{fmtHours(summary?.offlineMinutes ?? 0)}<span className="ml-1 text-sm font-bold text-slate-400">giờ</span></p><p className="text-xs text-slate-500">Trực tiếp</p></div></div>
+                <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-violet-100 text-violet-700"><Laptop className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{fmtHours(summary?.onlineMinutes ?? 0)}<span className="ml-1 text-sm font-bold text-slate-400">giờ</span></p><p className="text-xs text-slate-500">Online</p></div></div>
               </div>
-            </div>
-
-            <div className="rounded-2xl border bg-emerald-50 p-5">
-              <div className="flex gap-3"><Coffee className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" /><div><h3 className="text-sm font-extrabold">Hướng dẫn</h3><p className="mt-1 text-xs leading-5 text-slate-600">Ca mặc định: Sáng 8:00–12:00, Chiều 13:30–17:30. Ngoài giờ hành chính hoặc cuối tuần sẽ mặc định Online. Có thể thêm nhiều ca và chỉnh sửa tự do.</p></div></div>
             </div>
           </aside>
         </div>
@@ -296,64 +423,95 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
 
       {/* ---------- Popup ---------- */}
       {popupOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl border bg-white shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={e => { if (e.target === e.currentTarget) setPopupOpen(false); }}>
+          <div className="w-full max-w-3xl rounded-2xl border bg-white shadow-2xl">
             {/* Popup header */}
             <div className="flex items-center justify-between border-b px-6 py-4">
               <div>
-                <p className="text-xs font-bold uppercase text-emerald-600">{prefill?.existing.length ? 'Chỉnh sửa' : 'Thêm mới'}</p>
+                <p className="text-xs font-bold uppercase text-emerald-600">{isEdit ? 'Chỉnh sửa' : 'Thêm mới'}</p>
                 <h2 className="mt-0.5 text-lg font-extrabold">Công ca ngày {popupDate}</h2>
               </div>
               <button type="button" onClick={() => setPopupOpen(false)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X className="h-5 w-5" /></button>
             </div>
 
             <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
-              {/* Yesterday warning */}
-              {prefill?.yesterdayMissing && (
-                <div className="mb-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+              {/* Cannot edit message */}
+              {prefill && !prefill.canEdit ? (
+                <div className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800">
                   <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" />
-                  <span>Bạn chưa khai báo công ca ngày {prefill.yesterdayDate}. <button type="button" onClick={() => { setPopupOpen(false); void openPopup(prefill!.yesterdayDate); }} className="font-bold text-amber-900 underline">Khai báo ngay</button></span>
+                  <span>Bạn không có quyền chỉnh sửa ngày này. Hãy liên hệ kế toán nếu muốn chỉnh sửa giờ làm.</span>
                 </div>
-              )}
-
-              {/* Date picker */}
-              <label className="block"><span className="mb-1 block text-sm font-bold">Ngày</span><input type="date" className="ft-input" value={popupDate} onChange={e => { setPopupDate(e.target.value); void openPopup(e.target.value); }} /></label>
-
-              {/* Day off checkbox */}
-              <label className="mt-4 flex items-center gap-2 text-sm font-bold">
-                <input type="checkbox" checked={isDayOff} onChange={e => setIsDayOff(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-emerald-600" />
-                Nghỉ làm ngày này
-              </label>
-
-              {/* Shift rows */}
-              {!isDayOff && (
-                <div className="mt-5 space-y-3">
-                  <p className="text-xs font-bold uppercase text-slate-500">Các ca làm việc</p>
-                  {shifts.map((shift, idx) => (
-                    <div key={idx} className="rounded-xl border bg-slate-50 p-4">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-extrabold">Ca {idx + 1}</span>
-                        {shifts.length > 1 && <button type="button" onClick={() => removeShift(idx)} className="text-rose-500 hover:text-rose-700"><Trash2 className="h-4 w-4" /></button>}
-                      </div>
-                      <div className="mt-3 grid grid-cols-2 gap-3">
-                        <label><span className="mb-1 block text-xs font-bold text-slate-500">Bắt đầu</span><input type="time" className="ft-input" value={shift.start} onChange={e => updateShift(idx, 'start', e.target.value)} /></label>
-                        <label><span className="mb-1 block text-xs font-bold text-slate-500">Kết thúc</span><input type="time" className="ft-input" value={shift.end} onChange={e => updateShift(idx, 'end', e.target.value)} /></label>
-                      </div>
-                      <div className="mt-3">
-                        <span className="mb-1 block text-xs font-bold text-slate-500">Hình thức</span>
-                        <div className="grid grid-cols-2 gap-2">
-                          <button type="button" onClick={() => updateShift(idx, 'workMode', 'direct')} className={`flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-bold transition ${shift.workMode === 'direct' ? 'border-emerald-300 bg-emerald-100 text-emerald-800' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-200'}`}><MapPin className="h-3.5 w-3.5" />Trực tiếp</button>
-                          <button type="button" onClick={() => updateShift(idx, 'workMode', 'online')} className={`flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-bold transition ${shift.workMode === 'online' ? 'border-blue-300 bg-blue-100 text-blue-800' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-200'}`}><Globe className="h-3.5 w-3.5" />Online</button>
-                        </div>
-                      </div>
-                      <label className="mt-3 block"><span className="mb-1 block text-xs font-bold text-slate-500">Ghi chú</span><input type="text" className="ft-input" value={shift.notes} onChange={e => updateShift(idx, 'notes', e.target.value)} placeholder="Tùy chọn" maxLength={500} /></label>
+              ) : (
+                <>
+                  {/* Date picker */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <label className="block"><span className="mb-1 block text-sm font-bold">Ngày</span><input type="date" className="ft-input" value={popupDate} onChange={e => { setPopupDate(e.target.value); void openPopup(e.target.value); }} /></label>
+                    <div className="flex items-end pb-0.5">
+                      <label className="flex items-center gap-2 text-sm font-bold">
+                        <input type="checkbox" checked={isDayOff} onChange={e => setIsDayOff(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-emerald-600" />
+                        <Moon className="h-4 w-4 text-amber-600" /> Nghỉ làm ngày này
+                      </label>
                     </div>
-                  ))}
+                  </div>
 
-                  {shifts.length < 10 && (
-                    <button type="button" onClick={addShift} className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 py-3 text-sm font-bold text-slate-500 transition hover:border-emerald-400 hover:text-emerald-700"><Plus className="h-4 w-4" />Thêm ca</button>
+                  {/* Shift rows */}
+                  {!isDayOff && (
+                    <div className="mt-5 space-y-3">
+                      <p className="text-xs font-bold uppercase text-slate-500">Các ca làm việc</p>
+                      {shifts.map((shift, idx) => (
+                        <div key={idx} className="grid grid-cols-[1fr_1fr_auto] items-start gap-3 rounded-xl border bg-slate-50 px-4 py-3">
+                          {/* Row 1: times + mode + delete */}
+                          <div className="grid grid-cols-2 gap-3">
+                            <label><span className="mb-1 block text-xs font-bold text-slate-500">Bắt đầu</span><input type="time" className="ft-input" value={shift.start} onChange={e => updateShift(idx, 'start', e.target.value)} /></label>
+                            <label><span className="mb-1 block text-xs font-bold text-slate-500">Kết thúc</span><input type="time" className="ft-input" value={shift.end} onChange={e => updateShift(idx, 'end', e.target.value)} /></label>
+                          </div>
+                          <div>
+                            <span className="mb-1 block text-xs font-bold text-slate-500">Hình thức</span>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <button type="button" onClick={() => updateShift(idx, 'workMode', 'direct')} className={`flex items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-bold transition ${shift.workMode === 'direct' ? 'border-emerald-300 bg-emerald-100 text-emerald-800' : 'border-slate-200 bg-white text-slate-500 hover:border-emerald-200'}`}><MapPin className="h-3 w-3" />Trực tiếp</button>
+                              <button type="button" onClick={() => updateShift(idx, 'workMode', 'online')} className={`flex items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-bold transition ${shift.workMode === 'online' ? 'border-blue-300 bg-blue-100 text-blue-800' : 'border-slate-200 bg-white text-slate-500 hover:border-blue-200'}`}><Globe className="h-3 w-3" />Online</button>
+                            </div>
+                          </div>
+                          <div className="flex items-end pb-1">
+                            {shifts.length > 1 && <button type="button" onClick={() => removeShift(idx)} className="rounded-lg p-1.5 text-rose-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>}
+                          </div>
+                          {/* Row 2: notes spanning full width */}
+                          <div className="col-span-3">
+                            <input type="text" className="ft-input text-xs" value={shift.notes} onChange={e => updateShift(idx, 'notes', e.target.value)} placeholder="Ghi chú ca (tùy chọn)" maxLength={500} />
+                          </div>
+                        </div>
+                      ))}
+
+                      {shifts.length < 10 && (
+                        <button type="button" onClick={addShift} className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 py-2.5 text-sm font-bold text-slate-500 transition hover:border-emerald-400 hover:text-emerald-700"><Plus className="h-4 w-4" />Thêm ca</button>
+                      )}
+                    </div>
                   )}
-                </div>
+
+                  {/* Edit note (required for edits) */}
+                  {isEdit && (
+                    <div className="mt-5">
+                      <label><span className="mb-1 block text-sm font-bold text-amber-800">Ghi chú chỉnh sửa <span className="text-rose-500">*</span></span>
+                      <textarea className="ft-input min-h-16" value={editNote} onChange={e => setEditNote(e.target.value)} placeholder="Lý do chỉnh sửa công ca..." maxLength={1000} /></label>
+                    </div>
+                  )}
+
+                  {/* Existing edit logs for this date */}
+                  {prefill?.editLogs && prefill.editLogs.length > 0 && (
+                    <div className="mt-4">
+                      <p className="text-xs font-bold text-slate-500"><FileText className="mr-1 inline h-3.5 w-3.5" />Lịch sử chỉnh sửa ngày này</p>
+                      <div className="mt-1.5 max-h-28 space-y-1 overflow-y-auto">
+                        {prefill.editLogs.map(log => (
+                          <div key={log.id} className="rounded-lg border bg-slate-50 px-3 py-1.5 text-xs">
+                            <span className="font-bold">{log.editedByName}</span>
+                            <span className="text-slate-400"> · {new Date(log.createdAt).toLocaleString('vi-VN')}</span>
+                            <p className="text-slate-600">{log.note}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               {popupError && <div className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700">{popupError}</div>}
@@ -362,10 +520,12 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
             {/* Popup footer */}
             <div className="flex items-center justify-end gap-2 border-t px-6 py-4">
               <button type="button" onClick={() => setPopupOpen(false)} className="ft-btn ft-btn-secondary">Hủy</button>
-              <button type="button" onClick={() => void saveTimesheet()} disabled={saving || (!isDayOff && shifts.length === 0)} className="ft-btn ft-btn-primary">
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                {saving ? 'Đang lưu...' : 'Lưu'}
-              </button>
+              {(!prefill || prefill.canEdit) && (
+                <button type="button" onClick={() => void saveTimesheet()} disabled={saving || (!isDayOff && shifts.length === 0)} className="ft-btn ft-btn-primary">
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  {saving ? 'Đang lưu...' : 'Lưu'}
+                </button>
+              )}
             </div>
           </div>
         </div>

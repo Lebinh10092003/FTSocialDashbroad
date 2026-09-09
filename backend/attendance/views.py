@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from authentication.models import UserProfile
 from authentication.permissions import IsAuthenticated
 
-from .models import AttendanceRecord, TimesheetEntry
+from .models import AttendanceRecord, TimesheetEditLog, TimesheetEntry
 
 
 # ---------------------------------------------------------------------------
@@ -21,6 +21,8 @@ SHIFTS = {
     "AFTERNOON": {"name": "Ca chiều", "start": time(13, 30), "end": time(17, 30), "expected": 240},
     "EVENING": {"name": "Ca tối", "start": time(18, 0), "end": time(22, 0), "expected": 240},
 }
+
+ACCOUNTING_DEPT_NAMES = {"kế toán", "ke toan", "accounting"}
 
 
 # ---------------------------------------------------------------------------
@@ -51,18 +53,31 @@ def _parse_time(raw):
     return None
 
 
-def _is_business_hours(work_date, start_time):
-    """Check if the shift start falls within Mon-Fri 8:00-17:30."""
-    if work_date.weekday() >= 5:
-        return False
-    return time(8, 0) <= start_time <= time(17, 30)
+def _is_privileged(request):
+    """Admin or accounting department → full access."""
+    role = getattr(request, "user_role", "EMPLOYEE")
+    if role == "ADMIN":
+        return True
+    dept = getattr(request.user, "department", None)
+    if dept and dept.name.lower().strip() in ACCOUNTING_DEPT_NAMES:
+        return True
+    return False
+
+
+def _can_edit_date(request, work_date):
+    """Regular users can only edit today and yesterday. Privileged users can edit any date."""
+    if _is_privileged(request):
+        return True
+    today = timezone.localdate()
+    yesterday = today - timedelta(days=1)
+    return work_date in (today, yesterday)
 
 
 # ---------------------------------------------------------------------------
 # Timesheet entry payload
 # ---------------------------------------------------------------------------
-def _entry_payload(entry):
-    return {
+def _entry_payload(entry, include_employee=False):
+    payload = {
         "id": entry.id,
         "workDate": entry.work_date.isoformat(),
         "shiftNumber": entry.shift_number,
@@ -74,29 +89,73 @@ def _entry_payload(entry):
         "notes": entry.notes,
         "workedMinutes": entry.worked_minutes,
     }
+    if include_employee:
+        payload["employee"] = {
+            "email": entry.employee_id,
+            "name": entry.employee.name or entry.employee_id,
+            "department": entry.employee.department.name if entry.employee.department else "",
+        }
+    return payload
+
+
+def _log_payload(log):
+    return {
+        "id": log.id,
+        "workDate": log.work_date.isoformat(),
+        "editedBy": log.edited_by_id,
+        "editedByName": log.edited_by.name if log.edited_by else log.edited_by_id,
+        "note": log.note,
+        "oldData": log.old_data,
+        "newData": log.new_data,
+        "createdAt": log.created_at.isoformat(),
+    }
+
+
+def _snapshot_entries(entries):
+    """Serialize entries to JSON-safe dict for edit log."""
+    return [
+        {
+            "shift": e.shift_number,
+            "start": e.shift_start.isoformat(timespec="minutes"),
+            "end": e.shift_end.isoformat(timespec="minutes"),
+            "mode": e.work_mode,
+            "dayOff": e.is_day_off,
+            "notes": e.notes,
+        }
+        for e in entries
+    ]
 
 
 # ---------------------------------------------------------------------------
-# New timesheet endpoints
+# Auto-purge: keep only current + previous month
+# ---------------------------------------------------------------------------
+def _purge_old_entries():
+    today = timezone.localdate()
+    first_of_month = today.replace(day=1)
+    first_of_prev = (first_of_month - timedelta(days=1)).replace(day=1)
+    TimesheetEntry.objects.filter(work_date__lt=first_of_prev).delete()
+    TimesheetEditLog.objects.filter(work_date__lt=first_of_prev).delete()
+
+
+# ---------------------------------------------------------------------------
+# Timesheet endpoints
 # ---------------------------------------------------------------------------
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def timesheet_list(request):
     """Return timesheet entries for a month, with summary stats."""
+    _purge_old_entries()
+
     start, end = _month_range(request.query_params.get("month"))
-    today = timezone.localdate()
-    yesterday = today - timedelta(days=1)
+    privileged = _is_privileged(request)
 
     scope = str(request.query_params.get("scope") or "mine").lower()
-    role = getattr(request, "user_role", "EMPLOYEE")
     queryset = TimesheetEntry.objects.select_related("employee", "employee__department").filter(
         work_date__gte=start, work_date__lt=end,
     )
-    if scope == "team" and role == "ADMIN":
-        pass  # no filter — see all
-    elif scope == "team" and role == "MANAGER":
-        emails = list(UserProfile.objects.filter(manager_id=request.user.email).values_list("email", flat=True))
-        queryset = queryset.filter(employee_id__in=emails + [request.user.email])
+
+    if scope == "all" and privileged:
+        pass  # see all
     else:
         queryset = queryset.filter(employee=request.user)
         scope = "mine"
@@ -104,27 +163,30 @@ def timesheet_list(request):
     entries = list(queryset.order_by("-work_date", "shift_number")[:2000])
     own_entries = [e for e in entries if e.employee_id == request.user.email] if scope != "mine" else entries
 
-    work_dates = {e.work_date for e in own_entries if not e.is_day_off}
-    day_off_dates = {e.work_date for e in own_entries if e.is_day_off}
-    online_dates = {e.work_date for e in own_entries if e.work_mode == "online" and not e.is_day_off}
     total_minutes = sum(e.worked_minutes for e in own_entries)
+    online_minutes = sum(e.worked_minutes for e in own_entries if e.work_mode == "online" and not e.is_day_off)
+    offline_minutes = sum(e.worked_minutes for e in own_entries if e.work_mode == "direct" and not e.is_day_off)
 
-    yesterday_filled = TimesheetEntry.objects.filter(
-        employee=request.user, work_date=yesterday,
-    ).exists()
+    # Edit logs for this month
+    log_qs = TimesheetEditLog.objects.select_related("edited_by").filter(
+        work_date__gte=start, work_date__lt=end,
+    )
+    if scope == "mine":
+        log_qs = log_qs.filter(employee=request.user)
+    logs = list(log_qs.order_by("-created_at")[:200])
 
     return Response({
         "serverTime": _local(timezone.now()).isoformat(),
         "scope": scope,
         "month": start.strftime("%Y-%m"),
-        "entries": [_entry_payload(e) for e in entries],
+        "isPrivileged": privileged,
+        "entries": [_entry_payload(e, include_employee=(scope != "mine")) for e in entries],
         "summary": {
-            "workDays": len(work_dates),
             "totalMinutes": total_minutes,
-            "dayOffCount": len(day_off_dates),
-            "onlineDays": len(online_dates),
+            "onlineMinutes": online_minutes,
+            "offlineMinutes": offline_minutes,
         },
-        "yesterdayFilled": yesterday_filled,
+        "editLogs": [_log_payload(lg) for lg in logs],
     })
 
 
@@ -138,8 +200,27 @@ def timesheet_save(request):
     except (TypeError, ValueError):
         return Response({"error": "Ngày không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
 
+    # Determine target employee (privileged users can edit others)
+    target_email = str(request.data.get("employeeEmail") or "").strip()
+    privileged = _is_privileged(request)
+    if target_email and privileged:
+        try:
+            target_user = UserProfile.objects.get(email=target_email)
+        except UserProfile.DoesNotExist:
+            return Response({"error": "Nhân viên không tồn tại."}, status=status.HTTP_404_NOT_FOUND)
+    else:
+        target_user = request.user
+
+    # Permission check
+    if not _can_edit_date(request, work_date):
+        return Response(
+            {"error": "Bạn không có quyền chỉnh sửa ngày này. Hãy liên hệ kế toán nếu muốn chỉnh sửa giờ làm."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
     is_day_off = bool(request.data.get("isDayOff"))
     shifts = request.data.get("shifts") or []
+    edit_note = str(request.data.get("editNote") or "").strip()
 
     if not is_day_off and not shifts:
         return Response({"error": "Vui lòng thêm ít nhất một ca hoặc đánh dấu nghỉ."}, status=status.HTTP_400_BAD_REQUEST)
@@ -168,10 +249,24 @@ def timesheet_save(request):
             })
 
     with transaction.atomic():
-        TimesheetEntry.objects.filter(employee=request.user, work_date=work_date).delete()
+        existing = list(
+            TimesheetEntry.objects.filter(employee=target_user, work_date=work_date).order_by("shift_number")
+        )
+        is_edit = len(existing) > 0
+
+        # Require edit note when modifying existing entries
+        if is_edit and not edit_note:
+            return Response(
+                {"error": "Vui lòng nhập ghi chú chỉnh sửa khi cập nhật công ca đã có."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        old_snapshot = _snapshot_entries(existing) if is_edit else []
+
+        TimesheetEntry.objects.filter(employee=target_user, work_date=work_date).delete()
         if is_day_off:
             TimesheetEntry.objects.create(
-                employee=request.user,
+                employee=target_user,
                 work_date=work_date,
                 shift_number=1,
                 shift_start=time(0, 0),
@@ -181,12 +276,25 @@ def timesheet_save(request):
         else:
             for shift_data in parsed_shifts:
                 TimesheetEntry.objects.create(
-                    employee=request.user,
+                    employee=target_user,
                     work_date=work_date,
                     **shift_data,
                 )
 
-    saved = list(TimesheetEntry.objects.filter(employee=request.user, work_date=work_date).order_by("shift_number"))
+        saved = list(
+            TimesheetEntry.objects.filter(employee=target_user, work_date=work_date).order_by("shift_number")
+        )
+
+        if is_edit:
+            TimesheetEditLog.objects.create(
+                employee=target_user,
+                work_date=work_date,
+                edited_by=request.user,
+                note=edit_note[:1000],
+                old_data={"shifts": old_snapshot},
+                new_data={"shifts": _snapshot_entries(saved)},
+            )
+
     return Response({
         "message": "Đã lưu công ca." if not is_day_off else "Đã ghi nhận nghỉ làm.",
         "entries": [_entry_payload(e) for e in saved],
@@ -209,42 +317,91 @@ def timesheet_prefill(request):
     else:
         target_date = today
 
-    yesterday = today - timedelta(days=1)
-    yesterday_filled = TimesheetEntry.objects.filter(employee=request.user, work_date=yesterday).exists()
-    target_filled = TimesheetEntry.objects.filter(employee=request.user, work_date=target_date).exists()
+    # Determine target employee
+    target_email = request.query_params.get("employee")
+    privileged = _is_privileged(request)
+    if target_email and privileged:
+        try:
+            target_user = UserProfile.objects.get(email=target_email)
+        except UserProfile.DoesNotExist:
+            target_user = request.user
+    else:
+        target_user = request.user
 
-    # Existing entries for the target date (for edit mode)
+    yesterday = today - timedelta(days=1)
+    yesterday_filled = TimesheetEntry.objects.filter(employee=target_user, work_date=yesterday).exists()
+    target_filled = TimesheetEntry.objects.filter(employee=target_user, work_date=target_date).exists()
+
     existing = list(
-        TimesheetEntry.objects.filter(employee=request.user, work_date=target_date).order_by("shift_number")
+        TimesheetEntry.objects.filter(employee=target_user, work_date=target_date).order_by("shift_number")
     )
 
-    # Determine default work mode
     is_weekend = target_date.weekday() >= 5
     default_mode = "online" if is_weekend else "direct"
 
-    # Auto-fill: suggest 2 standard shifts if after 16:00 and yesterday is done
-    auto_fill = (
-        now_local.hour >= 16
-        and yesterday_filled
-        and target_date == today
-        and not target_filled
-    )
-
+    # Auto-fill logic:
+    # After 16:00 today + yesterday done → 2 shifts
+    # 7:00-15:59 today → 1 shift (morning only)
+    # Filling for a past date → 2 shifts
     suggested_shifts = []
-    if auto_fill:
-        suggested_shifts = [
-            {"start": "08:00", "end": "12:00", "workMode": default_mode, "notes": ""},
-            {"start": "13:30", "end": "17:30", "workMode": default_mode, "notes": ""},
-        ]
+    if not target_filled and not existing:
+        if target_date == today:
+            if now_local.hour >= 16 and yesterday_filled:
+                suggested_shifts = [
+                    {"start": "08:00", "end": "12:00", "workMode": default_mode, "notes": ""},
+                    {"start": "13:30", "end": "17:30", "workMode": default_mode, "notes": ""},
+                ]
+            elif 7 <= now_local.hour < 16:
+                suggested_shifts = [
+                    {"start": "08:00", "end": "12:00", "workMode": default_mode, "notes": ""},
+                ]
+            else:
+                suggested_shifts = [
+                    {"start": "08:00", "end": "12:00", "workMode": default_mode, "notes": ""},
+                ]
+        else:
+            # Past date → suggest 2 shifts
+            suggested_shifts = [
+                {"start": "08:00", "end": "12:00", "workMode": default_mode, "notes": ""},
+                {"start": "13:30", "end": "17:30", "workMode": default_mode, "notes": ""},
+            ]
+
+    # Yesterday warning: check work schedules for weekend logic
+    yesterday_warning = False
+    if target_date == today and not yesterday_filled:
+        days_ago = (today - yesterday).days
+        if days_ago == 1:  # only warn for exactly yesterday
+            if yesterday.weekday() >= 5:
+                # Weekend: only warn if 3+ work items or has training
+                from work_schedule.models import WorkItem
+                yesterday_items = WorkItem.objects.filter(
+                    executor=request.user, work_date=yesterday,
+                )
+                item_count = yesterday_items.count()
+                has_training = yesterday_items.filter(training_session__isnull=False).exists()
+                if item_count >= 3 or has_training:
+                    yesterday_warning = True
+            else:
+                yesterday_warning = True
+
+    # Edit logs for this date
+    edit_logs = list(
+        TimesheetEditLog.objects.select_related("edited_by").filter(
+            employee=target_user, work_date=target_date,
+        ).order_by("-created_at")[:50]
+    )
 
     return Response({
         "targetDate": target_date.isoformat(),
-        "autoFill": auto_fill,
+        "autoFill": len(suggested_shifts) > 0 and not existing,
         "shifts": suggested_shifts,
-        "yesterdayMissing": not yesterday_filled and target_date == today,
+        "yesterdayWarning": yesterday_warning,
         "yesterdayDate": yesterday.isoformat(),
         "defaultWorkMode": default_mode,
         "existing": [_entry_payload(e) for e in existing],
+        "canEdit": _can_edit_date(request, target_date),
+        "isPrivileged": privileged,
+        "editLogs": [_log_payload(lg) for lg in edit_logs],
     })
 
 

@@ -77,3 +77,22 @@ class TimesheetEntry(models.Model):
         if self.is_day_off:
             return f"{self.employee_id} · {self.work_date} · Nghỉ"
         return f"{self.employee_id} · {self.work_date} · Ca {self.shift_number} ({self.shift_start.strftime('%H:%M')}-{self.shift_end.strftime('%H:%M')})"
+
+
+class TimesheetEditLog(models.Model):
+    employee = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name="timesheet_edit_logs")
+    work_date = models.DateField()
+    edited_by = models.ForeignKey(UserProfile, on_delete=models.SET_NULL, null=True, related_name="timesheet_edits_made")
+    note = models.CharField(max_length=1000)
+    old_data = models.JSONField(default=dict, blank=True)
+    new_data = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["employee", "work_date"], name="editlog_employee_date_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.employee_id} · {self.work_date} · by {self.edited_by_id}"
