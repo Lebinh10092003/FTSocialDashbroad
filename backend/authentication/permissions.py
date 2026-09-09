@@ -53,6 +53,13 @@ class IsAuthenticated(permissions.BasePermission):
         return has_module_access(request)
 
 
+class IsWorkspaceAuthenticated(permissions.BasePermission):
+    """Authentication-only permission for cross-module facilities such as notifications."""
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        return user is not None and bool(getattr(user, "email", ""))
+
+
 class IsAuthenticatedOrReadOnly(permissions.BasePermission):
     """Public read access for normal workspace data; all mutations require authentication."""
     def has_permission(self, request, view):

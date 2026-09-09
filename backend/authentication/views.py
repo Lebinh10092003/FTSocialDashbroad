@@ -36,7 +36,7 @@ from .models import (
     WorkspaceNotification, WorkspaceNotificationRead,
 )
 from .notifications import notification_visible_to, notify_workspace
-from .permissions import IsAdmin, IsAuthenticated, IsManagerOrAdmin, request_role
+from .permissions import IsAdmin, IsAuthenticated, IsManagerOrAdmin, IsWorkspaceAuthenticated, request_role
 
 User = get_user_model()
 VALID_ROLES = {"ADMIN", "MANAGER", "EMPLOYEE", "VIEWER"}
@@ -1050,7 +1050,7 @@ def _actor_name(request):
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsWorkspaceAuthenticated])
 def workspace_notifications(request):
     profile = request.user
     rows = WorkspaceNotification.objects.prefetch_related("read_receipts").all()[:250]
@@ -1068,7 +1068,7 @@ def workspace_notifications(request):
 
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsWorkspaceAuthenticated])
 def read_workspace_notification(request, notification_id):
     notification = WorkspaceNotification.objects.filter(pk=notification_id).first()
     if not notification or not notification_visible_to(notification, request.user):
@@ -1078,7 +1078,7 @@ def read_workspace_notification(request, notification_id):
 
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsWorkspaceAuthenticated])
 def read_all_workspace_notifications(request):
     rows = [item for item in WorkspaceNotification.objects.all()[:250] if notification_visible_to(item, request.user)]
     WorkspaceNotificationRead.objects.bulk_create(

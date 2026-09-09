@@ -32,3 +32,11 @@ class JobTitleAndNotificationTests(TestCase):
         response = self.client.get("/api/notifications")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["notifications"][0]["category"], "personnel")
+
+    def test_notification_without_target_is_broadcast(self):
+        from .models import WorkspaceNotification
+        employee = UserProfile.objects.create(email="employee@example.test", role="EMPLOYEE")
+        WorkspaceNotification.objects.create(event_key="broadcast", title="Biến động Workspace", message="Nội dung")
+        self.client.force_authenticate(employee)
+        response = self.client.get("/api/notifications")
+        self.assertEqual(response.data["notifications"][0]["title"], "Biến động Workspace")

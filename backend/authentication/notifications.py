@@ -30,11 +30,14 @@ def notification_visible_to(notification, profile):
     if str(profile.role).upper() == 'ADMIN':
         return True
     email = str(profile.email).strip().lower()
-    if email in {str(value).strip().lower() for value in (notification.target_emails or [])}:
-        return True
+    emails = {str(value).strip().lower() for value in (notification.target_emails or [])}
     roles = {str(value).upper() for value in (notification.target_roles or [])}
+    targets = set(notification.target_modules or [])
+    if not emails and not roles and not targets:
+        return True
+    if email in emails:
+        return True
     if roles and str(profile.role).upper() in roles:
         return True
     modules = set(profile.access_modules or [])
-    targets = set(notification.target_modules or [])
     return bool(targets and modules.intersection(targets))
