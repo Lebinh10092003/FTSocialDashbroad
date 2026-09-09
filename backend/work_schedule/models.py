@@ -106,10 +106,14 @@ class WorkScheduleSheetSyncLease(models.Model):
 class WorkScheduleSheetInboundEvent(models.Model):
     """One onEdit webhook call from the Apps Script trigger (Sheet -> Web direction)."""
 
+    STATUS_PROCESSING = "processing"
     STATUS_PROCESSED = "processed"
+    STATUS_SKIPPED = "skipped"
     STATUS_FAILED = "failed"
     STATUS_CHOICES = [
+        (STATUS_PROCESSING, "Đang xử lý"),
         (STATUS_PROCESSED, "Đã xử lý"),
+        (STATUS_SKIPPED, "Bỏ qua do đang đồng bộ"),
         (STATUS_FAILED, "Lỗi"),
     ]
 

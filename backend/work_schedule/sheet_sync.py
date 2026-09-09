@@ -32,6 +32,8 @@ EMPLOYEE_EMAILS = {
 }
 EMAIL_EMPLOYEES = {email: employee_id for employee_id, email in EMPLOYEE_EMAILS.items()}
 WEEKDAYS = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
+INCREMENTAL_SYNC_LEASE_SECONDS = 300
+TWO_WAY_SYNC_LEASE_SECONDS = 1800
 
 
 def deterministic_sheet_uid(row_number, task_index):
@@ -48,7 +50,9 @@ def _service(google_token=None):
 def _rows(service):
     result = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"'{SHEET_NAME}'!A2:K6109",
+        # Open-ended so rows appended after the original 6109-row grid are also
+        # part of future full-sync scans.
+        range=f"'{SHEET_NAME}'!A2:K",
         valueRenderOption="FORMATTED_VALUE",
     ).execute()
     return result.get("values", [])
@@ -133,6 +137,36 @@ def ensure_sync_columns(service):
         {"updateDimensionProperties": {"range": {"sheetId": SHEET_ID, "dimension": "COLUMNS", "startIndex": 9, "endIndex": 11}, "properties": {"hiddenByUser": True}, "fields": "hiddenByUser"}},
     ])
     service.spreadsheets().batchUpdate(spreadsheetId=SPREADSHEET_ID, body={"requests": requests}).execute()
+
+
+def ensure_sheet_row_capacity(service, required_row):
+    """Grow the tab before values.batchUpdate targets a row beyond its grid."""
+    metadata = service.spreadsheets().get(
+        spreadsheetId=SPREADSHEET_ID,
+        fields="sheets.properties(sheetId,gridProperties(rowCount))",
+    ).execute()
+    target = next(
+        (sheet.get("properties", {}) for sheet in metadata.get("sheets", [])
+         if sheet.get("properties", {}).get("sheetId") == SHEET_ID),
+        None,
+    )
+    if not target:
+        raise RuntimeError("Không tìm thấy tab Lịch công tác.")
+    current_rows = int(target.get("gridProperties", {}).get("rowCount", 0))
+    if required_row <= current_rows:
+        return current_rows
+    rows_to_add = max(required_row - current_rows, 500)
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=SPREADSHEET_ID,
+        body={"requests": [{
+            "appendDimension": {
+                "sheetId": SHEET_ID,
+                "dimension": "ROWS",
+                "length": rows_to_add,
+            }
+        }]},
+    ).execute()
+    return current_rows + rows_to_add
 
 
 def _ingest_row(offset, row, today):
@@ -261,6 +295,7 @@ def push_groups_to_sheet(service, groups, force=False):
             updates.append({"range": f"'{SHEET_NAME}'!H{row_number}:I{row_number}", "values": [[EMAIL_EMPLOYEES.get(email, ""), record_id]]})
         synced.append((email, work_date, row_number, new_hash, items))
     if updates:
+        ensure_sheet_row_capacity(service, max(row[2] for row in synced))
         service.spreadsheets().values().batchUpdate(
             spreadsheetId=SPREADSHEET_ID,
             body={"valueInputOption": "USER_ENTERED", "data": updates},
@@ -275,19 +310,31 @@ def push_groups_to_sheet(service, groups, force=False):
 
 
 @contextmanager
-def sync_lease(seconds=300):
+def sync_lease(seconds=INCREMENTAL_SYNC_LEASE_SECONDS):
+    """Acquire the shared Sheet-sync lease.
+
+    ``locked_until`` doubles as a lease generation token. The conditional cleanup
+    prevents an expired worker from clearing a lease that a newer worker acquired.
+    A dead worker therefore blocks only until its timeout, never indefinitely.
+    """
     now = timezone.now()
+    acquired_until = now + timedelta(seconds=seconds)
     with transaction.atomic():
         lease, _ = WorkScheduleSheetSyncLease.objects.select_for_update().get_or_create(key="ft-work-schedule")
         if lease.locked_until and lease.locked_until > now:
             yield False
             return
-        lease.locked_until = now + timedelta(seconds=seconds)
+        lease.locked_until = acquired_until
         lease.save(update_fields=["locked_until"])
     try:
         yield True
     finally:
-        WorkScheduleSheetSyncLease.objects.filter(key="ft-work-schedule").update(locked_until=None)
+        # Only the owner of this exact lease generation may release it. If this
+        # worker outlived its timeout and another worker took over, leave the new
+        # owner's lease untouched.
+        WorkScheduleSheetSyncLease.objects.filter(
+            key="ft-work-schedule", locked_until=acquired_until
+        ).update(locked_until=None)
 
 
 def sync_to_sheet(google_token=None, force=False):
@@ -337,14 +384,17 @@ def initial_two_way_sync(google_token=None):
     start = today.replace(day=1)
     month_end = today.replace(day=monthrange(today.year, today.month)[1])
     end = month_end + timedelta(days=14)
-    return _two_way_sync(google_token, start, end)
+    with sync_lease(seconds=TWO_WAY_SYNC_LEASE_SECONDS) as acquired:
+        if not acquired:
+            return {"busy": True, "message": "Một lượt đồng bộ khác đang chạy."}
+        return _two_way_sync(google_token, start, end)
 
 
 def full_two_way_sync(google_token=None):
     """Re-read the complete configured Sheet range and reconcile all dated rows."""
-    with sync_lease() as acquired:
+    with sync_lease(seconds=TWO_WAY_SYNC_LEASE_SECONDS) as acquired:
         if not acquired:
-            raise RuntimeError("Một lượt đồng bộ khác đang chạy.")
+            return {"busy": True, "message": "Một lượt đồng bộ khác đang chạy."}
         return _two_way_sync(google_token, datetime(1900, 1, 1).date(), datetime(9999, 12, 31).date())
 
 

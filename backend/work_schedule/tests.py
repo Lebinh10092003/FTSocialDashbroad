@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -8,9 +9,16 @@ from rest_framework.authtoken.models import Token
 
 from authentication.models import UserProfile
 
-from .models import WorkItem, WorkScheduleSheetChange, WorkScheduleSheetInboundEvent
+from .models import WorkItem, WorkScheduleSheetChange, WorkScheduleSheetInboundEvent, WorkScheduleSheetSyncLease
 from .sheet_parser import assessment_notes, parse_sheet_tasks, status_from_note, training_end
-from .sheet_sync import EMPLOYEE_EMAILS, _group_values, _row_hash, deterministic_sheet_uid
+from .sheet_sync import (
+    EMPLOYEE_EMAILS,
+    _group_values,
+    _row_hash,
+    deterministic_sheet_uid,
+    ensure_sheet_row_capacity,
+    sync_lease,
+)
 from .training_sync import sync_work_item_from_training
 
 
@@ -472,6 +480,67 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(manager_row["reviewPercent"], 85)
 
 
+class WorkScheduleSheetLeaseTests(TestCase):
+    def test_lease_is_released_when_sync_raises(self):
+        with self.assertRaises(RuntimeError):
+            with sync_lease(seconds=60) as acquired:
+                self.assertTrue(acquired)
+                raise RuntimeError("sync failed")
+
+        lease = WorkScheduleSheetSyncLease.objects.get(key="ft-work-schedule")
+        self.assertIsNone(lease.locked_until)
+
+    def test_active_lease_rejects_a_second_sync(self):
+        with sync_lease(seconds=60) as first_acquired:
+            self.assertTrue(first_acquired)
+            with sync_lease(seconds=60) as second_acquired:
+                self.assertFalse(second_acquired)
+
+    def test_stale_lease_can_be_reacquired(self):
+        WorkScheduleSheetSyncLease.objects.create(
+            key="ft-work-schedule",
+            locked_until=timezone.now() - timedelta(seconds=1),
+        )
+        with sync_lease(seconds=60) as acquired:
+            self.assertTrue(acquired)
+
+    def test_expired_owner_cannot_release_a_newer_lease(self):
+        replacement_expiry = timezone.now() + timedelta(minutes=10)
+        with sync_lease(seconds=60) as acquired:
+            self.assertTrue(acquired)
+            WorkScheduleSheetSyncLease.objects.filter(key="ft-work-schedule").update(
+                locked_until=replacement_expiry
+            )
+
+        lease = WorkScheduleSheetSyncLease.objects.get(key="ft-work-schedule")
+        self.assertEqual(lease.locked_until, replacement_expiry)
+
+
+class WorkScheduleSheetCapacityTests(TestCase):
+    def test_sheet_is_extended_before_writing_beyond_grid(self):
+        service = mock.Mock()
+        service.spreadsheets.return_value.get.return_value.execute.return_value = {
+            "sheets": [{"properties": {"sheetId": 1443841670, "gridProperties": {"rowCount": 6109}}}]
+        }
+
+        resulting_rows = ensure_sheet_row_capacity(service, 6110)
+
+        self.assertEqual(resulting_rows, 6609)
+        body = service.spreadsheets.return_value.batchUpdate.call_args.kwargs["body"]
+        self.assertEqual(body["requests"][0]["appendDimension"]["length"], 500)
+
+    def test_sheet_is_not_extended_when_target_row_already_fits(self):
+        service = mock.Mock()
+        service.spreadsheets.return_value.get.return_value.execute.return_value = {
+            "sheets": [{"properties": {"sheetId": 1443841670, "gridProperties": {"rowCount": 7000}}}]
+        }
+
+        resulting_rows = ensure_sheet_row_capacity(service, 6110)
+
+        self.assertEqual(resulting_rows, 7000)
+        service.spreadsheets.return_value.batchUpdate.assert_not_called()
+
+
 @mock.patch.dict(os.environ, {"SHEET_WEBHOOK_SECRET": "test-webhook-secret"})
 class WorkScheduleSheetWebhookTests(TestCase):
     """NOTE: migrations 0004/0006/0009/0010 seed real historical WorkItem/WorkScheduleSheetChange
@@ -590,6 +659,41 @@ class WorkScheduleSheetWebhookTests(TestCase):
             "sheet_name": "Tab khác",
         })
         self.assertEqual(response.status_code, 400, response.content)
+        mock_full_sync.assert_not_called()
+
+    @mock.patch("work_schedule.sheet_sync.full_two_way_sync")
+    def test_full_sync_busy_is_acknowledged_without_a_gateway_error(self, mock_full_sync):
+        mock_full_sync.return_value = {"busy": True, "message": "Một lượt đồng bộ khác đang chạy."}
+        response = self.post({
+            "event_id": "evt-full-busy",
+            "event_type": "full_sync",
+            "sheet_name": "Lịch công tác",
+            "reason": "watchdog",
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["status"], "skipped_busy")
+        event = WorkScheduleSheetInboundEvent.objects.get(event_id="evt-full-busy")
+        self.assertEqual(event.status, WorkScheduleSheetInboundEvent.STATUS_SKIPPED)
+
+    @mock.patch("work_schedule.sheet_sync.full_two_way_sync")
+    def test_duplicate_in_flight_full_sync_returns_accepted(self, mock_full_sync):
+        payload = {
+            "event_type": "full_sync",
+            "sheet_name": "Lịch công tác",
+            "reason": "watchdog",
+        }
+        WorkScheduleSheetInboundEvent.objects.create(
+            event_id="evt-full-in-flight",
+            row_number=1,
+            payload=payload,
+            status=WorkScheduleSheetInboundEvent.STATUS_PROCESSING,
+        )
+
+        response = self.post({"event_id": "evt-full-in-flight", **payload})
+
+        self.assertEqual(response.status_code, 202, response.content)
+        self.assertEqual(response.json()["status"], WorkScheduleSheetInboundEvent.STATUS_PROCESSING)
         mock_full_sync.assert_not_called()
 
     @mock.patch("work_schedule.sheet_sync.ensure_sync_columns")

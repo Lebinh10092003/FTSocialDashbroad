@@ -666,7 +666,7 @@ def work_schedule_sheet_webhook(request):
         }
         event, created = WorkScheduleSheetInboundEvent.objects.get_or_create(
             event_id=event_id,
-            defaults={"row_number": 1, "payload": event_payload, "status": WorkScheduleSheetInboundEvent.STATUS_PROCESSED},
+            defaults={"row_number": 1, "payload": event_payload, "status": WorkScheduleSheetInboundEvent.STATUS_PROCESSING},
         )
         if not created and event.status == WorkScheduleSheetInboundEvent.STATUS_PROCESSED:
             return Response({
@@ -676,13 +676,39 @@ def work_schedule_sheet_webhook(request):
                 "createdCount": event.created_count,
                 "updatedCount": event.updated_count,
             })
+        if not created and event.status == WorkScheduleSheetInboundEvent.STATUS_PROCESSING:
+            return Response({
+                "message": "Sự kiện full_sync này đang được xử lý (bỏ qua request trùng lặp).",
+                "eventType": "full_sync",
+                "status": event.status,
+                "retryAfterSeconds": 30,
+            }, status=status.HTTP_202_ACCEPTED, headers={"Retry-After": "30"})
+        if not created and event.status == WorkScheduleSheetInboundEvent.STATUS_SKIPPED:
+            return Response({
+                "message": "Sự kiện full_sync đã được bỏ qua vì có lượt đồng bộ khác đang chạy.",
+                "eventType": "full_sync",
+                "status": event.status,
+            })
         if not created:
             event.row_number = 1
             event.payload = event_payload
+            event.status = WorkScheduleSheetInboundEvent.STATUS_PROCESSING
             event.error = ""
-            event.save(update_fields=["row_number", "payload", "error"])
+            event.processed_at = None
+            event.save(update_fields=["row_number", "payload", "status", "error", "processed_at"])
         try:
             result = full_two_way_sync(None)
+            if result.get("busy"):
+                event.status = WorkScheduleSheetInboundEvent.STATUS_SKIPPED
+                event.error = result.get("message", "Một lượt đồng bộ khác đang chạy.")
+                event.processed_at = timezone.now()
+                event.save(update_fields=["status", "error", "processed_at"])
+                return Response({
+                    "message": "Đã bỏ qua full_sync vì một lượt đồng bộ khác đang thực sự chạy.",
+                    "eventType": "full_sync",
+                    "status": "skipped_busy",
+                    "retryAfterSeconds": 30,
+                })
             created_count = int(result.get("pulled", {}).get("created", 0))
             updated_count = int(result.get("pulled", {}).get("updated", 0))
             event.status = WorkScheduleSheetInboundEvent.STATUS_PROCESSED
