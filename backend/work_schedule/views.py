@@ -206,9 +206,6 @@ def _apply_data(request, item, creating=False, allow_people=True, data_override=
         return error
     supporters = [person for person in supporters if person.email != executor.email]
     managers = [person for person in managers if person.email != executor.email]
-    if creating and request.user_role == "MANAGER" and executor.email != request.user.email and request.user.email not in {p.email for p in managers}:
-        managers.append(request.user)
-
     previous_group = (item.executor_id, item.work_date) if item and item.pk else None
     next_group = (executor.email, work_date)
     item.title = title[:1000]
@@ -255,7 +252,8 @@ def work_items(request):
                 for executor_email in executor_emails:
                     payload = dict(request.data)
                     payload["executorEmail"] = executor_email
-                    payload["managerEmails"] = list(dict.fromkeys([request.user.email, *(request.data.get("managerEmails") or [])]))
+                    if "managerEmails" not in request.data:
+                        payload["managerEmails"] = [request.user.email]
                     item = WorkItem(creator=request.user, executor=request.user, work_date=timezone.localdate(), title="")
                     error = _apply_data(request, item, creating=True, data_override=payload)
                     if error:
@@ -293,7 +291,7 @@ def work_team(request):
     member_ids = list(rows.values_list("email", flat=True))
     team_items = WorkItem.objects.select_related("creator", "executor", "reviewed_by").prefetch_related("supporters", "managers").filter(
         executor_id__in=member_ids
-    ).order_by("work_date", "daily_order", "start_time", "created_at")[:2000]
+    ).order_by("work_date", "daily_order", "start_time", "created_at")[:10000]
     return Response({"members": [
         {
             "email": profile.email,

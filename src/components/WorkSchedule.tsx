@@ -277,6 +277,7 @@ function PeoplePicker({ label, staff, selected, onChange, multiple = true, disab
             <span key={person.email} className="inline-flex max-w-full items-center gap-2 rounded-lg bg-blue-50 px-2.5 py-1.5 text-sm font-semibold text-blue-900">
               <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-blue-100 text-[9px] font-extrabold text-blue-700">{initials(person.name)}</span>
               <span className="truncate">{person.name}</span>
+              {!disabled && <button type="button" onClick={() => onChange(selected.filter((email) => email !== person.email))} className="rounded p-0.5 text-blue-400 hover:bg-blue-100 hover:text-blue-700" aria-label={`Bỏ chọn ${person.name}`}><X className="h-3.5 w-3.5" /></button>}
             </span>
           ))}
           <input
@@ -467,6 +468,17 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     void load(Boolean(cachedSnapshot));
   }, [idToken]);
   useEffect(() => {
+    const refresh = window.setInterval(() => void load(true), 30_000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void load(true);
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(refresh);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [idToken]);
+  useEffect(() => {
     if (loading) return;
     workScheduleSnapshot = { owner: userEmail, savedAt: Date.now(), tasks, staff, teamMembers, teamTasks };
   }, [loading, staff, tasks, teamMembers, teamTasks, userEmail]);
@@ -505,12 +517,13 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
       if (!assignees.length) throw new Error("Vui lòng chọn ít nhất một nhân viên nhận việc.");
       const data = await requestJson(editing.id ? `/api/work-schedule/items/${editing.id}` : "/api/work-schedule/items", {
         method: editing.id ? "PATCH" : "POST",
-        body: JSON.stringify(editing.assignmentMode
-          ? { ...editing, executorEmails: assignees, managerEmails: [...new Set([userEmail, ...editing.managerEmails])] }
-          : editing),
+        body: JSON.stringify(editing.assignmentMode ? { ...editing, executorEmails: assignees } : editing),
       });
       const createdItems = Array.isArray(data.items) ? data.items : data.item ? [data.item] : [];
       setTasks((rows) => editing.id
+        ? rows.map((item) => (item.id === data.item.id ? data.item : item))
+        : [...rows, ...createdItems]);
+      setTeamTasks((rows) => editing.id
         ? rows.map((item) => (item.id === data.item.id ? data.item : item))
         : [...rows, ...createdItems]);
       setEditing(null);
@@ -607,6 +620,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
           body: JSON.stringify({ ids, action: "delete" }),
         });
       setTasks((rows) => rows.filter((item) => !ids.includes(item.id)));
+      setTeamTasks((rows) => rows.filter((item) => !ids.includes(item.id)));
       setSelectedIds([]);
       setEditing(null);
     } catch (cause: any) {
@@ -770,10 +784,10 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm công việc..." className="w-56 rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-blue-400" />
               </label>}
-              <button type="button" onClick={() => setEditing(view === "team" ? { ...blankDraft(userEmail, selectedDate), executorEmails: [], assignmentMode: true, managerEmails: [userEmail] } : blankDraft(userEmail, selectedDate))} className="inline-flex items-center gap-2 rounded-xl bg-[#0055da] px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-200">
+              {view !== "team" && <button type="button" onClick={() => setEditing(blankDraft(userEmail, selectedDate))} className="inline-flex items-center gap-2 rounded-xl bg-[#0055da] px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-200">
                 <Plus className="h-4 w-4" />
-                {view === "team" ? "Giao việc" : "Công việc mới"}
-              </button>
+                Công việc mới
+              </button>}
             </div>
           </div>
         </header>
@@ -1120,6 +1134,7 @@ function TeamSpreadsheetView({ members, tasks, userEmail, setEditing, saveInline
       {period === "day"
         ? <label><span className="mb-1 block text-xs font-bold text-slate-500">Ngày</span><input type="date" value={selectedDay} onChange={(event) => setSelectedDay(event.target.value)} className="border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500" /></label>
         : <div><span className="mb-1 block text-xs font-bold text-slate-500">{period === "month" ? "Tháng" : "Tuần"}</span><div className="flex border border-slate-300"><button type="button" onClick={() => setAnchor(period === "month" ? addMonths(anchor, -1) : addDays(anchor, -7))} className="border-r border-slate-300 p-2 hover:bg-slate-50"><ChevronLeft className="h-4 w-4" /></button><div className="min-w-40 px-3 py-1 text-center text-xs font-bold">{period === "month" ? `Tháng ${anchor.getMonth() + 1}/${anchor.getFullYear()}` : `Tuần ${weekNumber(start)}`}<br/><span className="font-normal text-slate-500">{shortDate(start)}–{fullDate(end)}</span></div><button type="button" onClick={() => setAnchor(period === "month" ? addMonths(anchor, 1) : addDays(anchor, 7))} className="border-l border-slate-300 p-2 hover:bg-slate-50"><ChevronRight className="h-4 w-4" /></button></div></div>}
+      <button type="button" onClick={() => setEditing({ ...blankDraft(userEmail, period === "day" ? selectedDay : iso(new Date())), executorEmails: personEmail === "all" ? [] : [personEmail], executorEmail: personEmail === "all" ? "" : personEmail, assignmentMode: true, managerEmails: [userEmail] })} className="ml-auto inline-flex items-center gap-2 rounded-xl bg-[#0055da] px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-200"><Plus className="h-4 w-4" />Giao việc</button>
     </section>
     <SpreadsheetScheduleTable days={days} people={visiblePeople} tasks={tasks} saveInlineDay={saveInlineDay} reloadTasks={reloadTasks} />
   </div>;
@@ -1573,9 +1588,7 @@ function TaskDialog({ draft, setDraft, staff, userEmail, saveTask, saving, saveP
               ? <PeoplePicker label="Nhân viên nhận việc * (chọn một hoặc nhiều)" staff={staff.filter((item: Person) => item.email !== userEmail)} selected={draft.executorEmails || []} onChange={(emails) => setDraft({ ...draft, executorEmails: emails, executorEmail: emails[0] || "" })} disabled={lockedPeople} />
               : <PeoplePicker label="Người thực hiện * (chọn 1)" staff={staff} selected={[draft.executorEmail]} onChange={(emails) => setDraft({ ...draft, executorEmail: emails[0] || userEmail })} multiple={false} disabled={lockedPeople} />}
             <PeoplePicker label="Người hỗ trợ/theo dõi (chọn nhiều)" staff={staff.filter((item) => item.email !== draft.executorEmail)} selected={draft.supporterEmails} onChange={(emails) => setDraft({ ...draft, supporterEmails: emails })} disabled={lockedPeople} />
-            {draft.assignmentMode
-              ? <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">Người giao việc được tự động ghi nhận là người quản lý.</div>
-              : <PeoplePicker label="Người quản lý (chọn nhiều)" staff={staff.filter((item) => item.email !== draft.executorEmail)} selected={draft.managerEmails} onChange={(emails) => setDraft({ ...draft, managerEmails: emails })} disabled={lockedPeople} />}
+            <PeoplePicker label={draft.assignmentMode ? "Người giao việc / quản lý (có thể thay đổi)" : "Người quản lý (chọn nhiều)"} staff={staff.filter((item) => !(draft.assignmentMode ? draft.executorEmails || [] : [draft.executorEmail]).includes(item.email))} selected={draft.managerEmails} onChange={(emails) => setDraft({ ...draft, managerEmails: emails })} disabled={lockedPeople} />
           </div>
           <label className="block rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
             <span className="ws-label text-amber-900">Ghi chú tiến trình</span>

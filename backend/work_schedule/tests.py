@@ -420,7 +420,16 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(len(response.json()["items"]), 2)
         created = WorkItem.objects.filter(title="Chuẩn bị tài liệu chung").order_by("executor_id")
         self.assertEqual(created.count(), 2)
-        self.assertTrue(all(item.managers.filter(email=self.manager.email).exists() for item in created))
+        self.assertTrue(all(not item.managers.exists() for item in created))
+        employee_rows = self.request(self.executor_token, "get", "/api/work-schedule/items").json()["items"]
+        self.assertIn(self.executor.email, [row["executor"]["email"] for row in employee_rows if row["title"] == "Chuẩn bị tài liệu chung"])
+
+        defaulted = self.request(self.manager_token, "post", "/api/work-schedule/items", {
+            "title": "Việc dùng người giao mặc định", "date": "2026-09-10",
+            "executorEmails": [self.executor.email], "supporterEmails": [],
+        })
+        self.assertEqual(defaulted.status_code, 201, defaulted.data)
+        self.assertTrue(WorkItem.objects.get(title="Việc dùng người giao mặc định").managers.filter(email=self.manager.email).exists())
 
         outsider, _ = self.profile("outsider@example.com")
         rejected = self.request(self.manager_token, "post", "/api/work-schedule/items", {
