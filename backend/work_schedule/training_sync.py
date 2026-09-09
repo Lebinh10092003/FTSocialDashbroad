@@ -2,6 +2,7 @@ import re
 import unicodedata
 from datetime import datetime, time, timedelta
 
+from django.conf import settings
 from django.db.models import Max
 
 from authentication.models import UserProfile
@@ -109,6 +110,17 @@ def sync_training_from_work_item(item):
             WorkItem.objects.filter(pk=item.pk).update(training_session=None)
             session.delete()
             item.training_session = None
+        return None
+
+    # A work-schedule entry is not sufficient evidence to create an official
+    # Digital Training session: several staff can describe the same session
+    # with different titles/times. Until a reconciliation candidate is
+    # confirmed, keep the work item only and do not place another event on the
+    # training calendar. Existing projections can still be reconciled/deleted.
+    if (
+        not item.training_session_id
+        and not settings.WORK_SCHEDULE_TRAINING_PROJECTION_ENABLED
+    ):
         return None
 
     start_time, end_time = _three_hour_window(item.start_time)

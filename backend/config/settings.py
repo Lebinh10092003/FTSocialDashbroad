@@ -93,6 +93,13 @@ MEDIA_ROOT = PROJECT_ROOT / "uploads"
 # Keep under nginx's 12 MB request cap. Email-builder uploads are optimised in
 # the browser first; this remains a server-side guard for every caller.
 MAX_UPLOAD_SIZE = int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(10 * 1024 * 1024)))
+# Work-schedule rows are currently treated as unconfirmed training suggestions.
+# Keep direct/customer-created Digital Training sessions authoritative while the
+# reconciliation workflow is being introduced.
+WORK_SCHEDULE_TRAINING_PROJECTION_ENABLED = env_bool(
+    "WORK_SCHEDULE_TRAINING_PROJECTION_ENABLED",
+    False,
+)
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 CORS_ALLOWED_ORIGINS = [

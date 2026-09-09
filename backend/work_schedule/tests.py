@@ -3,7 +3,7 @@ from datetime import time, timedelta
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.authtoken.models import Token
 
@@ -511,6 +511,7 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(rejected.status_code, 403, rejected.data)
         self.assertFalse(WorkItem.objects.filter(title="Không được tạo dở dang").exists())
 
+    @override_settings(WORK_SCHEDULE_TRAINING_PROJECTION_ENABLED=True)
     def test_training_schedule_syncs_both_ways_with_three_hour_duration(self):
         response = self.request(self.manager_token, "post", "/api/work-schedule/items", {
             "title": "Tập huấn B1 TH Trung Văn", "date": "2026-09-15",
@@ -556,6 +557,7 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(item.priority, "high")
         self.assertTrue(item.time_prefix_in_title)
 
+    @override_settings(WORK_SCHEDULE_TRAINING_PROJECTION_ENABLED=True)
     def test_untimed_native_sheet_training_reference_does_not_create_calendar_session(self):
         item = WorkItem.objects.create(
             creator=self.executor,
@@ -578,6 +580,23 @@ class WorkScheduleApiTests(TestCase):
         item.time_prefix_in_title = True
         item.save()
         self.assertIsNotNone(sync_training_from_work_item(item))
+
+    def test_training_work_item_is_only_a_suggestion_while_projection_is_paused(self):
+        from .training_sync import sync_training_from_work_item
+
+        item = WorkItem.objects.create(
+            creator=self.executor,
+            executor=self.executor,
+            title="Tập huấn B3 TH Kim Đồng",
+            work_date="2026-09-12",
+            start_time=time(8, 30),
+            label="Tập huấn",
+            time_prefix_in_title=True,
+        )
+
+        self.assertIsNone(sync_training_from_work_item(item))
+        item.refresh_from_db()
+        self.assertIsNone(item.training_session_id)
 
     def test_internal_training_session_is_never_deleted_by_sheet_projection(self):
         from digital_training.models import TrainingSession
