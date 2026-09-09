@@ -432,6 +432,9 @@ def work_day_edit(request):
                 if row["title"] != item.title:
                     item.title = row["title"]
                     update_fields.append("title")
+                    if item.time_prefix_in_title:
+                        item.time_prefix_in_title = False
+                        update_fields.append("time_prefix_in_title")
                 if row["status"] is not None and row["status"] != item.status:
                     item.status = row["status"]
                     update_fields.append("status")

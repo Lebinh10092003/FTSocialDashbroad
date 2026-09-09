@@ -1320,7 +1320,7 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
       .filter((task) => task.reviewPercent !== null)
       .map((task) => `${task.reviewPercent}%${task.reviewNote ? ` · ${task.reviewNote}` : ""}`))];
     return [row.key, {
-      content: numberedGridCell(workItems.map((task) => ({ number: task.dailyOrder, text: task.timePrefixInTitle && task.startTime ? `${task.startTime}: ${task.title}` : task.title }))),
+      content: numberedGridCell(workItems.map((task) => ({ number: task.dailyOrder, text: task.title }))),
       selfAssessment: allCompleted ? "Hoàn thành" : numberedGridCell(workItems.map((task) => ({ number: task.dailyOrder, text: displayedSelfAssessment(task) }))),
       leaderAssessment: allReviewed ? "Hoàn thành" : leaderAssessments.join("\n"),
     }];
