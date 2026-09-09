@@ -14,6 +14,7 @@ from .sheet_parser import assessment_notes, parse_sheet_tasks, status_from_note,
 from .sheet_sync import (
     EMPLOYEE_EMAILS,
     _build_content_format_runs,
+    _formula_content_rows,
     _group_values,
     _row_hash,
     _row_employee_email,
@@ -660,6 +661,21 @@ class WorkScheduleSheetLeaseTests(TestCase):
 
 
 class WorkScheduleSheetCapacityTests(TestCase):
+    def test_formula_content_rows_are_excluded_from_rich_text_formatting(self):
+        service = mock.Mock()
+        service.spreadsheets.return_value.get.return_value.execute.return_value = {
+            "sheets": [{"data": [{
+                "startRow": 1,
+                "rowData": [
+                    {"values": [{"userEnteredValue": {"stringValue": "Văn bản"}}]},
+                    {"values": [{"userEnteredValue": {"formulaValue": "=QUERY(A:K)"}}]},
+                    {},
+                ],
+            }]}]
+        }
+
+        self.assertEqual(_formula_content_rows(service), {3})
+
     def test_sheet_is_extended_before_writing_beyond_grid(self):
         service = mock.Mock()
         service.spreadsheets.return_value.get.return_value.execute.return_value = {

@@ -385,6 +385,30 @@ def _build_content_format_runs(content, items=None):
     return runs
 
 
+def _formula_content_rows(service):
+    """Return 1-based rows whose column E value is produced by a formula.
+
+    Google rejects textFormatRuns for computed values, even when their displayed
+    value is text. Those rows remain fully synchronized but keep formula-owned
+    formatting.
+    """
+    result = service.spreadsheets().get(
+        spreadsheetId=SPREADSHEET_ID,
+        ranges=[f"'{SHEET_NAME}'!E2:E"],
+        includeGridData=True,
+        fields="sheets.data(startRow,rowData.values.userEnteredValue)",
+    ).execute()
+    rows = set()
+    for block in (result.get("sheets") or [{}])[0].get("data", []):
+        start_row = int(block.get("startRow", 1))
+        for offset, row_data in enumerate(block.get("rowData", [])):
+            values = row_data.get("values", [])
+            entered = values[0].get("userEnteredValue", {}) if values else {}
+            if "formulaValue" in entered:
+                rows.add(start_row + offset + 1)
+    return rows
+
+
 def push_groups_to_sheet(service, groups, force=False):
     rows = _rows(service)
     groups = set(groups)
@@ -450,7 +474,10 @@ def push_groups_to_sheet(service, groups, force=False):
             ).execute()
     # Apply bold+italic formatting to time-prefixed task lines in column E
     format_requests = []
+    formula_rows = _formula_content_rows(service) if synced else set()
     for email, work_date, row_number, sync_hash, items in synced:
+        if row_number in formula_rows:
+            continue
         content, _, _, _ = _group_values(items) if items else ("", "", "", "")
         runs = _build_content_format_runs(content, items)
         if runs:
