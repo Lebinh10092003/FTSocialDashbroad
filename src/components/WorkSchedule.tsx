@@ -498,7 +498,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
   const todayIso = iso(new Date()),
     overdueTasks = tasks.filter((task) => task.executor.email === userEmail && task.date < todayIso && (task.status === "todo" || task.status === "doing")),
     overdueDates = [...new Set(overdueTasks.map((task) => task.date))].sort(),
-    dailyTasks = filtered.filter((task) => task.date === selectedDate),
+    dailyTasks = filtered.filter((task) => task.date === selectedDate && task.executor.email === userEmail),
     completedCount = dailyTasks.filter((task) => task.status === "completed" || task.status === "reviewed").length,
     completionPercent = dailyTasks.length ? Math.round((completedCount / dailyTasks.length) * 100) : 0,
     selectedTasks = tasks.filter((task) => selectedIds.includes(task.id)),
