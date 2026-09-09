@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs grep:*)",
+      "Bash(grep -n \"bold\\\\|italic\\\\|formatCell\\\\|sheet.*format\\\\|format.*sheet\\\\|sheet_format\\\\|\\\\\\\\\\\\\\\\d+h\\\\\\\\|time.*pattern\\\\|pattern.*time\" src/components/WorkSchedule.tsx)",
+      "Bash(grep -n \"request.user\\\\s*=\" backend/*/middleware.py)",
+      "Bash(cat backend/*/middleware.py)",
+      "Bash(ls backend/*/middleware.py)",
+      "Bash(git -C C:/FermatTech/FTWorkspace/.claude/worktrees/agent-a2c6aa29 log --oneline -5)",
+      "Bash(git -C C:/FermatTech/FTWorkspace/.claude/worktrees/agent-a5d04300 log --oneline -5)",
+      "Bash(git -C C:/FermatTech/FTWorkspace/.claude/worktrees/agent-a2c6aa29 status)",
+      "Bash(git -C C:/FermatTech/FTWorkspace/.claude/worktrees/agent-a5d04300 status)",
+      "Bash(git -C C:/FermatTech/FTWorkspace/.claude/worktrees/agent-a2c6aa29 diff HEAD)",
+      "Bash(git -C C:/FermatTech/FTWorkspace/.claude/worktrees/agent-a5d04300 diff HEAD)",
+      "Bash(npx tsc:*)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(node -e \"try{require\\('typescript'\\)}catch\\(e\\){console.log\\('no ts'\\)}\")",
+      "Bash(python3:*)",
+      "Bash(git:*)",
+      "Bash(gh run:*)",
+      "Bash(python backend/manage.py test digital_training.test_assessment_maintenance --noinput)",
+      "Bash(python -m pytest backend/digital_training/test_assessment_maintenance.py -x -q)",
+      "Bash(grep -E \"\\\\.\\(tsx?|jsx?\\)$\")",
+      "Bash(python manage.py test work_schedule --no-input)",
+      "Bash(python -m pytest backend/work_schedule/tests.py -x -q)",
+      "Bash(python manage.py makemigrations attendance)",
+      "Bash(python manage.py check)",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(ls \"C:/FermatTech/FTWorkspace/node_modules/.bin/tsc\"*)",
+      "Bash(ls \"C:/FermatTech/FTWorkspace/node_modules/typescript/bin/\"*)"
+    ]
+  }
+}

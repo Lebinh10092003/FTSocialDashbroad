@@ -1,6 +1,6 @@
 import React, { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { appDialog } from './components/AppDialog';
-import { ArrowLeft, BadgeDollarSign, CalendarCheck, CalendarRange, ChartColumnBig, ClipboardList, FileCheck2, GraduationCap, Mail, Megaphone, QrCode, ShieldUser } from 'lucide-react';
+import { ArrowLeft, BadgeDollarSign, CalendarCheck, CalendarDays, CalendarRange, ChartColumnBig, ClipboardList, FileCheck2, GraduationCap, Mail, Megaphone, Moon, QrCode, ShieldUser, TriangleAlert } from 'lucide-react';
 
 import { Channel, UserRole } from './types';
 import Sidebar from './components/social-dashboard/Sidebar';
@@ -217,6 +217,10 @@ export default function App() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // Yesterday timesheet warning
+  const [yesterdayWarning, setYesterdayWarning] = useState<{ show: boolean; date: string }>({ show: false, date: '' });
+  const [dismissPermanent, setDismissPermanent] = useState(false);
+
   const isGuest = !idToken || user.email === GUEST_USER.email;
   const normalisedEmployeeIdentity = [user.jobTitle?.name || '', ...(user.departments || []).map(item => item.name)]
     .join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(new RegExp(String.fromCharCode(273), 'g'), 'd').toLocaleLowerCase('vi-VN');
@@ -333,6 +337,38 @@ export default function App() {
     }, 500);
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [authChecking, canViewFinance, isGuest, user.accessModules, userRole]);
+
+  // Check yesterday timesheet warning when workspace loads
+  useEffect(() => {
+    if (authChecking || isGuest || !idToken) return;
+    const dismissed = sessionStorage.getItem('timesheet_dismiss_yesterday');
+    if (dismissed) return;
+    fetch('/api/attendance/timesheet/prefill', { headers: { Authorization: `Bearer ${idToken}` } })
+      .then(r => r.json())
+      .then((pf: any) => {
+        if (pf.yesterdayWarning) setYesterdayWarning({ show: true, date: pf.yesterdayDate });
+      })
+      .catch(() => {});
+  }, [authChecking, isGuest, idToken]);
+
+  const fmtDDMMYYYY = (iso: string) => { const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
+
+  const dismissYesterdayWarning = () => {
+    setYesterdayWarning(prev => ({ ...prev, show: false }));
+    if (dismissPermanent) sessionStorage.setItem('timesheet_dismiss_yesterday', '1');
+  };
+
+  const markYesterdayDayOff = async () => {
+    dismissYesterdayWarning();
+    try {
+      await fetch('/api/attendance/timesheet/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ workDate: yesterdayWarning.date, isDayOff: true }),
+      });
+    } catch { /* ignore */ }
+  };
+
 
   useEffect(() => {
     const updateAppearance = (event: Event) => setAppearance((event as CustomEvent<WorkspaceAppearance>).detail || readWorkspaceAppearance());
@@ -621,6 +657,33 @@ export default function App() {
         </header>
 
         <main className="z-10 mx-auto w-full max-w-[1600px] flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+          {yesterdayWarning.show && (
+            <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+              <div className="flex items-start gap-3">
+                <TriangleAlert className="mt-0.5 h-6 w-6 shrink-0 text-amber-600" />
+                <div className="flex-1">
+                  <h3 className="text-base font-extrabold text-amber-900">Bạn chưa cập nhật công ca cho ngày {fmtDDMMYYYY(yesterdayWarning.date)}</h3>
+                  <p className="mt-1 text-sm text-amber-800">Vui lòng cập nhật công ca trong thời gian sớm nhất để đảm bảo dữ liệu chấm công chính xác.</p>
+                  <label className="mt-3 flex items-center gap-2 text-xs font-bold text-amber-700">
+                    <input type="checkbox" checked={dismissPermanent} onChange={e => setDismissPermanent(e.target.checked)} className="h-3.5 w-3.5 rounded border-amber-400" />
+                    Không nhắc lại cảnh báo này
+                  </label>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <button type="button" onClick={() => { dismissYesterdayWarning(); setViewMode('attendance'); }} className="flex flex-col items-center gap-1.5 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow transition hover:bg-blue-700">
+                      <CalendarDays className="h-5 w-5" /><span>Cập nhật ngay</span>
+                    </button>
+                    <button type="button" onClick={() => void markYesterdayDayOff()} className="flex flex-col items-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow transition hover:bg-emerald-700">
+                      <Moon className="h-5 w-5" /><span>Hôm qua tôi nghỉ</span>
+                    </button>
+                    <button type="button" onClick={dismissYesterdayWarning} className="flex flex-col items-center gap-1.5 rounded-xl bg-rose-600 px-5 py-3 text-sm font-bold text-white shadow transition hover:bg-rose-700">
+                      <TriangleAlert className="h-5 w-5" /><span>Bỏ qua</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {accessNotice && <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 sm:col-span-2 lg:col-span-3">{accessNotice}</div>}
             {visibleApps.map(app => {
@@ -783,7 +846,7 @@ export default function App() {
   if (viewMode === 'attendance') {
     return (
       <Suspense fallback={<div className="grid h-screen place-items-center bg-[#f3f5f1]">Đang nạp mô-đun Công ca...</div>}>
-        <Attendance onBackToWorkspace={() => setViewMode('workspace')} idToken={idToken || ''} userName={user.displayName} />
+        <Attendance onBackToWorkspace={() => setViewMode('workspace')} idToken={idToken || ''} userName={user.displayName} userEmail={user.email} />
       </Suspense>
     );
   }
