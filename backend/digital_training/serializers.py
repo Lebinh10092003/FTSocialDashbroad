@@ -233,10 +233,11 @@ class TrainingSessionSerializer(serializers.ModelSerializer):
         # error and accounts for the two nullable ownership fields.
         validators = []
         fields = [
-            "id", "title", "session_number", "date", "start_time", "end_time", "partner", "partner_id", "partner_name",
+            "id", "title", "source", "session_number", "date", "start_time", "end_time", "partner", "partner_id", "partner_name",
             "class_group_id", "class_group_name", "category", "contents", "attendees", "location",
             "status", "notes", "staff_name", "instructor_name", "support_staff_name", "has_materials", "created_at", "updated_at",
         ]
+        read_only_fields = ["source"]
 
     def get_partner_name(self, obj):
         return obj.partner_ref.name if obj.partner_ref else obj.partner

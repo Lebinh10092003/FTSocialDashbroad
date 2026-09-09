@@ -94,6 +94,15 @@ def _normalise_orders(executor_id, work_date):
 
 
 def sync_training_from_work_item(item):
+    # A TrainingSession created inside Digital Training (manually or from a
+    # customer) owns its data. Sheet synchronization must never delete or
+    # rewrite it merely because its mirrored WorkItem later changes.
+    if (
+        item.training_session_id
+        and item.training_session.source != TrainingSession.SOURCE_WORK_SCHEDULE
+    ):
+        return item.training_session
+
     if not _is_training(item):
         if item.training_session_id:
             session = item.training_session
@@ -126,7 +135,10 @@ def sync_training_from_work_item(item):
     if item.training_session_id:
         TrainingSession.objects.filter(pk=item.training_session_id).update(**defaults)
         return item.training_session
-    session = TrainingSession.objects.create(**defaults)
+    session = TrainingSession.objects.create(
+        source=TrainingSession.SOURCE_WORK_SCHEDULE,
+        **defaults,
+    )
     WorkItem.objects.filter(pk=item.pk).update(training_session=session)
     item.training_session = session
     return session

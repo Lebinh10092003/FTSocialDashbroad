@@ -521,6 +521,7 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         item = WorkItem.objects.select_related("training_session").get(pk=response.json()["item"]["id"])
         self.assertIsNotNone(item.training_session_id)
+        self.assertEqual(item.training_session.source, "work_schedule")
         self.assertEqual(item.end_time.isoformat(timespec="minutes"), "20:00")
         self.assertEqual(item.training_session.end_time.isoformat(timespec="minutes"), "20:00")
 
@@ -577,6 +578,33 @@ class WorkScheduleApiTests(TestCase):
         item.time_prefix_in_title = True
         item.save()
         self.assertIsNotNone(sync_training_from_work_item(item))
+
+    def test_internal_training_session_is_never_deleted_by_sheet_projection(self):
+        from digital_training.models import TrainingSession
+        from .training_sync import sync_training_from_work_item
+
+        session = TrainingSession.objects.create(
+            title="Buổi 7 · Khách hàng nội bộ",
+            session_date="2026-09-08",
+            start_time=time(17, 30),
+            end_time=time(20, 30),
+            source=TrainingSession.SOURCE_INTERNAL,
+        )
+        item = WorkItem.objects.create(
+            creator=self.executor,
+            executor=self.executor,
+            title=session.title,
+            work_date=session.session_date,
+            training_session=session,
+            source_sheet_row=5003,
+            source_record_id="REC-SHEET-OLD",
+            time_prefix_in_title=False,
+        )
+
+        self.assertEqual(sync_training_from_work_item(item), session)
+        self.assertTrue(TrainingSession.objects.filter(pk=session.pk).exists())
+        item.refresh_from_db()
+        self.assertEqual(item.training_session_id, session.pk)
 
     def test_organisational_manager_views_report_only_in_team_schedule(self):
         self.executor.manager = self.manager

@@ -155,7 +155,14 @@ class TrainingClass(models.Model):
 
 class TrainingSession(models.Model):
     STATUS_CHOICES = [("unscheduled", "Unscheduled"), ("planned", "Scheduled"), ("completed", "Completed"), ("cancelled", "Cancelled")]
+    SOURCE_INTERNAL = "internal"
+    SOURCE_WORK_SCHEDULE = "work_schedule"
+    SOURCE_CHOICES = [
+        (SOURCE_INTERNAL, "Digital Training"),
+        (SOURCE_WORK_SCHEDULE, "Work schedule projection"),
+    ]
     title = models.CharField(max_length=255)
+    source = models.CharField(max_length=30, choices=SOURCE_CHOICES, default=SOURCE_INTERNAL)
     session_number = models.PositiveIntegerField(null=True, blank=True)
     session_date = models.DateField(null=True, blank=True)
     start_time = models.TimeField(null=True, blank=True)
