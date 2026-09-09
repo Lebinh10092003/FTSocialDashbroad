@@ -142,6 +142,7 @@ export default function TrainingAssessmentWorkspace({
           ) : (
             <TrainingAssessmentsAdmin
               idToken={idToken}
+              userRole={userRole || "EMPLOYEE"}
               sessions={sessions}
               classes={classes}
               partners={partners}

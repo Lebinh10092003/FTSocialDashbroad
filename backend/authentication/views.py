@@ -31,8 +31,12 @@ from integrations.google_sheets import (
     initialize_sheets_structure,
 )
 from .auth import get_admin_emails
-from .models import Department, JobTitle, SystemConfig, UserLogin, UserProfile
-from .permissions import IsAdmin, IsAuthenticated, IsManagerOrAdmin
+from .models import (
+    Department, JobTitle, SystemConfig, UserLogin, UserProfile,
+    WorkspaceNotification, WorkspaceNotificationRead,
+)
+from .notifications import notification_visible_to, notify_workspace
+from .permissions import IsAdmin, IsAuthenticated, IsManagerOrAdmin, request_role
 
 User = get_user_model()
 VALID_ROLES = {"ADMIN", "MANAGER", "EMPLOYEE", "VIEWER"}
@@ -885,6 +889,11 @@ def manage_users(request):
         profile, error_response = _write_employee(request)
         if error_response:
             return error_response
+        notify_workspace(
+            event_key=f"employee:{profile.email}:created:{int(timezone.now().timestamp())}",
+            title="Đã thêm nhân sự", message=f"{_actor_name(request)} đã thêm {profile.name or profile.email} vào FT Workspace.",
+            category="personnel", target_roles=["ADMIN", "MANAGER"], action_url="/account-management",
+        )
         return Response({"success": True, "message": "Đã thêm nhân viên.", "user": _user_payload(profile)}, status=status.HTTP_201_CREATED)
 
     page_size = _get_positive_int(request.query_params.get("page_size"), 20, 100)
@@ -923,6 +932,11 @@ def manage_single_user(request, email):
         if django_user:
             django_user.delete()
         profile.delete()
+        notify_workspace(
+            event_key=f"employee:{clean_email}:deleted:{int(timezone.now().timestamp())}",
+            title="Đã xóa nhân sự", message=f"{_actor_name(request)} đã xóa {profile.name or clean_email} khỏi FT Workspace.",
+            severity="warning", category="personnel", target_roles=["ADMIN", "MANAGER"], action_url="/account-management",
+        )
         return Response({"success": True, "message": "Đã xóa nhân viên."})
 
     if clean_email == request.user.email and str(request.data.get("employmentStatus") or request.data.get("employment_status") or "").upper() in {"SUSPENDED", "TERMINATED"}:
@@ -932,6 +946,11 @@ def manage_single_user(request, email):
     updated, error_response = _write_employee(request, profile)
     if error_response:
         return error_response
+    notify_workspace(
+        event_key=f"employee:{updated.email}:updated:{int(timezone.now().timestamp())}",
+        title="Hồ sơ nhân sự thay đổi", message=f"{_actor_name(request)} đã cập nhật hồ sơ của {updated.name or updated.email}.",
+        category="personnel", target_roles=["ADMIN", "MANAGER"], action_url="/account-management",
+    )
     return Response({"success": True, "message": "Đã cập nhật nhân viên.", "user": _user_payload(updated)})
 
 
@@ -961,7 +980,7 @@ def reset_employee_password(request, email):
 def _category_view(request, model, label):
     if request.method == "GET":
         return Response([_category_payload(item) for item in model.objects.all()])
-    if request.user_role != "ADMIN":
+    if request_role(request) != "ADMIN":
         return Response({"error": "Chỉ quản trị viên được quản lý danh mục này."}, status=status.HTTP_403_FORBIDDEN)
     name = str(request.data.get("name") or "").strip()
     if not name:
@@ -969,6 +988,12 @@ def _category_view(request, model, label):
     if model.objects.filter(name__iexact=name).exists():
         return Response({"error": f"{label.capitalize()} đã tồn tại."}, status=status.HTTP_400_BAD_REQUEST)
     item = model.objects.create(name=name, code=str(request.data.get("code") or "").strip()) if model is Department else model.objects.create(name=name)
+    notify_workspace(
+        event_key=f"catalogue:{model._meta.model_name}:{item.pk}:created",
+        title=f"Đã thêm {label}",
+        message=f"{_actor_name(request)} đã thêm {label} “{item.name}”.",
+        category="personnel", target_roles=["ADMIN", "MANAGER"], action_url="/account-management",
+    )
     return Response({"success": True, "item": _category_payload(item)}, status=status.HTTP_201_CREATED)
 
 
@@ -976,11 +1001,32 @@ def _category_detail(request, model, item_id, label):
     item = model.objects.filter(pk=item_id).first()
     if not item:
         return Response({"error": f"Không tìm thấy {label}."}, status=status.HTTP_404_NOT_FOUND)
-    if request.user_role != "ADMIN":
+    if request_role(request) != "ADMIN":
         return Response({"error": "Chỉ quản trị viên được quản lý danh mục này."}, status=status.HTTP_403_FORBIDDEN)
     if request.method == "DELETE":
+        hard_delete = str(request.query_params.get("hard") or "").lower() in {"1", "true", "yes"}
+        employee_count = item.employees.count()
+        if hard_delete:
+            if employee_count:
+                return Response(
+                    {"error": f"{label.capitalize()} đang được gán cho {employee_count} nhân sự. Hãy chuyển chức danh trước khi xóa hẳn."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            item_name, item_pk = item.name, item.pk
+            item.delete()
+            notify_workspace(
+                event_key=f"catalogue:{model._meta.model_name}:{item_pk}:deleted",
+                title=f"Đã xóa {label}", message=f"{_actor_name(request)} đã xóa hẳn {label} “{item_name}”.",
+                severity="warning", category="personnel", target_roles=["ADMIN", "MANAGER"], action_url="/account-management",
+            )
+            return Response({"success": True, "message": f"Đã xóa {label}."})
         item.is_active = False
         item.save(update_fields=["is_active", "updated_at"])
+        notify_workspace(
+            event_key=f"catalogue:{model._meta.model_name}:{item.pk}:disabled:{int(item.updated_at.timestamp())}",
+            title=f"Đã ngừng sử dụng {label}", message=f"{_actor_name(request)} đã ngừng sử dụng {label} “{item.name}”.",
+            severity="warning", category="personnel", target_roles=["ADMIN", "MANAGER"], action_url="/account-management",
+        )
         return Response({"success": True, "message": f"Đã ngừng sử dụng {label}.", "item": _category_payload(item)})
     name = str(request.data.get("name") or item.name).strip()
     if model.objects.exclude(pk=item.pk).filter(name__iexact=name).exists():
@@ -990,7 +1036,56 @@ def _category_detail(request, model, item_id, label):
     if model is Department:
         item.code = str(request.data.get("code", item.code) or "").strip()
     item.save()
+    notify_workspace(
+        event_key=f"catalogue:{model._meta.model_name}:{item.pk}:updated:{int(item.updated_at.timestamp())}",
+        title=f"Đã cập nhật {label}", message=f"{_actor_name(request)} đã cập nhật {label} “{item.name}”.",
+        category="personnel", target_roles=["ADMIN", "MANAGER"], action_url="/account-management",
+    )
     return Response({"success": True, "item": _category_payload(item)})
+
+
+def _actor_name(request):
+    profile = getattr(request, "user", None)
+    return str(getattr(profile, "name", "") or getattr(profile, "email", "") or "Hệ thống")
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def workspace_notifications(request):
+    profile = request.user
+    rows = WorkspaceNotification.objects.prefetch_related("read_receipts").all()[:250]
+    visible = [item for item in rows if notification_visible_to(item, profile)][:100]
+    read_ids = set(WorkspaceNotificationRead.objects.filter(user=profile, notification__in=visible).values_list("notification_id", flat=True))
+    return Response({
+        "unreadCount": sum(1 for item in visible if item.pk not in read_ids),
+        "notifications": [{
+            "id": item.pk, "title": item.title, "message": item.message,
+            "severity": item.severity, "category": item.category,
+            "actionUrl": item.action_url, "createdAt": item.created_at,
+            "read": item.pk in read_ids,
+        } for item in visible],
+    })
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def read_workspace_notification(request, notification_id):
+    notification = WorkspaceNotification.objects.filter(pk=notification_id).first()
+    if not notification or not notification_visible_to(notification, request.user):
+        return Response({"error": "Không tìm thấy thông báo."}, status=status.HTTP_404_NOT_FOUND)
+    WorkspaceNotificationRead.objects.get_or_create(notification=notification, user=request.user)
+    return Response({"success": True})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def read_all_workspace_notifications(request):
+    rows = [item for item in WorkspaceNotification.objects.all()[:250] if notification_visible_to(item, request.user)]
+    WorkspaceNotificationRead.objects.bulk_create(
+        [WorkspaceNotificationRead(notification=item, user=request.user) for item in rows],
+        ignore_conflicts=True,
+    )
+    return Response({"success": True})
 
 
 @api_view(["GET", "POST"])

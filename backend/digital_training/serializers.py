@@ -470,6 +470,7 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
     variant_distribution = serializers.SerializerMethodField()
     participant_count = serializers.SerializerMethodField()
     sync_counts = serializers.SerializerMethodField()
+    retention_warning = serializers.SerializerMethodField()
 
     class Meta:
         model = TrainingAssessment
@@ -482,10 +483,24 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
             "source_type", "source_name", "question_bank_url", "output_sheet_url",
             "drive_folder_id", "storage_config", "audience_group", "participants", "participant_count",
             "max_people_per_variant", "sync_status", "sync_error", "sync_counts",
+            "closed_at", "graded_at", "backup_completed_at", "backup_manifest",
+            "purge_at", "retention_warning",
             "created_by", "attempts_count", "submitted_count", "average_score",
             "variant_distribution", "created_at", "updated_at",
         ]
-        read_only_fields = ["partner", "public_slug", "created_by"]
+        read_only_fields = [
+            "partner", "public_slug", "created_by", "closed_at", "graded_at",
+            "backup_completed_at", "backup_manifest", "purge_at", "retention_warning",
+        ]
+
+    def get_retention_warning(self, obj):
+        from .assessment_lifecycle import lifecycle_warning
+        return lifecycle_warning(obj)
+
+    def validate_status(self, value):
+        if value not in {"draft", "published", "closed"}:
+            raise serializers.ValidationError("Trạng thái này do hệ thống tự xác nhận sau khi chấm hoặc sao lưu.")
+        return value
 
     def get_variants(self, obj):
         return [

@@ -16,6 +16,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from authentication.models import SystemConfig
+from authentication.notifications import notify_workspace
 from authentication.permissions import IsAuthenticated
 
 from .assessment_service import (
@@ -43,6 +44,7 @@ from .models import (
     TrainingAssessmentUpload,
     TrainingQuestionBankSnapshot,
 )
+from .assessment_lifecycle import refresh_assessment_status, trash_draft, verify_assessment_backup
 from .serializers import (
     TrainingAssessmentAttemptSerializer,
     TrainingAssessmentSerializer,
@@ -419,7 +421,6 @@ def _sync_completed_attempt(attempt):
     """Deliver one completed attempt while keeping the database as the source of truth."""
     if not attempt.assessment.output_sheet_url:
         return attempt
-    attempt.purge_after = attempt.purge_after or timezone.now() + timedelta(days=7)
     try:
         sync_attempt_to_google_sheet(attempt)
         attempt.sync_status = "synced"
@@ -428,6 +429,7 @@ def _sync_completed_attempt(attempt):
     except Exception as error:
         attempt.sync_status = "error"
         attempt.sync_error = str(error)[:2000]
+    attempt.purge_after = None
     attempt.save(update_fields=["sync_status", "sync_error", "synced_at", "purge_after", "updated_at"])
     return attempt
 
@@ -435,7 +437,7 @@ def _sync_completed_attempt(attempt):
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def assessments(request):
-    queryset = TrainingAssessment.objects.select_related("session", "partner", "training_class").all()
+    queryset = TrainingAssessment.objects.select_related("session", "partner", "training_class").filter(trashed_at__isnull=True)
     if request.method == "GET":
         return Response(TrainingAssessmentSerializer(queryset, many=True, context={"request": request}).data)
     if not _can_manage(request):
@@ -443,6 +445,13 @@ def assessments(request):
     serializer = TrainingAssessmentSerializer(data=request.data, context={"request": request})
     serializer.is_valid(raise_exception=True)
     item = serializer.save(created_by=_actor(request))
+    notify_workspace(
+        event_key=f"assessment:{item.pk}:created",
+        title="Đã tạo bài kiểm tra cuối khóa",
+        message=f"{_actor(request)} đã tạo “{item.title}” cho {item.partner.name if item.partner else 'đơn vị chưa xác định'}.",
+        category="digital-training", target_modules=["digital-training"],
+        action_url=f"/training-assessments/{item.pk}",
+    )
     if item.output_sheet_url:
         try:
             prepare_assessment_google_sheet(item)
@@ -458,7 +467,7 @@ def assessments(request):
 @api_view(["GET", "PATCH", "DELETE"])
 @permission_classes([IsAuthenticated])
 def assessment_detail(request, pk):
-    item = TrainingAssessment.objects.select_related("session", "partner", "training_class").filter(pk=pk).first()
+    item = TrainingAssessment.objects.select_related("session", "partner", "training_class").filter(pk=pk, trashed_at__isnull=True).first()
     if not item:
         return _assessment_error("Không tìm thấy bài đánh giá.", status.HTTP_404_NOT_FOUND)
     if request.method == "GET":
@@ -466,6 +475,9 @@ def assessment_detail(request, pk):
     if not _can_manage(request):
         return _forbidden()
     if request.method == "DELETE":
+        if item.status == "draft":
+            trash_draft(item)
+            return Response({"success": True, "message": "Đã chuyển bản nháp vào thùng rác. Quản trị viên có thể khôi phục trong 3 ngày."}, status=status.HTTP_202_ACCEPTED)
         active_count = item.attempts.filter(status="in_progress").count()
         if active_count:
             password_error = _require_confirmation_password(request)
@@ -480,12 +492,37 @@ def assessment_detail(request, pk):
                 status.HTTP_409_CONFLICT,
             )
         item.delete()
+        notify_workspace(
+            event_key=f"assessment:{pk}:deleted:{int(timezone.now().timestamp())}",
+            title="Đã xóa bài kiểm tra cuối khóa", message=f"{_actor(request)} đã xóa “{item.title}” cùng dữ liệu bài làm trên web.",
+            severity="warning", category="digital-training", target_modules=["digital-training"],
+            action_url="/training-assessments",
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
-    if str(request.data.get("status") or "") == "closed":
+    requested_status = str(request.data.get("status") or "")
+    closing = requested_status == "closed"
+    reopening = requested_status == "published" and item.status in {"closed", "graded"}
+    if closing:
         item.attempts.filter(status="in_progress").update(status="timed_out", submitted_at=timezone.now())
     serializer = TrainingAssessmentSerializer(item, data=request.data, partial=True, context={"request": request})
     serializer.is_valid(raise_exception=True)
     updated = serializer.save()
+    if reopening:
+        updated.closed_at = None
+        updated.graded_at = None
+        updated.backup_completed_at = None
+        updated.backup_manifest = {}
+        updated.save(update_fields=["closed_at", "graded_at", "backup_completed_at", "backup_manifest", "updated_at"])
+    if closing and not updated.closed_at:
+        updated.closed_at = timezone.now()
+        updated.save(update_fields=["closed_at", "updated_at"])
+        refresh_assessment_status(updated)
+        notify_workspace(
+            event_key=f"assessment:{updated.pk}:closed",
+            title="Bài kiểm tra đã đóng", message=f"“{updated.title}” đã đóng và sẵn sàng để chấm.",
+            category="digital-training", target_modules=["digital-training"],
+            action_url=f"/training-assessments/{updated.pk}",
+        )
     return Response(TrainingAssessmentSerializer(updated, context={"request": request}).data)
 
 
@@ -702,7 +739,7 @@ def assessment_result_grade(request, pk, attempt_pk):
     attempt = TrainingAssessmentAttempt.objects.filter(pk=attempt_pk, assessment_id=pk).first()
     if not attempt:
         return _assessment_error("Không tìm thấy lượt làm bài.", status.HTTP_404_NOT_FOUND)
-    if attempt.assessment.status != "closed":
+    if attempt.assessment.status not in {"closed", "graded"}:
         return _assessment_error("Chỉ chấm bài sau khi bài kiểm tra đã đóng.")
     grading_note = str(request.data.get("grading_note") or "").strip()
     if grading_note:
@@ -772,6 +809,7 @@ def assessment_result_grade(request, pk, attempt_pk):
             "manual_grading_required", "updated_at",
         ])
         _sync_completed_attempt(attempt)
+        refresh_assessment_status(attempt.assessment)
         return Response(_admin_attempt_payload(attempt, request))
     if grading_note:
         return Response(_admin_attempt_payload(attempt, request))
@@ -789,6 +827,7 @@ def assessment_result_grade(request, pk, attempt_pk):
         "sync_error", "synced_at", "purge_after", "updated_at",
     ])
     _sync_completed_attempt(attempt)
+    refresh_assessment_status(attempt.assessment)
     return Response(_admin_attempt_payload(attempt, request))
 
 
@@ -851,7 +890,7 @@ def assessment_prepare_output(request, pk):
         rebuild_assessment_google_sheet_rows(assessment, resources)
         assessment.attempts.filter(status__in=["submitted", "timed_out"]).update(
             sync_status="synced", sync_error="", synced_at=timezone.now(),
-            purge_after=timezone.now() + timedelta(days=7),
+            purge_after=None,
         )
         assessment.sync_status = "ready"
         assessment.sync_error = ""
@@ -859,6 +898,45 @@ def assessment_prepare_output(request, pk):
         assessment.sync_status = "error"
         assessment.sync_error = str(error)[:2000]
     assessment.save(update_fields=["sync_status", "sync_error", "updated_at"])
+    return Response(TrainingAssessmentSerializer(assessment, context={"request": request}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def assessment_verify_backup(request, pk):
+    if not _can_manage(request):
+        return _forbidden()
+    assessment = TrainingAssessment.objects.select_related("partner").filter(pk=pk, trashed_at__isnull=True).first()
+    if not assessment:
+        return _assessment_error("Không tìm thấy đợt kiểm tra.", status.HTTP_404_NOT_FOUND)
+    try:
+        complete, manifest = verify_assessment_backup(assessment, rebuild=True)
+    except Exception as error:
+        return _assessment_error(f"Không thể kiểm chứng bản sao Google Sheet: {error}", status.HTTP_502_BAD_GATEWAY)
+    code = status.HTTP_200_OK if complete else status.HTTP_409_CONFLICT
+    return Response({"complete": complete, "manifest": manifest, "assessment": TrainingAssessmentSerializer(assessment, context={"request": request}).data}, status=code)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def assessment_trash(request):
+    if str(getattr(request, "user_role", "") or getattr(request.user, "role", "")) != "ADMIN":
+        return _forbidden()
+    rows = TrainingAssessment.objects.select_related("partner", "training_class").filter(trashed_at__isnull=False).order_by("purge_at")
+    return Response(TrainingAssessmentSerializer(rows, many=True, context={"request": request}).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def assessment_restore(request, pk):
+    if str(getattr(request, "user_role", "") or getattr(request.user, "role", "")) != "ADMIN":
+        return _forbidden()
+    assessment = TrainingAssessment.objects.filter(pk=pk, trashed_at__isnull=False, purge_at__gt=timezone.now()).first()
+    if not assessment:
+        return _assessment_error("Bản nháp không còn trong thời hạn khôi phục 3 ngày.", status.HTTP_404_NOT_FOUND)
+    assessment.trashed_at = None
+    assessment.purge_at = None
+    assessment.save(update_fields=["trashed_at", "purge_at", "updated_at"])
     return Response(TrainingAssessmentSerializer(assessment, context={"request": request}).data)
 
 
@@ -873,7 +951,9 @@ def assessment_import_sheet_grades(request, pk):
     if not assessment.output_sheet_url:
         return _assessment_error("Bài kiểm tra chưa liên kết Google Sheet.")
     try:
-        return Response(sync_assessment_grades_from_google_sheet(assessment))
+        result = sync_assessment_grades_from_google_sheet(assessment)
+        refresh_assessment_status(assessment)
+        return Response(result)
     except Exception as error:
         return _assessment_error(f"Không thể đồng bộ điểm từ Google Sheet: {error}")
 
@@ -931,7 +1011,7 @@ def assessment_sync_pending_results(request, pk):
             now = timezone.now()
             pending.update(
                 sync_status="synced", sync_error="", synced_at=now,
-                purge_after=now + timedelta(days=7),
+                purge_after=None,
             )
         except Exception as error:
             pending.update(sync_status="error", sync_error=str(error)[:2000])

@@ -49,6 +49,42 @@ class UserProfile(models.Model):
         return f'{self.email} ({self.role})'
 
 
+class WorkspaceNotification(models.Model):
+    """One idempotent Workspace event, filtered to its intended audience."""
+
+    SEVERITY_CHOICES = [
+        ('info', 'Thông tin'),
+        ('warning', 'Cảnh báo'),
+        ('urgent', 'Khẩn'),
+        ('success', 'Thành công'),
+    ]
+    event_key = models.CharField(max_length=255, unique=True)
+    title = models.CharField(max_length=255)
+    message = models.TextField()
+    category = models.CharField(max_length=80, default='workspace')
+    severity = models.CharField(max_length=20, choices=SEVERITY_CHOICES, default='info')
+    action_url = models.CharField(max_length=1000, blank=True, default='')
+    target_roles = models.JSONField(default=list, blank=True)
+    target_modules = models.JSONField(default=list, blank=True)
+    target_emails = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class WorkspaceNotificationRead(models.Model):
+    notification = models.ForeignKey(WorkspaceNotification, on_delete=models.CASCADE, related_name='read_receipts')
+    user = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name='notification_reads')
+    read_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['notification', 'user'], name='unique_workspace_notification_read'),
+        ]
+
+
 class UserLogin(models.Model):
     id = models.CharField(max_length=255, primary_key=True)
     email = models.CharField(max_length=255)

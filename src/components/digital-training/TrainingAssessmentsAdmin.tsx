@@ -48,7 +48,7 @@ type Assessment = {
   opens_at?: string | null;
   closes_at?: string | null;
   attempt_limit: number;
-  status: "draft" | "published" | "closed";
+  status: "draft" | "published" | "closed" | "graded" | "backup_complete";
   public_slug: string;
   questions: any[];
   variants: Array<{ name: string; question_count: number }>;
@@ -76,6 +76,8 @@ type Assessment = {
   sync_status: string;
   sync_error?: string;
   sync_counts: { pending: number; synced: number; error: number };
+  purge_at?: string | null;
+  retention_warning?: { level: "warning" | "strong" | "urgent"; label: string; days: number; remaining: number } | null;
   created_at: string;
   updated_at: string;
 };
@@ -181,6 +183,8 @@ const statusLabel: Record<string, string> = {
   draft: "Bản nháp",
   published: "Đang mở",
   closed: "Đã đóng",
+  graded: "Đã chấm",
+  backup_complete: "Đã hoàn thành sao lưu",
 };
 
 const toDateTimeLocal = (value?: string | null) => {
@@ -221,18 +225,22 @@ type QuestionBankSettings = { default_url: string };
 type CachedQuestionBank = Preview & { synced_at?: string; inventory?: { sheets?: Array<{ name: string; topics?: Array<{ name: string; total: number; theory: number; practice: number; easy: number; medium: number; hard: number }> }> } };
 export default function TrainingAssessmentsAdmin({
   idToken,
+  userRole,
   sessions,
   classes,
   partners,
   isGuest,
 }: {
   idToken: string;
+  userRole: string;
   sessions: any[];
   classes: any[];
   partners: any[];
   isGuest: boolean;
 }) {
   const [items, setItems] = useState<Assessment[]>([]);
+  const [trashItems, setTrashItems] = useState<Assessment[]>([]);
+  const [showTrash, setShowTrash] = useState(false);
   const [selected, setSelected] = useState<Assessment | null>(null);
   const [results, setResults] = useState<any[]>([]);
   const [manualScores, setManualScores] = useState<Record<number, string>>({});
@@ -313,6 +321,27 @@ export default function TrainingAssessmentsAdmin({
     } finally {
       setBusy(false);
     }
+  };
+
+  const loadTrash = async () => {
+    setBusy(true); setNotice("");
+    try {
+      const response = await fetch("/api/digital-training/assessments-trash", { headers: auth });
+      if (!response.ok) throw new Error(await errorText(response));
+      setTrashItems(await response.json()); setShowTrash(true);
+    } catch (error: any) { setNotice(String(error?.message || error)); }
+    finally { setBusy(false); }
+  };
+
+  const restoreDraft = async (item: Assessment) => {
+    setBusy(true); setNotice("");
+    try {
+      const response = await fetch(`/api/digital-training/assessments-trash/${item.id}/restore`, { method: "POST", headers: auth });
+      if (!response.ok) throw new Error(await errorText(response));
+      setTrashItems((current) => current.filter((row) => row.id !== item.id));
+      await load(); setNotice("Đã khôi phục bản nháp.");
+    } catch (error: any) { setNotice(String(error?.message || error)); }
+    finally { setBusy(false); }
   };
 
   useEffect(() => {
@@ -804,6 +833,20 @@ export default function TrainingAssessmentsAdmin({
     }
   };
 
+  const verifyBackup = async () => {
+    if (!selected) return;
+    setBusy(true); setNotice("");
+    try {
+      const response = await fetch(`/api/digital-training/assessments/${selected.id}/verify-backup`, { method: "POST", headers: auth });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.manifest?.errors?.[0] || payload.error || "Bản sao chưa đầy đủ.");
+      setSelected(payload.assessment);
+      setItems((current) => current.map((item) => item.id === payload.assessment.id ? payload.assessment : item));
+      setNotice(`Đã kiểm chứng bản sao: ${payload.manifest.questionCount} câu hỏi, ${payload.manifest.attemptCount} bài làm.`);
+    } catch (error: any) { setNotice(String(error?.message || error)); }
+    finally { setBusy(false); }
+  };
+
   const updateResultStorage = async (result: any, removeStored = false) => {
     if (!selected) return;
     let confirmationPassword = "";
@@ -851,7 +894,7 @@ export default function TrainingAssessmentsAdmin({
 
   const openGrading = async (attempt?: any, single = false) => {
     if (!selected) return;
-    if (selected.status !== "closed") {
+    if (!["closed", "graded"].includes(selected.status)) {
       await appDialog.alert("Chỉ có thể chấm sau khi đóng bài để tránh chấm khi học viên vẫn đang làm. Hãy đóng bài trước, rồi mở lại khi cần.", { title: "Bài kiểm tra đang mở", tone: "warning" });
       return;
     }
@@ -1410,7 +1453,7 @@ export default function TrainingAssessmentsAdmin({
         <article className="assessment-detail-card overflow-hidden rounded-2xl border bg-white shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4 p-6">
             <div><p className="text-xs font-bold uppercase text-blue-600">Bài kiểm tra cuối khóa tập huấn</p><h2 className="mt-1 text-2xl font-extrabold">{selected.title}</h2><p className="mt-2 text-sm text-slate-500">{[selected.partner_name, selected.class_name].filter(Boolean).join(" · ")}</p></div>
-            <div className="flex flex-wrap gap-2"><button aria-disabled={selected.status !== "closed"} disabled={busy} onClick={() => void openGrading()} title={selected.status === "closed" ? "Chấm các bài đã nộp" : "Đóng bài trước khi chấm"} className={`ft-btn ft-btn-secondary ${selected.status !== "closed" ? "cursor-not-allowed opacity-50" : ""}`}><Check className="h-4 w-4" />Chấm bài</button><a href={`${publicLink}?preview=creator`} target="_blank" rel="noreferrer" className="ft-btn ft-btn-secondary" title="Xem trước mặc định ở chế độ quản trị viên"><Layers3 className="h-4 w-4" />Xem trước</a>{selected.status !== "published" && <button disabled={busy} onClick={() => void changeStatus("published")} className="ft-primary"><Send className="h-4 w-4" />{selected.status === "closed" ? "Mở lại bài" : "Phát hành"}</button>}{selected.status === "published" && <button disabled={busy} onClick={() => void changeStatus("closed")} className="ft-btn ft-btn-secondary">Đóng bài</button>}<button aria-label="Xóa bài kiểm tra" title="Xóa bài kiểm tra" onClick={() => void remove()} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-bold text-rose-700"><Trash2 className="h-4 w-4" /></button></div>
+            <div className="flex flex-wrap gap-2"><button aria-disabled={!['closed', 'graded'].includes(selected.status)} disabled={busy} onClick={() => void openGrading()} title={['closed', 'graded'].includes(selected.status) ? "Chấm các bài đã nộp" : "Đóng bài trước khi chấm"} className={`ft-btn ft-btn-secondary ${!['closed', 'graded'].includes(selected.status) ? "cursor-not-allowed opacity-50" : ""}`}><Check className="h-4 w-4" />Chấm bài</button><a href={`${publicLink}?preview=creator`} target="_blank" rel="noreferrer" className="ft-btn ft-btn-secondary" title="Xem trước mặc định ở chế độ quản trị viên"><Layers3 className="h-4 w-4" />Xem trước</a>{!['published', 'backup_complete'].includes(selected.status) && <button disabled={busy} onClick={() => void changeStatus("published")} className="ft-primary"><Send className="h-4 w-4" />{['closed', 'graded'].includes(selected.status) ? "Mở lại bài" : "Phát hành"}</button>}{selected.status === "published" && <button disabled={busy} onClick={() => void changeStatus("closed")} className="ft-btn ft-btn-secondary">Đóng bài</button>}<button aria-label="Xóa bài kiểm tra" title="Xóa bài kiểm tra" onClick={() => void remove()} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-bold text-rose-700"><Trash2 className="h-4 w-4" /></button></div>
           </div>
           <div className="flex flex-wrap gap-2 border-t bg-white px-6 pt-4"><button type="button" onClick={() => setDetailTab("overview")} className={`rounded-lg px-4 py-2 text-sm font-bold ${detailTab === "overview" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>Tổng quan</button><button type="button" onClick={() => setDetailTab("settings")} className={`rounded-lg px-4 py-2 text-sm font-bold ${detailTab === "settings" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>Chi tiết bài kiểm tra</button></div>
           <div className={`${detailTab === "overview" ? "block" : "hidden"} border-t bg-slate-50 p-4 sm:p-6`}>
@@ -1453,7 +1496,7 @@ export default function TrainingAssessmentsAdmin({
           </div>
           {detailTab === "settings" && <section className="border-t bg-slate-50 p-6"><div className="mx-auto max-w-4xl rounded-2xl border bg-white p-5 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-wide text-blue-600">Cấu hình đã tạo</p><h3 className="mt-1 text-xl font-extrabold">Chi tiết bài kiểm tra</h3><p className="mt-1 text-sm text-slate-500">Chỉnh các thông tin vận hành mà không làm thay đổi câu hỏi hoặc mã đề.</p></div><span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-800">{selected.questions.length} câu · {selected.variants.length} mã đề</span></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><label><span className="mb-1 block text-sm font-bold">Thời gian làm bài (phút)</span><input required type="number" min="1" max="480" className="ft-input" value={detailDraft.duration_minutes} onChange={(event) => setDetailDraft((current) => ({ ...current, duration_minutes: event.target.value }))} /></label><label><span className="mb-1 block text-sm font-bold">Số lượt tối đa/người</span><input required type="number" min="1" max="20" className="ft-input" value={detailDraft.attempt_limit} onChange={(event) => setDetailDraft((current) => ({ ...current, attempt_limit: event.target.value }))} /></label><label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Mô tả hiển thị cho người làm</span><textarea className="ft-input min-h-20" value={detailDraft.description} onChange={(event) => setDetailDraft((current) => ({ ...current, description: event.target.value }))} /></label><label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Hướng dẫn bổ sung</span><textarea className="ft-input min-h-24" value={detailDraft.instructions} onChange={(event) => setDetailDraft((current) => ({ ...current, instructions: event.target.value }))} /><small className="mt-1 block text-slate-500">Nội dung này được hiển thị sau hướng dẫn chuẩn ở trang bắt đầu bài.</small></label></div><div className="mt-5 grid gap-3 rounded-xl bg-slate-50 p-4 text-sm sm:grid-cols-2"><p><b>Đơn vị / phân lớp:</b> {selected.partner_name || "—"}{selected.class_name ? ` · ${selected.class_name}` : ""}</p><p><b>Nhóm đối tượng:</b> {selected.audience_group || "—"}</p><p><b>Nguồn câu hỏi:</b> {selected.source_name || "—"}</p><p><b>Hình thức tạo:</b> {selected.generation_mode === "auto_generate" ? "Sinh từ ngân hàng chuẩn" : "Đề soạn sẵn"}</p>{selected.question_bank_url && <a href={selected.question_bank_url} target="_blank" rel="noreferrer" className="font-bold text-blue-700 underline">Mở ngân hàng câu hỏi</a>}{selected.output_sheet_url && <a href={selected.output_sheet_url} target="_blank" rel="noreferrer" className="font-bold text-blue-700 underline">Mở Sheet đầu ra</a>}</div>{notice && <p className={`mt-4 rounded-xl p-3 text-sm ${notice.startsWith("Đã") ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-700"}`}>{notice}</p>}<div className="mt-5 flex justify-end"><button disabled={busy} onClick={() => void saveAssessmentDetails()} className="ft-primary">Lưu thay đổi</button></div></div></section>}
 
-          {detailTab === "settings" && <div className="border-t bg-slate-50 px-6 pb-6"><div className="mx-auto max-w-5xl rounded-xl border border-blue-100 bg-blue-50/60 p-4"><div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-sm font-extrabold text-slate-900">Google Sheet liên kết</p><p className="mt-1 max-w-2xl text-sm text-slate-600">Bài nộp và điểm chấm tự động được ghi lên Sheet. “Cập nhật lên Sheet” ghi lại toàn bộ dữ liệu hệ thống; “Đồng bộ điểm từ Sheet” chỉ lấy các cột điểm về hệ thống.</p></div><div className="flex flex-wrap gap-2">{selected.output_sheet_url && <a href={selected.output_sheet_url} target="_blank" rel="noreferrer" className="ft-btn ft-btn-secondary bg-white"><FileSpreadsheet className="h-4 w-4" />Mở Google Sheet<ExternalLink className="h-3.5 w-3.5" /></a>}{driveFolderLink && <a href={driveFolderLink} target="_blank" rel="noreferrer" className="ft-btn ft-btn-secondary bg-white"><Upload className="h-4 w-4" />Mở thư mục bài làm<ExternalLink className="h-3.5 w-3.5" /></a>}{selected.sync_status !== "ready" && <button disabled={busy || !selected.output_sheet_url} onClick={() => void prepareOutput()} className="ft-btn ft-btn-secondary bg-white"><FileSpreadsheet className="h-4 w-4" />Khởi tạo cấu trúc Sheet</button>}<button disabled={busy || !selected.output_sheet_url} onClick={() => void prepareOutput()} className="ft-btn ft-btn-secondary bg-white" title="Hệ thống → Google Sheet"><RefreshCw className="h-4 w-4" />Cập nhật lên Sheet</button><button disabled={busy || !selected.output_sheet_url} onClick={() => void importGradesFromSheet()} className="ft-btn ft-btn-secondary bg-white" title="Google Sheet → hệ thống; chỉ cập nhật điểm"><Download className="h-4 w-4" />Đồng bộ điểm từ Sheet</button></div></div></div></div>}
+          {detailTab === "settings" && <div className="border-t bg-slate-50 px-6 pb-6"><div className="mx-auto max-w-5xl rounded-xl border border-blue-100 bg-blue-50/60 p-4"><div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-sm font-extrabold text-slate-900">Google Sheet liên kết</p><p className="mt-1 max-w-2xl text-sm text-slate-600">Bài nộp và điểm chấm tự động được ghi lên Sheet. Chỉ trạng thái “Đã hoàn thành sao lưu” mới xác nhận câu hỏi, đáp án, điểm và liên kết media đã khớp hoàn toàn.</p></div><div className="flex flex-wrap gap-2">{selected.output_sheet_url && <a href={selected.output_sheet_url} target="_blank" rel="noreferrer" className="ft-btn ft-btn-secondary bg-white"><FileSpreadsheet className="h-4 w-4" />Mở Google Sheet<ExternalLink className="h-3.5 w-3.5" /></a>}{driveFolderLink && <a href={driveFolderLink} target="_blank" rel="noreferrer" className="ft-btn ft-btn-secondary bg-white"><Upload className="h-4 w-4" />Mở thư mục bài làm<ExternalLink className="h-3.5 w-3.5" /></a>}<button disabled={busy || !selected.output_sheet_url} onClick={() => void prepareOutput()} className="ft-btn ft-btn-secondary bg-white" title="Hệ thống → Google Sheet"><RefreshCw className="h-4 w-4" />Cập nhật lên Sheet</button><button disabled={busy || !selected.output_sheet_url} onClick={() => void verifyBackup()} className="ft-btn ft-btn-secondary bg-white"><FileCheck2 className="h-4 w-4" />Kiểm chứng sao lưu</button><button disabled={busy || !selected.output_sheet_url} onClick={() => void importGradesFromSheet()} className="ft-btn ft-btn-secondary bg-white" title="Google Sheet → hệ thống; chỉ cập nhật điểm"><Download className="h-4 w-4" />Đồng bộ điểm từ Sheet</button></div></div></div></div>}
         </article>
         <div className="grid gap-4 sm:grid-cols-3"><div className="rounded-2xl border bg-white p-5"><Users className="h-5 w-5 text-blue-600" /><b className="mt-3 block text-3xl">{selected.attempts_count}</b><span className="text-sm text-slate-500">Lượt bắt đầu</span></div><div className="rounded-2xl border bg-white p-5"><Check className="h-5 w-5 text-emerald-600" /><b className="mt-3 block text-3xl">{selected.submitted_count}</b><span className="text-sm text-slate-500">Bài đã nộp</span></div><div className="rounded-2xl border bg-white p-5"><BarChart3 className="h-5 w-5 text-amber-600" /><b className="mt-3 block text-3xl">{selected.average_score ?? "—"}{selected.average_score != null && "%"}</b><span className="text-sm text-slate-500">Điểm trung bình</span></div></div>
         {selected.output_sheet_url && (selected.sync_counts.pending || selected.sync_counts.error) && <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><p><b>Cần đồng bộ:</b> {selected.sync_counts.pending} chờ, {selected.sync_counts.error} lỗi. Dữ liệu gốc vẫn an toàn trong hệ thống; hãy đồng bộ lại trước khi xóa lượt.</p><button disabled={busy} onClick={() => void syncPendingResults()} className="ft-btn ft-btn-secondary bg-white"><RefreshCw className="h-4 w-4" />Đồng bộ lại tất cả</button></div>}
@@ -1474,11 +1517,15 @@ export default function TrainingAssessmentsAdmin({
     );
   }
 
+  if (showTrash) {
+    return <section className="mt-6 overflow-hidden rounded-2xl border bg-white shadow-sm"><div className="flex items-center justify-between border-b p-5"><div><h2 className="text-xl font-extrabold">Bản nháp đã xóa</h2><p className="mt-1 text-sm text-slate-500">Quản trị viên có thể khôi phục trong 3 ngày; sau hạn này dữ liệu bị xóa vĩnh viễn.</p></div><button onClick={() => setShowTrash(false)} className="ft-btn ft-btn-secondary"><ArrowLeft className="h-4 w-4" />Quay lại</button></div>{notice && <p className="m-5 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{notice}</p>}<div className="overflow-x-auto"><table className="ft-table"><thead><tr><th>Bài kiểm tra</th><th>Đơn vị</th><th>Hạn khôi phục</th><th /></tr></thead><tbody>{trashItems.length ? trashItems.map(item => <tr key={item.id}><td><b>{item.title}</b></td><td>{item.partner_name || '—'}</td><td>{item.purge_at ? new Date(item.purge_at).toLocaleString('vi-VN') : '—'}</td><td><button disabled={busy} onClick={() => void restoreDraft(item)} className="ft-btn ft-btn-secondary">Khôi phục</button></td></tr>) : <tr><td colSpan={4} className="py-10 text-center text-slate-500">Không có bản nháp trong thùng rác.</td></tr>}</tbody></table></div></section>;
+  }
+
   return (
     <section className="mt-6 overflow-hidden rounded-2xl border bg-white shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3 p-5">
         <div><h2 className="text-xl font-extrabold">Bài kiểm tra cuối khóa tập huấn</h2><p className="mt-1 text-sm text-slate-500">Một link cho mỗi đơn vị/phân lớp, tự chia đều 4–5 mã đề và chấm điểm tập trung.</p></div>
-        {!isGuest && <div className="flex gap-2"><button onClick={() => void load()} className="ft-btn ft-btn-secondary"><RefreshCw className="h-4 w-4" /></button><button onClick={openCreate} className="ft-primary"><Plus className="h-4 w-4" />Tạo bài kiểm tra</button></div>}
+        {!isGuest && <div className="flex gap-2">{userRole === 'ADMIN' && <button onClick={() => void loadTrash()} className="ft-btn ft-btn-secondary"><Trash2 className="h-4 w-4" />Bản nháp đã xóa</button>}<button onClick={() => void load()} className="ft-btn ft-btn-secondary"><RefreshCw className="h-4 w-4" /></button><button onClick={openCreate} className="ft-primary"><Plus className="h-4 w-4" />Tạo bài kiểm tra</button></div>}
       </div>
       {/* Filter bar */}
       {items.length > 0 && (
@@ -1497,6 +1544,8 @@ export default function TrainingAssessmentsAdmin({
             <option value="draft">Bản nháp</option>
             <option value="published">Đang mở</option>
             <option value="closed">Đã đóng</option>
+            <option value="graded">Đã chấm</option>
+            <option value="backup_complete">Đã hoàn thành sao lưu</option>
           </select>
           {partnerOptions.length > 1 && (
             <select className="ft-input w-auto text-sm" value={filterPartner} onChange={(e) => setFilterPartner(e.target.value)}>
@@ -1510,7 +1559,12 @@ export default function TrainingAssessmentsAdmin({
         </div>
       )}
       {notice && <p className="mx-5 mb-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{notice}</p>}
-      <div className="overflow-x-auto"><table className="ft-table min-w-[1160px]"><thead><tr><th>STT</th><th>Người</th><th>Bài đánh giá</th><th>Đơn vị / phân lớp</th><th>Mã đề</th><th><button type="button" onClick={() => setWorkDateSort((current) => current === "desc" ? "asc" : "desc")} className="inline-flex items-center gap-1 font-bold">Ngày làm {workDateSort === "desc" ? "↓" : "↑"}</button></th><th>Thời gian</th><th>Lượt làm</th><th>Điểm TB</th><th>Trạng thái</th></tr></thead><tbody>{sortedItems.length ? sortedItems.map((item, index) => { const peoplePerVariant = item.variants.length ? Math.ceil((item.participant_count || 0) / item.variants.length) : 0; return <tr key={item.id} onClick={() => void openDetail(item)} className="cursor-pointer hover:bg-blue-50"><td>{index + 1}</td><td><b>{item.participant_count || 0}</b><span className="block text-xs text-slate-500">{peoplePerVariant ? `đang tối đa ${peoplePerVariant}/mã` : "chưa có người làm"}</span><span className="block text-xs text-amber-700">khuyến nghị ≤ 12/mã</span></td><td><b>{item.title}</b><span className="mt-1 block text-xs font-bold text-blue-600">{item.generation_mode === "auto_generate" ? "Sinh từ ngân hàng chuẩn" : "Đề soạn sẵn"}</span><span className="mt-1 block font-mono text-xs text-slate-400">{assessmentDetailPath(item.id)}</span></td><td>{item.partner_name || "—"}<span className="block text-xs text-slate-500">{item.class_name || "Không chia lớp"}</span></td><td>{item.variants.length}<span className="block text-xs text-slate-500">{item.variants.map((v) => v.name).join(", ")}</span></td><td>{formatWorkDate(item.opens_at || item.created_at)}<span className="block text-xs text-slate-500">{item.opens_at ? "Theo lịch mở bài" : "Ngày tạo"}</span></td><td><span className="inline-flex items-center gap-1"><Clock3 className="h-3.5 w-3.5" />{item.duration_minutes} phút</span></td><td>{item.submitted_count} / {item.attempts_count}</td><td>{item.average_score == null ? "—" : `${item.average_score}%`}</td><td><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${item.status === "published" ? "bg-emerald-100 text-emerald-800" : item.status === "closed" ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-700"}`}>{statusLabel[item.status]}</span><span className={`mt-1 block text-[11px] font-bold ${item.sync_counts?.error ? "text-rose-600" : item.sync_counts?.pending ? "text-amber-600" : "text-emerald-600"}`}>Sync: {item.sync_counts?.synced || 0}/{item.submitted_count}{item.sync_counts?.error ? ` - ${item.sync_counts.error} lỗi` : ""}</span></td></tr>; }) : <tr><td colSpan={10} className="py-12 text-center text-slate-500">{busy ? "Đang tải..." : items.length ? "Không có kết quả khớp bộ lọc." : "Chưa có bài kiểm tra cuối tập huấn."}</td></tr>}</tbody></table></div>
+      <div className="overflow-x-auto"><table className="ft-table min-w-[1160px]"><thead><tr><th>STT</th><th>Người</th><th>Bài đánh giá</th><th>Đơn vị / phân lớp</th><th>Mã đề</th><th><button type="button" onClick={() => setWorkDateSort((current) => current === "desc" ? "asc" : "desc")} className="inline-flex items-center gap-1 font-bold">Ngày làm {workDateSort === "desc" ? "↓" : "↑"}</button></th><th>Thời gian</th><th>Lượt làm</th><th>Điểm TB</th><th>Trạng thái</th></tr></thead><tbody>{sortedItems.length ? sortedItems.map((item, index) => {
+        const peoplePerVariant = item.variants.length ? Math.ceil((item.participant_count || 0) / item.variants.length) : 0;
+        const warningClass = item.retention_warning?.level === "urgent" ? "bg-red-600 text-white" : item.retention_warning?.level === "strong" ? "bg-orange-100 text-orange-900" : "bg-amber-100 text-amber-900";
+        const statusClass = item.status === "published" ? "bg-emerald-100 text-emerald-800" : item.status === "backup_complete" ? "bg-blue-100 text-blue-800" : item.status === "graded" ? "bg-violet-100 text-violet-800" : item.status === "closed" ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-700";
+        return <tr key={item.id} onClick={() => void openDetail(item)} className="cursor-pointer hover:bg-blue-50"><td>{index + 1}</td><td><b>{item.participant_count || 0}</b><span className="block text-xs text-slate-500">{peoplePerVariant ? `đang tối đa ${peoplePerVariant}/mã` : "chưa có người làm"}</span><span className="block text-xs text-amber-700">khuyến nghị ≤ 12/mã</span></td><td><b>{item.title}</b><span className="mt-1 block text-xs font-bold text-blue-600">{item.generation_mode === "auto_generate" ? "Sinh từ ngân hàng chuẩn" : "Đề soạn sẵn"}</span><span className="mt-1 block font-mono text-xs text-slate-400">{assessmentDetailPath(item.id)}</span></td><td>{item.partner_name || "—"}<span className="block text-xs text-slate-500">{item.class_name || "Không chia lớp"}</span></td><td>{item.variants.length}<span className="block text-xs text-slate-500">{item.variants.map((v) => v.name).join(", ")}</span></td><td>{formatWorkDate(item.opens_at || item.created_at)}<span className="block text-xs text-slate-500">{item.opens_at ? "Theo lịch mở bài" : "Ngày tạo"}</span></td><td><span className="inline-flex items-center gap-1"><Clock3 className="h-3.5 w-3.5" />{item.duration_minutes} phút</span></td><td>{item.submitted_count} / {item.attempts_count}</td><td>{item.average_score == null ? "—" : `${item.average_score}%`}</td><td><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${statusClass}`}>{statusLabel[item.status]}</span>{item.retention_warning && <span className={`mt-2 block rounded px-2 py-1 text-[11px] font-extrabold ${warningClass}`}><AlertTriangle className="mr-1 inline h-3 w-3" />{item.retention_warning.label}</span>}<span className={`mt-1 block text-[11px] font-bold ${item.sync_counts?.error ? "text-rose-600" : item.sync_counts?.pending ? "text-amber-600" : "text-emerald-600"}`}>Sync: {item.sync_counts?.synced || 0}/{item.submitted_count}{item.sync_counts?.error ? ` - ${item.sync_counts.error} lỗi` : ""}</span></td></tr>;
+      }) : <tr><td colSpan={10} className="py-12 text-center text-slate-500">{busy ? "Đang tải..." : items.length ? "Không có kết quả khớp bộ lọc." : "Chưa có bài kiểm tra cuối tập huấn."}</td></tr>}</tbody></table></div>
     </section>
   );
 }

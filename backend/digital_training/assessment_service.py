@@ -1101,6 +1101,25 @@ def _sheet_attempt_row(attempt, questions):
         _sheet_answer_value(question, attempt.answers.get(str(question.get("id")), ""))
         for question in questions
     ]
+    return [
+        attempt.respondent_name, attempt.email, attempt.phone, attempt.organization, attempt.position,
+        attempt.participant_code, str(attempt.access_token), attempt.variant,
+        status_names.get(attempt.status, attempt.status),
+        attempt.started_at.isoformat() if attempt.started_at else "",
+        attempt.submitted_at.isoformat() if attempt.submitted_at else "",
+        *answer_values,
+        float(attempt.auto_graded_points or 0),
+        float(attempt.practical_score or 0) if attempt.practical_score is not None else "",
+        float(attempt.score or 0),
+        "Cần chấm" if attempt.manual_grading_required else "Đã chấm",
+        "Đã ghi",
+        attempt.synced_at.isoformat() if attempt.synced_at else "",
+        attempt.purge_after.isoformat() if attempt.purge_after else "",
+        json.dumps({
+            "answers": attempt.answers or {}, "progress": attempt.progress or {},
+            "grading": attempt.grading or {}, "grading_notes": attempt.grading_notes or [],
+        }, ensure_ascii=False, sort_keys=True, default=str),
+    ]
 
 
 def _completion_label(attempt):
@@ -1143,21 +1162,6 @@ def _submission_list_row(attempt, index=""):
         _sheet_local_datetime(attempt.submitted_at),
         str(attempt.access_token),
         attempt.sync_status or "pending",
-    ]
-    return [
-        attempt.respondent_name, attempt.email, attempt.phone, attempt.organization, attempt.position,
-        attempt.participant_code, str(attempt.access_token), attempt.variant,
-        status_names.get(attempt.status, attempt.status),
-        attempt.started_at.isoformat() if attempt.started_at else "",
-        attempt.submitted_at.isoformat() if attempt.submitted_at else "",
-        *answer_values,
-        float(attempt.auto_graded_points or 0),
-        float(attempt.practical_score or 0) if attempt.practical_score is not None else "",
-        float(attempt.score or 0),
-        "Cần chấm" if attempt.manual_grading_required else "Đã chấm",
-        "Đã ghi",
-        attempt.synced_at.isoformat() if attempt.synced_at else "",
-        attempt.purge_after.isoformat() if attempt.purge_after else "",
     ]
 
 
@@ -1253,15 +1257,16 @@ def prepare_assessment_google_sheet(assessment):
         body={"values": participant_values},
     ).execute()
 
-    question_headers = ["STT", "M\u00e3 c\u00e2u h\u1ecfi", "Ch\u1ee7 \u0111\u1ec1", "Lo\u1ea1i c\u00e2u h\u1ecfi", "Ki\u1ec3u c\u00e2u h\u1ecfi", "\u0110\u1ed9 kh\u00f3", "C\u00e2u h\u1ecfi", "\u1ea2nh/Video minh h\u1ecda", "Ph\u01b0\u01a1ng \u00e1n 1", "Ph\u01b0\u01a1ng \u00e1n 2", "Ph\u01b0\u01a1ng \u00e1n 3", "Ph\u01b0\u01a1ng \u00e1n 4", "Ph\u01b0\u01a1ng \u00e1n 5", "\u0110\u00e1p \u00e1n", "\u1ea2nh \u0111\u00e1p \u00e1n", "\u0110i\u1ec3m"]
+    question_headers = ["STT", "Mã định danh", "Mã câu hỏi", "Chủ đề", "Loại câu hỏi", "Kiểu câu hỏi", "Độ khó", "Câu hỏi", "Ảnh/Video minh họa", "Phương án 1", "Phương án 2", "Phương án 3", "Phương án 4", "Phương án 5", "Đáp án", "Ảnh đáp án", "Điểm", "Dữ liệu đầy đủ (JSON)"]
     for variant, sheet_title in layout["question_sheets"].items():
         rows = [question_headers]
         for question in sorted([item for item in assessment.questions if str(item.get("variant") or "") == variant], key=lambda item: item.get("order") or 0):
             option_map = {str(item.get("key")): item.get("text", "") for item in question.get("options") or []}
             rows.append([
-                question.get("order", ""), question.get("question_code", ""), question.get("category", ""), question.get("knowledge_type", ""), question.get("type", ""), question.get("difficulty", ""), question.get("text", ""), question.get("media_url", ""),
+                question.get("order", ""), question.get("id", ""), question.get("question_code", ""), question.get("category", ""), question.get("knowledge_type", ""), question.get("type", ""), question.get("difficulty", ""), question.get("text", ""), question.get("media_url", ""),
                 *[option_map.get(str(index), option_map.get(chr(64 + index), "")) for index in range(1, 6)],
                 ";".join(str(item) for item in question.get("correct_answers") or []), question.get("answer_image_url", ""), question.get("points", 0),
+                json.dumps(question, ensure_ascii=False, sort_keys=True, default=str),
             ])
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
@@ -1272,7 +1277,7 @@ def prepare_assessment_google_sheet(assessment):
 
     for variant, sheet_title in layout["answer_sheets"].items():
         questions = public_questions(assessment, variant)
-        headers = ["Họ tên", "Email", "Số điện thoại", "Tổ chuyên môn/Phòng ban", "Chức vụ", "Mã người làm", "Mã lượt làm", "Mã đề", "Trạng thái", "Bắt đầu lúc", "Nộp lúc", *[_sheet_question_header(question, index) for index, question in enumerate(questions, start=1)], "Điểm tự động", "Điểm thực hành", "Tổng điểm", "Trạng thái chấm", "Trạng thái đồng bộ", "Thời điểm ghi Sheet", "Hạn xóa dữ liệu tạm"]
+        headers = ["Họ tên", "Email", "Số điện thoại", "Tổ chuyên môn/Phòng ban", "Chức vụ", "Mã người làm", "Mã lượt làm", "Mã đề", "Trạng thái", "Bắt đầu lúc", "Nộp lúc", *[_sheet_question_header(question, index) for index, question in enumerate(questions, start=1)], "Điểm tự động", "Điểm thực hành", "Tổng điểm", "Trạng thái chấm", "Trạng thái đồng bộ", "Thời điểm ghi Sheet", "Hạn xóa dữ liệu tạm", "Dữ liệu bài làm đầy đủ (JSON)"]
         service.spreadsheets().values().clear(
             spreadsheetId=spreadsheet_id,
             range=f"'{sheet_title}'!A:ZZ",

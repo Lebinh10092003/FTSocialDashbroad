@@ -319,7 +319,13 @@ class TrainingQuestionBankSnapshot(models.Model):
 
 
 class TrainingAssessment(models.Model):
-    STATUS_CHOICES = [("draft", "Draft"), ("published", "Published"), ("closed", "Closed")]
+    STATUS_CHOICES = [
+        ("draft", "Bản nháp"),
+        ("published", "Đang mở"),
+        ("closed", "Đã đóng"),
+        ("graded", "Đã chấm"),
+        ("backup_complete", "Đã hoàn thành sao lưu"),
+    ]
     GENERATION_MODE_CHOICES = [("prepared", "Prepared variants"), ("auto_generate", "Auto-generate from import")]
     title = models.CharField(max_length=255)
     session = models.ForeignKey(TrainingSession, null=True, blank=True, on_delete=models.SET_NULL, related_name="assessments")
@@ -352,6 +358,12 @@ class TrainingAssessment(models.Model):
     max_people_per_variant = models.PositiveIntegerField(default=12)
     sync_status = models.CharField(max_length=20, default="pending")
     sync_error = models.TextField(blank=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    graded_at = models.DateTimeField(null=True, blank=True)
+    backup_completed_at = models.DateTimeField(null=True, blank=True)
+    backup_manifest = models.JSONField(default=dict, blank=True)
+    trashed_at = models.DateTimeField(null=True, blank=True)
+    purge_at = models.DateTimeField(null=True, blank=True)
     created_by = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

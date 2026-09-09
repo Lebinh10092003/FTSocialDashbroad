@@ -1,0 +1,40 @@
+name: Assessment lifecycle
+
+on:
+  schedule:
+    - cron: '17 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: workspace-production-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Configure VPS SSH access
+        env:
+          VPS_HOST: ${{ secrets.DEPLOY_HOST }}
+          VPS_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          install -d -m 700 ~/.ssh
+          ssh-keyscan -p "$VPS_PORT" -H "$VPS_HOST" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Warn, verify backups and purge expired assessments
+        env:
+          VPS_HOST: ${{ secrets.DEPLOY_HOST }}
+          VPS_PORT: ${{ secrets.DEPLOY_PORT }}
+          VPS_USERNAME: ${{ secrets.DEPLOY_USER }}
+          SSHPASS: ${{ secrets.DEPLOY_PASSWORD }}
+        run: |
+          set -Eeuo pipefail
+          : "${SSHPASS:?Missing repository secret DEPLOY_PASSWORD}"
+          sshpass -e ssh -p "$VPS_PORT" -o BatchMode=no -o StrictHostKeyChecking=yes "$VPS_USERNAME@$VPS_HOST" "if [ \"\$(id -u)\" -eq 0 ]; then exec sudo -u workspace -H bash -lc 'cd /var/www/ft-workspace/backend && DJANGO_DB_PATH=/home/workspace/ft-workspace-data/workspace.sqlite3 ../.venv/bin/python manage.py maintain_assessment_lifecycle'; else cd /var/www/ft-workspace/backend && DJANGO_DB_PATH=/home/workspace/ft-workspace-data/workspace.sqlite3 exec ../.venv/bin/python manage.py maintain_assessment_lifecycle; fi"
