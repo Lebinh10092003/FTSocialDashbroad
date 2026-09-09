@@ -89,6 +89,8 @@ class WorkScheduleSheetParserTests(TestCase):
         self.assertTrue(all(task.has_time_prefix for task in tasks))
 
     def test_only_authored_time_prefix_gets_bold_italic_pure_black(self):
+        self.assertEqual(_build_content_format_runs(""), [])
+
         content = "1. Việc có giờ hệ thống\n2. 8h30: Việc ghi giờ trong tên\n3. 7:00 Việc khác"
         runs = _build_content_format_runs(content)
         emphasized = [run for run in runs if run["format"].get("bold")]

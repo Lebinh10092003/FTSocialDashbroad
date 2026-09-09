@@ -361,6 +361,11 @@ _TIME_LINE_RE = re.compile(
 
 def _build_content_format_runs(content, items=None):
     """Bold/italic task lines that start with a time or have high priority."""
+    # Sheets only accepts textFormatRuns for a literal, non-empty string cell.
+    # Without this guard an empty schedule generated a run at index 0 and made
+    # the entire sync fail with HTTP 400 during the formatting phase.
+    if not content:
+        return []
     lines = content.split('\n')
     runs = []
     offset = 0
