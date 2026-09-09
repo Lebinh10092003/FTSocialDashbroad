@@ -11,6 +11,7 @@ from django.db import models, transaction
 from django.utils import timezone
 
 from authentication.models import SystemConfig, UserProfile
+from attendance.models import TimesheetEntry
 from integrations.google_sheets import build_sheets_service
 
 from .models import WorkItem, WorkScheduleSheetChange, WorkScheduleSheetSyncLease
@@ -262,6 +263,19 @@ def _group_values(items):
     )
     task_ids = _numbered([str(item.sync_uid) for item in items])
     return content, self_notes, leader_notes, task_ids
+
+
+def _attendance_value(entries):
+    """Render web timesheet rows exactly as the visible Sheet attendance cell."""
+    if not entries:
+        return ""
+    if any(entry.is_day_off for entry in entries):
+        return "Nghỉ"
+    return "\n".join(
+        f"{'Online' if entry.work_mode == 'online' else 'Trực tiếp'}: "
+        f"{entry.shift_start.strftime('%H:%M')} - {entry.shift_end.strftime('%H:%M')}"
+        for entry in entries
+    )
 
 
 def _row_hash(content, self_notes, leader_notes, task_ids):
@@ -573,6 +587,7 @@ def push_groups_to_sheet(service, groups, force=False):
     updates = []
     conflicts = []
     synced = []
+    update_rows = []
     row_index = {}
     for row_number, row in enumerate(rows, start=2):
         row_email = _row_employee_email(row)
@@ -580,6 +595,7 @@ def push_groups_to_sheet(service, groups, force=False):
         if row_email and row_date:
             row_index.setdefault((row_email, row_date), (row_number, row))
     items_by_group = defaultdict(list)
+    attendance_by_group = defaultdict(list)
     if groups:
         group_emails = {email for email, _ in groups}
         min_date = min(work_date for _, work_date in groups)
@@ -592,18 +608,31 @@ def push_groups_to_sheet(service, groups, force=False):
             key = (item.executor_id, item.work_date)
             if key in groups:
                 items_by_group[key].append(item)
+        all_attendance = TimesheetEntry.objects.filter(
+            employee_id__in=group_emails,
+            work_date__range=(min_date, max_date),
+        ).order_by("shift_number", "pk")
+        for entry in all_attendance:
+            key = (entry.employee_id, entry.work_date)
+            if key in groups:
+                attendance_by_group[key].append(entry)
     profiles = UserProfile.objects.in_bulk(
         {email for email, _ in groups}, field_name="email"
     )
     next_row = max((i for i, row in enumerate(rows, start=2) if any(_cell(row, c) for c in range(min(9, len(row))))), default=2) + 1
     for email, work_date in sorted(groups, key=lambda value: (value[1], value[0])):
         items = items_by_group[(email, work_date)]
+        attendance = attendance_by_group[(email, work_date)]
         row_number, current = _find_row(rows, email, work_date, items, row_index)
         if row_number is None:
-            if not items:
+            if not items and not attendance:
                 continue
             row_number, current = next_row, []
             next_row += 1
+        update_rows.append(row_number)
+        if "attendance" in columns:
+            column = _column_letter(columns["attendance"])
+            updates.append({"range": f"'{SHEET_NAME}'!{column}{row_number}", "values": [[_attendance_value(attendance)]]})
         live_values = (_cell(current, 4), _cell(current, 5), _cell(current, 6), _cell(current, 9))
         live_hash = _row_hash(*live_values)
         stored_hash = _cell(current, 10)
@@ -635,7 +664,7 @@ def push_groups_to_sheet(service, groups, force=False):
                 updates.append({"range": f"'{SHEET_NAME}'!{column}{row_number}", "values": [[value]]})
         synced.append((email, work_date, row_number, new_hash, items))
     if updates:
-        ensure_sheet_row_capacity(service, max(row[2] for row in synced))
+        ensure_sheet_row_capacity(service, max(update_rows))
         for start in range(0, len(updates), 500):
             service.spreadsheets().values().batchUpdate(
                 spreadsheetId=SPREADSHEET_ID,

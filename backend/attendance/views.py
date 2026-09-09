@@ -316,6 +316,11 @@ def timesheet_save(request):
                 new_data={"shifts": _snapshot_entries(saved)},
             )
 
+    # Timesheet changes are web-authoritative for the visible "Chấm công"
+    # column. Queue the existing background Sheet worker after the DB commit.
+    from work_schedule.signals import queue_group
+    queue_group(target_user.email, work_date)
+
     return Response({
         "message": "Đã lưu công ca." if not is_day_off else "Đã ghi nhận nghỉ làm.",
         "entries": [_entry_payload(e) for e in saved],

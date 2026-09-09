@@ -111,7 +111,7 @@ export default function TrainingAssessmentWorkspace({
       </aside>
 
       <main className="md:ml-64">
-        <header className="border-b bg-white px-5 py-4 md:px-8">
+        <header className="ft-module-header border-b px-5 py-4 md:px-8">
           <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-blue-600">

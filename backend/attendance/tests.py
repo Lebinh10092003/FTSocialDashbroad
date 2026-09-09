@@ -9,6 +9,7 @@ from authentication.models import UserProfile
 
 from .models import AttendanceRecord
 from .views import _worked_minutes
+from work_schedule.models import WorkScheduleSheetChange
 
 
 class AttendanceApiTests(TestCase):
@@ -22,7 +23,7 @@ class AttendanceApiTests(TestCase):
             email=django_user.email,
             name="Nhân viên chấm công",
             role="EMPLOYEE",
-            access_modules=[],
+            access_modules=["attendance"],
         )
         self.token = Token.objects.create(user=django_user).key
 
@@ -88,3 +89,35 @@ class AttendanceApiTests(TestCase):
             clock_out=timezone.make_aware(datetime.combine(timezone.localdate(), datetime.strptime("17:30", "%H:%M").time()), local_tz),
         )
         self.assertEqual(_worked_minutes(item), 480)
+
+    def test_admin_first_timesheet_request_lists_active_employees_without_entries(self):
+        self.profile.role = "ADMIN"
+        self.profile.save(update_fields=["role", "updated_at"])
+        employee = UserProfile.objects.create(
+            email="no-timesheet@example.com",
+            name="Nhân viên chưa có ca",
+            role="EMPLOYEE",
+            employment_status="ACTIVE",
+        )
+
+        response = self.request("get", f"/api/attendance/timesheet?month={timezone.localdate():%Y-%m}&scope=all")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["isPrivileged"])
+        self.assertIn(employee.email, [row["email"] for row in response.json()["employees"]])
+
+    def test_saving_timesheet_queues_background_sheet_update(self):
+        work_date = timezone.localdate().isoformat()
+
+        response = self.request("post", "/api/attendance/timesheet/save", {
+            "workDate": work_date,
+            "isDayOff": False,
+            "shifts": [{"start": "09:30", "end": "12:00", "workMode": "direct", "notes": ""}],
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(WorkScheduleSheetChange.objects.filter(
+            executor_email=self.profile.email,
+            work_date=work_date,
+            status=WorkScheduleSheetChange.STATUS_PENDING,
+        ).exists())

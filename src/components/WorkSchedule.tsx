@@ -62,6 +62,7 @@ type WorkDraft = {
   reviewNote: string;
 };
 type InlineDayDraft = { content: string; selfAssessment: string; leaderAssessment: string };
+type TimesheetShift = { shiftStart: string; shiftEnd: string; workMode: "direct" | "online"; isDayOff: boolean };
 type DayEditState = { date: string; tasks: WorkTask[] };
 type DayAssessmentMode = "default" | "completed" | "custom";
 type DayAssessmentEntry = { mode: DayAssessmentMode; note: string };
@@ -748,24 +749,24 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
   ];
 
   return (
-    <div className="ws-shell min-h-dvh bg-[#f5f7fb] text-slate-900">
-      <aside className="ws-sidebar">
-        <div className="ft-sidebar-brand mx-3 mt-3 flex items-center gap-3">
+    <div className="ft-module-shell flex min-h-dvh text-slate-900">
+      <aside className="dt-sidebar ft-module-sidebar sticky top-0 flex h-dvh w-64 shrink-0 flex-col border-r">
+        <button type="button" onClick={onBackToWorkspace} className="ft-sidebar-brand mx-3 mt-3 flex items-center gap-3 text-left">
           <img src="/logo.png" alt="FermatTech" className="h-9 object-contain" />
-          <div><b>FermatTech</b><p>Lịch làm việc</p></div>
-        </div>
+          <div className="min-w-0 border-l border-sky-100 pl-3"><b className="block text-xl font-extrabold leading-none">FermatTech</b><p className="mt-1 text-[10px] font-extrabold uppercase tracking-[0.12em] text-blue-200">Lịch làm việc</p></div>
+        </button>
         <nav className="flex-1 space-y-1 p-3">
           {navItems.map((item) => {
             const Icon = item.icon;
             return (
-              <button key={item.id} type="button" onClick={() => navigateSchedule(item.id)} className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-left text-sm font-semibold transition ${view === item.id ? "bg-white text-[#0055da] shadow-sm" : "text-blue-50 hover:bg-white/10"}`}>
+              <button key={item.id} type="button" onClick={() => navigateSchedule(item.id)} className={`ft-nav-item flex w-full items-center gap-3 rounded-xl border-l-4 px-3.5 py-3 text-left text-sm font-semibold transition ${view === item.id ? "ft-nav-item-active" : ""}`}>
                 <Icon className="h-4.5 w-4.5" />
                 {item.label}
               </button>
             );
           })}
         </nav>
-        <div className="p-3">
+        <div className="ft-sidebar-footer border-t p-3">
           <button type="button" onClick={onBackToWorkspace} className="ft-sidebar-back mb-3 flex w-full items-center gap-3 rounded-xl border p-3 text-left text-sm font-bold">
             <ArrowLeft className="h-4 w-4" />
             Quay lại Workspace
@@ -774,7 +775,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
         </div>
       </aside>
       <main className="min-w-0 flex-1">
-        <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/90 px-4 py-3 backdrop-blur-xl sm:px-6 lg:px-8">
+        <header className="ft-module-header sticky top-0 z-20 border-b px-4 py-3 sm:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[1680px] flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-xs font-bold uppercase tracking-[.16em] text-blue-600">Không gian làm việc</p>
@@ -792,7 +793,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
             </div>
           </div>
         </header>
-        <div className="mx-auto max-w-[1680px] p-4 sm:p-6 lg:p-8">
+        <div className="ft-module-content mx-auto max-w-[1680px] p-4 sm:p-6 lg:p-8">
           {error && (
             <div className="mb-5 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
               <span>{error}</span>
@@ -907,7 +908,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
               </button>
             </div>
           )}
-          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={tasks} userEmail={userEmail} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={(period: "week" | "month") => navigateSchedule("week", period)} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={(next: View) => navigateSchedule(next)} setEditing={setEditing} setDraggedId={setDraggedId} moveTask={moveTask} saveInlineDay={saveInlineDay} reloadTasks={load} /> : view === "team" ? <TeamSpreadsheetView members={teamMembers} tasks={teamTasks} userEmail={userEmail} setEditing={setEditing} saveInlineDay={saveInlineDay} reloadTasks={load} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} onSync={syncSheet} />}
+          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={tasks} userEmail={userEmail} idToken={idToken} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={(period: "week" | "month") => navigateSchedule("week", period)} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={(next: View) => navigateSchedule(next)} setEditing={setEditing} setDraggedId={setDraggedId} moveTask={moveTask} saveInlineDay={saveInlineDay} reloadTasks={load} /> : view === "team" ? <TeamSpreadsheetView members={teamMembers} tasks={teamTasks} userEmail={userEmail} setEditing={setEditing} saveInlineDay={saveInlineDay} reloadTasks={load} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} onSync={syncSheet} />}
         </div>
       </main>
       {editing && <TaskDialog draft={editing} setDraft={setEditing} staff={staff} userEmail={userEmail} saveTask={saveTask} saving={savingTask} saveProgressNote={saveProgressNote} deleteTasks={deleteTasks} review={review} />}
@@ -1141,7 +1142,7 @@ function TeamSpreadsheetView({ members, tasks, userEmail, setEditing, saveInline
   </div>;
 }
 
-function WeekView({ tasks, userEmail, visibleDays, anchor, setAnchor, period, setPeriod, layout, setLayout, setSelectedDate, setView, setEditing, setDraggedId, moveTask, saveInlineDay, reloadTasks }: any) {
+function WeekView({ tasks, userEmail, idToken, visibleDays, anchor, setAnchor, period, setPeriod, layout, setLayout, setSelectedDate, setView, setEditing, setDraggedId, moveTask, saveInlineDay, reloadTasks }: any) {
   const today = iso(new Date());
   const currentMonth = anchor.getMonth();
   const [dragTargetDate, setDragTargetDate] = useState<string | null>(null);
@@ -1234,7 +1235,7 @@ function WeekView({ tasks, userEmail, visibleDays, anchor, setAnchor, period, se
           </div>
         </section>
       ) : (
-        <SpreadsheetScheduleTable days={visibleDays} tasks={tasks.filter((task: WorkTask) => task.executor.email === userEmail)} executorEmail={userEmail} saveInlineDay={saveInlineDay} reloadTasks={reloadTasks} />
+        <SpreadsheetScheduleTable days={visibleDays} tasks={tasks.filter((task: WorkTask) => task.executor.email === userEmail)} executorEmail={userEmail} idToken={idToken} saveInlineDay={saveInlineDay} reloadTasks={reloadTasks} />
       )}
     </>
   );
@@ -1300,11 +1301,12 @@ const resizeGridTextarea = (element: HTMLTextAreaElement | null) => {
   editors.forEach((editor) => { editor.style.height = `${height}px`; });
 };
 
-function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInlineDay, reloadTasks }: {
+function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, idToken, saveInlineDay, reloadTasks }: {
   days: Date[];
   tasks: WorkTask[];
   executorEmail?: string;
   people?: TeamMember[];
+  idToken?: string;
   saveInlineDay: (date: string, items: GridSaveItem[], deleteIds: number[], executorEmail?: string, leaderAssessment?: string) => Promise<unknown>;
   reloadTasks: (silent?: boolean) => Promise<void>;
 }) {
@@ -1329,12 +1331,39 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
   const [drafts, setDrafts] = useState<Record<string, InlineDayDraft>>(makeDrafts);
   const [dirtyRows, setDirtyRows] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [attendanceByDate, setAttendanceByDate] = useState<Record<string, TimesheetShift[]>>({});
   const savingRef = useRef(false);
   const draftsRef = useRef(drafts);
   const dirtyRowsRef = useRef(dirtyRows);
 
   useEffect(() => { draftsRef.current = drafts; }, [drafts]);
   useEffect(() => { dirtyRowsRef.current = dirtyRows; }, [dirtyRows]);
+
+  useEffect(() => {
+    if (people || !idToken || !days.length) return;
+    let active = true;
+    const loadAttendance = async () => {
+      try {
+        const start = iso(days[0]);
+        const end = iso(days[days.length - 1]);
+        const response = await fetch(`/api/attendance/timesheet/range?start=${start}&end=${end}`, { headers: { Authorization: `Bearer ${idToken}` } });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "Không thể tải chấm công.");
+        if (active) setAttendanceByDate(payload.dates || {});
+      } catch {
+        if (active) setAttendanceByDate({});
+      }
+    };
+    void loadAttendance();
+    const refresh = window.setInterval(() => void loadAttendance(), 30_000);
+    const refreshWhenVisible = () => { if (document.visibilityState === "visible") void loadAttendance(); };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      active = false;
+      window.clearInterval(refresh);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [gridKey, idToken, people]);
 
   useEffect(() => {
     setDrafts((current) => {
@@ -1452,11 +1481,11 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
   }, [dirtyRows, drafts, saving]);
 
   return <section className="overflow-hidden border border-slate-400 bg-white shadow-sm">
-    <div className="overflow-x-auto"><table className="w-full min-w-[1220px] table-fixed border-collapse text-sm">
+    <div className="overflow-x-auto"><table className="w-full min-w-[1400px] table-fixed border-collapse text-sm">
       <thead className="bg-[#e5f4e8] text-[#001e40]"><tr>
         <th className="w-24 border-b border-r border-slate-400 px-2 py-2 text-left">Thứ</th><th className="w-28 border-b border-r border-slate-400 px-2 py-2 text-left">Ngày</th><th className="w-16 border-b border-r border-slate-400 px-2 py-2 text-center">Tuần</th>
         {people && <th className="w-44 border-b border-r border-slate-400 px-2 py-2 text-left">Nhân sự</th>}
-        <th className="border-b border-r border-slate-400 px-2 py-2 text-left">Nội dung công việc</th><th className="w-64 border-b border-r border-slate-400 px-2 py-2 text-left">Tự đánh giá / ghi chú</th><th className="w-64 border-b border-slate-400 px-2 py-2 text-left">Lãnh đạo đánh giá</th>
+        <th className="border-b border-r border-slate-400 px-2 py-2 text-left">Nội dung công việc</th><th className="w-64 border-b border-r border-slate-400 px-2 py-2 text-left">Tự đánh giá / ghi chú</th>{!people && <th className="w-64 border-b border-r border-slate-400 px-2 py-2 text-left">Chấm công</th>}<th className="w-64 border-b border-slate-400 px-2 py-2 text-left">Lãnh đạo đánh giá</th>
       </tr></thead>
       <tbody>{gridRows.map((row) => {
         const workItems = rowsFor(row), draft = drafts[row.key] || { content: "", selfAssessment: "", leaderAssessment: "" };
@@ -1469,6 +1498,11 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
           {people && <td className="border-b border-r border-slate-400 px-2 py-2"><b className="block">{row.person?.name}</b></td>}
           <td className="border-b border-r border-slate-400 p-0"><ImportantWorkContentEditor value={draft.content} tasks={workItems} onInput={(event) => resizeGridTextarea(event.currentTarget)} onChange={(event) => updateCell(row.key, { content: event.target.value })} onBlur={() => void saveTable()} className={editorClass} /></td>
           <td className="border-b border-r border-slate-400 p-0"><textarea ref={resizeGridTextarea} value={draft.selfAssessment} onInput={(event) => resizeGridTextarea(event.currentTarget)} onChange={(event) => updateCell(row.key, { selfAssessment: event.target.value })} onBlur={() => void saveTable()} placeholder="1. Ghi chú tiến trình hiện tại" className={`${editorClass} text-xs ${compactSelfAssessment ? "content-center text-center font-bold text-emerald-700" : ""}`} /></td>
+          {!people && <td className="border-b border-r border-slate-400 px-3 py-2 text-xs leading-6 text-slate-700">
+            {(attendanceByDate[row.date] || []).length
+              ? (attendanceByDate[row.date] || []).map((shift, index) => <div key={index} className={shift.isDayOff ? "font-bold text-amber-700" : "font-semibold"}>{shift.isDayOff ? "Nghỉ" : `${shift.workMode === "online" ? "Online" : "Trực tiếp"}: ${shift.shiftStart} - ${shift.shiftEnd}`}</div>)
+              : <span className="text-slate-300">—</span>}
+          </td>}
           <td className="border-b border-slate-400 p-0"><textarea ref={resizeGridTextarea} readOnly={!canReviewDay} value={draft.leaderAssessment} onInput={(event) => resizeGridTextarea(event.currentTarget)} onChange={(event) => updateCell(row.key, { leaderAssessment: event.target.value })} onBlur={() => void saveTable()} placeholder="Chưa đánh giá" className={`${editorClass} text-xs ${canReviewDay ? "" : "bg-slate-50/50 text-slate-600"} ${compactLeaderAssessment ? "content-center text-center font-bold text-violet-700" : ""}`} /></td>
         </tr>;
       })}</tbody>

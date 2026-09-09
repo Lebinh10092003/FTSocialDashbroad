@@ -929,24 +929,26 @@ function ProductSelect({
             placeholder={searchPlaceholder}
             className="mb-2 w-full rounded-lg border px-3 py-2 text-sm"
           />
-          {visible.map((item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => toggle(item)}
-              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-sky-50"
-            >
-              <span
-                aria-hidden="true"
-                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${value.includes(item) ? "border-sky-600 bg-sky-600 text-white" : "border-slate-300"}`}
+          <div className="max-h-60 overflow-y-auto">
+            {visible.map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => toggle(item)}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-sky-50"
               >
-                {value.includes(item) && (
-                  <Check className="h-3 w-3 stroke-[3]" />
-                )}
-              </span>
-              {item}
-            </button>
-          ))}
+                <span
+                  aria-hidden="true"
+                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${value.includes(item) ? "border-sky-600 bg-sky-600 text-white" : "border-slate-300"}`}
+                >
+                  {value.includes(item) && (
+                    <Check className="h-3 w-3 stroke-[3]" />
+                  )}
+                </span>
+                {item}
+              </button>
+            ))}
+          </div>
           {allowCustom &&
             query.trim() &&
             !options.some(
@@ -6230,13 +6232,19 @@ export default function DigitalTraining({
                     placeholder="Chọn một hoặc nhiều nhân viên"
                     searchPlaceholder="Tìm nhân viên..."
                   />
-                  <label>
-                    <span className="mb-1 block text-sm font-bold">{"Nh\u00e2n vi\u00ean h\u1ed7 tr\u1ee3"}</span>
-                    <select value={sd.support_staff_name} onChange={(e) => setSd({ ...sd, support_staff_name: e.target.value })} className="w-full rounded-lg border px-3 py-2">
-                      <option value="">{"Ch\u01b0a ph\u00e2n c\u00f4ng"}</option>
-                      {employeeOptions.map((name) => <option key={name} value={name}>{name}</option>)}
-                    </select>
-                  </label>
+                  <ProductSelect
+                    label="Nhân viên hỗ trợ"
+                    value={sd.support_staff_name.split(", ").filter(Boolean)}
+                    onChange={(supportStaff) =>
+                      setSd({
+                        ...sd,
+                        support_staff_name: supportStaff.join(", "),
+                      })
+                    }
+                    options={employeeOptions}
+                    placeholder="Chọn một hoặc nhiều nhân viên"
+                    searchPlaceholder="Tìm nhân viên..."
+                  />
                   <Input
                     label="Số người tham gia"
                     type="number"

@@ -643,20 +643,8 @@ a { color: inherit; text-decoration: none; }
   padding: 1rem;
 }
 
-/* Work schedule: a focused operational surface, inspired by board and calendar tools. */
-.ws-shell { display: flex; }
-.ws-sidebar {
-  position: sticky;
-  top: 0;
-  display: flex;
-  height: 100dvh;
-  width: 16.5rem;
-  flex: 0 0 16.5rem;
-  flex-direction: column;
-  color: white;
-  background: linear-gradient(180deg, #0055da 0%, #003d9f 100%);
-  box-shadow: 5px 0 24px rgba(0, 55, 150, .16);
-}
+/* Work schedule content keeps its board-specific components while sharing the
+   same module shell, sidebar and responsive navigation as every other module. */
 .ws-board { display: grid; grid-template-columns: repeat(4, minmax(280px, 1fr)); gap: 1rem; overflow-x: auto; padding-bottom: .5rem; }
 .ws-stat { display: flex; align-items: center; gap: .875rem; min-height: 88px; border: 1px solid #e2e8f0; border-radius: 1rem; background: #fff; padding: 1rem; box-shadow: 0 2px 8px rgba(15,23,42,.04); }
 .ws-stat-icon { display: grid; width: 2.75rem; height: 2.75rem; flex: 0 0 2.75rem; place-items: center; border-radius: .875rem; }
@@ -667,13 +655,6 @@ a { color: inherit; text-decoration: none; }
 .ws-input { width: 100%; border: 1px solid #e2e8f0; border-radius: .75rem; background: #fff; padding: .7rem .8rem; font-size: .875rem; color: #0f172a; outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
 .ws-input:focus { border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(59,130,246,.12); }
 .ws-bulk-btn { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid #e2e8f0; border-radius: .6rem; background: #fff; padding: .45rem .7rem; font-size: .75rem; font-weight: 700; }
-@media (max-width: 900px) {
-  .ws-shell { display: block; }
-  .ws-sidebar { position: relative; width: 100%; height: auto; min-height: 0; }
-  .ws-sidebar nav { display: flex; overflow-x: auto; }
-  .ws-sidebar nav button { min-width: max-content; }
-  .ws-sidebar > div:last-child { display: none; }
-}
 .ft-overview-header + section > div:first-child {
   display: none;
 }
@@ -938,9 +919,10 @@ a { color: inherit; text-decoration: none; }
 }
 .ft-module-sidebar .ft-sidebar-brand {
   margin: .75rem .75rem .5rem;
-  padding: 1rem !important;
+  min-height: 6rem;
+  padding: 1.25rem !important;
   border: 1px solid #cfe5f5 !important;
-  border-radius: 1rem;
+  border-radius: 0 !important;
   background: #fff !important;
   box-shadow: 0 4px 14px rgba(15, 102, 163, .09);
 }
@@ -1354,20 +1336,22 @@ body.workspace-app-theme.workspace-theme-dark .ft-table tbody tr { background: r
 body.workspace-app-theme.workspace-theme-dark .ft-table tbody tr:nth-child(even) { background: #f1f5f9 !important; }
 body.workspace-app-theme.workspace-theme-dark .ft-table td { color: var(--workspace-surface-text) !important; }
 
-/* Logos always retain their native white frame, independent of the chosen theme. */
+/* Module logos use one large rectangular identity frame in every theme. */
 body.workspace-app-theme .ft-module-shell img[src="/logo.png"],
 body.workspace-app-theme .workspace-module-canvas img[src="/logo.png"],
-body.workspace-app-theme .ws-shell img[src="/logo.png"],
 body.workspace-app-theme img.ft-module-logo {
   box-sizing: content-box;
-  max-height: 2.25rem;
+  max-height: 2.75rem;
   border: 1px solid #d9e2f0;
-  border-radius: .7rem;
+  border-radius: 0;
   background: #fff !important;
-  padding: .35rem .5rem;
+  padding: .5rem .75rem;
   box-shadow: 0 3px 10px rgba(15,55,95,.1);
 }
-body.workspace-app-theme .ft-sidebar-brand { min-height: 4.75rem; }
+body.workspace-app-theme .ft-sidebar-brand {
+  min-height: 6rem;
+  border-radius: 0 !important;
+}
 body.workspace-app-theme .ft-sidebar-brand > div,
 body.workspace-app-theme .ft-sidebar-brand > span { min-width: 0; border-left: 0 !important; padding-left: 0 !important; }
 body.workspace-app-theme .ft-sidebar-brand b,
@@ -1414,8 +1398,8 @@ body.workspace-app-theme.workspace-theme-light .ft-sidebar-footer { border-color
 .workspace-theme > header img[src="/logo.png"] {
   box-sizing: content-box;
   border: 1px solid #d9e2f0;
-  border-radius: .7rem;
+  border-radius: 0;
   background: #fff !important;
-  padding: .35rem .55rem;
+  padding: .5rem .75rem;
   box-shadow: 0 3px 10px rgba(15,55,95,.1);
 }

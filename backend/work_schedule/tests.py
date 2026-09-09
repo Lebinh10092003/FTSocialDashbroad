@@ -14,6 +14,7 @@ from .sheet_parser import assessment_notes, parse_sheet_tasks, status_from_note,
 from .sheet_sync import (
     EMPLOYEE_EMAILS,
     _build_content_format_runs,
+    _attendance_value,
     _canonical_row,
     _formula_content_rows,
     _group_values,
@@ -28,6 +29,24 @@ from .training_sync import sync_work_item_from_training
 
 
 class WorkScheduleSheetParserTests(TestCase):
+    def test_attendance_value_uses_the_visible_multiline_format(self):
+        class Shift:
+            def __init__(self, mode, start, end, day_off=False):
+                self.work_mode = mode
+                self.shift_start = start
+                self.shift_end = end
+                self.is_day_off = day_off
+
+        self.assertEqual(
+            _attendance_value([
+                Shift("direct", time(9, 30), time(12, 0)),
+                Shift("direct", time(13, 30), time(18, 0)),
+                Shift("online", time(20, 0), time(23, 0)),
+            ]),
+            "Trực tiếp: 09:30 - 12:00\nTrực tiếp: 13:30 - 18:00\nOnline: 20:00 - 23:00",
+        )
+        self.assertEqual(_attendance_value([Shift("direct", time(0), time(0), True)]), "Nghỉ")
+
     def test_attendance_column_does_not_shift_assessment_or_hidden_metadata(self):
         columns = {
             "weekday": 0, "date": 1, "week": 2, "staff": 3,
