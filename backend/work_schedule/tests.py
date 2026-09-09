@@ -119,6 +119,32 @@ class WorkScheduleSheetParserTests(TestCase):
             "phongnt@fermat.edu.vn",
         )
 
+    def test_new_employee_resolves_dynamically_by_code_or_unique_roster_name(self):
+        from work_schedule.sheet_sync import _row_employee_email, _sheet_employee_code
+
+        profile = UserProfile.objects.create(
+            email="new.an@fermat.edu.vn",
+            name="Nguyễn Văn An",
+            employee_code="FT-NEW-AN",
+            employment_status="ACTIVE",
+        )
+        self.assertEqual(
+            _row_employee_email(["Hai", "14/09/2026", "38", "11. An"]),
+            profile.email,
+        )
+        self.assertEqual(
+            _row_employee_email(["Hai", "14/09/2026", "38", "11. An", "", "", "", "FT-NEW-AN"]),
+            profile.email,
+        )
+        self.assertEqual(_sheet_employee_code(profile.email), "FT-NEW-AN")
+
+        no_code = UserProfile.objects.create(
+            email="new.no-code@fermat.edu.vn",
+            name="Nhân sự chưa có mã",
+            employment_status="ACTIVE",
+        )
+        self.assertEqual(_sheet_employee_code(no_code.email), no_code.email)
+
     def test_identical_tasks_in_one_sheet_cell_are_collapsed(self):
         tasks = _unique_sheet_tasks(parse_sheet_tasks(
             "1. Tập huấn B3, B4 TH Kim Đồng\n"

@@ -1,5 +1,6 @@
 import json
 import re
+import unicodedata
 import uuid
 from calendar import monthrange
 from collections import defaultdict
@@ -76,12 +77,67 @@ def _cell(row, index):
     return str(row[index] if index < len(row) else "").strip()
 
 
+def _normalise_staff_name(value):
+    plain = "".join(
+        char for char in unicodedata.normalize("NFD", str(value or "").casefold())
+        if unicodedata.category(char) != "Mn"
+    ).replace("đ", "d")
+    return re.sub(r"[^a-z0-9]+", " ", plain).strip()
+
+
+def _active_profile_by_sheet_identity(identity):
+    """Resolve a future employee without requiring a code release.
+
+    New staff can be identified by their employee_code (preferred), email, full
+    name, or a unique trailing name used by the numbered Sheet roster. Ambiguous
+    short names deliberately return None instead of assigning work to the wrong
+    person.
+    """
+    raw = str(identity or "").strip()
+    if not raw:
+        return None
+    profiles = UserProfile.objects.filter(employment_status="ACTIVE")
+    if "@" in raw:
+        return profiles.filter(email__iexact=raw).first()
+    by_code = profiles.filter(employee_code__iexact=raw).first()
+    if by_code:
+        return by_code
+    target = _normalise_staff_name(raw)
+    if not target:
+        return None
+    exact = [profile for profile in profiles if _normalise_staff_name(profile.name) == target]
+    if len(exact) == 1:
+        return exact[0]
+    suffix = [
+        profile for profile in profiles
+        if _normalise_staff_name(profile.name).split()[-len(target.split()):] == target.split()
+    ]
+    return suffix[0] if len(suffix) == 1 else None
+
+
+def _sheet_employee_code(email, profile=None):
+    if email in EMAIL_EMPLOYEES:
+        return EMAIL_EMPLOYEES[email]
+    profile = profile or UserProfile.objects.filter(email=email, employment_status="ACTIVE").first()
+    # Email is a stable, already-supported identity when HR has not assigned an
+    # employee code yet; never write a blank hidden identity for a new person.
+    return str(profile.employee_code or profile.email) if profile else email
+
+
 def _row_employee_email(row):
-    email = EMPLOYEE_EMAILS.get(_cell(row, 7))
+    sheet_identity = _cell(row, 7)
+    email = EMPLOYEE_EMAILS.get(sheet_identity)
     if email:
         return email
-    staff_name = re.sub(r"^\s*\d+\s*[.)-]?\s*", "", _cell(row, 3)).strip().casefold()
-    return SHEET_STAFF_EMAILS.get(staff_name)
+    profile = _active_profile_by_sheet_identity(sheet_identity)
+    if profile:
+        return profile.email
+    staff_name = re.sub(r"^\s*\d+\s*[.)-]?\s*", "", _cell(row, 3)).strip()
+    alias_email = SHEET_STAFF_EMAILS.get(staff_name.casefold())
+    if alias_email:
+        return alias_email
+    profile = _active_profile_by_sheet_identity(staff_name)
+    return profile.email if profile else None
 
 
 def _parse_date(value):
@@ -351,7 +407,7 @@ def _find_row(rows, email, work_date, items, row_index=None):
         if matched:
             return matched
     else:
-        employee_id = EMAIL_EMPLOYEES.get(email, "")
+        employee_id = _sheet_employee_code(email)
         for index, row in enumerate(rows, start=2):
             if _parse_date(_cell(row, 1)) == work_date and employee_id and _cell(row, 7) == employee_id:
                 return index, row
@@ -477,7 +533,7 @@ def push_groups_to_sheet(service, groups, force=False):
             iso_week = work_date.isocalendar().week
             record_id = f"REC-WEB-{uuid.uuid4().hex[:12].upper()}"
             updates.append({"range": f"'{SHEET_NAME}'!A{row_number}:D{row_number}", "values": [[WEEKDAYS[work_date.weekday()], work_date.strftime("%d/%m/%Y"), iso_week, profile.name if profile else email]]})
-            updates.append({"range": f"'{SHEET_NAME}'!H{row_number}:I{row_number}", "values": [[EMAIL_EMPLOYEES.get(email, ""), record_id]]})
+            updates.append({"range": f"'{SHEET_NAME}'!H{row_number}:I{row_number}", "values": [[_sheet_employee_code(email, profile), record_id]]})
         synced.append((email, work_date, row_number, new_hash, items))
     if updates:
         ensure_sheet_row_capacity(service, max(row[2] for row in synced))
