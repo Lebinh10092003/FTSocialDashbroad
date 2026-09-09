@@ -893,12 +893,31 @@ def automatic_question_score(question, answer):
             return None
         normalized = _key(answer_text)
         return points if normalized and normalized in {_key(value) for value in correct} else Decimal("0")
-    if question.get("type") in {"matching", "ordering"}:
+    if question.get("type") == "matching":
+        options = question.get("options") or []
+        if not options:
+            return None
+        # Parse student's matching answer (stored as {left_key: right_key} dict)
+        student_map: dict[str, str] = {}
+        if isinstance(answer, dict):
+            student_map = {str(k): str(v) for k, v in answer.items() if v not in (None, "")}
+        elif answer_text:
+            for pair in answer_text.split(";"):
+                parts = pair.split("-", 1)
+                if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+                    student_map[parts[0].strip()] = parts[1].strip()
+        correct_count = sum(
+            1 for idx, opt in enumerate(options)
+            if student_map.get(str(opt.get("key") or "")) == chr(65 + idx)
+        )
+        total = len(options)
+        return points * Decimal(str(correct_count)) / Decimal(str(total))
+    if question.get("type") == "ordering":
         if not correct:
             return None
         expected_arrangements = {_key(value) for value in correct}
         if len(correct) > 1:
-            expected_arrangements.add(_key(("|" if question.get("type") == "matching" else "-").join(str(value) for value in correct)))
+            expected_arrangements.add(_key("-".join(str(value) for value in correct)))
         return points if _key(answer_text) in expected_arrangements else Decimal("0")
     return None
 
