@@ -2,6 +2,7 @@ import json
 import re
 import uuid
 from calendar import monthrange
+from collections import defaultdict
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 
@@ -335,11 +336,16 @@ def pull_from_sheet(service, start_date, end_date):
     return {"created": created, "updated": updated, "deleted": deleted, "groups": touched}
 
 
-def _find_row(rows, email, work_date, items):
-    employee_id = EMAIL_EMPLOYEES.get(email, "")
-    for index, row in enumerate(rows, start=2):
-        if _parse_date(_cell(row, 1)) == work_date and employee_id and _cell(row, 7) == employee_id:
-            return index, row
+def _find_row(rows, email, work_date, items, row_index=None):
+    if row_index is not None:
+        matched = row_index.get((email, work_date))
+        if matched:
+            return matched
+    else:
+        employee_id = EMAIL_EMPLOYEES.get(email, "")
+        for index, row in enumerate(rows, start=2):
+            if _parse_date(_cell(row, 1)) == work_date and employee_id and _cell(row, 7) == employee_id:
+                return index, row
     source_rows = {item.source_sheet_row for item in items if item.source_sheet_row}
     if len(source_rows) == 1:
         number = source_rows.pop()
@@ -381,13 +387,36 @@ def _build_content_format_runs(content, items=None):
 
 def push_groups_to_sheet(service, groups, force=False):
     rows = _rows(service)
+    groups = set(groups)
     updates = []
     conflicts = []
     synced = []
+    row_index = {}
+    for row_number, row in enumerate(rows, start=2):
+        row_email = _row_employee_email(row)
+        row_date = _parse_date(_cell(row, 1))
+        if row_email and row_date:
+            row_index.setdefault((row_email, row_date), (row_number, row))
+    items_by_group = defaultdict(list)
+    if groups:
+        group_emails = {email for email, _ in groups}
+        min_date = min(work_date for _, work_date in groups)
+        max_date = max(work_date for _, work_date in groups)
+        all_items = WorkItem.objects.filter(
+            executor_id__in=group_emails,
+            work_date__range=(min_date, max_date),
+        ).order_by("daily_order", "start_time", "created_at", "pk")
+        for item in all_items:
+            key = (item.executor_id, item.work_date)
+            if key in groups:
+                items_by_group[key].append(item)
+    profiles = UserProfile.objects.in_bulk(
+        {email for email, _ in groups}, field_name="email"
+    )
     next_row = max((i for i, row in enumerate(rows, start=2) if any(_cell(row, c) for c in range(min(9, len(row))))), default=2) + 1
-    for email, work_date in sorted(set(groups), key=lambda value: (value[1], value[0])):
-        items = list(WorkItem.objects.filter(executor_id=email, work_date=work_date).order_by("daily_order", "start_time", "created_at", "pk"))
-        row_number, current = _find_row(rows, email, work_date, items)
+    for email, work_date in sorted(groups, key=lambda value: (value[1], value[0])):
+        items = items_by_group[(email, work_date)]
+        row_number, current = _find_row(rows, email, work_date, items, row_index)
         if row_number is None:
             if not items:
                 continue
@@ -406,7 +435,7 @@ def push_groups_to_sheet(service, groups, force=False):
             {"range": f"'{SHEET_NAME}'!J{row_number}:K{row_number}", "values": [[task_ids, new_hash]]},
         ])
         if not current:
-            profile = UserProfile.objects.filter(email=email).first()
+            profile = profiles.get(email)
             iso_week = work_date.isocalendar().week
             record_id = f"REC-WEB-{uuid.uuid4().hex[:12].upper()}"
             updates.append({"range": f"'{SHEET_NAME}'!A{row_number}:D{row_number}", "values": [[WEEKDAYS[work_date.weekday()], work_date.strftime("%d/%m/%Y"), iso_week, profile.name if profile else email]]})
@@ -414,10 +443,11 @@ def push_groups_to_sheet(service, groups, force=False):
         synced.append((email, work_date, row_number, new_hash, items))
     if updates:
         ensure_sheet_row_capacity(service, max(row[2] for row in synced))
-        service.spreadsheets().values().batchUpdate(
-            spreadsheetId=SPREADSHEET_ID,
-            body={"valueInputOption": "USER_ENTERED", "data": updates},
-        ).execute()
+        for start in range(0, len(updates), 500):
+            service.spreadsheets().values().batchUpdate(
+                spreadsheetId=SPREADSHEET_ID,
+                body={"valueInputOption": "USER_ENTERED", "data": updates[start:start + 500]},
+            ).execute()
     # Apply bold+italic formatting to time-prefixed task lines in column E
     format_requests = []
     for email, work_date, row_number, sync_hash, items in synced:
@@ -441,10 +471,11 @@ def push_groups_to_sheet(service, groups, force=False):
                 }
             })
     if format_requests:
-        service.spreadsheets().batchUpdate(
-            spreadsheetId=SPREADSHEET_ID,
-            body={'requests': format_requests},
-        ).execute()
+        for start in range(0, len(format_requests), 500):
+            service.spreadsheets().batchUpdate(
+                spreadsheetId=SPREADSHEET_ID,
+                body={'requests': format_requests[start:start + 500]},
+            ).execute()
     with suppress_sheet_queue():
         for email, work_date, row_number, sync_hash, items in synced:
             for index, item in enumerate(items, 1):
