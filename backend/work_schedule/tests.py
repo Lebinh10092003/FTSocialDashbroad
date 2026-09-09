@@ -15,6 +15,7 @@ from .sheet_sync import (
     EMPLOYEE_EMAILS,
     _group_values,
     _row_hash,
+    _unique_sheet_tasks,
     deterministic_sheet_uid,
     ensure_sheet_row_capacity,
     sync_lease,
@@ -69,6 +70,19 @@ class WorkScheduleSheetParserTests(TestCase):
         ])
         self.assertEqual(tasks[-1].start_time.isoformat(timespec="minutes"), "17:30")
         self.assertEqual(training_end(tasks[-1].start_time).isoformat(timespec="minutes"), "20:30")
+
+    def test_identical_tasks_in_one_sheet_cell_are_collapsed(self):
+        tasks = _unique_sheet_tasks(parse_sheet_tasks(
+            "1. Tập huấn B3, B4 TH Kim Đồng\n"
+            "2. 08:30: Tập huấn B3, B4 TH Kim Đồng\n"
+            "3. Chuẩn bị tài liệu"
+        ))
+
+        self.assertEqual([task.title for task in tasks], [
+            "Tập huấn B3, B4 TH Kim Đồng",
+            "Chuẩn bị tài liệu",
+        ])
+        self.assertEqual(tasks[0].start_time.isoformat(timespec="minutes"), "08:30")
 
     def test_apps_script_utc_date_is_converted_to_the_local_sheet_date(self):
         from .sheet_sync import _parse_date
@@ -624,6 +638,19 @@ class WorkScheduleSheetWebhookTests(TestCase):
         self.assertEqual(response.json()["createdCount"], 1)
         item = WorkItem.objects.get(source_sheet_row=self.ROW_NUMBER, source_task_index=1)
         self.assertEqual(item.work_date.isoformat(), "2026-09-08")
+
+    @mock.patch("work_schedule.sheet_sync.push_groups_to_sheet")
+    @mock.patch("work_schedule.sheet_sync.ensure_sync_columns")
+    @mock.patch("work_schedule.sheet_sync._service")
+    def test_repeated_task_lines_in_one_row_create_only_one_item(self, mock_service, mock_ensure, mock_push):
+        values = self.row_values()
+        values[4] = "1. Nhiệm vụ bị lặp\n2. Nhiệm vụ bị lặp"
+
+        response = self.post({"event_id": "evt-duplicate-lines", "row": self.ROW_NUMBER, "values": values})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["createdCount"], 1)
+        self.assertEqual(WorkItem.objects.filter(source_sheet_row=self.ROW_NUMBER).count(), 1)
 
     @mock.patch("work_schedule.sheet_sync.push_groups_to_sheet")
     @mock.patch("work_schedule.sheet_sync.ensure_sync_columns")

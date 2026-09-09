@@ -136,6 +136,32 @@ def _row_hash(content, self_notes, leader_notes, task_ids):
     return f"{value:08x}"
 
 
+def _duplicate_title_key(value):
+    """Treat visually identical task titles as the same task within one day."""
+    return re.sub(r"\s+", " ", str(value or "")).strip().casefold()
+
+
+def _unique_sheet_tasks(tasks):
+    """Remove repeated numbered lines inside one Sheet cell.
+
+    Prefer the occurrence carrying a start time, while retaining the first visual
+    position. This targets the duplicated-line source without merging unrelated
+    records that happen to share a title elsewhere in the application.
+    """
+    unique = []
+    positions = {}
+    for task in tasks:
+        key = _duplicate_title_key(task.title)
+        if not key:
+            continue
+        if key not in positions:
+            positions[key] = len(unique)
+            unique.append(task)
+        elif task.start_time and not unique[positions[key]].start_time:
+            unique[positions[key]] = task
+    return unique
+
+
 def ensure_sync_columns(service):
     metadata = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID, fields="sheets.properties").execute()
     target = next((s["properties"] for s in metadata.get("sheets", []) if s["properties"].get("sheetId") == SHEET_ID), None)
@@ -201,7 +227,7 @@ def _ingest_row(offset, row, today):
     source_items = list(WorkItem.objects.filter(source_sheet_row=offset))
     touched.add((email, work_date))
     touched.update((item.executor_id, item.work_date) for item in source_items)
-    parsed = parse_sheet_tasks(_cell(row, 4))
+    parsed = _unique_sheet_tasks(parse_sheet_tasks(_cell(row, 4)))
     notes = assessment_notes(_cell(row, 5), len(parsed))
     leader_notes = assessment_notes(_cell(row, 6), len(parsed))
     ids = _task_uids(_cell(row, 9))
