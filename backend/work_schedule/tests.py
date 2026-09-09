@@ -555,6 +555,43 @@ class WorkScheduleSheetWebhookTests(TestCase):
         self.assertEqual(response.status_code, 400, response.content)
         mock_service.assert_not_called()
 
+    @mock.patch("work_schedule.sheet_sync.full_two_way_sync")
+    def test_full_sync_does_not_require_row_values_and_is_deduplicated(self, mock_full_sync):
+        mock_full_sync.return_value = {
+            "start": "1900-01-01",
+            "end": "9999-12-31",
+            "pulled": {"created": 2, "updated": 5, "groups": 3},
+            "pushed": {"groups": 3, "tasks": 7, "conflicts": []},
+        }
+        payload = {
+            "event_id": "evt-full-1",
+            "event_type": "full_sync",
+            "sheet_name": "Lịch công tác",
+            "reason": "manual_test",
+        }
+
+        response = self.post(payload)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["eventType"], "full_sync")
+        self.assertEqual(response.json()["createdCount"], 2)
+        self.assertEqual(response.json()["updatedCount"], 5)
+        mock_full_sync.assert_called_once_with(None)
+
+        duplicate = self.post(payload)
+        self.assertEqual(duplicate.status_code, 200, duplicate.content)
+        self.assertIn("đã được xử lý trước đó", duplicate.json()["message"])
+        mock_full_sync.assert_called_once_with(None)
+
+    @mock.patch("work_schedule.sheet_sync.full_two_way_sync")
+    def test_full_sync_rejects_an_unexpected_sheet_name(self, mock_full_sync):
+        response = self.post({
+            "event_id": "evt-full-wrong-sheet",
+            "event_type": "full_sync",
+            "sheet_name": "Tab khác",
+        })
+        self.assertEqual(response.status_code, 400, response.content)
+        mock_full_sync.assert_not_called()
+
     @mock.patch("work_schedule.sheet_sync.ensure_sync_columns")
     @mock.patch("work_schedule.sheet_sync._service")
     def test_push_back_failure_does_not_fail_the_webhook_or_lose_the_ingested_item(self, mock_service, mock_ensure):

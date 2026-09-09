@@ -640,7 +640,7 @@ def work_schedule_sheet_webhook(request):
     """Realtime Sheet -> Web sync. Called by the Apps Script `onEdit` trigger for exactly
     one edited row (never a full-sheet scan). Authenticated by a shared secret header
     instead of a user token, since Apps Script cannot hold a logged-in session."""
-    from .sheet_sync import _ingest_row, _service, ensure_sync_columns, push_groups_to_sheet
+    from .sheet_sync import _ingest_row, _service, ensure_sync_columns, full_two_way_sync, push_groups_to_sheet
     from .signals import suppress_sheet_queue
 
     expected_secret = os.getenv("SHEET_WEBHOOK_SECRET", "")
@@ -649,9 +649,66 @@ def work_schedule_sheet_webhook(request):
         return Response({"error": "Không xác thực được webhook."}, status=status.HTTP_401_UNAUTHORIZED)
 
     event_id = str(request.data.get("event_id") or "").strip()
+    event_type = str(request.data.get("event_type") or "row_update").strip().lower()
+    if not event_id:
+        return Response({"error": "Payload thiếu event_id hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+    if event_type not in {"row_update", "full_sync"}:
+        return Response({"error": "event_type chỉ hỗ trợ row_update hoặc full_sync."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if event_type == "full_sync":
+        sheet_name = str(request.data.get("sheet_name") or "Lịch công tác").strip()
+        if sheet_name != "Lịch công tác":
+            return Response({"error": "full_sync chỉ hỗ trợ tab Lịch công tác."}, status=status.HTTP_400_BAD_REQUEST)
+        event_payload = {
+            "event_type": "full_sync",
+            "sheet_name": sheet_name,
+            "reason": str(request.data.get("reason") or "").strip(),
+        }
+        event, created = WorkScheduleSheetInboundEvent.objects.get_or_create(
+            event_id=event_id,
+            defaults={"row_number": 1, "payload": event_payload, "status": WorkScheduleSheetInboundEvent.STATUS_PROCESSED},
+        )
+        if not created and event.status == WorkScheduleSheetInboundEvent.STATUS_PROCESSED:
+            return Response({
+                "message": "Sự kiện full_sync đã được xử lý trước đó (bỏ qua để tránh trùng lặp).",
+                "eventType": "full_sync",
+                "status": event.status,
+                "createdCount": event.created_count,
+                "updatedCount": event.updated_count,
+            })
+        if not created:
+            event.row_number = 1
+            event.payload = event_payload
+            event.error = ""
+            event.save(update_fields=["row_number", "payload", "error"])
+        try:
+            result = full_two_way_sync(None)
+            created_count = int(result.get("pulled", {}).get("created", 0))
+            updated_count = int(result.get("pulled", {}).get("updated", 0))
+            event.status = WorkScheduleSheetInboundEvent.STATUS_PROCESSED
+            event.created_count = min(created_count, 32767)
+            event.updated_count = min(updated_count, 32767)
+            event.processed_at = timezone.now()
+            event.error = ""
+            event.save(update_fields=["status", "created_count", "updated_count", "processed_at", "error"])
+        except Exception as exc:
+            event.status = WorkScheduleSheetInboundEvent.STATUS_FAILED
+            event.error = str(exc)
+            event.processed_at = timezone.now()
+            event.save(update_fields=["status", "error", "processed_at"])
+            logger.exception("Không thể full sync lịch từ Sheet (event_id=%s).", event_id)
+            return Response({"error": f"Không thể đồng bộ toàn bộ Sheet: {exc}"}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({
+            "message": "Đã đồng bộ toàn bộ tab Lịch công tác.",
+            "eventType": "full_sync",
+            "createdCount": created_count,
+            "updatedCount": updated_count,
+            "result": result,
+        })
+
     row_number = request.data.get("row")
     values = request.data.get("values")
-    if not event_id or not isinstance(row_number, int) or row_number < 2 or not isinstance(values, list):
+    if not isinstance(row_number, int) or row_number < 2 or not isinstance(values, list):
         return Response({"error": "Payload thiếu event_id/row/values hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
 
     event, created = WorkScheduleSheetInboundEvent.objects.get_or_create(

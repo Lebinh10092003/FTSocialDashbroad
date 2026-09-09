@@ -318,13 +318,9 @@ def sync_to_sheet(google_token=None, force=False):
             raise
 
 
-def initial_two_way_sync(google_token=None):
+def _two_way_sync(google_token, start, end):
     service = _service(google_token)
     ensure_sync_columns(service)
-    today = timezone.localdate()
-    start = today.replace(day=1)
-    month_end = today.replace(day=monthrange(today.year, today.month)[1])
-    end = month_end + timedelta(days=14)
     pulled = pull_from_sheet(service, start, end)
     groups = set(pulled["groups"])
     groups.update(WorkItem.objects.filter(work_date__range=(start, end)).values_list("executor_id", "work_date"))
@@ -334,6 +330,22 @@ def initial_two_way_sync(google_token=None):
     result["pulled"]["groups"] = len(result["pulled"]["groups"])
     SystemConfig.objects.update_or_create(key="work_schedule_sheet_sync", defaults={"data": {"lastSuccessAt": timezone.now().isoformat(), **result}})
     return result
+
+
+def initial_two_way_sync(google_token=None):
+    today = timezone.localdate()
+    start = today.replace(day=1)
+    month_end = today.replace(day=monthrange(today.year, today.month)[1])
+    end = month_end + timedelta(days=14)
+    return _two_way_sync(google_token, start, end)
+
+
+def full_two_way_sync(google_token=None):
+    """Re-read the complete configured Sheet range and reconcile all dated rows."""
+    with sync_lease() as acquired:
+        if not acquired:
+            raise RuntimeError("Một lượt đồng bộ khác đang chạy.")
+        return _two_way_sync(google_token, datetime(1900, 1, 1).date(), datetime(9999, 12, 31).date())
 
 
 def sync_status():
