@@ -186,6 +186,12 @@ def _apply_data(request, item, creating=False, allow_people=True, data_override=
     end_raw = str(data.get("endTime", item.end_time.isoformat(timespec="minutes") if item and item.end_time else "") or "").strip()
     start_time = parse_time(start_raw) if start_raw else None
     end_time = parse_time(end_raw) if end_raw else None
+    from .sheet_parser import parse_sheet_tasks
+    authored_time = parse_sheet_tasks(f"1. {title}")[0]
+    if not start_raw and authored_time.has_time_prefix:
+        start_time = authored_time.start_time
+        if not end_raw:
+            end_time = authored_time.end_time
     if (start_raw and not start_time) or (end_raw and not end_time):
         return Response({"error": "Thời gian thực hiện không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
     if start_time and end_time and end_time <= start_time:
@@ -193,6 +199,8 @@ def _apply_data(request, item, creating=False, allow_people=True, data_override=
 
     requested_status = str(data.get("status", item.status if item else WorkItem.STATUS_TODO) or "").lower()
     requested_priority = str(data.get("priority", item.priority if item else "medium") or "").lower()
+    if authored_time.has_time_prefix:
+        requested_priority = "high"
     if requested_status not in VALID_STATUSES or requested_status == WorkItem.STATUS_REVIEWED:
         return Response({"error": "Trạng thái công việc không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
     if requested_priority not in VALID_PRIORITIES:
@@ -218,7 +226,10 @@ def _apply_data(request, item, creating=False, allow_people=True, data_override=
     item.end_time = end_time
     item.status = requested_status
     item.priority = requested_priority
-    item.time_prefix_in_title = item.time_prefix_in_title if (item and "title" not in data) else False
+    item.time_prefix_in_title = (
+        item.time_prefix_in_title if (item and "title" not in data)
+        else authored_time.has_time_prefix
+    )
     item.label = str(data.get("label", item.label if item else "Công việc") or "Công việc").strip()[:100]
     item.executor = executor
     if creating or previous_group != next_group:
@@ -364,6 +375,8 @@ def work_day_edit(request):
             "status": row_status,
             "daily_order": row.get("dailyOrder", row_index),
         }
+        from .sheet_parser import parse_sheet_tasks
+        normalized["parsed_title"] = parse_sheet_tasks(f"1. {title}")[0]
         try:
             normalized["daily_order"] = int(normalized["daily_order"])
         except (TypeError, ValueError):
@@ -419,9 +432,12 @@ def work_day_edit(request):
                     progress_note=row["progress_note"],
                     work_date=work_date,
                     status=row["status"] or WorkItem.STATUS_TODO,
-                    priority="medium",
                     label="Công việc",
                     daily_order=row["daily_order"],
+                    start_time=row["parsed_title"].start_time,
+                    end_time=row["parsed_title"].end_time,
+                    time_prefix_in_title=row["parsed_title"].has_time_prefix,
+                    priority="high" if row["parsed_title"].has_time_prefix else "medium",
                 )
                 if request.user_role == "MANAGER" and executor.email != request.user.email:
                     item.managers.add(request.user)
@@ -432,9 +448,14 @@ def work_day_edit(request):
                 if row["title"] != item.title:
                     item.title = row["title"]
                     update_fields.append("title")
-                    if item.time_prefix_in_title:
-                        item.time_prefix_in_title = False
-                        update_fields.append("time_prefix_in_title")
+                    parsed_title = row["parsed_title"]
+                    item.start_time = parsed_title.start_time
+                    item.end_time = parsed_title.end_time
+                    item.time_prefix_in_title = parsed_title.has_time_prefix
+                    update_fields.extend(["start_time", "end_time", "time_prefix_in_title"])
+                    if parsed_title.has_time_prefix and item.priority != "high":
+                        item.priority = "high"
+                        update_fields.append("priority")
                 if row["status"] is not None and row["status"] != item.status:
                     item.status = row["status"]
                     update_fields.append("status")

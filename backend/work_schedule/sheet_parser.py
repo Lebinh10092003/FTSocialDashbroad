@@ -8,6 +8,12 @@ LEADING_TIME = re.compile(
     r"^\s*(\d{1,2})(?:\s*[hH]\s*(\d{1,2})?|\s*:\s*(\d{2}))(?:\s*[:;,.\-]\s*|\s+)(.+)$",
     re.DOTALL,
 )
+LEADING_TIME_RANGE = re.compile(
+    r"^\s*(\d{1,2})(?:\s*[hH]\s*(\d{1,2})?|\s*:\s*(\d{2}))"
+    r"\s*[-–—]\s*(\d{1,2})(?:\s*[hH]\s*(\d{1,2})?|\s*:\s*(\d{2}))"
+    r"(?:\s*[:;,.\-]\s*|\s+)?(.*)$",
+    re.DOTALL,
+)
 
 
 @dataclass(frozen=True)
@@ -15,6 +21,7 @@ class ParsedSheetTask:
     source_number: int
     title: str
     start_time: time | None
+    end_time: time | None
     has_time_prefix: bool
 
 
@@ -43,15 +50,26 @@ def parse_sheet_tasks(value: str) -> list[ParsedSheetTask]:
     result: list[ParsedSheetTask] = []
     for number, raw_title in split_numbered_tasks(value):
         start = None
-        title = raw_title.strip().rstrip(";").strip()
-        match = LEADING_TIME.match(title)
-        if match:
+        end = None
+        title = raw_title.strip()
+        range_match = LEADING_TIME_RANGE.match(title)
+        match = range_match or LEADING_TIME.match(title)
+        if range_match:
+            hour = int(range_match.group(1))
+            minute = int(range_match.group(2) or range_match.group(3) or 0)
+            end_hour = int(range_match.group(4))
+            end_minute = int(range_match.group(5) or range_match.group(6) or 0)
+            if 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= end_hour <= 23 and 0 <= end_minute <= 59:
+                start = time(hour, minute)
+                end = time(end_hour, end_minute)
+        elif match:
             hour = int(match.group(1))
             minute = int(match.group(2) or match.group(3) or 0)
             if 0 <= hour <= 23 and 0 <= minute <= 59:
                 start = time(hour, minute)
-                title = match.group(4).strip().rstrip(";").strip()
-        result.append(ParsedSheetTask(number, title, start, start is not None))
+        # The title is intentionally kept verbatim. Parsed times are metadata;
+        # they must never be used to rewrite what the user typed in the cell.
+        result.append(ParsedSheetTask(number, title, start, end, start is not None))
     return result
 
 

@@ -240,11 +240,9 @@ def _numbered(values):
 
 
 def _group_values(items):
-    content = _numbered([
-        f"{item.start_time.strftime('%H:%M')}: {item.title}"
-        if item.start_time and getattr(item, "time_prefix_in_title", False) else item.title
-        for item in items
-    ])
+    # The editable web grid and the Sheet cell share the same title text. Times
+    # are separate metadata and must not be reconstructed into user content.
+    content = _numbered([item.title for item in items])
     all_completed = bool(items) and all(
         item.status in {WorkItem.STATUS_COMPLETED, WorkItem.STATUS_REVIEWED}
         for item in items
@@ -277,7 +275,12 @@ def _row_hash(content, self_notes, leader_notes, task_ids):
 
 def _duplicate_title_key(value):
     """Treat visually identical task titles as the same task within one day."""
-    return re.sub(r"\s+", " ", str(value or "")).strip().casefold()
+    normalized = re.sub(r"\s+", " ", str(value or "")).strip()
+    from .sheet_parser import LEADING_TIME, LEADING_TIME_RANGE
+    match = LEADING_TIME_RANGE.match(normalized) or LEADING_TIME.match(normalized)
+    if match:
+        normalized = match.group(7 if match.re is LEADING_TIME_RANGE else 4)
+    return normalized.strip().casefold()
 
 
 def _unique_sheet_tasks(tasks):
@@ -401,7 +404,7 @@ def _ingest_row(offset, row, today):
         if leader_note and leader_note.strip().lower() not in {"chưa đánh giá", "chua danh gia"}:
             task_status = WorkItem.STATUS_REVIEWED
         custom_note = "" if note.strip().lower() in {"cần làm", "đang thực hiện", "hoàn thành", "đã hoàn thành", "xong"} else note
-        source_record_id = _cell(row, 8)
+        source_record_id = _cell(row, 8) or (item.source_record_id if item else "")
         is_web_origin = source_record_id.upper().startswith("REC-WEB-")
         explicit_time = parsed_task.has_time_prefix
         # Web-origin tasks store raw user text as title (no time stripping). If the
@@ -411,11 +414,7 @@ def _ingest_row(offset, row, today):
         preserve_web_title = is_web_origin and item and not item.time_prefix_in_title and explicit_time
         if preserve_web_title:
             explicit_time = False
-        is_sheet_training = (
-            email == "liennt@fermat.edu.vn"
-            and explicit_time
-            and "tập huấn" in parsed_task.title.lower()
-        )
+        is_sheet_training = explicit_time and "tập huấn" in parsed_task.title.lower()
         is_web_training = bool(is_web_origin and item and item.label == "Tập huấn")
         is_training = is_sheet_training or is_web_training
         if item:
@@ -424,7 +423,7 @@ def _ingest_row(offset, row, today):
             item.progress_note = custom_note[:1000]
             item.work_date = work_date
             item.start_time = item.start_time if preserve_web_title else parsed_task.start_time
-            item.end_time = training_end(parsed_task.start_time) if is_training else item.end_time
+            item.end_time = parsed_task.end_time or (training_end(parsed_task.start_time) if is_training else None)
             item.status = task_status
             item.daily_order = index
             item.source_sheet_row = offset
@@ -442,7 +441,7 @@ def _ingest_row(offset, row, today):
                 creator=executor, executor=executor, title=parsed_task.title[:1000],
                 description="Nhập từ Lịch công tác FT 2026 mới.", progress_note=custom_note[:1000],
                 work_date=work_date, start_time=parsed_task.start_time,
-                end_time=training_end(parsed_task.start_time) if is_training else None,
+                end_time=parsed_task.end_time or (training_end(parsed_task.start_time) if is_training else None),
                 status=task_status, priority="high" if explicit_time else "medium",
                 label="Tập huấn" if is_training else "Công việc",
                 daily_order=index, source_sheet_row=offset, source_task_index=index,

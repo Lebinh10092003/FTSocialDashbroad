@@ -87,6 +87,20 @@ class WorkScheduleSheetParserTests(TestCase):
         ])
         self.assertEqual(all_reviewed_notes, "Hoàn thành")
 
+    def test_sheet_output_keeps_web_grid_title_verbatim(self):
+        class Item:
+            title = "7h30 - 12h30 Tham gia tập huấn TH Kim Đồng"
+            start_time = time(7, 30)
+            status = "todo"
+            progress_note = ""
+            review_percent = None
+            review_note = ""
+            sync_uid = deterministic_sheet_uid(1148, 1)
+
+        content, _, _, _ = _group_values([Item()])
+
+        self.assertEqual(content, "1. 7h30 - 12h30 Tham gia tập huấn TH Kim Đồng")
+
     def test_numbered_cell_keeps_wrapped_lines_and_accepts_duplicate_numbers(self):
         tasks = parse_sheet_tasks(
             "1. Nhiệm vụ đầu\nphần mô tả xuống dòng\n2. Nhiệm vụ hai\n2. 17h30: Tập huấn GCE1"
@@ -94,7 +108,7 @@ class WorkScheduleSheetParserTests(TestCase):
         self.assertEqual([task.title for task in tasks], [
             "Nhiệm vụ đầu\nphần mô tả xuống dòng",
             "Nhiệm vụ hai",
-            "Tập huấn GCE1",
+            "17h30: Tập huấn GCE1",
         ])
         self.assertEqual(tasks[-1].start_time.isoformat(timespec="minutes"), "17:30")
         self.assertEqual(training_end(tasks[-1].start_time).isoformat(timespec="minutes"), "20:30")
@@ -108,6 +122,13 @@ class WorkScheduleSheetParserTests(TestCase):
             ["08:30", "08:00", "07:00", "07:00"],
         )
         self.assertTrue(all(task.has_time_prefix for task in tasks))
+
+    def test_time_range_is_preserved_verbatim_and_parsed_as_metadata(self):
+        task = parse_sheet_tasks("1. 7h30 - 12h30 Tham gia tập huấn TH Kim Đồng")[0]
+
+        self.assertEqual(task.title, "7h30 - 12h30 Tham gia tập huấn TH Kim Đồng")
+        self.assertEqual(task.start_time.isoformat(timespec="minutes"), "07:30")
+        self.assertEqual(task.end_time.isoformat(timespec="minutes"), "12:30")
 
     def test_only_authored_time_prefix_gets_bold_italic_pure_black(self):
         self.assertEqual(_build_content_format_runs(""), [])
@@ -174,7 +195,7 @@ class WorkScheduleSheetParserTests(TestCase):
         ))
 
         self.assertEqual([task.title for task in tasks], [
-            "Tập huấn B3, B4 TH Kim Đồng",
+            "08:30: Tập huấn B3, B4 TH Kim Đồng",
             "Chuẩn bị tài liệu",
         ])
         self.assertEqual(tasks[0].start_time.isoformat(timespec="minutes"), "08:30")
@@ -567,9 +588,13 @@ class WorkScheduleApiTests(TestCase):
 
     def test_title_with_time_notation_is_preserved_verbatim(self):
         # The system must never reformat or strip text that users write as task titles.
-        # Time-like patterns (e.g. "8h30: …", "7:30 - 12:30") are user content, not
-        # structured fields — they should be stored exactly as typed.
-        for raw_title in ["8h30: Họp triển khai", "7:30 - 12:30", "7h Họp nhóm"]:
+        # Authored time remains verbatim in the title while also becoming
+        # scheduling metadata and high priority.
+        for raw_title, expected_start in [
+            ("8h30: Họp triển khai", "08:30"),
+            ("7:30 - 12:30", "07:30"),
+            ("7h Họp nhóm", "07:00"),
+        ]:
             with self.subTest(title=raw_title):
                 response = self.request(self.executor_token, "post", "/api/work-schedule/items", {
                     "title": raw_title, "date": "2026-09-07",
@@ -579,9 +604,9 @@ class WorkScheduleApiTests(TestCase):
                 self.assertEqual(response.status_code, 201, response.data)
                 item = WorkItem.objects.get(pk=response.json()["item"]["id"])
                 self.assertEqual(item.title, raw_title)
-                self.assertIsNone(item.start_time)
-                self.assertEqual(item.priority, "medium")
-                self.assertFalse(item.time_prefix_in_title)
+                self.assertEqual(item.start_time.isoformat(timespec="minutes"), expected_start)
+                self.assertEqual(item.priority, "high")
+                self.assertTrue(item.time_prefix_in_title)
                 item.delete()
 
     def test_grid_title_with_time_range_is_preserved_verbatim(self):
@@ -594,8 +619,10 @@ class WorkScheduleApiTests(TestCase):
         })
         self.assertEqual(response.status_code, 200, response.data)
         item = WorkItem.objects.get(executor=self.executor, work_date="2026-09-07", title="7:30 - 12:30")
-        self.assertIsNone(item.start_time)
-        self.assertFalse(item.time_prefix_in_title)
+        self.assertEqual(item.start_time.isoformat(timespec="minutes"), "07:30")
+        self.assertEqual(item.end_time.isoformat(timespec="minutes"), "12:30")
+        self.assertEqual(item.priority, "high")
+        self.assertTrue(item.time_prefix_in_title)
 
     @override_settings(WORK_SCHEDULE_TRAINING_PROJECTION_ENABLED=True)
     def test_untimed_native_sheet_training_reference_does_not_create_calendar_session(self):
@@ -926,7 +953,7 @@ class WorkScheduleSheetWebhookTests(TestCase):
         response = self.post({"event_id": "evt-time-priority", "row": self.ROW_NUMBER, "values": values})
         self.assertEqual(response.status_code, 200, response.content)
         item = WorkItem.objects.get(source_sheet_row=self.ROW_NUMBER)
-        self.assertEqual(item.title, "Gửi báo cáo")
+        self.assertEqual(item.title, "8h: Gửi báo cáo")
         self.assertEqual(item.start_time.isoformat(timespec="minutes"), "08:00")
         self.assertEqual(item.priority, "high")
         self.assertTrue(item.time_prefix_in_title)
