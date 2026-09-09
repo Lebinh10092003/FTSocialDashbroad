@@ -23,6 +23,9 @@ from .training_sync import sync_work_item_from_training
 
 
 class WorkScheduleSheetParserTests(TestCase):
+    def test_sheet_mapping_includes_director_thuan(self):
+        self.assertEqual(EMPLOYEE_EMAILS["EMP-E6557326"], "thuanld@fermat.edu.vn")
+
     def test_sheet_identity_and_hash_are_stable_when_title_is_not_the_identity(self):
         self.assertEqual(str(deterministic_sheet_uid(1094, 1)), "6ae71379-0000-5000-8000-000446000001")
         self.assertEqual(_row_hash("a", "b", "c", "d"), "eb564109")

@@ -1240,8 +1240,11 @@ type ScheduleGridRow = { key: string; date: string; executorEmail: string; perso
 const numberedGridCell = (values: Array<{ number: number; text: string }>) => values.map((value) => `${value.number}. ${value.text}`).join("\n");
 const resizeGridTextarea = (element: HTMLTextAreaElement | null) => {
   if (!element) return;
-  element.style.height = "auto";
-  element.style.height = `${Math.max(80, element.scrollHeight)}px`;
+  const row = element.closest("tr");
+  const editors = row ? Array.from(row.querySelectorAll<HTMLTextAreaElement>("textarea")) : [element];
+  editors.forEach((editor) => { editor.style.height = "auto"; });
+  const height = Math.max(80, ...editors.map((editor) => editor.scrollHeight));
+  editors.forEach((editor) => { editor.style.height = `${height}px`; });
 };
 
 function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInlineDay, reloadTasks }: {

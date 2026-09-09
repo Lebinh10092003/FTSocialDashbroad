@@ -20,6 +20,7 @@ SPREADSHEET_ID = "1kWiJdTSM_6ZDeLTGCWvDA3num5n0DmRH2Tv-6AwuBYc"
 SHEET_NAME = "Lịch công tác"
 SHEET_ID = 1443841670
 EMPLOYEE_EMAILS = {
+    "EMP-E6557326": "thuanld@fermat.edu.vn",
     "EMP-0FA847B0": "dungpv@fermat.edu.vn",
     "EMP-198EA04B": "liennt@fermat.edu.vn",
     "EMP-AECADFA4": "hanh@fermat.edu.vn",
