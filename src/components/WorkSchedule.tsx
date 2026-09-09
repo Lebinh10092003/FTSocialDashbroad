@@ -470,6 +470,11 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     if (loading) return;
     workScheduleSnapshot = { owner: userEmail, savedAt: Date.now(), tasks, staff, teamMembers, teamTasks };
   }, [loading, staff, tasks, teamMembers, teamTasks, userEmail]);
+  useEffect(() => {
+    if (!loading && view === "team" && teamMembers.length === 0) {
+      navigateSchedule("board");
+    }
+  }, [loading, teamMembers.length, view]);
   const filtered = useMemo(
     () =>
       tasks.filter((task) => {
@@ -1100,7 +1105,7 @@ function TeamSpreadsheetView({ members, tasks, userEmail, setEditing, saveInline
   const reviewed = rows.filter((task) => task.status === "reviewed").length;
   const completed = rows.filter((task) => task.status === "completed" || task.status === "reviewed").length;
 
-  if (!members.length) return <section className="grid min-h-[420px] place-items-center border border-dashed border-slate-300 bg-white p-8 text-center"><div><UserCheck className="mx-auto h-10 w-10 text-slate-300" /><h2 className="mt-4 text-lg font-extrabold text-[#001e40]">Chưa có nhân sự để quản lý</h2><p className="mt-2 text-sm text-slate-500">Danh sách xuất hiện khi nhân sự được phân người quản lý.</p></div></section>;
+  if (!members.length) return <section className="grid min-h-[420px] place-items-center border border-dashed border-slate-300 bg-white p-8 text-center"><div><UserCheck className="mx-auto h-10 w-10 text-slate-300" /><h2 className="mt-4 text-lg font-extrabold text-[#001e40]">Chưa có nhân sự trực tiếp</h2><p className="mt-2 text-sm text-slate-500">Danh sách xuất hiện khi quản trị viên thiết lập người quản lý cho nhân viên trong hệ thống.</p></div></section>;
 
   return <div className="space-y-4">
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

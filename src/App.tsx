@@ -539,8 +539,8 @@ export default function App() {
       },
       {
         mode: 'digital-training',
-        title: 'Đào tạo số',
-        description: 'Quản lý nội dung đào tạo chuyển đổi số và ứng dụng AI.',
+        title: 'Công nghệ & đào tạo số',
+        description: 'Quản lý lịch gặp khách hàng, nội dung đào tạo chuyển đổi số và ứng dụng AI.',
         gradient: 'from-[#0055DA] to-[#00C68D]',
         icon: GraduationCap,
       },
@@ -823,7 +823,7 @@ export default function App() {
   if (viewMode === 'digital-training') {
     return (
       <>
-        <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp mô-đun Đào tạo số...</div>}>
+        <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp mô-đun Công nghệ & đào tạo số...</div>}>
           <DigitalTraining
             onBackToWorkspace={() => setViewMode('workspace')}
             onOpenTrainingAssessment={() => setViewMode('training-assessments')}

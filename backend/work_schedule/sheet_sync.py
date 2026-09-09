@@ -286,6 +286,25 @@ def _find_row(rows, email, work_date, items):
     return None, None
 
 
+_TIME_LINE_RE = re.compile(r'^\d+\.\s+\d{1,2}:\d{2}')
+
+
+def _build_content_format_runs(content):
+    """Return textFormatRuns for bold+italic on time-prefixed task lines."""
+    lines = content.split('\n')
+    runs = []
+    offset = 0
+    prev_bold = None
+    for line in lines:
+        is_bold = bool(_TIME_LINE_RE.match(line))
+        if is_bold != prev_bold:
+            fmt = {'bold': True, 'italic': True, 'foregroundColorStyle': {'rgbColor': {'red': 0.0, 'green': 0.13, 'blue': 0.25}}} if is_bold else {}
+            runs.append({'startIndex': offset, 'format': fmt})
+            prev_bold = is_bold
+        offset += len(line) + 1  # +1 for newline character
+    return runs
+
+
 def push_groups_to_sheet(service, groups, force=False):
     rows = _rows(service)
     updates = []
@@ -324,6 +343,33 @@ def push_groups_to_sheet(service, groups, force=False):
         service.spreadsheets().values().batchUpdate(
             spreadsheetId=SPREADSHEET_ID,
             body={"valueInputOption": "USER_ENTERED", "data": updates},
+        ).execute()
+    # Apply bold+italic formatting to time-prefixed task lines in column E
+    format_requests = []
+    for email, work_date, row_number, sync_hash, items in synced:
+        content, _, _, _ = _group_values(items) if items else ("", "", "", "")
+        runs = _build_content_format_runs(content)
+        if runs:
+            format_requests.append({
+                'updateCells': {
+                    'range': {
+                        'sheetId': SHEET_ID,
+                        'startRowIndex': row_number - 1,
+                        'endRowIndex': row_number,
+                        'startColumnIndex': 4,  # column E (0-indexed)
+                        'endColumnIndex': 5,
+                    },
+                    'rows': [{'values': [{'textFormatRuns': [
+                        {'startIndex': run['startIndex'], 'format': run['format']}
+                        for run in runs
+                    ]}]}],
+                    'fields': 'textFormatRuns',
+                }
+            })
+    if format_requests:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=SPREADSHEET_ID,
+            body={'requests': format_requests},
         ).execute()
     with suppress_sheet_queue():
         for email, work_date, row_number, sync_hash, items in synced:

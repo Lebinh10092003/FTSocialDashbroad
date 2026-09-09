@@ -1715,6 +1715,23 @@ type DigitalTrainingSnapshot = {
   surveys: Survey[];
 };
 const DIGITAL_TRAINING_MEMORY_TTL_MS = 5 * 60 * 1000;
+const DIGITAL_TRAINING_CACHE_KEY = 'ft-digital-training-bootstrap-v1';
+const DIGITAL_TRAINING_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+const loadDigitalTrainingCache = (owner: string): DigitalTrainingSnapshot | null => {
+  try {
+    const record = JSON.parse(window.localStorage.getItem(DIGITAL_TRAINING_CACHE_KEY) || 'null');
+    if (!record?.savedAt || !record?.owner || record.owner !== owner || Date.now() - Number(record.savedAt) >= DIGITAL_TRAINING_CACHE_TTL_MS) {
+      window.localStorage.removeItem(DIGITAL_TRAINING_CACHE_KEY);
+      return null;
+    }
+    return record.payload || null;
+  } catch { return null; }
+};
+const storeDigitalTrainingCache = (owner: string, payload: unknown) => {
+  try {
+    window.localStorage.setItem(DIGITAL_TRAINING_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), owner, payload }));
+  } catch {}
+};
 let digitalTrainingSnapshot: DigitalTrainingSnapshot | null = null;
 
 export default function DigitalTraining({
@@ -1760,9 +1777,10 @@ export default function DigitalTraining({
   );
   const canEditFinance = canViewFinance && (userRole === "ADMIN" || isAccountant);
   const cacheOwner = isGuest ? "guest" : idToken;
+  const [localStorageCache] = useState(() => isGuest ? null : loadDigitalTrainingCache(cacheOwner));
   const cachedSnapshot = digitalTrainingSnapshot?.owner === cacheOwner && Date.now() - digitalTrainingSnapshot.savedAt < DIGITAL_TRAINING_MEMORY_TTL_MS
     ? digitalTrainingSnapshot
-    : null;
+    : localStorageCache;
   const route = currentRoute(),
     [tab, setTab] = useState<Tab>(route.tab),
     [scheduleOpen, setScheduleOpen] = useState(
@@ -1986,6 +2004,7 @@ export default function DigitalTraining({
           productCatalog: productRows, productOpportunities: opportunityRows, leads: nextLeads,
           classes: nextClasses, materials: nextMaterials, surveys: nextSurveys,
         };
+        storeDigitalTrainingCache(cacheOwner, digitalTrainingSnapshot);
       } catch (e: any) {
         setNotice(e.message);
       } finally {
@@ -2001,6 +2020,7 @@ export default function DigitalTraining({
       owner: cacheOwner, savedAt: Date.now(), sessions, employees, meetings, partners,
       partnerProductSubscriptions, productCatalog, productOpportunities, leads, classes, materials, surveys,
     };
+    storeDigitalTrainingCache(cacheOwner, digitalTrainingSnapshot);
   }, [cacheOwner, classes, employees, leads, loading, materials, meetings, partnerProductSubscriptions, partners, productCatalog, productOpportunities, sessions, surveys]);
   useEffect(() => {
     const h = () => {
@@ -4007,7 +4027,7 @@ export default function DigitalTraining({
           <div className="border-l pl-3">
             <b>Fermat</b>
             <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-cyan-600">
-              Đào tạo số
+              Công nghệ & đào tạo số
             </p>
           </div>
         </div>
@@ -4024,7 +4044,7 @@ export default function DigitalTraining({
             className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-bold ${tab === "calendar" || tab === "sessions" ? "ft-nav-item ft-nav-item-active" : "ft-nav-item"}`}
           >
             <ClipboardList className="h-4 w-4" />
-            Lịch công tác
+            Lịch gặp khách hàng
             <ChevronDown className={`ml-auto h-4 w-4 transition-transform ${scheduleOpen ? "rotate-180" : ""}`} />
           </button>
           {scheduleOpen && (
@@ -4245,21 +4265,29 @@ export default function DigitalTraining({
                             item.staff_name || partner?.training_staff || "",
                         };
                       }),
-                      ...meetings.map((item) => ({
-                        id: `${item.schedule_type === "other" ? "other" : "meeting"}-${item.id}`,
-                        title: item.title,
-                        date: item.date,
-                        start_time: item.start_time,
-                        end_time: item.end_time,
-                        location: item.location,
-                        staff_name: item.staff_name,
-                        content: item.content,
-                        status: item.status,
-                        kind:
-                          item.schedule_type === "other"
-                            ? ("other" as const)
-                            : ("meeting" as const),
-                      })),
+                      ...(() => {
+                        const seenMeetings = new Set<string>();
+                        return meetings.filter((item) => {
+                          const key = `${item.schedule_type}|${item.title}|${item.date}|${item.start_time ?? ""}|${item.end_time ?? ""}|${item.staff_name ?? ""}`;
+                          if (seenMeetings.has(key)) return false;
+                          seenMeetings.add(key);
+                          return true;
+                        }).map((item) => ({
+                          id: `${item.schedule_type === "other" ? "other" : "meeting"}-${item.id}`,
+                          title: item.title,
+                          date: item.date,
+                          start_time: item.start_time,
+                          end_time: item.end_time,
+                          location: item.location,
+                          staff_name: item.staff_name,
+                          content: item.content,
+                          status: item.status,
+                          kind:
+                            item.schedule_type === "other"
+                              ? ("other" as const)
+                              : ("meeting" as const),
+                        }));
+                      })(),
                     ]}
                     onPick={
                       isGuest
