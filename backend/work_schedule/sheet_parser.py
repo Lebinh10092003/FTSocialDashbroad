@@ -5,7 +5,7 @@ from datetime import datetime, time, timedelta
 
 NUMBERED_LINE = re.compile(r"^\s*(\d{1,3})\s*[.,)]\s*(.*?)(?:\s*)$")
 LEADING_TIME = re.compile(
-    r"^\s*(\d{1,2})(?:\s*[hH]\s*(\d{1,2})?|\s*:\s*(\d{2}))\s*[:;,.\-]?\s+(.+)$",
+    r"^\s*(\d{1,2})(?:\s*[hH]\s*(\d{1,2})?|\s*:\s*(\d{2}))(?:\s*[:;,.\-]\s*|\s+)(.+)$",
     re.DOTALL,
 )
 

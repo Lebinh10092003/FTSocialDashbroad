@@ -97,6 +97,17 @@ class WorkScheduleSheetParserTests(TestCase):
             {"red": 0.0, "green": 0.0, "blue": 0.0},
         )
 
+        class Item:
+            def __init__(self, priority):
+                self.priority = priority
+
+        priority_runs = _build_content_format_runs(
+            "1. Việc không có giờ nhưng ưu tiên cao\n2. Việc thường",
+            [Item("high"), Item("medium")],
+        )
+        self.assertTrue(priority_runs[0]["format"]["bold"])
+        self.assertEqual(priority_runs[1]["format"], {})
+
     def test_identical_tasks_in_one_sheet_cell_are_collapsed(self):
         tasks = _unique_sheet_tasks(parse_sheet_tasks(
             "1. Tập huấn B3, B4 TH Kim Đồng\n"
@@ -494,6 +505,19 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertIsNone(WorkItem.objects.get(pk=response.json()["item"]["id"]).training_session_id)
 
+    def test_time_prefixed_title_automatically_becomes_high_priority(self):
+        response = self.request(self.executor_token, "post", "/api/work-schedule/items", {
+            "title": "8h30: Họp triển khai", "date": "2026-09-07",
+            "executorEmail": self.executor.email, "supporterEmails": [], "managerEmails": [],
+            "priority": "medium",
+        })
+        self.assertEqual(response.status_code, 201, response.data)
+        item = WorkItem.objects.get(pk=response.json()["item"]["id"])
+        self.assertEqual(item.title, "Họp triển khai")
+        self.assertEqual(item.start_time.isoformat(timespec="minutes"), "08:30")
+        self.assertEqual(item.priority, "high")
+        self.assertTrue(item.time_prefix_in_title)
+
     def test_untimed_native_sheet_training_reference_does_not_create_calendar_session(self):
         item = WorkItem.objects.create(
             creator=self.executor,
@@ -754,6 +778,19 @@ class WorkScheduleSheetWebhookTests(TestCase):
         mock_push.assert_called_once()
         touched_groups = mock_push.call_args.args[1]
         self.assertEqual(touched_groups, {(self.EMPLOYEE_EMAIL, item.work_date)})
+
+    @mock.patch("work_schedule.sheet_sync.push_groups_to_sheet")
+    @mock.patch("work_schedule.sheet_sync.ensure_sync_columns")
+    @mock.patch("work_schedule.sheet_sync._service")
+    def test_time_prefixed_sheet_row_is_high_priority(self, mock_service, mock_ensure, mock_push):
+        values = self.row_values("8h: Gửi báo cáo")
+        response = self.post({"event_id": "evt-time-priority", "row": self.ROW_NUMBER, "values": values})
+        self.assertEqual(response.status_code, 200, response.content)
+        item = WorkItem.objects.get(source_sheet_row=self.ROW_NUMBER)
+        self.assertEqual(item.title, "Gửi báo cáo")
+        self.assertEqual(item.start_time.isoformat(timespec="minutes"), "08:00")
+        self.assertEqual(item.priority, "high")
+        self.assertTrue(item.time_prefix_in_title)
 
     @mock.patch("work_schedule.sheet_sync.push_groups_to_sheet")
     @mock.patch("work_schedule.sheet_sync.ensure_sync_columns")

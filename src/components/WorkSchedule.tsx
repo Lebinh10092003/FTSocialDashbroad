@@ -20,6 +20,7 @@ type WorkTask = {
   status: WorkStatus;
   displayStatus: WorkStatus;
   priority: Priority;
+  timePrefixInTitle: boolean;
   label: string;
   dailyOrder: number;
   trainingSessionId?: number | null;
@@ -216,7 +217,7 @@ const authHeaders = (token: string, json = false): HeadersInit => ({
 });
 const draftFromTask = (task: WorkTask): WorkDraft => ({
   id: task.id,
-  title: task.title,
+  title: task.timePrefixInTitle && task.startTime ? `${task.startTime}: ${task.title}` : task.title,
   description: task.description,
   progressNote: task.progressNote,
   date: task.date,
@@ -349,7 +350,7 @@ function TaskCard({ task, displayOrder, selected, onSelect, onOpen, onDelete, on
           </button>
         )}
       </div>
-      <h3 className="text-sm font-bold leading-5 text-slate-900">
+      <h3 className={`text-sm font-bold leading-5 text-slate-900 ${task.priority === "high" ? "italic text-black" : ""}`}>
         <span className="mr-1.5 text-blue-600">{displayOrder}.</span>
         {task.displayTitle}
       </h3>
@@ -1258,6 +1259,38 @@ type GridSaveItem = { id?: number; title: string; progressNote: string; status: 
 type ScheduleGridRow = { key: string; date: string; executorEmail: string; person?: TeamMember };
 
 const numberedGridCell = (values: Array<{ number: number; text: string }>) => values.map((value) => `${value.number}. ${value.text}`).join("\n");
+const timePrefixedGridLine = /^\s*\d+\s*[.,)]\s*\d{1,2}(?:\s*[hH]\s*\d{0,2}|\s*:\s*\d{2})(?=\s|[:;,.-])/;
+
+function ImportantWorkContentEditor({ value, tasks, className, onInput, onChange, onBlur }: {
+  value: string;
+  tasks: WorkTask[];
+  className: string;
+  onInput: React.FormEventHandler<HTMLTextAreaElement>;
+  onChange: React.ChangeEventHandler<HTMLTextAreaElement>;
+  onBlur: React.FocusEventHandler<HTMLTextAreaElement>;
+}) {
+  const [focused, setFocused] = useState(false);
+  const priorityByOrder = new Map(tasks.map((task) => [task.dailyOrder, task.priority]));
+  let currentImportant = false;
+  const renderedLines = value.split("\n").map((line, index) => {
+    const numbered = line.match(/^\s*(\d{1,3})\s*[.,)]\s*/);
+    if (numbered) currentImportant = timePrefixedGridLine.test(line) || priorityByOrder.get(Number(numbered[1])) === "high";
+    return <React.Fragment key={`${index}-${line}`}><span className={currentImportant ? "font-bold italic text-black" : "font-medium text-slate-900"}>{line || " "}</span>{index < value.split("\n").length - 1 && "\n"}</React.Fragment>;
+  });
+  return <div className="relative">
+    {!!value && !focused && <div aria-hidden className="pointer-events-none absolute inset-0 whitespace-pre-wrap p-2 leading-5">{renderedLines}</div>}
+    <textarea
+      ref={resizeGridTextarea}
+      value={value}
+      onFocus={() => setFocused(true)}
+      onInput={onInput}
+      onChange={onChange}
+      onBlur={(event) => { setFocused(false); onBlur(event); }}
+      placeholder={'1. Nhập nội dung công việc\n2. Nhiệm vụ tiếp theo'}
+      className={`${className} font-medium ${value && !focused ? "text-transparent" : "text-slate-900"}`}
+    />
+  </div>;
+}
 const resizeGridTextarea = (element: HTMLTextAreaElement | null) => {
   if (!element) return;
   const row = element.closest("tr");
@@ -1287,7 +1320,7 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
       .filter((task) => task.reviewPercent !== null)
       .map((task) => `${task.reviewPercent}%${task.reviewNote ? ` · ${task.reviewNote}` : ""}`))];
     return [row.key, {
-      content: numberedGridCell(workItems.map((task) => ({ number: task.dailyOrder, text: task.title }))),
+      content: numberedGridCell(workItems.map((task) => ({ number: task.dailyOrder, text: task.timePrefixInTitle && task.startTime ? `${task.startTime}: ${task.title}` : task.title }))),
       selfAssessment: allCompleted ? "Hoàn thành" : numberedGridCell(workItems.map((task) => ({ number: task.dailyOrder, text: displayedSelfAssessment(task) }))),
       leaderAssessment: allReviewed ? "Hoàn thành" : leaderAssessments.join("\n"),
     }];
@@ -1434,7 +1467,7 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
         return <tr key={row.key} className="align-top">
           <td className="border-b border-r border-slate-400 px-2 py-2 font-bold">{weekday(row.date)}</td><td className="border-b border-r border-slate-400 px-2 py-2">{fullDate(row.date)}</td><td className="border-b border-r border-slate-400 px-2 py-2 text-center font-semibold">{weekNumber(row.date)}</td>
           {people && <td className="border-b border-r border-slate-400 px-2 py-2"><b className="block">{row.person?.name}</b></td>}
-          <td className="border-b border-r border-slate-400 p-0"><textarea ref={resizeGridTextarea} value={draft.content} onInput={(event) => resizeGridTextarea(event.currentTarget)} onChange={(event) => updateCell(row.key, { content: event.target.value })} onBlur={() => void saveTable()} placeholder={'1. Nhập nội dung công việc\n2. Nhiệm vụ tiếp theo'} className={`${editorClass} font-medium`} /></td>
+          <td className="border-b border-r border-slate-400 p-0"><ImportantWorkContentEditor value={draft.content} tasks={workItems} onInput={(event) => resizeGridTextarea(event.currentTarget)} onChange={(event) => updateCell(row.key, { content: event.target.value })} onBlur={() => void saveTable()} className={editorClass} /></td>
           <td className="border-b border-r border-slate-400 p-0"><textarea ref={resizeGridTextarea} value={draft.selfAssessment} onInput={(event) => resizeGridTextarea(event.currentTarget)} onChange={(event) => updateCell(row.key, { selfAssessment: event.target.value })} onBlur={() => void saveTable()} placeholder="1. Ghi chú tiến trình hiện tại" className={`${editorClass} text-xs ${compactSelfAssessment ? "content-center text-center font-bold text-emerald-700" : ""}`} /></td>
           <td className="border-b border-slate-400 p-0"><textarea ref={resizeGridTextarea} readOnly={!canReviewDay} value={draft.leaderAssessment} onInput={(event) => resizeGridTextarea(event.currentTarget)} onChange={(event) => updateCell(row.key, { leaderAssessment: event.target.value })} onBlur={() => void saveTable()} placeholder="Chưa đánh giá" className={`${editorClass} text-xs ${canReviewDay ? "" : "bg-slate-50/50 text-slate-600"} ${compactLeaderAssessment ? "content-center text-center font-bold text-violet-700" : ""}`} /></td>
         </tr>;

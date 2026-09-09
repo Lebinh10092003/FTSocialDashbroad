@@ -281,6 +281,8 @@ def _ingest_row(offset, row, today):
             item.source_task_index = index
             item.source_record_id = source_record_id
             item.time_prefix_in_title = explicit_time
+            if explicit_time:
+                item.priority = "high"
             item.label = "Tập huấn" if is_training else "Công việc"
             item.sync_uid = sync_uid
             item.save()
@@ -291,7 +293,8 @@ def _ingest_row(offset, row, today):
                 description="Nhập từ Lịch công tác FT 2026 mới.", progress_note=custom_note[:1000],
                 work_date=work_date, start_time=parsed_task.start_time,
                 end_time=training_end(parsed_task.start_time) if is_training else None,
-                status=task_status, priority="medium", label="Tập huấn" if is_training else "Công việc",
+                status=task_status, priority="high" if explicit_time else "medium",
+                label="Tập huấn" if is_training else "Công việc",
                 daily_order=index, source_sheet_row=offset, source_task_index=index,
                 source_record_id=source_record_id,
                 time_prefix_in_title=explicit_time,
@@ -350,14 +353,24 @@ _TIME_LINE_RE = re.compile(
 )
 
 
-def _build_content_format_runs(content):
-    """Return textFormatRuns for bold+italic on time-prefixed task lines."""
+def _build_content_format_runs(content, items=None):
+    """Bold/italic task lines that start with a time or have high priority."""
     lines = content.split('\n')
     runs = []
     offset = 0
     prev_bold = None
+    task_index = -1
+    current_bold = False
+    ordered_items = list(items or [])
     for line in lines:
-        is_bold = bool(_TIME_LINE_RE.match(line))
+        if re.match(r'^\s*\d+\s*[.,)]\s*', line):
+            task_index += 1
+            is_high_priority = (
+                task_index < len(ordered_items)
+                and ordered_items[task_index].priority == "high"
+            )
+            current_bold = bool(_TIME_LINE_RE.match(line)) or is_high_priority
+        is_bold = current_bold
         if is_bold != prev_bold:
             fmt = {'bold': True, 'italic': True, 'foregroundColorStyle': {'rgbColor': {'red': 0.0, 'green': 0.0, 'blue': 0.0}}} if is_bold else {}
             runs.append({'startIndex': offset, 'format': fmt})
@@ -409,7 +422,7 @@ def push_groups_to_sheet(service, groups, force=False):
     format_requests = []
     for email, work_date, row_number, sync_hash, items in synced:
         content, _, _, _ = _group_values(items) if items else ("", "", "", "")
-        runs = _build_content_format_runs(content)
+        runs = _build_content_format_runs(content, items)
         if runs:
             format_requests.append({
                 'updateCells': {
