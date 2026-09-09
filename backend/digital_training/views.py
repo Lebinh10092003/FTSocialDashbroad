@@ -186,6 +186,29 @@ def training_session_detail(request, pk):
 def training_customer_meetings(request):
     if request.method == "GET":
         complete_past_training_schedules()
+    if request.method == "POST":
+        # Prevent exact duplicates: return existing record when all key fields match.
+        title = str(request.data.get("title") or "").strip()
+        meeting_date = request.data.get("date") or request.data.get("meeting_date")
+        start_time = request.data.get("start_time") or None
+        end_time = request.data.get("end_time") or None
+        staff_name = str(request.data.get("staff_name") or "").strip()
+        if title and meeting_date:
+            qs = TrainingCustomerMeeting.objects.filter(
+                title=title,
+                meeting_date=meeting_date,
+                staff_name=staff_name,
+            )
+            if start_time:
+                qs = qs.filter(start_time=start_time)
+            if end_time:
+                qs = qs.filter(end_time=end_time)
+            duplicate = qs.select_related("lead", "partner", "opportunity__product").first()
+            if duplicate:
+                return Response(
+                    TrainingCustomerMeetingSerializer(duplicate, context={"request": request}).data,
+                    status=status.HTTP_200_OK,
+                )
     return _crud_collection(request, TrainingCustomerMeeting.objects.select_related("lead", "partner", "opportunity__product").all(), TrainingCustomerMeetingSerializer, "cuộc gặp khách hàng")
 
 

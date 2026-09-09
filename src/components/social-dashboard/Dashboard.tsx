@@ -35,6 +35,13 @@ import SearchableSelect from '../SearchableSelect';
 const COLORS = ['#2563eb', '#0f766e', '#f59e0b', '#ef4444', '#7c3aed', '#ec4899', '#0891b2', '#ea580c'];
 const DEFAULT_AUTO_SCALE_STEPS = 8;
 
+// Module-level in-memory cache shared across component mounts (5-minute TTL).
+const DASHBOARD_SNAPSHOT_TTL = 5 * 60 * 1000;
+let dashboardSnapshot: { key: string; savedAt: number; data: DashboardData; followerTrend: FollowerTrendPoint[] } | null = null;
+
+const makeCacheKey = (idToken: string, platformFilter: string, channelFilter: string, startDate: string, endDate: string) =>
+  `${idToken}|${platformFilter}|${channelFilter}|${startDate}|${endDate}`;
+
 interface DashboardProps {
   idToken: string;
   googleAccessToken: string | null;
@@ -181,10 +188,13 @@ export default function Dashboard({ idToken, googleAccessToken, channels, onOpen
   const [datePreset, setDatePreset] = useState<DatePreset>('7days');
   const [syncingSelectedPeriod, setSyncingSelectedPeriod] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [followerTrend, setFollowerTrend] = useState<FollowerTrendPoint[]>([]);
+  // Seed initial state from module-level snapshot when available and fresh.
+  const initialCacheKey = makeCacheKey(idToken, 'all', 'all', getPastDateStr(6), getTodayStr());
+  const initialSnap = dashboardSnapshot?.key === initialCacheKey && Date.now() - dashboardSnapshot.savedAt < DASHBOARD_SNAPSHOT_TTL ? dashboardSnapshot : null;
+  const [data, setData] = useState<DashboardData | null>(initialSnap?.data ?? null);
+  const [followerTrend, setFollowerTrend] = useState<FollowerTrendPoint[]>(initialSnap?.followerTrend ?? []);
   const [followerTrendLoading, setFollowerTrendLoading] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialSnap);
   const [error, setError] = useState<string | null>(null);
   const [activeMetric, setActiveMetric] = useState<TrendMetric>('views');
   const [selectedChannels, setSelectedChannels] = useState<Set<string>>(new Set());
@@ -265,7 +275,16 @@ export default function Dashboard({ idToken, googleAccessToken, channels, onOpen
         const body = await response.json().catch(() => ({}));
         throw new Error(body.error || `Không thể tải thống kê (${response.status}).`);
       }
-      setData(await response.json());
+      const freshData: DashboardData = await response.json();
+      setData(freshData);
+      // Update module-level snapshot so the next mount can skip the initial load.
+      const cacheKey = makeCacheKey(idToken, platformFilter, channelFilter, startDate, endDate);
+      dashboardSnapshot = {
+        key: cacheKey,
+        savedAt: Date.now(),
+        data: freshData,
+        followerTrend: dashboardSnapshot?.key === cacheKey ? (dashboardSnapshot.followerTrend ?? []) : [],
+      };
     } catch (fetchError: any) {
       setError(fetchError.message || 'Không thể kết nối tới hệ thống.');
     } finally {
@@ -284,7 +303,13 @@ export default function Dashboard({ idToken, googleAccessToken, channels, onOpen
         headers: { Authorization: `Bearer ${idToken}` },
       });
       if (!response.ok) throw new Error('Không thể tải lịch sử người theo dõi.');
-      setFollowerTrend(await response.json());
+      const freshTrend: FollowerTrendPoint[] = await response.json();
+      setFollowerTrend(freshTrend);
+      // Merge into snapshot.
+      const cacheKey = makeCacheKey(idToken, platformFilter, channelFilter, startDate, endDate);
+      if (dashboardSnapshot?.key === cacheKey) {
+        dashboardSnapshot = { ...dashboardSnapshot, followerTrend: freshTrend, savedAt: Date.now() };
+      }
     } catch (trendError) {
       console.error('Không thể tải xu hướng followers:', trendError);
       setFollowerTrend([]);
