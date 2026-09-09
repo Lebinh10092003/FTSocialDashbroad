@@ -241,6 +241,45 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(updated.status, "completed")
         self.assertEqual(updated.progress_note, "Hoàn thành")
 
+    def test_manager_can_review_all_completed_tasks_once_for_the_day(self):
+        self.executor.manager = self.manager
+        self.executor.save(update_fields=["manager"])
+        first = self.create_item()
+        second = self.request(self.manager_token, "post", "/api/work-schedule/items", {
+            "title": "Nhiệm vụ thứ hai", "date": first["date"],
+            "executorEmail": self.executor.email, "supporterEmails": [],
+            "managerEmails": [self.manager.email], "status": "completed",
+        }).json()["item"]
+        WorkItem.objects.filter(pk=first["id"]).update(status="completed")
+
+        response = self.request(self.manager_token, "post", "/api/work-schedule/day", {
+            "date": first["date"],
+            "executorEmail": self.executor.email,
+            "leaderAssessment": "Hoàn thành",
+            "items": [
+                {"id": first["id"], "title": first["title"], "progressNote": "Hoàn thành", "status": "completed", "dailyOrder": 1},
+                {"id": second["id"], "title": second["title"], "progressNote": "Hoàn thành", "status": "completed", "dailyOrder": 2},
+            ],
+        })
+
+        self.assertEqual(response.status_code, 200, response.data)
+        reviewed = WorkItem.objects.filter(pk__in=[first["id"], second["id"]])
+        self.assertEqual(reviewed.filter(status="reviewed", review_percent=100, reviewed_by=self.manager).count(), 2)
+
+    def test_day_review_rejects_when_any_task_is_not_completed(self):
+        self.executor.manager = self.manager
+        self.executor.save(update_fields=["manager"])
+        item = self.create_item()
+        response = self.request(self.manager_token, "post", "/api/work-schedule/day", {
+            "date": item["date"],
+            "executorEmail": self.executor.email,
+            "leaderAssessment": "Hoàn thành",
+            "items": [{"id": item["id"], "title": item["title"], "progressNote": "", "status": "todo", "dailyOrder": 1}],
+        })
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(WorkItem.objects.get(pk=item["id"]).status, "todo")
+
     def test_day_table_edit_can_delete_a_removed_numbered_task(self):
         first = self.create_item()
         second = self.request(self.executor_token, "post", "/api/work-schedule/items", {

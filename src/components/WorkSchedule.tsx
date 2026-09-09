@@ -60,7 +60,7 @@ type WorkDraft = {
   reviewPercent: number | null;
   reviewNote: string;
 };
-type InlineDayDraft = { content: string; selfAssessment: string };
+type InlineDayDraft = { content: string; selfAssessment: string; leaderAssessment: string };
 type DayEditState = { date: string; tasks: WorkTask[] };
 type DayAssessmentMode = "default" | "completed" | "custom";
 type DayAssessmentEntry = { mode: DayAssessmentMode; note: string };
@@ -519,10 +519,10 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
       setSavingTask(false);
     }
   };
-  const saveInlineDay = (date: string, items: Array<{ id?: number; title: string; progressNote: string; status: WorkStatus; dailyOrder: number }>, deleteIds: number[], executorEmail?: string) =>
+  const saveInlineDay = (date: string, items: Array<{ id?: number; title: string; progressNote: string; status: WorkStatus; dailyOrder: number }>, deleteIds: number[], executorEmail?: string, leaderAssessment?: string) =>
     requestJson("/api/work-schedule/day", {
       method: "POST",
-      body: JSON.stringify({ date, items, deleteIds, executorEmail }),
+      body: JSON.stringify({ date, items, deleteIds, executorEmail, ...(leaderAssessment !== undefined ? { leaderAssessment } : {}) }),
     });
   const saveProgressNote = async (draft = editing) => {
     if (!draft?.id) return;
@@ -1081,8 +1081,8 @@ function TeamSpreadsheetView({ members, tasks, userEmail, setEditing, saveInline
   tasks: WorkTask[];
   userEmail: string;
   setEditing: (draft: WorkDraft) => void;
-  saveInlineDay: (date: string, items: GridSaveItem[], deleteIds: number[], executorEmail?: string) => Promise<unknown>;
-  reloadTasks: () => Promise<void>;
+  saveInlineDay: (date: string, items: GridSaveItem[], deleteIds: number[], executorEmail?: string, leaderAssessment?: string) => Promise<unknown>;
+  reloadTasks: (silent?: boolean) => Promise<void>;
 }) {
   const [personEmail, setPersonEmail] = useState("all");
   const [period, setPeriod] = useState<"week" | "day" | "month">("week");
@@ -1258,9 +1258,15 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
   const rowsFor = (row: ScheduleGridRow) => tasks.filter((task) => task.date === row.date && (!row.executorEmail || task.executor.email === row.executorEmail)).sort((a, b) => a.dailyOrder - b.dailyOrder);
   const makeDrafts = () => Object.fromEntries(gridRows.map((row) => {
     const workItems = rowsFor(row);
+    const allCompleted = workItems.length > 0 && workItems.every((task) => task.status === "completed" || task.status === "reviewed");
+    const allReviewed = workItems.length > 0 && workItems.every((task) => task.status === "reviewed");
+    const leaderAssessments = [...new Set(workItems
+      .filter((task) => task.reviewPercent !== null)
+      .map((task) => `${task.reviewPercent}%${task.reviewNote ? ` · ${task.reviewNote}` : ""}`))];
     return [row.key, {
       content: numberedGridCell(workItems.map((task) => ({ number: task.dailyOrder, text: task.title }))),
-      selfAssessment: numberedGridCell(workItems.map((task) => ({ number: task.dailyOrder, text: displayedSelfAssessment(task) }))),
+      selfAssessment: allCompleted ? "Hoàn thành" : numberedGridCell(workItems.map((task) => ({ number: task.dailyOrder, text: displayedSelfAssessment(task) }))),
+      leaderAssessment: allReviewed ? "Hoàn thành" : leaderAssessments.join("\n"),
     }];
   })) as Record<string, InlineDayDraft>;
   const gridKey = gridRows.map((row) => row.key).join("|");
@@ -1278,7 +1284,7 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
   }, [tasks, gridKey]);
 
   const updateCell = (key: string, patch: Partial<InlineDayDraft>) => {
-    setDrafts((current) => ({ ...current, [key]: { ...(current[key] || { content: "", selfAssessment: "" }), ...patch } }));
+    setDrafts((current) => ({ ...current, [key]: { ...(current[key] || { content: "", selfAssessment: "", leaderAssessment: "" }), ...patch } }));
     setDirtyRows((current) => current.includes(key) ? current : [...current, key]);
   };
   const saveTable = async () => {
@@ -1309,10 +1315,12 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
         nextDrafts = { ...nextDrafts };
         savingRows.forEach((key) => {
           const content = splitNumberedCell(nextDrafts[key]?.content || "").filter((entry) => entry.text);
+          const singleCompletion = isCompletionNote(nextDrafts[key]?.selfAssessment || "");
           const notes = splitNumberedCell(nextDrafts[key]?.selfAssessment || "");
           nextDrafts[key] = {
             content: numberedGridCell(content.map((entry, index) => ({ number: index + 1, text: entry.text }))),
-            selfAssessment: numberedGridCell(content.map((_, index) => ({ number: index + 1, text: notes[index]?.text || "" }))),
+            selfAssessment: singleCompletion ? "Hoàn thành" : numberedGridCell(content.map((_, index) => ({ number: index + 1, text: notes[index]?.text || "" }))),
+            leaderAssessment: nextDrafts[key]?.leaderAssessment || "",
           };
         });
         setDrafts(nextDrafts);
@@ -1321,6 +1329,7 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
         const row = gridRows.find((item) => item.key === key)!;
         const original = rowsFor(row);
         const content = splitNumberedCell(nextDrafts[key]?.content || "").filter((entry) => entry.text);
+        const singleCompletion = isCompletionNote(nextDrafts[key]?.selfAssessment || "");
         const notes = splitNumberedCell(nextDrafts[key]?.selfAssessment || "");
         if (content.length > 100) throw new Error(`Ngày ${fullDate(row.date)} vượt quá 100 nhiệm vụ.`);
         if (content.some((entry) => entry.number < 1 || entry.number > 100)) throw new Error(`Số thứ tự nhiệm vụ của ngày ${fullDate(row.date)} phải nằm trong khoảng 1–100.`);
@@ -1330,7 +1339,7 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
           if (!current) current = original.find((task) => !usedIds.has(task.id) && task.dailyOrder === entry.number);
           if (!current) current = original.find((task, taskIndex) => taskIndex >= index && !usedIds.has(task.id));
           if (current) usedIds.add(current.id);
-          const note = notes.find((item) => item.number === entry.number)?.text || notes[index]?.text || "";
+          const note = singleCompletion ? "Hoàn thành" : notes.find((item) => item.number === entry.number)?.text || notes[index]?.text || "";
           return {
             ...(current ? { id: current.id } : {}), title: entry.text, progressNote: note,
             status: current?.status === "reviewed" ? "reviewed" : isCompletionNote(note) ? "completed" : current?.status || "todo",
@@ -1340,9 +1349,9 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
         const removed = original.filter((task) => !usedIds.has(task.id));
         const blocked = removed.find((task) => !task.canDelete);
         if (blocked) throw new Error(`Bạn không có quyền xóa nhiệm vụ số ${blocked.dailyOrder} của ngày ${fullDate(row.date)}.`);
-        await saveInlineDay(row.date, items, removed.map((task) => task.id), row.executorEmail || undefined);
+        await saveInlineDay(row.date, items, removed.map((task) => task.id), row.executorEmail || undefined, nextDrafts[key]?.leaderAssessment);
       }
-      await reloadTasks();
+      await reloadTasks(true);
       setDirtyRows((current) => current.filter((key) => {
         if (!savingRows.includes(key)) return true;
         return JSON.stringify(draftsRef.current[key]) !== JSON.stringify(savedDrafts[key]);
@@ -1357,7 +1366,7 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
 
   useEffect(() => {
     if (!dirtyRows.length || saving) return;
-    const timer = window.setTimeout(() => void saveTable(), 5000);
+    const timer = window.setTimeout(() => void saveTable(), 30_000);
     const saveWhenLeaving = () => void saveTable();
     const saveWhenHidden = () => { if (document.visibilityState === "hidden") void saveTable(); };
     window.addEventListener("blur", saveWhenLeaving);
@@ -1377,15 +1386,17 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, saveInli
         <th className="border-b border-r border-slate-400 px-2 py-2 text-left">Nội dung công việc</th><th className="w-64 border-b border-r border-slate-400 px-2 py-2 text-left">Tự đánh giá / ghi chú</th><th className="w-64 border-b border-slate-400 px-2 py-2 text-left">Lãnh đạo đánh giá</th>
       </tr></thead>
       <tbody>{gridRows.map((row) => {
-        const workItems = rowsFor(row), draft = drafts[row.key] || { content: "", selfAssessment: "" };
-        const leader = numberedGridCell(workItems.map((task) => ({ number: task.dailyOrder, text: task.reviewPercent === null ? "Chưa đánh giá" : `${task.reviewPercent}%${task.reviewNote ? ` · ${task.reviewNote}` : ""}` })));
+        const workItems = rowsFor(row), draft = drafts[row.key] || { content: "", selfAssessment: "", leaderAssessment: "" };
+        const canReviewDay = workItems.some((task) => task.canReview) && workItems.every((task) => task.status === "completed" || task.status === "reviewed");
+        const compactSelfAssessment = isCompletionNote(draft.selfAssessment);
+        const compactLeaderAssessment = isCompletionNote(draft.leaderAssessment);
         const editorClass = "block min-h-20 w-full resize-none overflow-hidden border-0 bg-transparent p-2 leading-5 outline-none hover:bg-blue-50/30 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-blue-500";
         return <tr key={row.key} className="align-top">
           <td className="border-b border-r border-slate-400 px-2 py-2 font-bold">{weekday(row.date)}</td><td className="border-b border-r border-slate-400 px-2 py-2">{fullDate(row.date)}</td><td className="border-b border-r border-slate-400 px-2 py-2 text-center font-semibold">{weekNumber(row.date)}</td>
           {people && <td className="border-b border-r border-slate-400 px-2 py-2"><b className="block">{row.person?.name}</b></td>}
           <td className="border-b border-r border-slate-400 p-0"><textarea ref={resizeGridTextarea} value={draft.content} onInput={(event) => resizeGridTextarea(event.currentTarget)} onChange={(event) => updateCell(row.key, { content: event.target.value })} onBlur={() => void saveTable()} placeholder={'1. Nhập nội dung công việc\n2. Nhiệm vụ tiếp theo'} className={`${editorClass} font-medium`} /></td>
-          <td className="border-b border-r border-slate-400 p-0"><textarea ref={resizeGridTextarea} value={draft.selfAssessment} onInput={(event) => resizeGridTextarea(event.currentTarget)} onChange={(event) => updateCell(row.key, { selfAssessment: event.target.value })} onBlur={() => void saveTable()} placeholder="1. Ghi chú tiến trình hiện tại" className={`${editorClass} text-xs`} /></td>
-          <td className="border-b border-slate-400 p-0"><textarea ref={resizeGridTextarea} readOnly value={leader} placeholder="Chưa đánh giá" className={`${editorClass} bg-slate-50/50 text-xs text-slate-600`} /></td>
+          <td className="border-b border-r border-slate-400 p-0"><textarea ref={resizeGridTextarea} value={draft.selfAssessment} onInput={(event) => resizeGridTextarea(event.currentTarget)} onChange={(event) => updateCell(row.key, { selfAssessment: event.target.value })} onBlur={() => void saveTable()} placeholder="1. Ghi chú tiến trình hiện tại" className={`${editorClass} text-xs ${compactSelfAssessment ? "content-center text-center font-bold text-emerald-700" : ""}`} /></td>
+          <td className="border-b border-slate-400 p-0"><textarea ref={resizeGridTextarea} readOnly={!canReviewDay} value={draft.leaderAssessment} onInput={(event) => resizeGridTextarea(event.currentTarget)} onChange={(event) => updateCell(row.key, { leaderAssessment: event.target.value })} onBlur={() => void saveTable()} placeholder="Chưa đánh giá" className={`${editorClass} text-xs ${canReviewDay ? "" : "bg-slate-50/50 text-slate-600"} ${compactLeaderAssessment ? "content-center text-center font-bold text-violet-700" : ""}`} /></td>
         </tr>;
       })}</tbody>
     </table></div>

@@ -1,6 +1,7 @@
 import hmac
 import logging
 import os
+import re
 from datetime import timedelta
 
 from django.db import transaction
@@ -312,6 +313,8 @@ def work_day_edit(request):
     work_date = parse_date(str(request.data.get("date") or ""))
     rows = request.data.get("items")
     raw_delete_ids = request.data.get("deleteIds", [])
+    leader_assessment_supplied = "leaderAssessment" in request.data
+    leader_assessment = str(request.data.get("leaderAssessment") or "").strip()[:1000]
     executor_email = str(request.data.get("executorEmail") or request.user.email).strip().lower()
     executor = UserProfile.objects.filter(email=executor_email, employment_status="ACTIVE").first()
     if not work_date:
@@ -431,6 +434,39 @@ def work_day_edit(request):
                 item.save(update_fields=update_fields)
                 sync_training_from_work_item(item)
             updated_ids.append(item.id)
+        if leader_assessment_supplied and leader_assessment:
+            review_targets = list(WorkItem.objects.filter(
+                id__in=updated_ids,
+                executor=executor,
+                work_date=work_date,
+            ))
+            pending_reviews = [item for item in review_targets if item.status != WorkItem.STATUS_REVIEWED]
+            if any(item.status != WorkItem.STATUS_COMPLETED for item in pending_reviews):
+                transaction.set_rollback(True)
+                return Response({"error": "Chỉ có thể đánh giá theo ngày khi tất cả nhiệm vụ đã hoàn thành."}, status=status.HTTP_400_BAD_REQUEST)
+            if any(not _can_manage(item, request.user, request.user_role) for item in pending_reviews):
+                transaction.set_rollback(True)
+                return Response({"error": "Bạn không có quyền đánh giá toàn bộ nhiệm vụ trong ngày này."}, status=status.HTTP_403_FORBIDDEN)
+            assessment_match = re.match(r"^\s*(\d{1,3})\s*%\s*(?:[·:\-]\s*)?(.*)$", leader_assessment, re.DOTALL)
+            if assessment_match:
+                review_percent = int(assessment_match.group(1))
+                review_note = assessment_match.group(2).strip()
+            else:
+                review_percent = 100
+                review_note = "" if leader_assessment.lower() in {"hoàn thành", "đã hoàn thành", "xong"} else leader_assessment
+            if review_percent > 100:
+                transaction.set_rollback(True)
+                return Response({"error": "Mức độ hoàn thành phải từ 0 đến 100%."}, status=status.HTTP_400_BAD_REQUEST)
+            reviewed_at = timezone.now()
+            for item in pending_reviews:
+                item.status = WorkItem.STATUS_REVIEWED
+                item.review_percent = review_percent
+                item.review_note = review_note
+                item.reviewed_by = request.user
+                item.reviewed_at = reviewed_at
+                item.needs_revision = False
+                item.save(update_fields=["status", "review_percent", "review_note", "reviewed_by", "reviewed_at", "needs_revision", "updated_at"])
+                sync_training_from_work_item(item)
         affected_groups = set()
         for item_id in delete_ids:
             item = visible[item_id]
