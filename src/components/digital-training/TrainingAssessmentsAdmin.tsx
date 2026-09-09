@@ -860,7 +860,7 @@ export default function TrainingAssessmentsAdmin({
       await appDialog.alert("Chưa có bài làm đã nộp hoặc hết giờ để chấm.", { title: "Chưa có bài để chấm" });
       return;
     }
-    if (gradingAttempt && screen === "grading" && Object.entries(questionScores).some(([id, value]) => value !== String(gradingAttempt.grading?.[id] ?? ""))) {
+    if (gradingAttempt && screen === "grading" && Object.entries(questionScores).some(([id, value]) => value !== String(gradingAttempt.grading?.[id] ?? gradingAttempt.automatic_grading?.[id] ?? 0))) {
       if (!await appDialog.confirm("Điểm chưa lưu sẽ bị bỏ. Tiếp tục chuyển bài?", { title: "Điểm chưa lưu", confirmText: "Chuyển bài" })) return;
     }
     setSingleGrading(single);
@@ -897,7 +897,9 @@ export default function TrainingAssessmentsAdmin({
       const refreshed = results.map((item) => item.id === updated.id ? updated : item);
       setResults(refreshed);
       setGradingAttempt(updated);
-      setQuestionScores(Object.fromEntries(Object.entries(updated.grading || {}).map(([id, score]) => [id, String(score)])));
+      // Re-initialize using the same logic as openGrading: teacher override > auto-grade > 0
+      const variantQs = selected.questions.filter((q) => q.variant === updated.variant);
+      setQuestionScores(Object.fromEntries(variantQs.map((q) => [q.id, String(updated.grading?.[q.id] ?? updated.automatic_grading?.[q.id] ?? 0)])));
       setNotice(updated.manual_grading_required ? "Đã lưu điểm. Vẫn còn câu cần chấm." : "Đã lưu điểm bài làm.");
     } catch (error: any) {
       setNotice(String(error?.message || error));
