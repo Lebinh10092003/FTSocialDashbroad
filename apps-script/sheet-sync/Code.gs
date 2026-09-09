@@ -41,7 +41,10 @@ function onEditInstallable(e) {
 }
 
 function handleRowEdit_(sheet, row) {
-  var values = sheet.getRange(row, 1, 1, LAST_COLUMN).getValues()[0];
+  // Keep the payload identical to the backend's Google Sheets read path
+  // (valueRenderOption=FORMATTED_VALUE). getValues() turns date cells into
+  // Date objects which JSON serializes as UTC and can shift the calendar day.
+  var values = sheet.getRange(row, 1, 1, LAST_COLUMN).getDisplayValues()[0];
   var eventId = Utilities.getUuid();
   var outboxRow = appendToOutbox_(eventId, row, values);
   var result = sendWebhook_(eventId, row, values);

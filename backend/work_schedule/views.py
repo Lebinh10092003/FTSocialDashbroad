@@ -797,7 +797,7 @@ def work_schedule_sheet_webhook(request):
     try:
         with transaction.atomic():
             with suppress_sheet_queue():
-                created_count, updated_count, touched = _ingest_row(row_number, row, timezone.localdate())
+                created_count, updated_count, deleted_count, touched = _ingest_row(row_number, row, timezone.localdate())
             event.status = WorkScheduleSheetInboundEvent.STATUS_PROCESSED
             event.created_count = created_count
             event.updated_count = updated_count
@@ -827,6 +827,7 @@ def work_schedule_sheet_webhook(request):
         "message": "Đã đồng bộ dòng từ Sheet vào hệ thống.",
         "createdCount": created_count,
         "updatedCount": updated_count,
+        "deletedCount": deleted_count,
         "groups": [[email, work_date.isoformat()] for email, work_date in touched],
         "pushBackError": push_back_error,
     })

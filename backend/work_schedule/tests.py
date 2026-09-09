@@ -67,6 +67,11 @@ class WorkScheduleSheetParserTests(TestCase):
         self.assertEqual(tasks[-1].start_time.isoformat(timespec="minutes"), "17:30")
         self.assertEqual(training_end(tasks[-1].start_time).isoformat(timespec="minutes"), "20:30")
 
+    def test_apps_script_utc_date_is_converted_to_the_local_sheet_date(self):
+        from .sheet_sync import _parse_date
+
+        self.assertEqual(_parse_date("2026-09-08T17:00:00.000Z").isoformat(), "2026-09-09")
+
     def test_assessment_is_aligned_by_occurrence_and_custom_note_does_not_complete(self):
         notes = assessment_notes("1. Đang chờ ký\n2. Hoàn thành", 3)
         self.assertEqual(notes, ["Đang chờ ký", "Hoàn thành", ""])
@@ -603,6 +608,36 @@ class WorkScheduleSheetWebhookTests(TestCase):
 
     def row_values(self, event_marker="Việc test webhook"):
         return ["Ba", "08/09/2026", "37", "Đặng Chí Sơn", f"1. {event_marker}", "", "", self.EMPLOYEE_ID, "REC-TEST-001", "", ""]
+
+    def test_iso_date_from_legacy_get_values_is_ingested_in_local_timezone(self):
+        values = self.row_values("Việc từ ngày ISO")
+        values[1] = "2026-09-07T17:00:00.000Z"
+        with mock.patch("work_schedule.sheet_sync._service"), \
+             mock.patch("work_schedule.sheet_sync.ensure_sync_columns"), \
+             mock.patch("work_schedule.sheet_sync.push_groups_to_sheet"):
+            response = self.post({"event_id": "evt-iso-date", "row": self.ROW_NUMBER, "values": values})
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["createdCount"], 1)
+        item = WorkItem.objects.get(source_sheet_row=self.ROW_NUMBER, source_task_index=1)
+        self.assertEqual(item.work_date.isoformat(), "2026-09-08")
+
+    @mock.patch("work_schedule.sheet_sync.push_groups_to_sheet")
+    @mock.patch("work_schedule.sheet_sync.ensure_sync_columns")
+    @mock.patch("work_schedule.sheet_sync._service")
+    def test_clearing_row_content_deletes_tasks_previously_sourced_from_that_row(self, mock_service, mock_ensure, mock_push):
+        first = self.post({"event_id": "evt-row-create", "row": self.ROW_NUMBER, "values": self.row_values("Việc sẽ xóa")})
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertTrue(WorkItem.objects.filter(source_sheet_row=self.ROW_NUMBER).exists())
+        cleared_values = self.row_values("")
+        cleared_values[4] = ""
+
+        cleared = self.post({"event_id": "evt-row-clear", "row": self.ROW_NUMBER, "values": cleared_values})
+
+        self.assertEqual(cleared.status_code, 200, cleared.content)
+        self.assertEqual(cleared.json()["deletedCount"], 1)
+        self.assertFalse(WorkItem.objects.filter(source_sheet_row=self.ROW_NUMBER).exists())
+        self.assertEqual(cleared.json()["groups"], [[self.EMPLOYEE_EMAIL, "2026-09-08"]])
 
     @mock.patch("work_schedule.sheet_sync.push_groups_to_sheet")
     @mock.patch("work_schedule.sheet_sync.ensure_sync_columns")

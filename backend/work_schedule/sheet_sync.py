@@ -63,11 +63,22 @@ def _cell(row, index):
 
 
 def _parse_date(value):
+    raw = str(value or "").strip()
     for pattern in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d"):
         try:
-            return datetime.strptime(value.strip(), pattern).date()
+            return datetime.strptime(raw, pattern).date()
         except (TypeError, ValueError):
             pass
+    # Apps Script getValues() serializes a Sheet Date as an ISO UTC instant.
+    # Convert it back through Django's local timezone before taking the date;
+    # e.g. 09/09 in Vietnam arrives as 2026-09-08T17:00:00.000Z.
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if timezone.is_aware(parsed):
+            parsed = timezone.localtime(parsed)
+        return parsed.date()
+    except (TypeError, ValueError):
+        pass
     return None
 
 
@@ -176,20 +187,24 @@ def _ingest_row(offset, row, today):
     webhook (exactly one row, no date-range filter). Caller is responsible for
     wrapping this in `suppress_sheet_queue()`.
     """
-    created = updated = 0
+    created = updated = deleted = 0
     touched = set()
     work_date = _parse_date(_cell(row, 1))
     employee_id = _cell(row, 7)
     email = EMPLOYEE_EMAILS.get(employee_id)
     if not email or not work_date:
-        return created, updated, touched
+        return created, updated, deleted, touched
     executor = UserProfile.objects.filter(email=email, employment_status="ACTIVE").first()
     if not executor:
-        return created, updated, touched
+        return created, updated, deleted, touched
+    source_items = list(WorkItem.objects.filter(source_sheet_row=offset))
+    touched.add((email, work_date))
+    touched.update((item.executor_id, item.work_date) for item in source_items)
     parsed = parse_sheet_tasks(_cell(row, 4))
     notes = assessment_notes(_cell(row, 5), len(parsed))
     leader_notes = assessment_notes(_cell(row, 6), len(parsed))
     ids = _task_uids(_cell(row, 9))
+    retained_ids = set()
     for index, parsed_task in enumerate(parsed, 1):
         sync_uid = ids[index - 1] if index <= len(ids) and ids[index - 1] else deterministic_sheet_uid(offset, index)
         item = WorkItem.objects.filter(sync_uid=sync_uid).first()
@@ -228,12 +243,20 @@ def _ingest_row(offset, row, today):
                 source_record_id=_cell(row, 8), sync_uid=sync_uid,
             )
             created += 1
-        touched.add((email, work_date))
-    return created, updated, touched
+        retained_ids.add(item.pk)
+    stale_items = [item for item in source_items if item.pk not in retained_ids]
+    if stale_items:
+        from .training_sync import delete_training_for_work_item
+
+        for item in stale_items:
+            delete_training_for_work_item(item)
+            item.delete()
+            deleted += 1
+    return created, updated, deleted, touched
 
 
 def pull_from_sheet(service, start_date, end_date):
-    created = updated = 0
+    created = updated = deleted = 0
     touched = set()
     today = timezone.localdate()
     with suppress_sheet_queue():
@@ -241,11 +264,12 @@ def pull_from_sheet(service, start_date, end_date):
             work_date = _parse_date(_cell(row, 1))
             if not work_date or not (start_date <= work_date <= end_date):
                 continue
-            row_created, row_updated, row_touched = _ingest_row(offset, row, today)
+            row_created, row_updated, row_deleted, row_touched = _ingest_row(offset, row, today)
             created += row_created
             updated += row_updated
+            deleted += row_deleted
             touched |= row_touched
-    return {"created": created, "updated": updated, "groups": touched}
+    return {"created": created, "updated": updated, "deleted": deleted, "groups": touched}
 
 
 def _find_row(rows, email, work_date, items):
