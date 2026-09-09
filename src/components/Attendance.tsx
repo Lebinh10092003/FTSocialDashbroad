@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, CalendarDays, Clock, Coffee, Edit3, FileText, Globe, Laptop, Loader2, MapPin, Moon, Plus, RefreshCw, Save, Trash2, TriangleAlert, UserCheck, X } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, Clock, Coffee, Edit3, FileText, Globe, Laptop, Loader2, MapPin, Moon, Plus, RefreshCw, Save, Trash2, TriangleAlert, UserCheck, X } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -66,9 +66,9 @@ let cache: { owner: string; month: string; savedAt: number; data: TimesheetData 
 /* ------------------------------------------------------------------ */
 const currentMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
 const fmtHours = (mins: number) => (mins / 60).toFixed(2).replace(/\.?0+$/, '') || '0';
-const formatDate = (v: string) => new Intl.DateTimeFormat('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' }).format(new Date(`${v}T00:00:00`));
+const formatDate = (v: string) => { const [y, m, d] = v.split('-'); return `${d}/${m}/${y}`; };
 const modeLabel = (m: string) => m === 'online' ? 'Online' : 'Trực tiếp';
-const DISMISS_KEY = 'timesheet_dismiss_yesterday_warning';
+
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -94,10 +94,6 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
   const [editNote, setEditNote] = useState('');
   const [isEdit, setIsEdit] = useState(false);
 
-  // Yesterday warning
-  const [showWarning, setShowWarning] = useState(false);
-  const [warningDate, setWarningDate] = useState('');
-  const [dismissPermanent, setDismissPermanent] = useState(false);
 
   /* ---------- Data loading ---------- */
   const load = useCallback(async (silent = false) => {
@@ -124,23 +120,6 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
   }, [month, idToken]);
 
   useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(''), 3000); return () => clearTimeout(t); }, [notice]);
-
-  // Check yesterday warning on first load
-  useEffect(() => {
-    if (!data) return;
-    const dismissed = sessionStorage.getItem(DISMISS_KEY);
-    if (dismissed) return;
-    // Fetch prefill for today to check yesterdayWarning
-    fetch(`/api/attendance/timesheet/prefill`, { headers: { Authorization: `Bearer ${idToken}` } })
-      .then(r => r.json())
-      .then((pf: PrefillData) => {
-        if (pf.yesterdayWarning) {
-          setWarningDate(pf.yesterdayDate);
-          setShowWarning(true);
-        }
-      })
-      .catch(() => {});
-  }, [data?.serverTime]);
 
   /* ---------- Group entries by date ---------- */
   const grouped = useMemo(() => {
@@ -253,25 +232,6 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
     setShifts(prev => [...prev, { start: '13:30', end: '17:30', workMode: mode, notes: '' }]);
   };
 
-  /* ---------- Warning actions ---------- */
-  const dismissWarning = (permanent: boolean) => {
-    setShowWarning(false);
-    if (permanent) sessionStorage.setItem(DISMISS_KEY, '1');
-  };
-  const markYesterdayOff = async () => {
-    setShowWarning(false);
-    if (dismissPermanent) sessionStorage.setItem(DISMISS_KEY, '1');
-    try {
-      await fetch('/api/attendance/timesheet/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body: JSON.stringify({ workDate: warningDate, isDayOff: true }),
-      });
-      setNotice('Đã ghi nhận nghỉ làm ngày ' + warningDate);
-      await load(true);
-    } catch { /* ignore */ }
-  };
-
   const summary = data?.summary;
 
   return (
@@ -286,28 +246,6 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
       </header>
 
       <main className="mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-10">
-        {/* Yesterday warning banner */}
-        {showWarning && (
-          <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
-            <div className="flex items-start gap-3">
-              <TriangleAlert className="mt-0.5 h-6 w-6 shrink-0 text-amber-600" />
-              <div className="flex-1">
-                <h3 className="text-base font-extrabold text-amber-900">Bạn chưa cập nhật công ca cho ngày hôm qua ({warningDate})</h3>
-                <p className="mt-1 text-sm text-amber-800">Vui lòng cập nhật công ca trong thời gian sớm nhất để đảm bảo dữ liệu chấm công chính xác.</p>
-                <label className="mt-3 flex items-center gap-2 text-xs font-bold text-amber-700">
-                  <input type="checkbox" checked={dismissPermanent} onChange={e => setDismissPermanent(e.target.checked)} className="h-3.5 w-3.5 rounded border-amber-400" />
-                  Không nhắc lại cảnh báo này
-                </label>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => { dismissWarning(dismissPermanent); void openPopup(warningDate); }} className="ft-btn ft-btn-primary"><CalendarDays className="h-4 w-4" />Cập nhật ngay</button>
-                  <button type="button" onClick={markYesterdayOff} className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-bold text-amber-800 transition hover:bg-amber-100"><Moon className="mr-1.5 inline h-4 w-4" />Hôm qua tôi nghỉ</button>
-                  <button type="button" onClick={() => dismissWarning(dismissPermanent)} className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-bold text-amber-700 transition hover:bg-amber-100">Bỏ qua</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Title row */}
         <section className="mb-7 flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -343,42 +281,56 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
                     <tr><td colSpan={8} className="px-5 py-14 text-center text-slate-400">Đang tải...</td></tr>
                   ) : grouped.length === 0 ? (
                     <tr><td colSpan={8} className="px-5 py-14 text-center text-slate-400">Chưa có dữ liệu công trong tháng này.</td></tr>
-                  ) : grouped.map(([dateStr, entries]) => (
-                    entries.map((entry, idx) => (
-                      <tr key={entry.id} className="hover:bg-blue-50/50">
-                        {idx === 0 && <td rowSpan={entries.length} className="whitespace-nowrap font-bold align-top">{formatDate(dateStr)}{entry.employee && <span className="mt-0.5 block text-xs font-normal text-slate-400">{entry.employee.name}</span>}</td>}
-                        {entry.isDayOff ? (
-                          <>
-                            <td colSpan={5}><span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800"><Moon className="h-3.5 w-3.5" />Nghỉ làm</span></td>
-                            <td className="text-xs text-slate-400">—</td>
-                          </>
-                        ) : (
-                          <>
-                            <td className="font-bold">Ca {entry.shiftNumber}</td>
-                            <td className="tabular-nums">{entry.shiftStart}</td>
-                            <td className="tabular-nums">{entry.shiftEnd}{entry.crossesMidnight && <span className="ml-1 text-xs text-amber-600" title="Qua nửa đêm">+1</span>}</td>
-                            <td className="tabular-nums">{fmtHours(entry.workedMinutes)}h</td>
-                            <td>
-                              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${entry.workMode === 'online' ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'}`}>
-                                {entry.workMode === 'online' ? <Globe className="h-3 w-3" /> : <MapPin className="h-3 w-3" />}
-                                {modeLabel(entry.workMode)}
-                              </span>
-                            </td>
-                            <td className="max-w-[180px] truncate text-xs text-slate-500" title={entry.notes}>{entry.notes || '—'}</td>
-                          </>
-                        )}
-                        {idx === 0 && (
-                          <td rowSpan={entries.length} className="align-top">
-                            {canEditDate(dateStr) ? (
-                              <button type="button" onClick={() => void openPopup(dateStr)} className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline"><Edit3 className="h-3.5 w-3.5" />Sửa</button>
+                  ) : grouped.map(([dateStr, entries]) => {
+                    const dayTotal = entries.reduce((sum, e) => sum + (e.isDayOff ? 0 : e.workedMinutes), 0);
+                    const hasDayOff = entries.some(e => e.isDayOff);
+                    const rowCount = entries.length + (entries.length > 1 || !hasDayOff ? 1 : 0);
+                    return (
+                      <React.Fragment key={dateStr}>
+                        {entries.map((entry, idx) => (
+                          <tr key={entry.id} className="hover:bg-blue-50/50">
+                            {idx === 0 && <td rowSpan={rowCount} className="whitespace-nowrap font-bold align-top">{formatDate(dateStr)}{entry.employee && <span className="mt-0.5 block text-xs font-normal text-slate-400">{entry.employee.name}</span>}</td>}
+                            {entry.isDayOff ? (
+                              <>
+                                <td colSpan={5}><span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800"><Moon className="h-3.5 w-3.5" />Nghỉ làm</span></td>
+                                <td className="text-xs text-slate-400">—</td>
+                              </>
                             ) : (
-                              <span className="text-xs text-slate-300" title="Liên hệ kế toán để chỉnh sửa">—</span>
+                              <>
+                                <td className="font-bold">Ca {entry.shiftNumber}</td>
+                                <td className="tabular-nums">{entry.shiftStart}</td>
+                                <td className="tabular-nums">{entry.shiftEnd}{entry.crossesMidnight && <span className="ml-1 text-xs text-amber-600" title="Qua nửa đêm">+1</span>}</td>
+                                <td className="tabular-nums">{fmtHours(entry.workedMinutes)}h</td>
+                                <td>
+                                  <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${entry.workMode === 'online' ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                                    {entry.workMode === 'online' ? <Globe className="h-3 w-3" /> : <MapPin className="h-3 w-3" />}
+                                    {modeLabel(entry.workMode)}
+                                  </span>
+                                </td>
+                                <td className="max-w-[180px] truncate text-xs text-slate-500" title={entry.notes}>{entry.notes || '—'}</td>
+                              </>
                             )}
-                          </td>
+                            {idx === 0 && (
+                              <td rowSpan={rowCount} className="align-top">
+                                {canEditDate(dateStr) ? (
+                                  <button type="button" onClick={() => void openPopup(dateStr)} className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline"><Edit3 className="h-3.5 w-3.5" />Sửa</button>
+                                ) : (
+                                  <span className="text-xs text-slate-300" title="Liên hệ kế toán để chỉnh sửa">—</span>
+                                )}
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                        {!hasDayOff && (
+                          <tr className="bg-slate-50/80">
+                            <td colSpan={3} className="text-right text-xs font-bold text-slate-500">Tổng ngày:</td>
+                            <td className="tabular-nums text-xs font-extrabold text-slate-700">{fmtHours(dayTotal)}h</td>
+                            <td colSpan={3}></td>
+                          </tr>
                         )}
-                      </tr>
-                    ))
-                  ))}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -409,12 +361,12 @@ export default function Attendance({ onBackToWorkspace, idToken, userName }: Att
 
             {/* Summary */}
             <div className="rounded-2xl border bg-white p-5 shadow-sm">
-              <p className="text-xs font-bold uppercase text-emerald-600">Tổng quan</p>
-              <h2 className="mt-1 text-xl font-extrabold">Tháng {month}</h2>
-              <div className="mt-5 space-y-4">
-                <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-100 text-emerald-700"><Clock className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{fmtHours(summary?.totalMinutes ?? 0)}<span className="ml-1 text-sm font-bold text-slate-400">giờ</span></p><p className="text-xs text-slate-500">Tổng giờ làm</p></div></div>
-                <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-100 text-blue-700"><MapPin className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{fmtHours(summary?.offlineMinutes ?? 0)}<span className="ml-1 text-sm font-bold text-slate-400">giờ</span></p><p className="text-xs text-slate-500">Trực tiếp</p></div></div>
-                <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-violet-100 text-violet-700"><Laptop className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{fmtHours(summary?.onlineMinutes ?? 0)}<span className="ml-1 text-sm font-bold text-slate-400">giờ</span></p><p className="text-xs text-slate-500">Online</p></div></div>
+              <p className="text-sm font-bold uppercase text-emerald-600">Tổng quan</p>
+              <h2 className="mt-1 text-2xl font-extrabold">Tháng {(() => { const [y, m] = month.split('-'); return `${m}/${y}`; })()}</h2>
+              <div className="mt-5 space-y-5">
+                <div className="flex items-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-xl bg-emerald-100 text-emerald-700"><Clock className="h-6 w-6" /></div><div><p className="text-3xl font-extrabold">{fmtHours(summary?.totalMinutes ?? 0)}<span className="ml-1 text-base font-bold text-slate-400">giờ</span></p><p className="text-sm text-slate-500">Tổng giờ làm</p></div></div>
+                <div className="flex items-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-xl bg-blue-100 text-blue-700"><MapPin className="h-6 w-6" /></div><div><p className="text-3xl font-extrabold">{fmtHours(summary?.offlineMinutes ?? 0)}<span className="ml-1 text-base font-bold text-slate-400">giờ</span></p><p className="text-sm text-slate-500">Trực tiếp</p></div></div>
+                <div className="flex items-center gap-3"><div className="grid h-12 w-12 place-items-center rounded-xl bg-violet-100 text-violet-700"><Laptop className="h-6 w-6" /></div><div><p className="text-3xl font-extrabold">{fmtHours(summary?.onlineMinutes ?? 0)}<span className="ml-1 text-base font-bold text-slate-400">giờ</span></p><p className="text-sm text-slate-500">Online</p></div></div>
               </div>
             </div>
           </aside>
