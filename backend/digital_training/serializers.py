@@ -5,6 +5,7 @@ from django.db.models import Max, Sum
 from django.utils import timezone
 from rest_framework import serializers
 
+from authentication.models import WorkspaceNotification
 from .assessment_service import variants_for
 from .completion_service import schedule_has_ended
 from .product_service import sync_partner_product_subscriptions
@@ -149,8 +150,9 @@ class TrainingProductSubscriptionSerializer(serializers.ModelSerializer):
             "id", "partner", "partner_name", "partner_group", "partner_subtype",
             "partner_province", "partner_ward", "product", "product_name",
             "product_code", "quantity", "starts_at", "expires_at", "status",
-            "effective_status", "days_remaining", "notes", "created_at", "updated_at",
+            "effective_status", "days_remaining", "notes", "expiry_notice_stage", "created_at", "updated_at",
         ]
+        read_only_fields = ["expiry_notice_stage"]
 
     def get_effective_status(self, obj):
         return product_subscription_status(obj)
@@ -159,6 +161,9 @@ class TrainingProductSubscriptionSerializer(serializers.ModelSerializer):
         return (obj.expires_at - timezone.localdate()).days if obj.expires_at else None
 
     def validate(self, attrs):
+        product = attrs.get("product", getattr(self.instance, "product", None))
+        if product and product.code == "tap-huan":
+            attrs["expires_at"] = None
         starts_at = attrs.get("starts_at", getattr(self.instance, "starts_at", None))
         expires_at = attrs.get("expires_at", getattr(self.instance, "expires_at", None))
         if starts_at and expires_at and expires_at < starts_at:
@@ -174,11 +179,23 @@ class TrainingProductSubscriptionSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         subscription = super().create(validated_data)
         self._sync_partner_product_name(subscription)
+        from .product_lifecycle import emit_product_subscription_expiry_notice
+        emit_product_subscription_expiry_notice(subscription)
         return subscription
 
     def update(self, instance, validated_data):
+        previous_expiry = instance.expires_at
+        previous_status = instance.status
         subscription = super().update(instance, validated_data)
+        if subscription.expires_at != previous_expiry or subscription.status != previous_status:
+            subscription.expiry_notice_stage = 0
+            subscription.save(update_fields=["expiry_notice_stage", "updated_at"])
+            WorkspaceNotification.objects.filter(
+                event_key__startswith=f"product-subscription:{subscription.pk}:"
+            ).delete()
         self._sync_partner_product_name(subscription)
+        from .product_lifecycle import emit_product_subscription_expiry_notice
+        emit_product_subscription_expiry_notice(subscription)
         return subscription
 
 class TrainingFinanceEntrySerializer(serializers.ModelSerializer):

@@ -82,6 +82,7 @@ class TrainingProductSubscription(models.Model):
     expires_at = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
     notes = models.TextField(blank=True)
+    expiry_notice_stage = models.PositiveSmallIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -1803,6 +1803,8 @@ export default function DigitalTraining({
       menuOpenState(route.tab, route.productView).survey,
     ),
     [selected, setSelected] = useState<number | null>(route.partnerId),
+    [partnerDetailTab, setPartnerDetailTab] = useState<"products" | "training">("products"),
+    [editingProductSubscription, setEditingProductSubscription] = useState<ProductSubscription | null>(null),
     [selectedSurvey, setSelectedSurvey] = useState<number | null>(
       route.surveyId,
     ),
@@ -2020,6 +2022,10 @@ export default function DigitalTraining({
   useEffect(() => {
     void load(Boolean(cachedSnapshot));
   }, [idToken, isGuest]);
+  useEffect(() => {
+    setPartnerDetailTab("products");
+    setEditingProductSubscription(null);
+  }, [selected]);
   useEffect(() => {
     if (loading) return;
     digitalTrainingSnapshot = {
@@ -3447,6 +3453,9 @@ export default function DigitalTraining({
   })();
   const partner = partners.find((x) => x.id === selected);
   const partnerProducts = partner ? partnerProductSubscriptions.filter((item) => item.partner === partner.id) : [];
+  const hasTrainingProduct = !!partner && (
+    partner.planned_sessions > 0 || partnerProducts.some((item) => item.product_code === "tap-huan")
+  );
   const productSubscriptionStatus = (value?: string) => ({ active: "\u0110ang s\u1eed d\u1ee5ng", expiring: "S\u1eafp h\u1ebft h\u1ea1n", expired: "\u0110\u00e3 h\u1ebft h\u1ea1n", paused: "T\u1ea1m d\u1eebng", cancelled: "\u0110\u00e3 h\u1ee7y" }[value || ""] || "Ch\u01b0a c\u1eadp nh\u1eadt");
   const surveyDetail = surveys.find((x) => x.id === selectedSurvey);
   const partnerWardOptions = Array.from(
@@ -4024,6 +4033,24 @@ export default function DigitalTraining({
         ).length
       : 0;
     return group?.planned_sessions || shared || item.session_number || 0;
+  };
+  const saveProductSubscription = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingProductSubscription || !can()) return;
+    try {
+      const saved = await patch(`product-subscriptions/${editingProductSubscription.id}`, {
+        quantity: Number(editingProductSubscription.quantity || 1),
+        starts_at: editingProductSubscription.starts_at || null,
+        expires_at: editingProductSubscription.product_code === "tap-huan" ? null : editingProductSubscription.expires_at || null,
+        status: editingProductSubscription.status,
+        notes: editingProductSubscription.notes || "",
+      });
+      setPartnerProductSubscriptions((current) => current.map((item) => item.id === saved.id ? saved : item));
+      setEditingProductSubscription(null);
+      setNotice("Đã cập nhật thời hạn sản phẩm.");
+    } catch (error: any) {
+      setNotice(error.message);
+    }
   };
   return (
     <div className="ft-module-shell flex min-h-screen text-slate-800">
@@ -5321,7 +5348,7 @@ export default function DigitalTraining({
                     </button>
                     <article className="rounded-2xl border bg-white p-6 shadow-sm">
                       <p className="text-xs font-bold uppercase text-cyan-600">
-                        Khách hàng đào tạo
+                        Khách hàng hiện tại
                       </p>
                       <div className="flex flex-wrap justify-between gap-4">
                         <div>
@@ -5437,19 +5464,28 @@ export default function DigitalTraining({
                         </p>
                       </div>
                     </article>
+                    <div className="mt-5 flex flex-wrap gap-2 rounded-xl border bg-white p-2 shadow-sm">
+                      <button type="button" onClick={() => setPartnerDetailTab("products")} className={`rounded-lg px-4 py-2 text-sm font-bold ${partnerDetailTab === "products" ? "bg-cyan-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>Danh mục sản phẩm đã đăng ký</button>
+                      {hasTrainingProduct && <button type="button" onClick={() => setPartnerDetailTab("training")} className={`rounded-lg px-4 py-2 text-sm font-bold ${partnerDetailTab === "training" ? "bg-cyan-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>Tiến độ đào tạo</button>}
+                    </div>
+                    {partnerDetailTab === "products" && (
                     <article className="mt-5 rounded-2xl border bg-white p-5 shadow-sm">
                       <div>
                         <h3 className="font-extrabold">{"S\u1ea3n ph\u1ea9m \u0111\u0103ng k\u00fd"}</h3>
                         <p className="mt-1 text-sm text-slate-500">{"Th\u00f4ng tin \u0111\u1ea7y \u0111\u1ee7 v\u1ec1 s\u1ed1 l\u01b0\u1ee3ng, tr\u1ea1ng th\u00e1i v\u00e0 th\u1eddi h\u1ea1n s\u1eed d\u1ee5ng."}</p>
                       </div>
-                      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                        {partner.planned_sessions > 0 && <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-4"><b>{"T\u1eadp hu\u1ea5n"}</b><p className="mt-2 text-sm">{"S\u1ed1 bu\u1ed5i \u0111\u0103ng k\u00fd: "}{partner.planned_sessions}</p><p className="mt-1 text-sm">{"\u0110\u00e3 th\u1ef1c hi\u1ec7n: "}{partner.completed_sessions || 0}</p></div>}
-                                                {productOpportunities.filter((item) => item.partner === partner.id).map((item) => <div key={`opportunity-${item.id}`} className="rounded-xl border border-amber-200 bg-amber-50/50 p-4"><b>{item.product_name}</b><p className="mt-2 text-sm font-bold text-amber-800">{({ negotiating: "�ang thuong th?o", on_hold: "T?m d?ng", won: "�� k�", lost: "Kh�ng k�" } as Record<string, string>)[item.status]}</p><p className="mt-1 text-xs text-slate-600">{item.meeting_count} l?ch g?p li�n quan</p></div>)}
-{partnerProducts.map((item) => <div key={item.id} className="rounded-xl border p-4"><b>{item.product_name}</b><p className="mt-2 text-sm">{"SL: "}{item.quantity}{" - "}{productSubscriptionStatus(item.effective_status)}</p><p className="mt-1 text-sm">{"H\u1ea1n s\u1eed d\u1ee5ng: "}{item.expires_at ? showDate(item.expires_at) : "Ch\u01b0a c\u00f3 h\u1ea1n"}</p>{item.starts_at && <p className="mt-1 text-xs text-slate-500">{"B\u1eaft \u0111\u1ea7u: "}{showDate(item.starts_at)}</p>}{item.notes && <p className="mt-2 whitespace-pre-wrap border-t pt-2 text-xs text-slate-600">{"Ghi ch\u00fa: "}{item.notes}</p>}</div>)}
-                        {!partner.planned_sessions && !partnerProducts.length && <p className="text-sm text-slate-500">{"Ch\u01b0a c\u00f3 s\u1ea3n ph\u1ea9m \u0111\u0103ng k\u00fd."}</p>}
+                      <div className="mt-4 overflow-x-auto rounded-xl border">
+                        <table className="ft-table"><thead><tr><th>Sản phẩm</th><th>Số lượng</th><th>Trạng thái</th><th>Ngày bắt đầu</th><th>Hạn sử dụng</th><th>Ghi chú</th><th /></tr></thead><tbody>
+                          {partner.planned_sessions > 0 && !partnerProducts.some((item) => item.product_code === "tap-huan") && <tr><td><b>Tập huấn</b></td><td>{partner.planned_sessions} buổi</td><td><span className="rounded-full bg-cyan-50 px-2 py-1 text-xs font-bold text-cyan-700">Đang sử dụng</span></td><td>—</td><td><b>Không giới hạn</b></td><td>Đã thực hiện {partner.completed_sessions || 0} buổi</td><td /></tr>}
+                          {partnerProducts.map((item) => <tr key={item.id} className={item.effective_status === "expired" ? "bg-rose-50" : item.effective_status === "expiring" ? "bg-amber-50" : ""}><td><b>{item.product_name}</b></td><td>{item.product_code === "tap-huan" ? `${item.quantity} buổi` : item.quantity}</td><td><span className={`rounded-full px-2 py-1 text-xs font-bold ${item.effective_status === "expired" ? "bg-rose-100 text-rose-700" : item.effective_status === "expiring" ? "bg-amber-100 text-amber-800" : "bg-emerald-50 text-emerald-700"}`}>{productSubscriptionStatus(item.effective_status)}</span></td><td>{item.starts_at ? showDate(item.starts_at) : "—"}</td><td className={item.effective_status === "expired" ? "font-bold text-rose-700" : ""}>{item.product_code === "tap-huan" || !item.expires_at ? "Không giới hạn" : showDate(item.expires_at)}</td><td className="max-w-xs whitespace-pre-wrap text-xs">{item.notes || "—"}</td><td>{!isGuest && <button type="button" onClick={() => setEditingProductSubscription({ ...item })} className="ft-btn ft-btn-secondary"><Pencil className="h-4 w-4" />Sửa</button>}</td></tr>)}
+                          {productOpportunities.filter((item) => item.partner === partner.id).map((item) => <tr key={`opportunity-${item.id}`} className="bg-amber-50/60"><td><b>{item.product_name}</b></td><td>—</td><td className="font-bold text-amber-800">Đang thương thảo</td><td>—</td><td>—</td><td>{item.meeting_count} lịch gặp liên quan</td><td /></tr>)}
+                          {!partner.planned_sessions && !partnerProducts.length && <tr><td colSpan={7} className="py-10 text-center text-slate-500">Chưa có sản phẩm đăng ký.</td></tr>}
+                        </tbody></table>
                       </div>
                     </article>
-                                        <article className="mt-5 overflow-x-auto rounded-2xl border bg-white shadow-sm">
+                    )}
+                    {hasTrainingProduct && partnerDetailTab === "training" && <>
+                    <article className="mt-5 overflow-x-auto rounded-2xl border bg-white shadow-sm">
                       <div className="flex items-center justify-between p-5">
                         <div>
                           <h3 className="font-extrabold">
@@ -5569,6 +5605,7 @@ export default function DigitalTraining({
                         </article>
                       ))}
                     </div>
+                    </>}
                   </section>
                 )}
               {(tab === "partner-sessions" || tab === "partners") &&
@@ -6029,6 +6066,21 @@ export default function DigitalTraining({
                 </section>
               )}
             </>
+          )}
+          {editingProductSubscription && (
+            <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4">
+              <form onSubmit={saveProductSubscription} className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl">
+                <div className="flex items-start justify-between gap-3"><div><h2 className="text-xl font-extrabold">Cập nhật sản phẩm đăng ký</h2><p className="mt-1 text-sm text-slate-500">{editingProductSubscription.partner_name} · {editingProductSubscription.product_name}</p></div><button type="button" onClick={() => setEditingProductSubscription(null)}><X className="h-5 w-5" /></button></div>
+                <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                  <label><span className="mb-1 block text-sm font-bold">Số lượng</span><input type="number" min="1" required className="ft-input" value={editingProductSubscription.quantity} onChange={(event) => setEditingProductSubscription({ ...editingProductSubscription, quantity: Number(event.target.value) })} /></label>
+                  <label><span className="mb-1 block text-sm font-bold">Trạng thái</span><select className="ft-input" value={editingProductSubscription.status} onChange={(event) => setEditingProductSubscription({ ...editingProductSubscription, status: event.target.value as ProductSubscription["status"] })}><option value="active">Đang sử dụng</option><option value="paused">Tạm dừng</option><option value="cancelled">Đã hủy</option></select></label>
+                  <label><span className="mb-1 block text-sm font-bold">Ngày bắt đầu</span><input type="date" className="ft-input" value={editingProductSubscription.starts_at || ""} onChange={(event) => setEditingProductSubscription({ ...editingProductSubscription, starts_at: event.target.value || null })} /></label>
+                  <label><span className="mb-1 block text-sm font-bold">Hạn sử dụng</span>{editingProductSubscription.product_code === "tap-huan" ? <div className="ft-input bg-slate-100 font-semibold text-slate-600">Không giới hạn</div> : <input type="date" className="ft-input" value={editingProductSubscription.expires_at || ""} onChange={(event) => setEditingProductSubscription({ ...editingProductSubscription, expires_at: event.target.value || null })} />}</label>
+                  <label className="sm:col-span-2"><span className="mb-1 block text-sm font-bold">Ghi chú</span><textarea className="ft-input min-h-24" value={editingProductSubscription.notes || ""} onChange={(event) => setEditingProductSubscription({ ...editingProductSubscription, notes: event.target.value })} /></label>
+                </div>
+                <div className="mt-6 flex justify-end gap-2"><button type="button" onClick={() => setEditingProductSubscription(null)} className="ft-btn ft-btn-secondary">Hủy</button><button className="ft-primary">Lưu thay đổi</button></div>
+              </form>
+            </div>
           )}
           {modal === "schedule-kind" && (
             <Dialog

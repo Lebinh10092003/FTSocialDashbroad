@@ -50,14 +50,30 @@ def sync_partner_product_subscriptions(partner):
             code == "ai-dung-chung" and partner.ai_account_count
         ):
             continue
-        TrainingProductSubscription.objects.get_or_create(
+        subscription, _ = TrainingProductSubscription.objects.get_or_create(
             partner=partner,
             product=product,
             defaults={
-                "quantity": partner.ai_account_count if product.code == "ai-dung-chung" and partner.ai_account_count else 1,
+                "quantity": (
+                    partner.planned_sessions if product.code == "tap-huan" and partner.planned_sessions
+                    else partner.ai_account_count if product.code == "ai-dung-chung" and partner.ai_account_count
+                    else 1
+                ),
                 "starts_at": partner.contract_signed_date,
-                "expires_at": _contract_expiry(partner),
+                # Training is sold by session count and never expires. Other
+                # legacy products may inherit the customer's contract term.
+                "expires_at": None if product.code == "tap-huan" else _contract_expiry(partner),
                 "status": "active",
                 "notes": "Imported from customer profile.",
             },
         )
+        if product.code == "tap-huan":
+            update_fields = []
+            if subscription.expires_at is not None:
+                subscription.expires_at = None
+                update_fields.append("expires_at")
+            if partner.planned_sessions and subscription.quantity != partner.planned_sessions:
+                subscription.quantity = partner.planned_sessions
+                update_fields.append("quantity")
+            if update_fields:
+                subscription.save(update_fields=[*update_fields, "updated_at"])

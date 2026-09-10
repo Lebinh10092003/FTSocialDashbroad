@@ -1,4 +1,4 @@
-name: Assessment lifecycle
+name: Digital training lifecycle
 
 on:
   schedule:
@@ -28,7 +28,7 @@ jobs:
           ssh-keyscan -p "$VPS_PORT" -H "$VPS_HOST" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Warn, verify backups and purge expired assessments
+      - name: Maintain assessment retention and product expiry alerts
         env:
           VPS_HOST: ${{ secrets.DEPLOY_HOST }}
           VPS_PORT: ${{ secrets.DEPLOY_PORT }}
