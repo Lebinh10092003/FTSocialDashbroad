@@ -835,7 +835,15 @@ def _two_way_sync(google_token, start, end):
     pulled = pull_from_sheet(service, start, end)
     groups = set(pulled["groups"])
     groups.update(WorkItem.objects.filter(work_date__range=(start, end)).values_list("executor_id", "work_date"))
+    # A deployment/full sync must also backfill attendance that already existed
+    # before the dedicated monthly attendance workbook integration was enabled.
+    groups.update(
+        TimesheetEntry.objects.filter(work_date__range=(start, end)).values_list(
+            "employee_id", "work_date"
+        )
+    )
     pushed = push_groups_to_sheet(service, groups, force=True)
+    pushed["attendance"] = push_groups_to_attendance_sheet(service, groups)
     WorkScheduleSheetChange.objects.filter(executor_email__in=[g[0] for g in groups], work_date__range=(start, end), status__in=["pending", "failed", "conflict"]).update(status="done", processed_at=timezone.now(), last_error="")
     result = {"start": start.isoformat(), "end": end.isoformat(), "pulled": pulled, "pushed": pushed}
     result["pulled"]["groups"] = len(result["pulled"]["groups"])
