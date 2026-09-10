@@ -10,4 +10,5 @@ urlpatterns = [
     path("attendance/timesheet/save", views.timesheet_save, name="timesheet_save"),
     path("attendance/timesheet/prefill", views.timesheet_prefill, name="timesheet_prefill"),
     path("attendance/timesheet/range", views.timesheet_range, name="timesheet_range"),
+    path("attendance/timesheet/log/<int:log_id>", views.timesheet_log_delete, name="timesheet_log_delete"),
 ]

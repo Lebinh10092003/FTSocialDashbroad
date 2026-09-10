@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Clock, Edit3, FileText, Globe, Laptop, Loader2, MapPin, Moon, Plus, Save, Search, Trash2, TriangleAlert, UserCheck, Users, X } from 'lucide-react';
 import Time24Input from './Time24Input';
+import { appDialog } from './AppDialog';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -39,6 +40,8 @@ type TimesheetData = {
   scope: string;
   month: string;
   isPrivileged: boolean;
+  isAdmin: boolean;
+  summaryCutoff: string;
   entries: TimesheetEntry[];
   summary: { totalMinutes: number; onlineMinutes: number; offlineMinutes: number };
   editLogs: EditLog[];
@@ -87,7 +90,18 @@ const formatLogShifts = (data: any) => {
   return shifts.map(s => `${s.mode === 'online' ? 'Online' : 'Trực tiếp'}: ${s.start} - ${s.end}`).join(', ');
 };
 const WEEKDAYS_VI = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+const WEEKDAYS_VI_LONG = ['Chủ nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
 const weekdayName = (iso: string) => { const d = new Date(`${iso}T00:00:00`); return WEEKDAYS_VI[d.getDay()]; };
+const weekdayLongName = (iso: string) => { const d = new Date(`${iso}T00:00:00`); return WEEKDAYS_VI_LONG[d.getDay()]; };
+const todayIso = () => new Date().toISOString().slice(0, 10);
+const yesterdayIso = () => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); };
+/** Summaries cover completed days only: up to the end of yesterday, never past the shown month. */
+const summaryCutoffFor = (month: string) => {
+  const [y, m] = month.split('-').map(Number);
+  const lastOfMonth = `${month}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`;
+  const yesterday = yesterdayIso();
+  return yesterday < lastOfMonth ? yesterday : lastOfMonth;
+};
 const isWeekend = (iso: string) => { const d = new Date(`${iso}T00:00:00`).getDay(); return d === 0 || d === 6; };
 const isFixedHoliday = (iso: string) => FIXED_HOLIDAYS.has(iso.slice(5));
 const isDefaultDayOff = (iso: string) => isWeekend(iso) || isFixedHoliday(iso);
@@ -202,13 +216,17 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
     return map;
   }, [viewEntries]);
 
-  /* ---------- Summary ---------- */
+  /* ---------- Summary cutoff: end of yesterday ---------- */
+  const summaryCutoff = useMemo(() => summaryCutoffFor(month), [month]);
+
+  /* ---------- Summary (completed days only) ---------- */
   const summary = useMemo(() => {
-    const total = viewEntries.reduce((s, e) => s + (e.isDayOff ? 0 : e.workedMinutes), 0);
-    const online = viewEntries.reduce((s, e) => s + (e.workMode === 'online' && !e.isDayOff ? e.workedMinutes : 0), 0);
-    const offline = viewEntries.reduce((s, e) => s + (e.workMode === 'direct' && !e.isDayOff ? e.workedMinutes : 0), 0);
+    const counted = viewEntries.filter(e => !e.isDayOff && e.workDate <= summaryCutoff);
+    const total = counted.reduce((s, e) => s + e.workedMinutes, 0);
+    const online = counted.reduce((s, e) => s + (e.workMode === 'online' ? e.workedMinutes : 0), 0);
+    const offline = counted.reduce((s, e) => s + (e.workMode === 'direct' ? e.workedMinutes : 0), 0);
     return { totalMinutes: total, onlineMinutes: online, offlineMinutes: offline };
-  }, [viewEntries]);
+  }, [viewEntries, summaryCutoff]);
 
   /* ---------- All dates in the month ---------- */
   const allDates = useMemo(() => monthDates(month), [month]);
@@ -230,7 +248,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
 
   /* ---------- Missing weekday dates (for warning) ---------- */
   const missingWeekdays = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayIso();
     return allDates.filter(d => {
       if (d >= today) return false; // don't warn about future/today
       if (isDefaultDayOff(d)) return false;
@@ -241,7 +259,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
   /* ---------- Open popup ---------- */
   const openPopup = async (dateOverride?: string, dayOffOverride?: boolean) => {
     setPopupError('');
-    const targetDate = dateOverride || new Date().toISOString().slice(0, 10);
+    const targetDate = dateOverride || todayIso();
     setPopupDate(targetDate);
     setPopupOpen(true);
     setIsDayOff(false);
@@ -304,6 +322,28 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
     }
   };
 
+  /* ---------- Delete a note (admin only) ---------- */
+  const deleteNote = async (log: EditLog) => {
+    const confirmed = await appDialog.confirm(
+      `Xóa ghi chú ngày ${fmtDate(log.workDate)} của ${log.employeeName}?`,
+      { title: 'Xóa ghi chú', tone: 'danger', confirmText: 'Xóa' },
+    );
+    if (!confirmed) return;
+    try {
+      const res = await fetch(`/api/attendance/timesheet/log/${log.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Không thể xóa ghi chú.');
+      setData(prev => (prev ? { ...prev, editLogs: prev.editLogs.filter(item => item.id !== log.id) } : prev));
+      setNotice(body.message || 'Đã xóa ghi chú.');
+      await load(true);
+    } catch (e: any) {
+      setError(e.message || 'Không thể xóa ghi chú.');
+    }
+  };
+
   /* ---------- Save ---------- */
   const saveTimesheet = async () => {
     setSaving(true);
@@ -343,6 +383,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
   };
 
   const isPrivileged = data?.isPrivileged ?? false;
+  const isAdmin = data?.isAdmin ?? false;
   const selectedEmpName = data?.employees?.find(e => e.email === selectedEmployee)?.name;
   const summaryEmployeeEmail = selectedEmployee || userEmail || '';
   const trainingSummary = data?.trainingSummaryByEmployee?.[summaryEmployeeEmail];
@@ -444,8 +485,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
                       const defaultDayOff = isDefaultDayOff(dateStr);
                       const markedDayOff = hasDayOff || (!hasEntries && defaultDayOff);
                       const dayTotal = originalEntries.reduce((total, entry) => total + (entry.isDayOff ? 0 : entry.workedMinutes), 0);
-                      const today = new Date().toISOString().slice(0, 10);
-                      const isPast = dateStr < today;
+                      const isPast = dateStr < todayIso();
                       const logs = editLogsByDate.get(dateStr) || [];
                       const showDailyTotal = !markedDayOff;
                       const rowSpan = entries.length + (showDailyTotal ? 1 : 0);
@@ -476,7 +516,13 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
                               <td className="font-bold tabular-nums">{entry && !entry.isDayOff ? `${fmtHours(entry.workedMinutes)} giờ` : '—'}</td>
                               <td>{entry && !entry.isDayOff ? <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${entry.workMode === 'online' ? 'bg-violet-100 text-violet-700' : 'bg-emerald-100 text-emerald-700'}`}>{modeLabel(entry.workMode)}</span> : '—'}</td>
                               {index === 0 && <td rowSpan={rowSpan} className="align-top text-xs leading-5 text-slate-600">
-                                {logs.map(log => <p key={log.id} className="mb-1 rounded-lg bg-amber-50 px-2 py-1 text-amber-800"><FileText className="mr-1 inline h-3.5 w-3.5" />{editLogText(log)}</p>)}
+                                {logs.map(log => (
+                                  <p key={log.id} className="mb-1 flex items-start gap-1 rounded-lg bg-amber-50 px-2 py-1 text-amber-800">
+                                    <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                    <span className="min-w-0 flex-1">{editLogText(log)}</span>
+                                    {isAdmin && <button type="button" onClick={() => void deleteNote(log)} title="Xóa ghi chú" className="shrink-0 rounded p-0.5 text-amber-500 transition hover:bg-rose-100 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button>}
+                                  </p>
+                                ))}
                                 {logs.length === 0 && <span className={!hasEntries && isPast && !defaultDayOff ? 'text-amber-500' : 'text-slate-300'}>{!hasEntries && isPast && !defaultDayOff ? 'Chưa có công ca' : '—'}</span>}
                               </td>}
                             </tr>
@@ -498,6 +544,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
             <aside className="rounded-2xl border bg-white p-5 shadow-sm xl:sticky xl:top-6">
               <p className="text-xs font-bold uppercase text-emerald-600">Tổng quan{selectedEmpName ? ` — ${selectedEmpName}` : ''}</p>
               <h2 className="mt-1 text-xl font-extrabold">Tháng {fmtMonthLabel(month)}</h2>
+              <p className="mt-1 text-sm font-semibold text-slate-500">Tính đến hết {weekdayLongName(summaryCutoff)}, ngày {fmtDate(summaryCutoff)}</p>
               <div className="mt-5 space-y-5">
                 <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-100 text-emerald-700"><Clock className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{fmtHours(summary.totalMinutes)} giờ</p><p className="text-xs text-slate-500">Tổng giờ làm</p></div></div>
                 <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-xl bg-blue-100 text-blue-700"><MapPin className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{fmtHours(summary.offlineMinutes)} giờ</p><p className="text-xs text-slate-500">Trực tiếp</p></div></div>

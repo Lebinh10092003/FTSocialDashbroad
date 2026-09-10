@@ -222,35 +222,30 @@ const timeToMinutes = (value: string) => {
   const minutes = Number(match[1]) * 60 + Number(match[2]);
   return Number.isFinite(minutes) && minutes >= 0 && minutes <= 24 * 60 ? minutes : null;
 };
-const dayWorkMinutes = (rows: WorkTask[]) => {
-  const spans = rows
-    .map((task) => ({ from: timeToMinutes(task.startTime), to: timeToMinutes(task.endTime) }))
-    .filter((span): span is { from: number; to: number } => span.from !== null && span.to !== null && span.to > span.from)
-    .sort((a, b) => a.from - b.from);
-  let total = 0,
-    blockFrom = -1,
-    blockTo = -1;
-  spans.forEach((span) => {
-    if (span.from > blockTo) {
-      if (blockTo >= 0) total += blockTo - blockFrom;
-      blockFrom = span.from;
-      blockTo = span.to;
-    } else if (span.to > blockTo) {
-      blockTo = span.to;
-    }
-  });
-  if (blockTo >= 0) total += blockTo - blockFrom;
-  return total;
+const FIXED_HOLIDAYS = new Set(["01-01", "04-30", "05-01", "09-02"]);
+const isDefaultDayOff = (date: string) => {
+  const weekday = new Date(`${date}T00:00:00`).getDay();
+  return weekday === 0 || weekday === 6 || FIXED_HOLIDAYS.has(date.slice(5));
 };
+/** Worked minutes for one day, taken from the timesheet ("Công ca") shifts of that day. */
+const timesheetDayMinutes = (shifts: TimesheetShift[]) =>
+  shifts.reduce((total, shift) => {
+    if (shift.isDayOff) return total;
+    const from = timeToMinutes(shift.shiftStart),
+      to = timeToMinutes(shift.shiftEnd);
+    if (from === null || to === null || from === to) return total;
+    return total + (to > from ? to - from : 24 * 60 - from + to);
+  }, 0);
 const formatWorkHours = (minutes: number) => {
   const hours = Math.floor(minutes / 60),
     rest = minutes % 60;
   return rest === 0 ? `${hours}h` : `${hours}h${String(rest).padStart(2, "0")}`;
 };
-const dayWorkSummary = (rows: WorkTask[]) => {
-  if (rows.length === 0) return "Ngày nghỉ";
-  const minutes = dayWorkMinutes(rows);
-  return minutes > 0 ? `Tổng giờ làm: ${formatWorkHours(minutes)}` : "Tổng giờ làm: chưa đặt giờ";
+const timesheetDaySummary = (date: string, shifts: TimesheetShift[] | undefined) => {
+  if (shifts?.some((shift) => shift.isDayOff)) return "Ngày nghỉ";
+  if (!shifts?.length) return isDefaultDayOff(date) ? "Ngày nghỉ" : "Chưa khai công ca";
+  const minutes = timesheetDayMinutes(shifts);
+  return minutes > 0 ? `Tổng giờ làm: ${formatWorkHours(minutes)}` : "Ngày nghỉ";
 };
 const authHeaders = (token: string, json = false): HeadersInit => ({
   Authorization: `Bearer ${token}`,
@@ -1211,6 +1206,33 @@ function WeekView({ tasks, userEmail, idToken, visibleDays, anchor, setAnchor, p
   const today = iso(new Date());
   const currentMonth = anchor.getMonth();
   const [dragTargetDate, setDragTargetDate] = useState<string | null>(null);
+  const [timesheetByDate, setTimesheetByDate] = useState<Record<string, TimesheetShift[]>>({});
+  const showDaySummary = layout === "calendar" && period === "week";
+  const rangeStart = iso(visibleDays[0]),
+    rangeEnd = iso(visibleDays[visibleDays.length - 1]);
+
+  // The daily total comes from the "Công ca" timesheet, not from task start/end times.
+  useEffect(() => {
+    if (!showDaySummary || !idToken) return;
+    let active = true;
+    const loadTimesheet = async () => {
+      try {
+        const response = await fetch(`/api/attendance/timesheet/range?start=${rangeStart}&end=${rangeEnd}`, { headers: { Authorization: `Bearer ${idToken}` } });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "Không thể tải công ca.");
+        if (active) setTimesheetByDate(payload.dates || {});
+      } catch {
+        if (active) setTimesheetByDate({});
+      }
+    };
+    void loadTimesheet();
+    const onSaved = () => void loadTimesheet();
+    window.addEventListener("ft-timesheet-saved", onSaved);
+    return () => {
+      active = false;
+      window.removeEventListener("ft-timesheet-saved", onSaved);
+    };
+  }, [idToken, rangeStart, rangeEnd, showDaySummary]);
   const go = (amount: number) => setAnchor(period === "week" ? addDays(anchor, amount * 7) : addMonths(anchor, amount));
   const heading = period === "week" ? `LỊCH CÔNG TÁC TUẦN ${weekNumber(iso(visibleDays[0]))} NĂM ${visibleDays[0].getFullYear()}` : `LỊCH CÔNG TÁC THÁNG ${anchor.getMonth() + 1} NĂM ${anchor.getFullYear()}`;
   const dateRange = period === "week" ? `Từ ${fullDate(iso(visibleDays[0]))} đến ${fullDate(iso(visibleDays[visibleDays.length - 1]))}` : "";
@@ -1272,8 +1294,7 @@ function WeekView({ tasks, userEmail, idToken, visibleDays, anchor, setAnchor, p
             {visibleDays.map((day: Date) => {
               const dayIso = iso(day),
                 rows = rowsFor(day),
-                muted = period === "month" && day.getMonth() !== currentMonth,
-                showDaySummary = period === "week";
+                muted = period === "month" && day.getMonth() !== currentMonth;
               return (
                 <div
                   key={dayIso}
@@ -1294,9 +1315,11 @@ function WeekView({ tasks, userEmail, idToken, visibleDays, anchor, setAnchor, p
                   >
                     {day.getDate()}
                   </button>
-                  {showDaySummary && (
-                    <p className={`mb-2 rounded-lg px-2 py-1 text-[11px] font-bold leading-4 ${rows.length === 0 ? "bg-slate-100 text-slate-500" : "bg-blue-50 text-blue-700"}`}>{dayWorkSummary(rows)}</p>
-                  )}
+                  {showDaySummary && (() => {
+                    const summary = timesheetDaySummary(dayIso, timesheetByDate[dayIso]),
+                      worked = summary.startsWith("Tổng giờ làm");
+                    return <p className={`mb-2 rounded-lg px-2 py-1 text-[11px] font-bold leading-4 ${worked ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-500"}`}>{summary}</p>;
+                  })()}
                   <div className="space-y-2">{rows.map((task: WorkTask, index: number) => taskButton(task, index + 1))}</div>
                 </div>
               );

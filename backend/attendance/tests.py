@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, time, timedelta
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -173,14 +173,15 @@ class AttendanceApiTests(TestCase):
         self.profile.department = training
         self.profile.save(update_fields=["department", "updated_at"])
         self.profile.departments.add(training)
-        today = timezone.localdate()
+        # Summaries stop at the end of yesterday, so anchor the sessions there.
+        counted_day = timezone.localdate() - timedelta(days=1)
         TrainingSession.objects.create(
-            title="Buổi giảng", session_date=today, status="completed", instructor_name=self.profile.name,
+            title="Buổi giảng", session_date=counted_day, status="completed", instructor_name=self.profile.name,
         )
         TrainingSession.objects.create(
-            title="Buổi hỗ trợ", session_date=today, status="planned", support_staff_name=self.profile.name,
+            title="Buổi hỗ trợ", session_date=counted_day, status="planned", support_staff_name=self.profile.name,
         )
-        response = self.request("get", f"/api/attendance/timesheet?month={today:%Y-%m}&scope=all")
+        response = self.request("get", f"/api/attendance/timesheet?month={counted_day:%Y-%m}&scope=all")
         self.assertEqual(response.status_code, 200, response.content)
         summaries = response.json()["trainingSummaryByEmployee"]
         self.assertEqual(summaries[self.profile.email], {"instructorSessions": 1, "supportSessions": 1})
@@ -190,12 +191,68 @@ class AttendanceApiTests(TestCase):
         self.profile.save(update_fields=["role", "department", "updated_at"])
         self.profile.departments.clear()
         self.profile.departments.add(accounting)
-        accounting_response = self.request("get", f"/api/attendance/timesheet?month={today:%Y-%m}&scope=all")
+        accounting_response = self.request("get", f"/api/attendance/timesheet?month={counted_day:%Y-%m}&scope=all")
         self.assertEqual(accounting_response.json()["trainingSummaryByEmployee"], {})
 
         self.profile.role = "MANAGER"
         self.profile.department = None
         self.profile.save(update_fields=["role", "department", "updated_at"])
         self.profile.departments.clear()
-        leader_response = self.request("get", f"/api/attendance/timesheet?month={today:%Y-%m}&scope=all")
+        leader_response = self.request("get", f"/api/attendance/timesheet?month={counted_day:%Y-%m}&scope=all")
         self.assertEqual(leader_response.json()["trainingSummaryByEmployee"], {})
+
+    def test_training_summary_ignores_today_and_future_sessions(self):
+        training = Department.objects.create(name="Phòng Đào tạo số")
+        self.profile.department = training
+        self.profile.save(update_fields=["department", "updated_at"])
+        self.profile.departments.add(training)
+        today = timezone.localdate()
+        TrainingSession.objects.create(
+            title="Buổi hôm nay", session_date=today, status="planned", instructor_name=self.profile.name,
+        )
+        TrainingSession.objects.create(
+            title="Buổi tương lai", session_date=today + timedelta(days=1), status="planned", support_staff_name=self.profile.name,
+        )
+
+        response = self.request("get", f"/api/attendance/timesheet?month={today:%Y-%m}&scope=all")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        summaries = response.json()["trainingSummaryByEmployee"]
+        self.assertEqual(summaries[self.profile.email], {"instructorSessions": 0, "supportSessions": 0})
+
+    def test_summary_hours_stop_at_the_end_of_yesterday(self):
+        today = timezone.localdate()
+        TimesheetEntry.objects.create(
+            employee=self.profile, work_date=today, shift_number=1,
+            shift_start=time(8, 0), shift_end=time(12, 0), work_mode="direct",
+        )
+        counted = TimesheetEntry.objects.create(
+            employee=self.profile, work_date=today - timedelta(days=1), shift_number=1,
+            shift_start=time(8, 0), shift_end=time(11, 0), work_mode="direct",
+        )
+
+        response = self.request("get", f"/api/attendance/timesheet?month={today:%Y-%m}&scope=all")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        expected = counted.worked_minutes if counted.work_date.month == today.month else 0
+        self.assertEqual(body["summary"]["totalMinutes"], expected)
+        self.assertEqual(body["summaryCutoff"], (today - timedelta(days=1)).isoformat())
+
+    def test_only_admins_can_delete_a_timesheet_note(self):
+        log = TimesheetEditLog.objects.create(
+            employee=self.profile, work_date=timezone.localdate(), edited_by=self.profile, note="Ghi chú cần xóa",
+        )
+
+        forbidden = self.request("delete", f"/api/attendance/timesheet/log/{log.id}")
+        self.assertEqual(forbidden.status_code, 403, forbidden.content)
+        self.assertTrue(TimesheetEditLog.objects.filter(pk=log.id).exists())
+
+        self.profile.role = "ADMIN"
+        self.profile.save(update_fields=["role", "updated_at"])
+        allowed = self.request("delete", f"/api/attendance/timesheet/log/{log.id}")
+        self.assertEqual(allowed.status_code, 200, allowed.content)
+        self.assertFalse(TimesheetEditLog.objects.filter(pk=log.id).exists())
+
+        missing = self.request("delete", f"/api/attendance/timesheet/log/{log.id}")
+        self.assertEqual(missing.status_code, 404, missing.content)

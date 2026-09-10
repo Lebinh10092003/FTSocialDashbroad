@@ -64,14 +64,22 @@ def _can_show_training_summary(profile):
 
 
 def _training_session_counts(profiles, start, end):
-    """Count Digital Training sessions by the explicit instructor/support fields."""
+    """Count Digital Training sessions by the explicit instructor/support fields.
+
+    Only sessions that already took place are counted: the range stops at the end
+    of yesterday, so a session scheduled for today or any future date is ignored
+    even when the instructor/support staff are already named on it.
+    """
     from digital_training.models import TrainingSession
 
     profiles = list(profiles)
     if not profiles:
         return {}
+    counted_end = min(end, _summary_cutoff_exclusive())
+    if counted_end <= start:
+        return {profile.email: {"instructorSessions": 0, "supportSessions": 0} for profile in profiles}
     sessions = list(
-        TrainingSession.objects.filter(session_date__gte=start, session_date__lt=end)
+        TrainingSession.objects.filter(session_date__gte=start, session_date__lt=counted_end)
         .exclude(status__in=["cancelled", "unscheduled"])
         .values("instructor_name", "support_staff_name")
     )
@@ -92,6 +100,11 @@ def _training_session_counts(profiles, start, end):
             "supportSessions": sum(1 for _, supporters in parsed if identities.intersection(supporters)),
         }
     return result
+
+
+def _summary_cutoff_exclusive():
+    """Summaries stop at the end of yesterday, so today is never half-counted."""
+    return timezone.localdate()
 
 
 def _month_range(value):
@@ -238,9 +251,13 @@ def timesheet_list(request):
     entries = list(queryset.order_by("-work_date", "shift_number")[:2000])
     own_entries = [e for e in entries if e.employee_id == request.user.email] if scope != "mine" else entries
 
-    total_minutes = sum(e.worked_minutes for e in own_entries)
-    online_minutes = sum(e.worked_minutes for e in own_entries if e.work_mode == "online" and not e.is_day_off)
-    offline_minutes = sum(e.worked_minutes for e in own_entries if e.work_mode == "direct" and not e.is_day_off)
+    # Summaries only cover completed days: everything up to the end of yesterday.
+    cutoff = _summary_cutoff_exclusive()
+    counted = [e for e in own_entries if e.work_date < cutoff and not e.is_day_off]
+    total_minutes = sum(e.worked_minutes for e in counted)
+    online_minutes = sum(e.worked_minutes for e in counted if e.work_mode == "online")
+    offline_minutes = sum(e.worked_minutes for e in counted if e.work_mode == "direct")
+    summary_cutoff = min(cutoff, end) - timedelta(days=1)
 
     # Edit logs for this month
     log_qs = TimesheetEditLog.objects.select_related("employee", "edited_by").filter(
@@ -273,6 +290,8 @@ def timesheet_list(request):
         "scope": scope,
         "month": start.strftime("%Y-%m"),
         "isPrivileged": privileged,
+        "isAdmin": getattr(request, "user_role", "EMPLOYEE") == "ADMIN",
+        "summaryCutoff": summary_cutoff.isoformat(),
         "entries": [_entry_payload(e, include_employee=(scope != "mine")) for e in entries],
         "summary": {
             "totalMinutes": total_minutes,
@@ -393,6 +412,18 @@ def timesheet_save(request):
         "message": "Đã lưu công ca." if not is_day_off else "Đã ghi nhận nghỉ làm.",
         "entries": [_entry_payload(e) for e in saved],
     })
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def timesheet_log_delete(request, log_id):
+    """Remove one note from the timesheet table. Administrators only."""
+    if getattr(request, "user_role", "EMPLOYEE") != "ADMIN":
+        return Response({"error": "Chỉ quản trị viên mới được xóa ghi chú."}, status=status.HTTP_403_FORBIDDEN)
+    deleted, _ = TimesheetEditLog.objects.filter(pk=log_id).delete()
+    if not deleted:
+        return Response({"error": "Không tìm thấy ghi chú."}, status=status.HTTP_404_NOT_FOUND)
+    return Response({"message": "Đã xóa ghi chú."})
 
 
 @api_view(["GET"])
