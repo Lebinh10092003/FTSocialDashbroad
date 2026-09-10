@@ -602,6 +602,31 @@ class WorkScheduleApiTests(TestCase):
         self.assertEqual(item.work_date.isoformat(), "2026-09-16")
         self.assertEqual(item.status, "completed")
 
+    @override_settings(WORK_SCHEDULE_TRAINING_PROJECTION_ENABLED=True)
+    def test_training_schedule_preserves_an_explicit_end_time_when_edited(self):
+        from digital_training.models import TrainingSession
+
+        session = TrainingSession.objects.create(
+            title="Buổi 3 · TH Kim Đồng",
+            session_date="2026-09-12",
+            start_time=time(7, 30),
+            end_time=time(10, 30),
+            instructor_name=self.executor.name,
+        )
+        sync_work_item_from_training(session, self.manager)
+
+        session.start_time = time(8, 15)
+        session.end_time = time(11, 45)
+        session.save(update_fields=["start_time", "end_time"])
+        sync_work_item_from_training(session, self.manager)
+
+        session.refresh_from_db()
+        item = WorkItem.objects.get(training_session=session)
+        self.assertEqual(session.start_time.isoformat(timespec="minutes"), "08:15")
+        self.assertEqual(session.end_time.isoformat(timespec="minutes"), "11:45")
+        self.assertEqual(item.start_time.isoformat(timespec="minutes"), "08:15")
+        self.assertEqual(item.end_time.isoformat(timespec="minutes"), "11:45")
+
     def test_training_reference_inside_normal_task_does_not_create_session(self):
         response = self.request(self.executor_token, "post", "/api/work-schedule/items", {
             "title": "Gửi tài liệu sau tập huấn", "date": "2026-09-07",

@@ -34,6 +34,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import FinanceReport from "./FinanceReport";
 import ProductManagement, { type ProductView, type ProductSubscription } from "./ProductManagement";
 import TrainingOverview from "./TrainingOverview";
+import Time24Input from "../Time24Input";
 
 type Tab =
   | "overview"
@@ -637,41 +638,12 @@ function TimePicker({
   value: string;
   onChange: (value: string) => void;
 }) {
-  const [hour = "", minute = ""] = (value || "").slice(0, 5).split(":");
-  const update = (h: string, m: string) =>
-    onChange(`${h || "00"}:${m || "00"}`);
   return (
     <label>
       <span className="mb-1 block text-sm font-bold">{label}</span>
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg border border-slate-300 bg-white p-1.5">
-        <select
-          value={hour}
-          onChange={(e) => update(e.target.value, minute)}
-          className="rounded bg-sky-50 px-2 py-1.5 text-center font-bold outline-none"
-        >
-          <option value="">Giờ</option>
-          {Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0")).map(
-            (x) => (
-              <option key={x}>{x}</option>
-            ),
-          )}
-        </select>
-        <b className="text-slate-400">:</b>
-        <select
-          value={minute}
-          onChange={(e) => update(hour, e.target.value)}
-          className="rounded bg-sky-50 px-2 py-1.5 text-center font-bold outline-none"
-        >
-          <option value="">Phút</option>
-          {Array.from({ length: 12 }, (_, i) =>
-            String(i * 5).padStart(2, "0"),
-          ).map((x) => (
-            <option key={x}>{x}</option>
-          ))}
-        </select>
-      </div>
+      <Time24Input label={label} value={value} onChange={onChange} />
       <small className="mt-1 block text-xs text-slate-500">
-        Chọn giờ hoặc phút để điền ngay vào thời gian.
+        Có thể nhập trực tiếp hoặc mở danh sách giờ và phút.
       </small>
     </label>
   );
@@ -687,50 +659,14 @@ function CompactTimePicker({
   disabled?: boolean;
   ariaLabel: string;
 }) {
-  const [hour = "", minute = ""] = (value || "").slice(0, 5).split(":");
-  const update = (h: string, m: string) =>
-    onChange(`${h || "00"}:${m || "00"}`);
   return (
-    <div
-      role="group"
-      aria-label={ariaLabel}
-      data-time-picker="24h"
-      className="grid min-w-0 grid-cols-[1fr_auto_1fr] items-center gap-1 rounded-lg border bg-white px-1 py-0.5"
-    >
-      <select
-        aria-label={`${ariaLabel} - giờ`}
-        disabled={disabled}
-        value={hour}
-        onChange={(e) => update(e.target.value, minute)}
-        className="min-w-0 rounded bg-sky-50 px-1 py-1 text-center text-sm font-bold outline-none"
-      >
-        <option value="">Giờ</option>
-        {Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0")).map(
-          (x) => (
-            <option key={x} value={x}>
-              {x}
-            </option>
-          ),
-        )}
-      </select>
-      <b className="text-slate-400">:</b>
-      <select
-        aria-label={`${ariaLabel} - phút`}
-        disabled={disabled}
-        value={minute}
-        onChange={(e) => update(hour, e.target.value)}
-        className="min-w-0 rounded bg-sky-50 px-1 py-1 text-center text-sm font-bold outline-none"
-      >
-        <option value="">Phút</option>
-        {Array.from({ length: 60 }, (_, i) => String(i).padStart(2, "0")).map(
-          (x) => (
-            <option key={x} value={x}>
-              {x}
-            </option>
-          ),
-        )}
-      </select>
-    </div>
+    <Time24Input
+      label={ariaLabel}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      className="rounded-lg py-0"
+    />
   );
 }
 function ContentsPicker({
@@ -1958,6 +1894,7 @@ export default function DigitalTraining({
       try {
         const sessionResponse = await fetch("/api/digital-training/sessions", {
           headers: auth(),
+          cache: "no-store",
         });
         if (!sessionResponse.ok)
           throw Error("Không thể tải dữ liệu Đào tạo số.");
@@ -2428,6 +2365,7 @@ export default function DigitalTraining({
   const saveSession = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!can()) return;
+    const wasEditing = Boolean(editingSession);
     try {
       const payload = {
         ...sd,
@@ -2449,11 +2387,16 @@ export default function DigitalTraining({
           true,
           idToken,
         );
+      setSessions((current) =>
+        wasEditing
+          ? current.map((item) => item.id === saved.id ? saved : item)
+          : [...current, saved],
+      );
       setModal(null);
       setEditingSession(null);
       await load();
       setNotice(
-        editingSession ? "Đã cập nhật lịch tập huấn." : "Đã tạo buổi tập huấn.",
+        wasEditing ? "Đã cập nhật lịch tập huấn." : "Đã tạo buổi tập huấn.",
       );
     } catch (e: any) {
       setNotice(e.message);

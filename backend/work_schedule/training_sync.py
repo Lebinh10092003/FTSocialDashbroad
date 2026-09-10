@@ -41,8 +41,10 @@ def _is_training(item):
     return "tap huan" in label or title.startswith(("tap huan ", "tham gia tap huan ", "ho tro tap huan "))
 
 
-def _three_hour_window(start_time):
+def _time_window(start_time, end_time=None):
     start = start_time or time(9, 0)
+    if end_time:
+        return start, end_time
     end_dt = datetime.combine(datetime.today(), start) + timedelta(hours=3)
     return start, end_dt.time().replace(second=0, microsecond=0)
 
@@ -123,7 +125,7 @@ def sync_training_from_work_item(item):
     ):
         return None
 
-    start_time, end_time = _three_hour_window(item.start_time)
+    start_time, end_time = _time_window(item.start_time, item.end_time)
     if item.start_time != start_time or item.end_time != end_time:
         WorkItem.objects.filter(pk=item.pk).update(start_time=start_time, end_time=end_time)
         item.start_time, item.end_time = start_time, end_time
@@ -171,7 +173,7 @@ def sync_work_item_from_training(session, actor):
     executor = _matching_profile(session.instructor_name or session.staff_name, actor)
     if not executor:
         return None
-    start_time, end_time = _three_hour_window(session.start_time)
+    start_time, end_time = _time_window(session.start_time, session.end_time)
     if session.start_time != start_time or session.end_time != end_time:
         TrainingSession.objects.filter(pk=session.pk).update(start_time=start_time, end_time=end_time)
         session.start_time, session.end_time = start_time, end_time
