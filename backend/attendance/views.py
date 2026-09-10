@@ -1,3 +1,5 @@
+import re
+import unicodedata
 from datetime import date, datetime, time, timedelta
 
 from django.db import IntegrityError, transaction
@@ -23,6 +25,7 @@ SHIFTS = {
 }
 
 ACCOUNTING_DEPT_NAMES = {"kế toán", "ke toan", "accounting"}
+TRAINING_DEPT_NAMES = {"đào tạo số", "dao tao so", "phòng đào tạo số", "phong dao tao so", "digital training"}
 FIXED_HOLIDAYS = {(1, 1), (4, 30), (5, 1), (9, 2)}
 
 
@@ -35,6 +38,60 @@ def _local(value):
 
 def _is_default_day_off(value):
     return value.weekday() >= 5 or (value.month, value.day) in FIXED_HOLIDAYS
+
+
+def _normalized_label(value):
+    text = unicodedata.normalize("NFD", str(value or "").strip().lower().replace("đ", "d"))
+    return " ".join("".join(char for char in text if unicodedata.category(char) != "Mn").split())
+
+
+def _profile_department_names(profile):
+    names = set()
+    if profile.department:
+        names.add(_normalized_label(profile.department.name))
+    names.update(_normalized_label(item.name) for item in profile.departments.all())
+    return names
+
+
+def _can_show_training_summary(profile):
+    departments = _profile_department_names(profile)
+    accounting = {_normalized_label(value) for value in ACCOUNTING_DEPT_NAMES}
+    training = {_normalized_label(value) for value in TRAINING_DEPT_NAMES}
+    if departments.intersection(accounting) or any("ke toan" in name for name in departments):
+        return False
+    belongs_to_training = bool(departments.intersection(training)) or any("dao tao so" in name for name in departments)
+    return str(profile.role).upper() == "ADMIN" or belongs_to_training
+
+
+def _training_session_counts(profiles, start, end):
+    """Count Digital Training sessions by the explicit instructor/support fields."""
+    from digital_training.models import TrainingSession
+
+    profiles = list(profiles)
+    if not profiles:
+        return {}
+    sessions = list(
+        TrainingSession.objects.filter(session_date__gte=start, session_date__lt=end)
+        .exclude(status__in=["cancelled", "unscheduled"])
+        .values("instructor_name", "support_staff_name")
+    )
+
+    def staff_tokens(value):
+        return {
+            _normalized_label(part)
+            for part in re.split(r"[,;\n]+", str(value or ""))
+            if _normalized_label(part)
+        }
+
+    parsed = [(staff_tokens(row["instructor_name"]), staff_tokens(row["support_staff_name"])) for row in sessions]
+    result = {}
+    for profile in profiles:
+        identities = {_normalized_label(profile.name), _normalized_label(profile.email)} - {""}
+        result[profile.email] = {
+            "instructorSessions": sum(1 for instructors, _ in parsed if identities.intersection(instructors)),
+            "supportSessions": sum(1 for _, supporters in parsed if identities.intersection(supporters)),
+        }
+    return result
 
 
 def _month_range(value):
@@ -198,7 +255,7 @@ def timesheet_list(request):
     if scope == "all" and privileged:
         all_employees = UserProfile.objects.filter(
             employment_status="ACTIVE",
-        ).select_related("department").order_by("name")
+        ).select_related("department").prefetch_related("departments").order_by("name")
         employees = [
             {
                 "email": emp.email,
@@ -207,6 +264,9 @@ def timesheet_list(request):
             }
             for emp in all_employees
         ]
+
+    summary_profiles = list(all_employees) if scope == "all" and privileged else [request.user]
+    training_summary = _training_session_counts(summary_profiles, start, end) if _can_show_training_summary(request.user) else {}
 
     return Response({
         "serverTime": _local(timezone.now()).isoformat(),
@@ -221,6 +281,7 @@ def timesheet_list(request):
         },
         "editLogs": [_log_payload(lg) for lg in logs],
         "employees": employees,
+        "trainingSummaryByEmployee": training_summary,
     })
 
 

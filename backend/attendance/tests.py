@@ -5,9 +5,10 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.authtoken.models import Token
 
-from authentication.models import UserProfile
+from authentication.models import Department, UserProfile
+from digital_training.models import TrainingSession
 
-from .models import AttendanceRecord, TimesheetEditLog
+from .models import AttendanceRecord, TimesheetEditLog, TimesheetEntry
 from .views import _worked_minutes
 from work_schedule.models import WorkScheduleSheetChange
 
@@ -154,3 +155,47 @@ class AttendanceApiTests(TestCase):
         changed = self.request("post", "/api/attendance/timesheet/save", changed_times)
         self.assertEqual(changed.status_code, 200, changed.content)
         self.assertEqual(TimesheetEditLog.objects.count(), 1)
+
+    def test_day_off_is_saved_for_only_the_target_employee(self):
+        other = UserProfile.objects.create(email="other-day-off@example.com", name="Người khác", role="EMPLOYEE")
+        work_date = "2026-09-10"
+        response = self.request("post", "/api/attendance/timesheet/save", {
+            "workDate": work_date,
+            "isDayOff": True,
+        })
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(TimesheetEntry.objects.filter(employee=self.profile, work_date=work_date, is_day_off=True).exists())
+        self.assertFalse(TimesheetEntry.objects.filter(employee=other, work_date=work_date).exists())
+
+    def test_training_summary_is_limited_by_employee_department_and_role(self):
+        training = Department.objects.create(name="Phòng Đào tạo số")
+        accounting = Department.objects.create(name="Kế toán")
+        self.profile.department = training
+        self.profile.save(update_fields=["department", "updated_at"])
+        self.profile.departments.add(training)
+        today = timezone.localdate()
+        TrainingSession.objects.create(
+            title="Buổi giảng", session_date=today, status="completed", instructor_name=self.profile.name,
+        )
+        TrainingSession.objects.create(
+            title="Buổi hỗ trợ", session_date=today, status="planned", support_staff_name=self.profile.name,
+        )
+        response = self.request("get", f"/api/attendance/timesheet?month={today:%Y-%m}&scope=all")
+        self.assertEqual(response.status_code, 200, response.content)
+        summaries = response.json()["trainingSummaryByEmployee"]
+        self.assertEqual(summaries[self.profile.email], {"instructorSessions": 1, "supportSessions": 1})
+
+        self.profile.role = "ADMIN"
+        self.profile.department = accounting
+        self.profile.save(update_fields=["role", "department", "updated_at"])
+        self.profile.departments.clear()
+        self.profile.departments.add(accounting)
+        accounting_response = self.request("get", f"/api/attendance/timesheet?month={today:%Y-%m}&scope=all")
+        self.assertEqual(accounting_response.json()["trainingSummaryByEmployee"], {})
+
+        self.profile.role = "MANAGER"
+        self.profile.department = None
+        self.profile.save(update_fields=["role", "department", "updated_at"])
+        self.profile.departments.clear()
+        leader_response = self.request("get", f"/api/attendance/timesheet?month={today:%Y-%m}&scope=all")
+        self.assertEqual(leader_response.json()["trainingSummaryByEmployee"], {})

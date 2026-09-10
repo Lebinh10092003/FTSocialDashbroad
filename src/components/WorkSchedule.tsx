@@ -64,6 +64,8 @@ type WorkDraft = {
 };
 type InlineDayDraft = { content: string; selfAssessment: string; leaderAssessment: string };
 type TimesheetShift = { shiftStart: string; shiftEnd: string; workMode: "direct" | "online"; isDayOff: boolean };
+type TimesheetEditorShift = { start: string; end: string; workMode: "direct" | "online" };
+type TimesheetEditorState = { date: string; isDayOff: boolean; shifts: TimesheetEditorShift[]; loading: boolean; saving: boolean; error: string };
 type DayEditState = { date: string; tasks: WorkTask[] };
 type DayAssessmentMode = "default" | "completed" | "custom";
 type DayAssessmentEntry = { mode: DayAssessmentMode; note: string };
@@ -1355,6 +1357,7 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, idToken,
   const [dirtyRows, setDirtyRows] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [attendanceByDate, setAttendanceByDate] = useState<Record<string, TimesheetShift[]>>({});
+  const [attendanceEditor, setAttendanceEditor] = useState<TimesheetEditorState | null>(null);
   const savingRef = useRef(false);
   const draftsRef = useRef(drafts);
   const dirtyRowsRef = useRef(dirtyRows);
@@ -1387,6 +1390,62 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, idToken,
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [gridKey, idToken, people]);
+
+  const openAttendanceEditor = async (date: string) => {
+    if (people || !idToken) return;
+    setAttendanceEditor({ date, isDayOff: false, shifts: [], loading: true, saving: false, error: "" });
+    try {
+      const response = await fetch(`/api/attendance/timesheet/prefill?date=${date}`, { headers: { Authorization: `Bearer ${idToken}` } });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Không thể tải công ca.");
+      const existing = payload.existing || [];
+      const isDayOff = Boolean(existing[0]?.isDayOff || (!existing.length && payload.defaultDayOff));
+      const shifts = existing.length && !isDayOff
+        ? existing.map((item: any) => ({ start: item.shiftStart, end: item.shiftEnd, workMode: item.workMode }))
+        : (payload.shifts || []).map((item: any) => ({ start: item.start, end: item.end, workMode: item.workMode }));
+      setAttendanceEditor({
+        date,
+        isDayOff,
+        shifts: isDayOff ? [] : (shifts.length ? shifts : [{ start: "08:00", end: "12:00", workMode: "direct" }]),
+        loading: false,
+        saving: false,
+        error: "",
+      });
+    } catch (cause: any) {
+      setAttendanceEditor(current => current?.date === date ? { ...current, loading: false, error: cause.message || "Không thể tải công ca." } : current);
+    }
+  };
+
+  const updateAttendanceShift = (index: number, patch: Partial<TimesheetEditorShift>) => {
+    setAttendanceEditor(current => current ? {
+      ...current,
+      shifts: current.shifts.map((shift, shiftIndex) => shiftIndex === index ? { ...shift, ...patch } : shift),
+    } : current);
+  };
+
+  const saveAttendanceEditor = async () => {
+    const current = attendanceEditor;
+    if (!current || current.loading || current.saving || !idToken) return;
+    if (!current.isDayOff && !current.shifts.length) {
+      setAttendanceEditor({ ...current, error: "Vui lòng thêm ít nhất một ca." });
+      return;
+    }
+    setAttendanceEditor({ ...current, saving: true, error: "" });
+    try {
+      const response = await fetch("/api/attendance/timesheet/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ workDate: current.date, isDayOff: current.isDayOff, shifts: current.isDayOff ? [] : current.shifts }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Không thể lưu công ca.");
+      setAttendanceByDate(previous => ({ ...previous, [current.date]: payload.entries || [] }));
+      setAttendanceEditor(null);
+      window.dispatchEvent(new CustomEvent("ft-timesheet-saved", { detail: { date: current.date } }));
+    } catch (cause: any) {
+      setAttendanceEditor(latest => latest?.date === current.date ? { ...latest, saving: false, error: cause.message || "Không thể lưu công ca." } : latest);
+    }
+  };
 
   useEffect(() => {
     setDrafts((current) => {
@@ -1503,7 +1562,7 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, idToken,
     };
   }, [dirtyRows, drafts, saving]);
 
-  return <section className="overflow-hidden border border-slate-400 bg-white shadow-sm">
+  return <><section className="overflow-hidden border border-slate-400 bg-white shadow-sm">
     <div className="overflow-x-auto"><table className="w-full min-w-[1400px] table-fixed border-collapse text-sm">
       <thead className="bg-[#e5f4e8] text-[#001e40]"><tr>
         <th className="w-24 border-b border-r border-slate-400 px-2 py-2 text-left">Thứ</th><th className="w-28 border-b border-r border-slate-400 px-2 py-2 text-left">Ngày</th><th className="w-16 border-b border-r border-slate-400 px-2 py-2 text-center">Tuần</th>
@@ -1521,7 +1580,7 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, idToken,
           {people && <td className="border-b border-r border-slate-400 px-2 py-2"><b className="block">{row.person?.name}</b></td>}
           <td className="border-b border-r border-slate-400 p-0"><ImportantWorkContentEditor value={draft.content} tasks={workItems} onInput={(event) => resizeGridTextarea(event.currentTarget)} onChange={(event) => updateCell(row.key, { content: event.target.value })} onBlur={() => void saveTable()} className={editorClass} /></td>
           <td className="border-b border-r border-slate-400 p-0"><textarea ref={resizeGridTextarea} value={draft.selfAssessment} onInput={(event) => resizeGridTextarea(event.currentTarget)} onChange={(event) => updateCell(row.key, { selfAssessment: event.target.value })} onBlur={() => void saveTable()} placeholder="1. Ghi chú tiến trình hiện tại" className={`${editorClass} text-xs ${compactSelfAssessment ? "content-center text-center font-bold text-emerald-700" : ""}`} /></td>
-          {!people && <td className="border-b border-r border-slate-400 px-3 py-2 text-xs leading-6 text-slate-700">
+          {!people && <td onDoubleClick={() => void openAttendanceEditor(row.date)} title="Bấm đúp để chỉnh sửa công ca" className="cursor-pointer border-b border-r border-slate-400 px-3 py-2 align-middle text-xs leading-6 text-slate-700 hover:bg-emerald-50/60">
             {(attendanceByDate[row.date] || []).length
               ? (attendanceByDate[row.date] || []).map((shift, index) => <div key={index} className={shift.isDayOff ? "font-bold text-amber-700" : "font-semibold"}>{shift.isDayOff ? "Nghỉ" : `${shift.workMode === "online" ? "Online" : "Trực tiếp"}: ${shift.shiftStart} - ${shift.shiftEnd}`}</div>)
               : <span className="text-slate-300">—</span>}
@@ -1530,7 +1589,34 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, idToken,
         </tr>;
       })}</tbody>
     </table></div>
-  </section>;
+  </section>
+    {attendanceEditor && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={event => { if (event.target === event.currentTarget) void saveAttendanceEditor(); }}>
+      <div className="w-full max-w-2xl rounded-2xl border bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div><p className="text-xs font-bold uppercase text-emerald-600">Chỉnh sửa công ca</p><h3 className="mt-1 text-lg font-extrabold">Ngày {fullDate(attendanceEditor.date)}</h3></div>
+          <button type="button" onClick={() => setAttendanceEditor(null)} aria-label="Đóng không lưu" className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="max-h-[70vh] overflow-y-auto p-5">
+          {attendanceEditor.loading ? <p className="py-10 text-center text-sm text-slate-500">Đang tải công ca...</p> : <>
+            <label className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+              <input type="checkbox" checked={attendanceEditor.isDayOff} onChange={event => setAttendanceEditor(current => current ? { ...current, isDayOff: event.target.checked, shifts: event.target.checked ? [] : (current.shifts.length ? current.shifts : [{ start: "08:00", end: "12:00", workMode: "direct" }]) } : current)} className="h-4 w-4" />
+              Tích vào đây nếu là ngày nghỉ
+            </label>
+            {!attendanceEditor.isDayOff && <div className="mt-4 space-y-3">{attendanceEditor.shifts.map((shift, index) => <div key={index} className="grid gap-3 rounded-xl border bg-slate-50 p-4 sm:grid-cols-[1fr_1fr_1.2fr_auto]">
+              <label><span className="mb-1 block text-xs font-bold text-slate-500">Bắt đầu (24h)</span><Time24Input label={`Bắt đầu ca ${index + 1}`} value={shift.start} onChange={value => updateAttendanceShift(index, { start: value })} /></label>
+              <label><span className="mb-1 block text-xs font-bold text-slate-500">Kết thúc (24h)</span><Time24Input label={`Kết thúc ca ${index + 1}`} value={shift.end} onChange={value => updateAttendanceShift(index, { end: value })} /></label>
+              <label><span className="mb-1 block text-xs font-bold text-slate-500">Hình thức</span><select value={shift.workMode} onChange={event => updateAttendanceShift(index, { workMode: event.target.value as "direct" | "online" })} className="ft-input"><option value="direct">Trực tiếp</option><option value="online">Online</option></select></label>
+              <button type="button" onClick={() => setAttendanceEditor(current => current ? { ...current, shifts: current.shifts.filter((_, shiftIndex) => shiftIndex !== index) } : current)} title="Xóa ca" className="self-end rounded-lg p-2 text-rose-500 hover:bg-rose-50"><Trash2 className="h-4 w-4" /></button>
+            </div>)}
+              <button type="button" onClick={() => setAttendanceEditor(current => current ? { ...current, shifts: [...current.shifts, { start: "13:30", end: "17:30", workMode: "direct" }] } : current)} className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed py-2.5 text-sm font-bold text-slate-500 hover:border-emerald-400 hover:text-emerald-700"><Plus className="h-4 w-4" />Thêm ca</button>
+            </div>}
+            {attendanceEditor.error && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700">{attendanceEditor.error}</p>}
+          </>}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t px-5 py-4"><button type="button" onClick={() => setAttendanceEditor(null)} className="ft-btn ft-btn-secondary">Hủy</button><button type="button" disabled={attendanceEditor.loading || attendanceEditor.saving} onClick={() => void saveAttendanceEditor()} className="ft-btn ft-btn-primary">{attendanceEditor.saving ? "Đang lưu..." : "Lưu"}</button></div>
+      </div>
+    </div>}
+  </>;
 }
 
 function SheetView({ sheetUrl, setSheetUrl, sheetKey, notice, setNotice, onSync }: any) {
