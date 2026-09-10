@@ -390,10 +390,10 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
   const trainingSummary = data?.trainingSummaryByEmployee?.[summaryEmployeeEmail];
 
   return (
-    <div className="workspace-module-canvas flex min-h-dvh bg-slate-50 font-sans text-slate-900 xl:h-dvh xl:overflow-hidden">
+    <div className="workspace-module-canvas flex min-h-dvh items-start bg-slate-50 font-sans text-slate-900">
       {/* Employee sidebar (privileged only) */}
       {isPrivileged && (
-        <aside className="hidden w-72 shrink-0 flex-col border-r bg-white lg:flex xl:h-dvh xl:overflow-hidden">
+        <aside className="sticky top-0 hidden h-dvh w-72 shrink-0 flex-col overflow-hidden border-r bg-white lg:flex">
           <div className="border-b px-4 py-4">
             <button type="button" onClick={onBackToWorkspace} className="ft-btn ft-btn-secondary w-full justify-center"><ArrowLeft className="h-4 w-4" />Workspace</button>
           </div>
@@ -419,9 +419,9 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
         </aside>
       )}
 
-      <div className="flex min-h-dvh min-w-0 flex-1 flex-col xl:h-dvh xl:min-h-0 xl:overflow-hidden">
+      <div className="flex min-h-dvh min-w-0 flex-1 flex-col">
         {/* Header */}
-        <header className="shrink-0 border-b bg-white/90 backdrop-blur-xl">
+        <header className="sticky top-0 z-30 shrink-0 border-b bg-white/90 backdrop-blur-xl">
           <div className="mx-auto flex h-24 max-w-[1400px] items-center justify-between px-5 sm:px-8">
             {!isPrivileged && <button type="button" onClick={onBackToWorkspace} className="ft-btn ft-btn-secondary"><ArrowLeft className="h-4 w-4" />Workspace</button>}
             <div className="flex items-center gap-3"><div className="grid h-14 w-14 place-items-center rounded-xl bg-emerald-700 text-white"><UserCheck className="h-8 w-8" /></div><span className="text-xl font-extrabold">Công ca{selectedEmpName ? ` — ${selectedEmpName}` : ''}</span></div>
@@ -429,7 +429,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-[1400px] flex-1 px-5 py-8 sm:px-8 sm:py-10 xl:flex xl:min-h-0 xl:flex-col xl:overflow-hidden">
+        <main className="mx-auto w-full max-w-[1400px] flex-1 px-5 py-8 sm:px-8 sm:py-10">
           {/* Title row */}
           <section className="mb-7">
             <p className="text-xl font-extrabold uppercase tracking-wide text-emerald-700 sm:text-2xl">Xin chào, {userName}</p>
@@ -450,9 +450,9 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
             </div>
           )}
 
-          <div className="grid items-start gap-6 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
             {/* Monthly grid table */}
-            <div className="min-w-0 rounded-2xl border bg-white p-5 shadow-sm xl:flex xl:min-h-0 xl:flex-col xl:overflow-hidden">
+            <div className="min-w-0 rounded-2xl border bg-white p-5 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-bold uppercase text-emerald-600">Bảng công{selectedEmpName ? ` — ${selectedEmpName}` : ''}</p>
@@ -461,7 +461,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
                 <label><span className="sr-only">Chọn tháng</span><input type="month" value={month} onChange={e => setMonth(e.target.value)} className="ft-input" /></label>
               </div>
 
-              <div className="mt-5 overflow-x-auto rounded-xl border xl:min-h-0 xl:flex-1 xl:overflow-auto">
+              <div className="mt-5 overflow-x-auto rounded-xl border">
                 <table className="ft-table min-w-[1160px] table-fixed text-sm">
                   <colgroup>
                     <col className="w-16" />
@@ -542,7 +542,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
             </div>
 
             {/* Fixed right rail: summary and monthly Sheet link stay together. */}
-            <div className="space-y-4 xl:max-h-full xl:overflow-y-auto xl:overscroll-contain">
+            <div className="space-y-4 xl:sticky xl:top-28 xl:max-h-[calc(100dvh-8rem)] xl:overflow-y-auto">
               <aside className="rounded-2xl border bg-white p-5 shadow-sm">
                 <p className="text-xs font-bold uppercase text-emerald-600">Tổng quan{selectedEmpName ? ` — ${selectedEmpName}` : ''}</p>
                 <h2 className="mt-1 text-xl font-extrabold">Tháng {fmtMonthLabel(month)}</h2>
