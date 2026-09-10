@@ -1,0 +1,10 @@
+[Unit]
+Description=Check training assessment warnings and retention every day
+
+[Timer]
+OnCalendar=*-*-* 00:15:00 Asia/Ho_Chi_Minh
+Persistent=true
+Unit=workspace-assessment-lifecycle.service
+
+[Install]
+WantedBy=timers.target

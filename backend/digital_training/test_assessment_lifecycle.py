@@ -1,12 +1,13 @@
 import json
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from authentication.models import UserProfile, WorkspaceNotification
-from .assessment_lifecycle import lifecycle_warning
+from .assessment_lifecycle import assessment_retention_anchor, lifecycle_warning, run_assessment_lifecycle
 from .assessment_service import _sheet_attempt_row
 from .models import TrainingAssessment, TrainingAssessmentAttempt, TrainingPartner
 
@@ -62,3 +63,28 @@ class AssessmentLifecycleTests(TestCase):
         response = self.client.get("/api/notifications")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["unreadCount"], 1)
+
+    def test_legacy_completed_assessment_uses_attempt_end_as_anchor(self):
+        self.assessment.status = "backup_complete"
+        self.assessment.closed_at = None
+        self.assessment.closes_at = None
+        self.assessment.save(update_fields=["status", "closed_at", "closes_at"])
+        ended_at = timezone.now() - timedelta(days=28)
+        TrainingAssessmentAttempt.objects.filter(pk=self.attempt.pk).update(
+            expires_at=ended_at, submitted_at=ended_at,
+        )
+        self.assertEqual(assessment_retention_anchor(self.assessment).date(), ended_at.date())
+        self.assertIn("2 ng\u00e0y", lifecycle_warning(self.assessment)["label"])
+
+    @patch("digital_training.assessment_lifecycle.verify_assessment_backup", side_effect=RuntimeError("Sheet unavailable"))
+    def test_day_30_hard_deletes_even_when_backup_fails_and_warns(self, _verify):
+        assessment_id = self.assessment.pk
+        self.assessment.closed_at = timezone.now() - timedelta(days=30)
+        self.assessment.save(update_fields=["closed_at"])
+        result = run_assessment_lifecycle()
+        self.assertEqual(result["failedBackup"], 1)
+        self.assertEqual(result["deleted"], 1)
+        self.assertFalse(TrainingAssessment.objects.filter(pk=assessment_id).exists())
+        warning = WorkspaceNotification.objects.get(event_key=f"assessment:{assessment_id}:backup-failed-before-hard-delete")
+        self.assertEqual(warning.severity, "urgent")
+        self.assertEqual(warning.target_modules, ["digital-training"])

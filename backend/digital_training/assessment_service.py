@@ -9,6 +9,7 @@ import secrets
 import time
 import unicodedata
 from collections import Counter
+from datetime import timedelta
 from decimal import Decimal
 
 import requests
@@ -1226,14 +1227,27 @@ def prepare_assessment_google_sheet(assessment):
             body={"requests": requests_body},
         ).execute()
 
+    retention_anchor = assessment.closes_at or assessment.closed_at
+    retention_deadline = retention_anchor + timedelta(days=30) if retention_anchor else None
     overview_values = [
         ["KI\u1ec2M TRA CU\u1ed0I KH\u00d3A T\u1eacP HU\u1ea4N", assessment.title],
+        ["Phi\u00ean b\u1ea3n c\u1ea5u tr\u00fac", "FT-ASSESSMENT-2.0"],
+        ["M\u00e3 b\u00e0i ki\u1ec3m tra", assessment.pk],
         ["Kh\u00e1ch h\u00e0ng", assessment.partner.name if assessment.partner else ""],
         ["Nh\u00f3m \u0111\u1ed1i t\u01b0\u1ee3ng", assessment.audience_group],
         ["S\u1ed1 ng\u01b0\u1eddi", len(assessment.participants or [])],
         ["S\u1ed1 m\u00e3 \u0111\u1ec1", len(variants_for(assessment))],
         ["Tr\u1ea1ng th\u00e1i", assessment.status],
+        ["M\u1edf b\u00e0i", _sheet_local_datetime(assessment.opens_at)],
+        ["\u0110\u00f3ng b\u00e0i", _sheet_local_datetime(retention_anchor)],
+        ["H\u1ea1n x\u00f3a d\u1eef li\u1ec7u web", _sheet_local_datetime(retention_deadline)],
+        ["Chu\u1ea9n d\u1eef li\u1ec7u", "M\u1ed7i c\u00e2u h\u1ecfi v\u00e0 b\u00e0i l\u00e0m ph\u1ea3i c\u00f3 m\u00e3 \u0111\u1ecbnh danh, tr\u1ea1ng th\u00e1i \u0111\u1ed3ng b\u1ed9 v\u00e0 b\u1ea3n JSON \u0111\u1ea7y \u0111\u1ee7."],
     ]
+    service.spreadsheets().values().clear(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{layout['overview']}'!A:ZZ",
+        body={},
+    ).execute()
     service.spreadsheets().values().clear(
         spreadsheetId=spreadsheet_id,
         range=f"'{layout['distribution']}'!A:ZZ",

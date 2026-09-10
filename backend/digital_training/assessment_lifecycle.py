@@ -2,7 +2,7 @@ import hashlib
 import json
 from datetime import timedelta
 
-from django.db import transaction
+from django.db.models import Max
 from django.utils import timezone
 
 from authentication.notifications import notify_workspace
@@ -16,7 +16,21 @@ DRAFT_TRASH_DAYS = 3
 
 
 def assessment_retention_anchor(assessment):
-    return assessment.closed_at or assessment.closes_at
+    """Return the real end of the test, including a safe fallback for legacy rows."""
+    if assessment.closes_at:
+        return assessment.closes_at
+    if assessment.closed_at:
+        return assessment.closed_at
+    if assessment.status not in {"closed", "graded", "backup_complete"}:
+        return None
+    completed = assessment.attempts.filter(status__in=["submitted", "timed_out"]).aggregate(
+        last_submitted=Max("submitted_at"), last_expiry=Max("expires_at")
+    )
+    candidates = [value for value in completed.values() if value]
+    if candidates:
+        return max(candidates)
+    base = assessment.opens_at or assessment.created_at
+    return base + timedelta(minutes=max(1, assessment.duration_minutes or 1)) if base else None
 
 
 def refresh_assessment_status(assessment):
@@ -169,6 +183,11 @@ def run_assessment_lifecycle(now=None):
     now = now or timezone.now()
     result = {"warned": 0, "backedUp": 0, "deleted": 0, "failedBackup": 0, "purgedDrafts": 0}
     for assessment in TrainingAssessment.objects.filter(trashed_at__isnull=True).iterator():
+        if assessment.status == "published" and assessment.closes_at and assessment.closes_at <= now:
+            assessment.status = "closed"
+            assessment.closed_at = assessment.closes_at
+            assessment.attempts.filter(status="in_progress").update(status="timed_out", submitted_at=now)
+            assessment.save(update_fields=["status", "closed_at", "updated_at"])
         refresh_assessment_status(assessment)
         warning = lifecycle_warning(assessment, now)
         if warning:
@@ -187,16 +206,29 @@ def run_assessment_lifecycle(now=None):
         if not ok:
             result["failedBackup"] += 1
             notify_workspace(
-                event_key=f"assessment:{assessment.pk}:backup-blocked:{now.date().isoformat()}",
-                title="Không thể xóa an toàn bài kiểm tra",
-                message=f"Bài “{assessment.title}” đã đến hạn xóa nhưng bản sao Sheet chưa đầy đủ. Hệ thống đã giữ lại dữ liệu và yêu cầu quản trị viên xử lý.",
-                severity="urgent", category="digital-training", target_roles=["ADMIN"],
-                action_url=f"/training-assessments/{assessment.pk}",
+                event_key=f"assessment:{assessment.pk}:backup-failed-before-hard-delete",
+                title="Khẩn cấp: sao lưu lỗi trước khi xóa",
+                message=(
+                    f"Bài “{assessment.title}” của đơn vị "
+                    f"{assessment.partner.name if assessment.partner else 'chưa xác định'} đã đủ 30 ngày. "
+                    "Bản Google Sheet có thể chưa đầy đủ nhưng dữ liệu trên hệ thống vẫn bị xóa hoàn toàn theo chính sách lưu trữ."
+                ),
+                severity="urgent", category="digital-training", target_modules=["digital-training"],
+                action_url="/training-assessments",
             )
-            continue
-        result["backedUp"] += 1
+        else:
+            result["backedUp"] += 1
+        assessment_id = assessment.pk
+        title = assessment.title
         assessment.delete()
         result["deleted"] += 1
+        notify_workspace(
+            event_key=f"assessment:{assessment_id}:retention-deleted",
+            title="Đã xóa bài kiểm tra đủ 30 ngày",
+            message=f"Bài “{title}” đã được xóa hoàn toàn khỏi hệ thống theo chính sách lưu trữ tối đa 30 ngày.",
+            severity="warning", category="digital-training", target_modules=["digital-training"],
+            action_url="/training-assessments",
+        )
     stale_drafts = TrainingAssessment.objects.filter(trashed_at__isnull=False, purge_at__lte=now)
     result["purgedDrafts"] = stale_drafts.count()
     stale_drafts.delete()
