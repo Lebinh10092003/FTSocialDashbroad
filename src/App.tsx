@@ -1,6 +1,6 @@
 import React, { Component, Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { appDialog } from './components/AppDialog';
-import { ArrowLeft, BadgeDollarSign, CalendarCheck, CalendarDays, CalendarRange, ChartColumnBig, ClipboardList, FileCheck2, GraduationCap, Mail, Megaphone, Moon, QrCode, ShieldUser, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, BadgeDollarSign, CalendarCheck, CalendarDays, CalendarRange, ChartColumnBig, ClipboardList, ContactRound, FileCheck2, GraduationCap, Mail, Megaphone, Moon, QrCode, ShieldUser, TriangleAlert } from 'lucide-react';
 
 import { Channel, UserRole } from './types';
 import Sidebar from './components/social-dashboard/Sidebar';
@@ -653,7 +653,7 @@ export default function App() {
         <header className="sticky top-0 z-30 w-full glass-panel border-b border-white/50">
           <div className="relative mx-auto flex max-w-[1600px] items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
             <div className="flex shrink-0 items-center">
-              <img src="/logo.png" alt="FermatTech Logo" className="h-8 object-contain" />
+              <img src="/logo.png" alt="FermatTech Logo" className="h-12 object-contain" />
             </div>
             <div className="pointer-events-none absolute left-1/2 max-w-[48vw] -translate-x-1/2 truncate whitespace-nowrap text-center">
               <h1 className="workspace-title text-sm font-extrabold tracking-tight sm:text-lg lg:text-2xl">
@@ -736,6 +736,7 @@ export default function App() {
   if (viewMode === 'communication-tools') {
     const tools = [
       { mode: 'email-builder' as ViewMode, title: 'Thiết kế Email', description: 'Tạo, quản lý mẫu Email và chữ ký dùng chung.', icon: Mail, color: 'from-pink-500 to-violet-600', allowed: canAccessView('email-builder') },
+      { mode: 'signature-builder' as ViewMode, title: 'Tạo chữ ký Email', description: 'Tùy biến thông tin, mạng xã hội và sao chép chữ ký dùng cho Gmail hoặc Outlook.', icon: ContactRound, color: 'from-[#104581] to-[#1473D1]', allowed: canAccessView('signature-builder') },
       { mode: 'qr-generator' as ViewMode, title: 'Tạo mã QR', description: 'Tạo mã QR, kiểm tra đường dẫn và xuất poster truyền thông.', icon: QrCode, color: 'from-blue-600 to-cyan-500', allowed: canAccessView('qr-generator') },
     ].filter(tool => tool.allowed);
     return (
@@ -874,7 +875,7 @@ export default function App() {
   if (viewMode === 'signature-builder' && !canAccessView('signature-builder')) return null;
 
   if (viewMode === 'signature-builder') {
-    return <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp Trình tạo chữ ký...</div>}><SignatureBuilder onOpenEmailBuilder={() => setViewMode('email-builder')} /></Suspense>;
+    return <Suspense fallback={<div className="grid h-screen place-items-center bg-slate-50">Đang nạp Trình tạo chữ ký...</div>}><SignatureBuilder onBack={() => setViewMode('communication-tools')} userName={user.displayName} userEmail={user.email} jobTitle={user.jobTitle?.name} /></Suspense>;
   }
 
   if (viewMode === 'email-builder' && !canAccessView('email-builder')) return null;

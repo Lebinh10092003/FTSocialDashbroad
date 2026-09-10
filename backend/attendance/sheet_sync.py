@@ -5,6 +5,7 @@ from collections import defaultdict
 from authentication.models import UserProfile
 from authentication.monthly_sheets import get_monthly_sheet_links, normalize_label
 from digital_training.models import TrainingSession
+from django.utils import timezone
 from integrations.google_sheets import extract_spreadsheet_id
 
 from .models import TimesheetEntry
@@ -42,7 +43,10 @@ def _training_notes(profiles, dates):
         profile.email: {normalize_label(profile.name), normalize_label(profile.email)} - {""}
         for profile in profiles.values()
     }
-    sessions = TrainingSession.objects.filter(session_date__in=dates).exclude(
+    sessions = TrainingSession.objects.filter(
+        session_date__in=dates,
+        session_date__lte=timezone.localdate(),
+    ).exclude(
         status__in=["cancelled", "unscheduled"]
     ).order_by("session_date", "start_time", "pk")
     for session in sessions:

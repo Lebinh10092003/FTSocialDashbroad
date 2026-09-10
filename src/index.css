@@ -1249,6 +1249,10 @@ body.workspace-app-theme .ft-module-shell {
   background-attachment: fixed !important;
   color: var(--workspace-text);
 }
+body.workspace-app-theme #root > div.signature-builder-canvas:first-child {
+  background: #eef3f9 !important;
+  color: #1e293b;
+}
 body.workspace-app-theme .ft-module-header,
 body.workspace-app-theme .ft-mobile-nav,
 body.workspace-app-theme .workspace-module-canvas > header {

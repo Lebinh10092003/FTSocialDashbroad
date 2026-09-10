@@ -96,6 +96,28 @@ class AttendanceSheetSyncTests(TestCase):
         format_body = service.spreadsheets.return_value.batchUpdate.call_args.kwargs["body"]
         self.assertEqual(format_body["requests"][0]["repeatCell"]["range"]["startColumnIndex"], 17)
 
+    @mock.patch("attendance.sheet_sync.timezone.localdate", return_value=date(2026, 9, 2))
+    def test_future_training_session_is_not_written_to_note_column(self, _localdate):
+        self.create_shift(1, 8)
+        TrainingSession.objects.create(
+            title="Lịch tập huấn tương lai",
+            session_date=date(2026, 9, 3),
+            instructor_name=self.profile.name,
+            status="planned",
+        )
+        service = self.service()
+
+        push_groups_to_attendance_sheet(
+            service, {(self.profile.email, date(2026, 9, 3))}
+        )
+
+        data = service.spreadsheets.return_value.values.return_value.batchUpdate.call_args.kwargs["body"]["data"]
+        self.assertEqual(data[1], {
+            "range": "'Nguyễn Thanh Phong'!R11",
+            "values": [[""]],
+        })
+        service.spreadsheets.return_value.batchUpdate.assert_not_called()
+
     def test_more_than_three_shifts_inserts_inherited_row_and_continues(self):
         for number, hour in enumerate((8, 10, 13, 16), start=1):
             self.create_shift(number, hour)
