@@ -13,6 +13,7 @@ from django.utils import timezone
 from authentication.models import SystemConfig, UserProfile
 from authentication.monthly_sheets import get_monthly_sheet_links
 from attendance.models import TimesheetEntry
+from attendance.sheet_sync import push_groups_to_attendance_sheet
 from integrations.google_sheets import build_sheets_service, extract_spreadsheet_id
 
 from .models import WorkItem, WorkScheduleSheetChange, WorkScheduleSheetSyncLease
@@ -811,6 +812,7 @@ def sync_to_sheet(google_token=None, force=False):
             service = _service(google_token)
             ensure_sync_columns(service)
             result = push_groups_to_sheet(service, groups, force=force)
+            result["attendance"] = push_groups_to_attendance_sheet(service, groups)
             conflict_groups = {(row["email"], datetime.fromisoformat(row["date"]).date()) for row in result["conflicts"]}
             for change in pending:
                 is_conflict = (change.executor_email, change.work_date) in conflict_groups

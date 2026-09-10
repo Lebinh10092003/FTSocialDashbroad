@@ -390,10 +390,10 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
   const trainingSummary = data?.trainingSummaryByEmployee?.[summaryEmployeeEmail];
 
   return (
-    <div className="workspace-module-canvas flex min-h-dvh bg-slate-50 font-sans text-slate-900">
+    <div className="workspace-module-canvas flex min-h-dvh bg-slate-50 font-sans text-slate-900 xl:h-dvh xl:overflow-hidden">
       {/* Employee sidebar (privileged only) */}
       {isPrivileged && (
-        <aside className="hidden w-72 shrink-0 flex-col border-r bg-white lg:flex">
+        <aside className="hidden w-72 shrink-0 flex-col border-r bg-white lg:flex xl:h-dvh xl:overflow-hidden">
           <div className="border-b px-4 py-4">
             <button type="button" onClick={onBackToWorkspace} className="ft-btn ft-btn-secondary w-full justify-center"><ArrowLeft className="h-4 w-4" />Workspace</button>
           </div>
@@ -419,9 +419,9 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
         </aside>
       )}
 
-      <div className="flex min-h-dvh flex-1 flex-col">
+      <div className="flex min-h-dvh min-w-0 flex-1 flex-col xl:h-dvh xl:min-h-0 xl:overflow-hidden">
         {/* Header */}
-        <header className="border-b bg-white/90 backdrop-blur-xl">
+        <header className="shrink-0 border-b bg-white/90 backdrop-blur-xl">
           <div className="mx-auto flex h-24 max-w-[1400px] items-center justify-between px-5 sm:px-8">
             {!isPrivileged && <button type="button" onClick={onBackToWorkspace} className="ft-btn ft-btn-secondary"><ArrowLeft className="h-4 w-4" />Workspace</button>}
             <div className="flex items-center gap-3"><div className="grid h-14 w-14 place-items-center rounded-xl bg-emerald-700 text-white"><UserCheck className="h-8 w-8" /></div><span className="text-xl font-extrabold">Công ca{selectedEmpName ? ` — ${selectedEmpName}` : ''}</span></div>
@@ -429,7 +429,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-[1400px] flex-1 px-5 py-8 sm:px-8 sm:py-10">
+        <main className="mx-auto w-full max-w-[1400px] flex-1 px-5 py-8 sm:px-8 sm:py-10 xl:flex xl:min-h-0 xl:flex-col xl:overflow-hidden">
           {/* Title row */}
           <section className="mb-7">
             <p className="text-xl font-extrabold uppercase tracking-wide text-emerald-700 sm:text-2xl">Xin chào, {userName}</p>
@@ -450,9 +450,9 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
             </div>
           )}
 
-          <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="grid items-start gap-6 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_300px]">
             {/* Monthly grid table */}
-            <div className="min-w-0 rounded-2xl border bg-white p-5 shadow-sm">
+            <div className="min-w-0 rounded-2xl border bg-white p-5 shadow-sm xl:flex xl:min-h-0 xl:flex-col xl:overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-bold uppercase text-emerald-600">Bảng công{selectedEmpName ? ` — ${selectedEmpName}` : ''}</p>
@@ -461,7 +461,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
                 <label><span className="sr-only">Chọn tháng</span><input type="month" value={month} onChange={e => setMonth(e.target.value)} className="ft-input" /></label>
               </div>
 
-              <div className="mt-5 overflow-x-auto rounded-xl border">
+              <div className="mt-5 overflow-x-auto rounded-xl border xl:min-h-0 xl:flex-1 xl:overflow-auto">
                 <table className="ft-table min-w-[1160px] table-fixed text-sm">
                   <colgroup>
                     <col className="w-16" />
@@ -473,7 +473,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
                     <col className="w-28" />
                     <col className="w-56" />
                   </colgroup>
-                  <thead><tr><th>Thứ</th><th>Ngày</th><th>Ca</th><th>Giờ bắt đầu</th><th>Giờ kết thúc</th><th>Số giờ làm</th><th>Hình thức</th><th>Ghi chú</th></tr></thead>
+                  <thead className="sticky top-0 z-10"><tr><th>Thứ</th><th>Ngày</th><th>Ca</th><th>Giờ bắt đầu</th><th>Giờ kết thúc</th><th>Số giờ làm</th><th>Hình thức</th><th>Ghi chú</th></tr></thead>
                   <tbody>
                     {loading ? (
                       <tr><td colSpan={8} className="px-5 py-14 text-center text-slate-400">Đang tải...</td></tr>
@@ -541,30 +541,30 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
               </div>
             </div>
 
-            {/* Summary — right column, matching the compact reference layout. */}
-            <aside className="rounded-2xl border bg-white p-5 shadow-sm xl:sticky xl:top-6">
-              <p className="text-xs font-bold uppercase text-emerald-600">Tổng quan{selectedEmpName ? ` — ${selectedEmpName}` : ''}</p>
-              <h2 className="mt-1 text-xl font-extrabold">Tháng {fmtMonthLabel(month)}</h2>
-              <p className="mt-1 text-sm font-semibold text-slate-500">Tính đến hết {weekdayLongName(summaryCutoff)}, ngày {fmtDate(summaryCutoff)}</p>
-              <div className="mt-5 space-y-5">
-                <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-100 text-emerald-700"><Clock className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{fmtHours(summary.totalMinutes)} giờ</p><p className="text-xs text-slate-500">Tổng giờ làm</p></div></div>
-                <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-xl bg-blue-100 text-blue-700"><MapPin className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{fmtHours(summary.offlineMinutes)} giờ</p><p className="text-xs text-slate-500">Trực tiếp</p></div></div>
-                <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-xl bg-violet-100 text-violet-700"><Laptop className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{fmtHours(summary.onlineMinutes)} giờ</p><p className="text-xs text-slate-500">Online</p></div></div>
-                {trainingSummary && <>
-                  <div className="border-t border-slate-100 pt-5"><div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-xl bg-cyan-100 text-cyan-700"><Users className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{trainingSummary.instructorSessions}</p><p className="text-xs text-slate-500">Số buổi tập huấn (Giảng viên)</p></div></div></div>
-                  <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-xl bg-amber-100 text-amber-700"><UserCheck className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{trainingSummary.supportSessions}</p><p className="text-xs text-slate-500">Số buổi hỗ trợ tập huấn (Nhân viên hỗ trợ)</p></div></div>
-                </>}
-              </div>
-            </aside>
-            {isAdmin && <div className="xl:col-start-2">
-              <MonthlySheetLinkEditor
+            {/* Fixed right rail: summary and monthly Sheet link stay together. */}
+            <div className="space-y-4 xl:max-h-full xl:overflow-y-auto xl:overscroll-contain">
+              <aside className="rounded-2xl border bg-white p-5 shadow-sm">
+                <p className="text-xs font-bold uppercase text-emerald-600">Tổng quan{selectedEmpName ? ` — ${selectedEmpName}` : ''}</p>
+                <h2 className="mt-1 text-xl font-extrabold">Tháng {fmtMonthLabel(month)}</h2>
+                <p className="mt-1 text-sm font-semibold text-slate-500">Tính đến hết {weekdayLongName(summaryCutoff)}, ngày {fmtDate(summaryCutoff)}</p>
+                <div className="mt-5 space-y-5">
+                  <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-100 text-emerald-700"><Clock className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{fmtHours(summary.totalMinutes)} giờ</p><p className="text-xs text-slate-500">Tổng giờ làm</p></div></div>
+                  <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-xl bg-blue-100 text-blue-700"><MapPin className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{fmtHours(summary.offlineMinutes)} giờ</p><p className="text-xs text-slate-500">Trực tiếp</p></div></div>
+                  <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-xl bg-violet-100 text-violet-700"><Laptop className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{fmtHours(summary.onlineMinutes)} giờ</p><p className="text-xs text-slate-500">Online</p></div></div>
+                  {trainingSummary && <>
+                    <div className="border-t border-slate-100 pt-5"><div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-xl bg-cyan-100 text-cyan-700"><Users className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{trainingSummary.instructorSessions}</p><p className="text-xs text-slate-500">Số buổi tập huấn (Giảng viên)</p></div></div></div>
+                    <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-xl bg-amber-100 text-amber-700"><UserCheck className="h-5 w-5" /></div><div><p className="text-2xl font-extrabold">{trainingSummary.supportSessions}</p><p className="text-xs text-slate-500">Số buổi hỗ trợ tập huấn (Nhân viên hỗ trợ)</p></div></div>
+                  </>}
+                </div>
+              </aside>
+              {isAdmin && <MonthlySheetLinkEditor
                 idToken={idToken}
                 month={month}
                 module="attendance"
                 title="Trang tính Công ca"
                 description="Liên kết theo từng tháng; chỉ Admin nhìn thấy và chỉnh sửa."
-              />
-            </div>}
+              />}
+            </div>
           </div>
         </main>
       </div>{/* end flex-1 wrapper */}
