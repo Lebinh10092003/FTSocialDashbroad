@@ -216,6 +216,42 @@ const initials = (name: string) =>
     .map((item) => item[0])
     .join("")
     .toUpperCase();
+const timeToMinutes = (value: string) => {
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(value || "").trim());
+  if (!match) return null;
+  const minutes = Number(match[1]) * 60 + Number(match[2]);
+  return Number.isFinite(minutes) && minutes >= 0 && minutes <= 24 * 60 ? minutes : null;
+};
+const dayWorkMinutes = (rows: WorkTask[]) => {
+  const spans = rows
+    .map((task) => ({ from: timeToMinutes(task.startTime), to: timeToMinutes(task.endTime) }))
+    .filter((span): span is { from: number; to: number } => span.from !== null && span.to !== null && span.to > span.from)
+    .sort((a, b) => a.from - b.from);
+  let total = 0,
+    blockFrom = -1,
+    blockTo = -1;
+  spans.forEach((span) => {
+    if (span.from > blockTo) {
+      if (blockTo >= 0) total += blockTo - blockFrom;
+      blockFrom = span.from;
+      blockTo = span.to;
+    } else if (span.to > blockTo) {
+      blockTo = span.to;
+    }
+  });
+  if (blockTo >= 0) total += blockTo - blockFrom;
+  return total;
+};
+const formatWorkHours = (minutes: number) => {
+  const hours = Math.floor(minutes / 60),
+    rest = minutes % 60;
+  return rest === 0 ? `${hours}h` : `${hours}h${String(rest).padStart(2, "0")}`;
+};
+const dayWorkSummary = (rows: WorkTask[]) => {
+  if (rows.length === 0) return "Ngày nghỉ";
+  const minutes = dayWorkMinutes(rows);
+  return minutes > 0 ? `Tổng giờ làm: ${formatWorkHours(minutes)}` : "Tổng giờ làm: chưa đặt giờ";
+};
 const authHeaders = (token: string, json = false): HeadersInit => ({
   Authorization: `Bearer ${token}`,
   ...(json ? { "Content-Type": "application/json" } : {}),
@@ -409,6 +445,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     [savingTask, setSavingTask] = useState(false),
     [error, setError] = useState("");
   const savingTaskRef = useRef(false);
+  const localEditSeqRef = useRef(0);
   const sheetKey = `ft-work-schedule-sheet:${userEmail}`;
   const [sheetUrl, setSheetUrl] = useState(() => localStorage.getItem(sheetKey) || SHEET_TEMPLATE),
     [sheetNotice, setSheetNotice] = useState("");
@@ -444,8 +481,10 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
   const load = async (silent = false) => {
     if (!silent) setLoading(true);
     setError("");
+    const editSeq = localEditSeqRef.current;
     try {
       const [items, people, team] = await Promise.all([requestJson("/api/work-schedule/items"), requestJson("/api/auth/assignable-staff"), requestJson("/api/work-schedule/team")]);
+      if (silent && editSeq !== localEditSeqRef.current) return;
       const nextTasks = Array.isArray(items.items) ? items.items : [];
       const nextStaff = Array.isArray(people) ? people : [];
       const nextTeamMembers = Array.isArray(team.members) ? team.members : [];
@@ -720,6 +759,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     const task = tasks.find((item) => item.id === draggedId);
     setDraggedId(null);
     if (!task || !task.canEdit || task.status === "reviewed") return;
+    localEditSeqRef.current += 1;
     const previousTasks = tasks,
       targetDate = patch.date || task.date,
       nextOrder = Math.max(0, ...tasks.filter((item) => item.executor.email === task.executor.email && item.date === targetDate && item.id !== task.id).map((item) => item.dailyOrder)) + 1;
@@ -746,7 +786,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
         method: "PATCH",
         body: JSON.stringify(draft),
       });
-      await load();
+      void load(true);
     } catch (cause: any) {
       setTasks(previousTasks);
       void appDialog.alert(cause.message, {
@@ -1232,7 +1272,8 @@ function WeekView({ tasks, userEmail, idToken, visibleDays, anchor, setAnchor, p
             {visibleDays.map((day: Date) => {
               const dayIso = iso(day),
                 rows = rowsFor(day),
-                muted = period === "month" && day.getMonth() !== currentMonth;
+                muted = period === "month" && day.getMonth() !== currentMonth,
+                showDaySummary = period === "week";
               return (
                 <div
                   key={dayIso}
@@ -1249,10 +1290,13 @@ function WeekView({ tasks, userEmail, idToken, visibleDays, anchor, setAnchor, p
                       setSelectedDate(dayIso);
                       setView("board");
                     }}
-                    className={`mb-2 grid h-8 w-8 place-items-center rounded-full text-sm font-extrabold ${dayIso === today ? "bg-blue-600 text-white" : muted ? "text-slate-400" : "text-slate-700"}`}
+                    className={`${showDaySummary ? "mb-1" : "mb-2"} grid h-8 w-8 place-items-center rounded-full text-sm font-extrabold ${dayIso === today ? "bg-blue-600 text-white" : muted ? "text-slate-400" : "text-slate-700"}`}
                   >
                     {day.getDate()}
                   </button>
+                  {showDaySummary && (
+                    <p className={`mb-2 rounded-lg px-2 py-1 text-[11px] font-bold leading-4 ${rows.length === 0 ? "bg-slate-100 text-slate-500" : "bg-blue-50 text-blue-700"}`}>{dayWorkSummary(rows)}</p>
+                  )}
                   <div className="space-y-2">{rows.map((task: WorkTask, index: number) => taskButton(task, index + 1))}</div>
                 </div>
               );
