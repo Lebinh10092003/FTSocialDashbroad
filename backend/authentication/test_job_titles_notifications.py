@@ -1,4 +1,8 @@
+from datetime import timedelta
+from unittest.mock import patch
+
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from .models import JobTitle, UserProfile, WorkspaceNotification
@@ -61,3 +65,35 @@ class JobTitleAndNotificationTests(TestCase):
         WorkspaceNotification.objects.create(event_key="work-item:43", title="Việc khác", message="Nội dung")
         self.assertEqual(self.client.post("/api/notifications/read-all").status_code, 200)
         self.assertEqual(self.client.get("/api/notifications").data["unreadCount"], 0)
+
+    @patch("authentication.views._token_notification_payloads")
+    def test_social_token_warning_targets_users_with_social_access(self, payloads):
+        expiry = timezone.now() + timedelta(days=3)
+        payloads.return_value = [{
+            "id": "facebook-scan-1",
+            "platform": "facebook",
+            "platformLabel": "Facebook",
+            "label": "Token quét Facebook",
+            "affectedPages": ["Fermat Tech"],
+            "expiresAt": expiry.isoformat(),
+            "expiresAtValue": expiry,
+            "daysRemaining": 3,
+        }]
+        communications = UserProfile.objects.create(
+            email="communications@example.test",
+            role="EMPLOYEE",
+            access_modules=["social-dashboard"],
+        )
+        unrelated = UserProfile.objects.create(
+            email="unrelated@example.test",
+            role="EMPLOYEE",
+            access_modules=["work-schedule"],
+        )
+
+        self.client.force_authenticate(communications)
+        visible = self.client.get("/api/notifications")
+        self.assertEqual(visible.data["notifications"][0]["category"], "social-dashboard")
+
+        self.client.force_authenticate(unrelated)
+        hidden = self.client.get("/api/notifications")
+        self.assertEqual(hidden.data["notifications"], [])

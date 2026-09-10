@@ -15,6 +15,7 @@ from .completion_service import complete_past_training_schedules
 from .product_service import sync_partner_product_subscriptions
 from .models import TrainingClass, TrainingCustomerMeeting, TrainingFinanceEntry, TrainingLead, TrainingMaterial, TrainingPartner, TrainingProduct, TrainingProductOpportunity, TrainingProductSubscription, TrainingSession, TrainingSurvey
 from .serializers import TrainingClassSerializer, TrainingCustomerMeetingSerializer, TrainingFinanceEntrySerializer, TrainingLeadSerializer, TrainingMaterialSerializer, TrainingPartnerSerializer, TrainingProductOpportunitySerializer, TrainingProductSerializer, TrainingProductSubscriptionSerializer, TrainingSessionSerializer, TrainingSurveySerializer
+from .session_notifications import notify_training_session_created, notify_training_session_deleted, notify_training_session_updated
 
 
 def _sync_session_to_work_schedule(item, kind, request):
@@ -140,6 +141,8 @@ def _crud_collection(request, queryset, serializer_class, kind):
     serializer.is_valid(raise_exception=True)
     item = serializer.save()
     _sync_session_to_work_schedule(item, kind, request)
+    if isinstance(item, TrainingSession):
+        notify_training_session_created(_snapshot(serializer_class, item, request))
     _audit_item(item, kind, f"Tạo {kind}", None, request, serializer_class)
     return Response(serializer_class(item, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
@@ -154,6 +157,8 @@ def _crud_detail(request, queryset, serializer_class, pk, kind):
         return _forbidden()
     if request.method == "DELETE":
         before = _snapshot(serializer_class, item, request)
+        if isinstance(item, TrainingSession):
+            notify_training_session_deleted(before)
         _audit_item(item, kind, f"Xóa {kind}", before, request, serializer_class)
         _delete_session_from_work_schedule(item, kind)
         item.delete()
@@ -163,6 +168,8 @@ def _crud_detail(request, queryset, serializer_class, pk, kind):
     serializer.is_valid(raise_exception=True)
     updated = serializer.save()
     _sync_session_to_work_schedule(updated, kind, request)
+    if isinstance(updated, TrainingSession):
+        notify_training_session_updated(before, _snapshot(serializer_class, updated, request))
     _audit_item(updated, kind, f"Cập nhật {kind}", before, request, serializer_class)
     return Response(serializer_class(updated, context={"request": request}).data)
 
