@@ -22,6 +22,7 @@ urlpatterns = [
     path("notifications", views.workspace_notifications, name="workspace_notifications"),
     path("notifications/read-all", views.read_all_workspace_notifications, name="read_all_workspace_notifications"),
     path("notifications/<int:notification_id>/read", views.read_workspace_notification, name="read_workspace_notification"),
+    path("monthly-sheet-links", views.monthly_sheet_links, name="monthly_sheet_links"),
     path("auth/logins", views.list_logins, name="list_logins"),
     path("admin/users", views.admin_users, name="admin_users"),
     path("admin/create-user", views.admin_create_user, name="admin_create_user"),

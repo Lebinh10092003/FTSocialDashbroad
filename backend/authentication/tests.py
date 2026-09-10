@@ -8,7 +8,8 @@ from rest_framework.authtoken.models import Token
 from django.utils import timezone
 
 from social.models import Channel
-from .models import Department, SystemConfig, UserProfile
+from .models import Department, JobTitle, SystemConfig, UserProfile, WorkspaceNotification
+from .monthly_sheets import remind_missing_monthly_sheet_links
 from .views import (
     SENSITIVE_CONFIG_KEYS,
     _bootstrap_admin,
@@ -121,6 +122,42 @@ class TokenLifecycleTests(TestCase):
 
     def test_scan_tokens_are_hidden_from_non_admin_config_payloads(self):
         self.assertIn("facebookScanTokens", SENSITIVE_CONFIG_KEYS)
+
+
+class MonthlySheetLinkTests(TestCase):
+    def _token_for(self, email, role, job_title=None):
+        user = get_user_model().objects.create_user(username=email, email=email, password="StrongPassword9921")
+        UserProfile.objects.create(email=email, name=email.split("@", 1)[0], role=role, job_title=job_title)
+        return Token.objects.create(user=user).key
+
+    def test_only_admin_can_read_and_update_monthly_links(self):
+        admin_token = self._token_for("admin-links@example.com", "ADMIN")
+        employee_token = self._token_for("staff-links@example.com", "EMPLOYEE")
+        url = "https://docs.google.com/spreadsheets/d/demo-monthly-sheet/edit"
+
+        denied = self.client.get("/api/monthly-sheet-links?month=2026-10", HTTP_AUTHORIZATION=f"Bearer {employee_token}")
+        self.assertEqual(denied.status_code, 403)
+        saved = self.client.put(
+            "/api/monthly-sheet-links?month=2026-10",
+            {"month": "2026-10", "module": "attendance", "url": url},
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {admin_token}",
+        )
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.json()["links"]["attendance"], url)
+
+    def test_missing_link_reminders_target_accounting_and_are_idempotent(self):
+        title = JobTitle.objects.create(name="Kế toán / HCNS")
+        self._token_for("accounting@example.com", "EMPLOYEE", title)
+
+        first = remind_missing_monthly_sheet_links("2026-10")
+        second = remind_missing_monthly_sheet_links("2026-10")
+
+        self.assertEqual(len(first["created"]), 2)
+        self.assertEqual(second["created"], [])
+        notification = WorkspaceNotification.objects.get(event_key="monthly-sheet-link-missing:attendance:2026-10")
+        self.assertEqual(notification.target_emails, ["accounting@example.com"])
+        self.assertEqual(notification.action_url, "/attendance")
 
 class BootstrapAdminTests(TestCase):
     def test_json_bootstrap_provisions_additional_admin(self):

@@ -36,6 +36,13 @@ from .models import (
     WorkspaceNotification, WorkspaceNotificationRead,
 )
 from .notifications import notification_visible_to, notify_workspace
+from .monthly_sheets import (
+    MODULES as MONTHLY_SHEET_MODULES,
+    get_monthly_sheet_links,
+    set_monthly_sheet_link,
+    valid_month,
+    valid_sheet_url,
+)
 from .permissions import IsAdmin, IsAuthenticated, IsManagerOrAdmin, IsWorkspaceAuthenticated, request_role
 
 User = get_user_model()
@@ -671,6 +678,25 @@ WORKSPACE_MODULES = {
     "digital-training",
     "finance-report",
 }
+
+
+@api_view(["GET", "PUT"])
+@permission_classes([IsAdmin])
+def monthly_sheet_links(request):
+    month = str(request.query_params.get("month") or request.data.get("month") or timezone.localdate().strftime("%Y-%m")).strip()
+    if not valid_month(month):
+        return Response({"error": "Tháng không hợp lệ; dùng định dạng YYYY-MM."}, status=status.HTTP_400_BAD_REQUEST)
+    if request.method == "PUT":
+        module = str(request.data.get("module") or "").strip()
+        url = str(request.data.get("url") or "").strip()
+        if module not in MONTHLY_SHEET_MODULES:
+            return Response({"error": "Phân hệ trang tính không hợp lệ."}, status=status.HTTP_400_BAD_REQUEST)
+        if not valid_sheet_url(url):
+            return Response({"error": "Vui lòng nhập đúng liên kết Google Sheets hoặc tệp Excel trên Google Drive."}, status=status.HTTP_400_BAD_REQUEST)
+        links = set_monthly_sheet_link(module, month, url, request.user.email)
+    else:
+        links = get_monthly_sheet_links(month)
+    return Response({"month": month, "links": links, "adminOnly": True})
 # These are ordinary workspace tools.  New staff should receive them without an
 # administrator having to make the same selections for every account.
 DEFAULT_ACCESS_MODULES = {"work-schedule", "attendance", "email-builder", "signature-builder", "qr-generator"}

@@ -14,6 +14,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from authentication.models import UserProfile
+from authentication.monthly_sheets import get_monthly_sheet_links
 from authentication.permissions import IsAuthenticated
 
 from .models import WorkItem, WorkScheduleSheetInboundEvent
@@ -25,6 +26,12 @@ logger = logging.getLogger(__name__)
 
 VALID_STATUSES = {choice[0] for choice in WorkItem.STATUS_CHOICES}
 VALID_PRIORITIES = {choice[0] for choice in WorkItem.PRIORITY_CHOICES}
+
+
+def _admin_sheet_url(request):
+    if request.user_role != "ADMIN":
+        return ""
+    return get_monthly_sheet_links(timezone.localdate().strftime("%Y-%m")).get("work_schedule", "")
 
 
 @api_view(["GET", "POST"])
@@ -298,7 +305,7 @@ def work_items(request):
     return Response({
         "items": [_payload(item, request.user, request.user_role) for item in rows],
         "retentionStart": retention_start.isoformat(),
-        "sheetUrl": "https://docs.google.com/spreadsheets/d/1kWiJdTSM_6ZDeLTGCWvDA3num5n0DmRH2Tv-6AwuBYc/edit",
+        "sheetUrl": _admin_sheet_url(request),
     })
 
 
@@ -326,7 +333,7 @@ def work_team(request):
         for profile in rows
     ], "items": [_payload(item, request.user, request.user_role) for item in team_items],
         "retentionStart": retention_start.isoformat(),
-        "sheetUrl": "https://docs.google.com/spreadsheets/d/1kWiJdTSM_6ZDeLTGCWvDA3num5n0DmRH2Tv-6AwuBYc/edit",
+        "sheetUrl": _admin_sheet_url(request),
     })
 
 

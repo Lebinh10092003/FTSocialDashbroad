@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Clock, Edit3, FileText, Globe, Laptop, Loader2, MapPin, Moon, Plus, Save, Search, Trash2, TriangleAlert, UserCheck, Users, X } from 'lucide-react';
 import Time24Input from './Time24Input';
 import { appDialog } from './AppDialog';
+import MonthlySheetLinkEditor from './MonthlySheetLinkEditor';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -555,6 +556,15 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
                 </>}
               </div>
             </aside>
+            {isAdmin && <div className="xl:col-start-2">
+              <MonthlySheetLinkEditor
+                idToken={idToken}
+                month={month}
+                module="attendance"
+                title="Trang tính Công ca"
+                description="Liên kết theo từng tháng; chỉ Admin nhìn thấy và chỉnh sửa."
+              />
+            </div>}
           </div>
         </main>
       </div>{/* end flex-1 wrapper */}

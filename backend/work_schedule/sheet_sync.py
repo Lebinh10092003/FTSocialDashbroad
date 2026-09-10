@@ -11,8 +11,9 @@ from django.db import models, transaction
 from django.utils import timezone
 
 from authentication.models import SystemConfig, UserProfile
+from authentication.monthly_sheets import get_monthly_sheet_links
 from attendance.models import TimesheetEntry
-from integrations.google_sheets import build_sheets_service
+from integrations.google_sheets import build_sheets_service, extract_spreadsheet_id
 
 from .models import WorkItem, WorkScheduleSheetChange, WorkScheduleSheetSyncLease
 from .retention import purge_expired_work_schedule, retained_from
@@ -20,9 +21,9 @@ from .sheet_parser import assessment_notes, parse_sheet_tasks, status_from_note,
 from .signals import suppress_sheet_queue
 
 
-SPREADSHEET_ID = "1kWiJdTSM_6ZDeLTGCWvDA3num5n0DmRH2Tv-6AwuBYc"
+DEFAULT_SPREADSHEET_ID = "1kWiJdTSM_6ZDeLTGCWvDA3num5n0DmRH2Tv-6AwuBYc"
 SHEET_NAME = "Lịch công tác"
-SHEET_ID = 1443841670
+DEFAULT_SHEET_ID = 1443841670
 EMPLOYEE_EMAILS = {
     "EMP-E6557326": "thuanld@fermat.edu.vn",
     "EMP-0FA847B0": "dungpv@fermat.edu.vn",
@@ -83,6 +84,27 @@ def _service(google_token=None):
     return build_sheets_service(token, config_data)
 
 
+def _spreadsheet_id():
+    month = timezone.localdate().strftime("%Y-%m")
+    configured = get_monthly_sheet_links(month).get("work_schedule", "")
+    return extract_spreadsheet_id(configured) or DEFAULT_SPREADSHEET_ID
+
+
+def _sheet_properties(service):
+    metadata = service.spreadsheets().get(
+        spreadsheetId=_spreadsheet_id(), fields="sheets.properties"
+    ).execute()
+    target = next(
+        (sheet.get("properties", {}) for sheet in metadata.get("sheets", [])
+         if sheet.get("properties", {}).get("title") == SHEET_NAME
+         or sheet.get("properties", {}).get("sheetId") == DEFAULT_SHEET_ID),
+        None,
+    )
+    if not target:
+        raise RuntimeError("Không tìm thấy tab Lịch công tác.")
+    return target
+
+
 def _header_key(value):
     return _normalise_staff_name(value).replace(" ", "")
 
@@ -99,7 +121,7 @@ def _column_letter(index):
 
 def _sheet_columns(service):
     result = service.spreadsheets().values().get(
-        spreadsheetId=SPREADSHEET_ID,
+        spreadsheetId=_spreadsheet_id(),
         range=f"'{SHEET_NAME}'!A2:ZZ2",
         valueRenderOption="FORMATTED_VALUE",
     ).execute()
@@ -125,7 +147,7 @@ def _canonical_row(row, columns):
 
 def _retained_sheet_start_row(service, start_date):
     """Resolve and cache the first Sheet row in the rolling retention window."""
-    cache_key = "work_schedule_sheet_window"
+    cache_key = f"work_schedule_sheet_window:{_spreadsheet_id()}"
     cached = SystemConfig.objects.filter(key=cache_key).first()
     cached_data = cached.data if cached and isinstance(cached.data, dict) else {}
     if cached_data.get("startDate") == start_date.isoformat():
@@ -137,7 +159,7 @@ def _retained_sheet_start_row(service, start_date):
     columns, _ = _sheet_columns(service)
     date_column = _column_letter(columns["date"])
     result = service.spreadsheets().values().get(
-        spreadsheetId=SPREADSHEET_ID,
+        spreadsheetId=_spreadsheet_id(),
         range=f"'{SHEET_NAME}'!{date_column}3:{date_column}",
         valueRenderOption="FORMATTED_VALUE",
     ).execute()
@@ -159,7 +181,7 @@ def _rows(service, start_row=2):
     columns, _ = _sheet_columns(service)
     last_column = _column_letter(max(columns.values()))
     result = service.spreadsheets().values().get(
-        spreadsheetId=SPREADSHEET_ID,
+        spreadsheetId=_spreadsheet_id(),
         # Open-ended so rows appended after the original 6109-row grid are also
         # part of future full-sync scans.
         range=f"'{SHEET_NAME}'!A{start_row}:{last_column}",
@@ -352,10 +374,8 @@ def _unique_sheet_tasks(tasks):
 
 
 def ensure_sync_columns(service):
-    metadata = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID, fields="sheets.properties").execute()
-    target = next((s["properties"] for s in metadata.get("sheets", []) if s["properties"].get("sheetId") == SHEET_ID), None)
-    if not target:
-        raise RuntimeError("Không tìm thấy tab Lịch công tác.")
+    target = _sheet_properties(service)
+    sheet_id = target["sheetId"]
     columns, headers = _sheet_columns(service)
     internal_headers = {
         "employee_id": "EmployeeID",
@@ -373,14 +393,14 @@ def ensure_sync_columns(service):
     required_count = max(columns.values()) + 1
     requests = []
     if target.get("gridProperties", {}).get("columnCount", 0) < required_count:
-        requests.append({"updateSheetProperties": {"properties": {"sheetId": SHEET_ID, "gridProperties": {"columnCount": required_count}}, "fields": "gridProperties.columnCount"}})
+        requests.append({"updateSheetProperties": {"properties": {"sheetId": sheet_id, "gridProperties": {"columnCount": required_count}}, "fields": "gridProperties.columnCount"}})
     for index in sorted({columns[name] for name in internal_headers}):
-        requests.append({"updateDimensionProperties": {"range": {"sheetId": SHEET_ID, "dimension": "COLUMNS", "startIndex": index, "endIndex": index + 1}, "properties": {"hiddenByUser": True}, "fields": "hiddenByUser"}})
+        requests.append({"updateDimensionProperties": {"range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": index, "endIndex": index + 1}, "properties": {"hiddenByUser": True}, "fields": "hiddenByUser"}})
     if requests:
-        service.spreadsheets().batchUpdate(spreadsheetId=SPREADSHEET_ID, body={"requests": requests}).execute()
+        service.spreadsheets().batchUpdate(spreadsheetId=_spreadsheet_id(), body={"requests": requests}).execute()
     if header_updates:
         service.spreadsheets().values().batchUpdate(
-            spreadsheetId=SPREADSHEET_ID,
+            spreadsheetId=_spreadsheet_id(),
             body={"valueInputOption": "RAW", "data": header_updates},
         ).execute()
     return columns
@@ -389,12 +409,13 @@ def ensure_sync_columns(service):
 def ensure_sheet_row_capacity(service, required_row):
     """Grow the tab before values.batchUpdate targets a row beyond its grid."""
     metadata = service.spreadsheets().get(
-        spreadsheetId=SPREADSHEET_ID,
-        fields="sheets.properties(sheetId,gridProperties(rowCount))",
+        spreadsheetId=_spreadsheet_id(),
+        fields="sheets.properties(sheetId,title,gridProperties(rowCount))",
     ).execute()
     target = next(
         (sheet.get("properties", {}) for sheet in metadata.get("sheets", [])
-         if sheet.get("properties", {}).get("sheetId") == SHEET_ID),
+         if sheet.get("properties", {}).get("title") == SHEET_NAME
+         or sheet.get("properties", {}).get("sheetId") == DEFAULT_SHEET_ID),
         None,
     )
     if not target:
@@ -404,10 +425,10 @@ def ensure_sheet_row_capacity(service, required_row):
         return current_rows
     rows_to_add = max(required_row - current_rows, 500)
     service.spreadsheets().batchUpdate(
-        spreadsheetId=SPREADSHEET_ID,
+        spreadsheetId=_spreadsheet_id(),
         body={"requests": [{
             "appendDimension": {
-                "sheetId": SHEET_ID,
+                "sheetId": target["sheetId"],
                 "dimension": "ROWS",
                 "length": rows_to_add,
             }
@@ -596,7 +617,7 @@ def _formula_content_rows(service, columns=None, start_row=2):
     columns = columns or LEGACY_COLUMNS
     content_column = _column_letter(columns["content"])
     result = service.spreadsheets().get(
-        spreadsheetId=SPREADSHEET_ID,
+        spreadsheetId=_spreadsheet_id(),
         ranges=[f"'{SHEET_NAME}'!{content_column}{start_row}:{content_column}"],
         includeGridData=True,
         fields="sheets.data(startRow,rowData.values.userEnteredValue)",
@@ -703,12 +724,13 @@ def push_groups_to_sheet(service, groups, force=False):
         ensure_sheet_row_capacity(service, max(update_rows))
         for start in range(0, len(updates), 500):
             service.spreadsheets().values().batchUpdate(
-                spreadsheetId=SPREADSHEET_ID,
+                spreadsheetId=_spreadsheet_id(),
                 body={"valueInputOption": "USER_ENTERED", "data": updates[start:start + 500]},
             ).execute()
     # Apply bold+italic formatting to time-prefixed task lines in column E
     format_requests = []
     formula_rows = _formula_content_rows(service, columns, rows_start) if synced else set()
+    format_sheet_id = _sheet_properties(service)["sheetId"] if synced else DEFAULT_SHEET_ID
     for email, work_date, row_number, sync_hash, items in synced:
         if row_number in formula_rows:
             continue
@@ -718,7 +740,7 @@ def push_groups_to_sheet(service, groups, force=False):
             format_requests.append({
                 'updateCells': {
                     'range': {
-                        'sheetId': SHEET_ID,
+                        'sheetId': format_sheet_id,
                         'startRowIndex': row_number - 1,
                         'endRowIndex': row_number,
                         'startColumnIndex': columns["content"],
@@ -734,7 +756,7 @@ def push_groups_to_sheet(service, groups, force=False):
     if format_requests:
         for start in range(0, len(format_requests), 500):
             service.spreadsheets().batchUpdate(
-                spreadsheetId=SPREADSHEET_ID,
+                spreadsheetId=_spreadsheet_id(),
                 body={'requests': format_requests[start:start + 500]},
             ).execute()
     with suppress_sheet_queue():

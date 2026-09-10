@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDot, ClipboardCheck, ExternalLink, FileSpreadsheet, LayoutDashboard, Link2, ListChecks, Pencil, Plus, RefreshCw, Search, Settings2, Trash2, UserCheck, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDot, ClipboardCheck, ExternalLink, FileSpreadsheet, LayoutDashboard, ListChecks, Pencil, Plus, RefreshCw, Search, Trash2, UserCheck, X } from "lucide-react";
 import AccountMenu from "./AccountMenu";
 import { appDialog } from "./AppDialog";
 import Time24Input from "./Time24Input";
+import MonthlySheetLinkEditor from "./MonthlySheetLinkEditor";
 
 type WorkStatus = "todo" | "doing" | "completed" | "reviewed";
 type Priority = "low" | "medium" | "high";
@@ -109,7 +110,6 @@ function schedulePath(view: View, period: "week" | "month" = "week") {
   return "/work-schedule/personal";
 }
 
-const SHEET_TEMPLATE = "https://docs.google.com/spreadsheets/d/1kWiJdTSM_6ZDeLTGCWvDA3num5n0DmRH2Tv-6AwuBYc/edit?usp=sharing";
 const statuses: Array<{
   id: WorkStatus;
   label: string;
@@ -421,7 +421,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
   const cachedSnapshot = workScheduleSnapshot?.owner === userEmail && Date.now() - workScheduleSnapshot.savedAt < WORK_SCHEDULE_MEMORY_TTL_MS
     ? workScheduleSnapshot
     : null;
-  const [view, setView] = useState<View>(initialLocation.view),
+  const [view, setView] = useState<View>(initialLocation.view === "sheet" && userRole !== "ADMIN" ? "board" : initialLocation.view),
     [tasks, setTasks] = useState<WorkTask[]>(cachedSnapshot?.tasks || []),
     [staff, setStaff] = useState<Person[]>(cachedSnapshot?.staff || [{ email: userEmail, name: userName }]),
     [teamMembers, setTeamMembers] = useState<TeamMember[]>(cachedSnapshot?.teamMembers || []),
@@ -441,8 +441,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     [error, setError] = useState("");
   const savingTaskRef = useRef(false);
   const localEditSeqRef = useRef(0);
-  const sheetKey = `ft-work-schedule-sheet:${userEmail}`;
-  const [sheetUrl, setSheetUrl] = useState(() => localStorage.getItem(sheetKey) || SHEET_TEMPLATE),
+  const [sheetUrl, setSheetUrl] = useState(""),
     [sheetNotice, setSheetNotice] = useState("");
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, index) => addDays(mondayOf(weekStart), index)), [weekStart]);
   const visibleCalendarDays = useMemo(() => (calendarPeriod === "week" ? weekDays : monthCalendarDays(weekStart)), [calendarPeriod, weekDays, weekStart]);
@@ -490,6 +489,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
       setTeamMembers(nextTeamMembers);
       setTeamTasks(nextTeamTasks);
       setRetentionStart(nextRetentionStart);
+      if (userRole === "ADMIN") setSheetUrl(current => current || String(items.sheetUrl || team.sheetUrl || ""));
       workScheduleSnapshot = { owner: userEmail, savedAt: Date.now(), tasks: nextTasks, staff: nextStaff, teamMembers: nextTeamMembers, teamTasks: nextTeamTasks, retentionStart: nextRetentionStart };
     } catch (cause: any) {
       setError(cause.message || "Không thể tải lịch làm việc.");
@@ -794,7 +794,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     { id: "board", label: "Công việc theo ngày", icon: LayoutDashboard },
     { id: "week", label: "Lịch tuần / tháng", icon: CalendarDays },
     ...(teamMembers.length > 0 ? [{ id: "team" as View, label: "Quản lý nhân sự", icon: UserCheck }] : []),
-    { id: "sheet", label: "Liên kết Google Sheets", icon: FileSpreadsheet },
+    ...(userRole === "ADMIN" ? [{ id: "sheet" as View, label: "Liên kết Google Sheets", icon: FileSpreadsheet }] : []),
   ];
 
   return (
@@ -963,12 +963,12 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
                 <FileSpreadsheet className="mx-auto h-12 w-12 text-amber-600" />
                 <h2 className="mt-4 text-xl font-extrabold text-amber-950">Dữ liệu không được lưu trữ trên hệ thống</h2>
                 <p className="mt-2 text-sm font-medium leading-6 text-amber-800">Hệ thống chỉ lưu tháng hiện tại và hai tháng liền trước. Vui lòng truy cập trang tính để kiểm tra dữ liệu cũ hơn.</p>
-                <a href={sheetUrl || SHEET_TEMPLATE} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-xl bg-amber-700 px-4 py-2.5 text-sm font-extrabold text-white hover:bg-amber-800">
+                {userRole === "ADMIN" && sheetUrl ? <a href={sheetUrl} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-xl bg-amber-700 px-4 py-2.5 text-sm font-extrabold text-white hover:bg-amber-800">
                   <ExternalLink className="h-4 w-4" />Mở trang tính
-                </a>
+                </a> : <p className="mt-4 text-sm font-semibold text-amber-800">Vui lòng liên hệ Admin để tra cứu trang tính lưu trữ.</p>}
               </div>
             </section>
-          ) : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={tasks} userEmail={userEmail} idToken={idToken} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={(period: "week" | "month") => navigateSchedule("week", period)} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={(next: View) => navigateSchedule(next)} setEditing={setEditing} setDraggedId={setDraggedId} moveTask={moveTask} saveInlineDay={saveInlineDay} reloadTasks={load} /> : view === "team" ? <TeamSpreadsheetView members={teamMembers} tasks={teamTasks} userEmail={userEmail} setEditing={setEditing} saveInlineDay={saveInlineDay} reloadTasks={load} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} onSync={syncSheet} />}
+          ) : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={tasks} userEmail={userEmail} idToken={idToken} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={(period: "week" | "month") => navigateSchedule("week", period)} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={(next: View) => navigateSchedule(next)} setEditing={setEditing} setDraggedId={setDraggedId} moveTask={moveTask} saveInlineDay={saveInlineDay} reloadTasks={load} /> : view === "team" ? <TeamSpreadsheetView members={teamMembers} tasks={teamTasks} userEmail={userEmail} setEditing={setEditing} saveInlineDay={saveInlineDay} reloadTasks={load} /> : <SheetView idToken={idToken} sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} notice={sheetNotice} setNotice={setSheetNotice} onSync={syncSheet} />}
         </div>
       </main>
       {editing && <TaskDialog draft={editing} setDraft={setEditing} staff={staff} userEmail={userEmail} saveTask={saveTask} saving={savingTask} saveProgressNote={saveProgressNote} deleteTasks={deleteTasks} review={review} />}
@@ -1686,8 +1686,10 @@ function SpreadsheetScheduleTable({ days, tasks, executorEmail, people, idToken,
   </>;
 }
 
-function SheetView({ sheetUrl, setSheetUrl, sheetKey, notice, setNotice, onSync }: any) {
+function SheetView({ idToken, sheetUrl, setSheetUrl, notice, setNotice, onSync }: any) {
   const [syncing, setSyncing] = useState(false);
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const [month, setMonth] = useState(currentMonth);
   const runSync = async () => {
     setSyncing(true);
     setNotice("");
@@ -1706,45 +1708,23 @@ function SheetView({ sheetUrl, setSheetUrl, sheetKey, notice, setNotice, onSync 
           <FileSpreadsheet className="h-8 w-8" />
           <h2 className="mt-5 text-2xl font-extrabold">Lịch công tác FT</h2>
           <p className="mt-2 text-sm text-blue-100">Bảng công tác dùng chung làm nguồn đối chiếu lịch và chuẩn bị đồng bộ trạng thái hoàn thành.</p>
-          <button type="button" onClick={() => window.open(SHEET_TEMPLATE, "_blank", "noopener,noreferrer")} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-extrabold text-blue-700">
+          {sheetUrl && <button type="button" onClick={() => window.open(sheetUrl, "_blank", "noopener,noreferrer")} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-extrabold text-blue-700">
             <ExternalLink className="h-4 w-4" />
             Mở Lịch công tác FT
-          </button>
+          </button>}
         </div>
-        <div className="p-8">
-          <label className="text-sm font-bold">Đường dẫn Google Sheets cá nhân</label>
-          <div className="mt-2 flex gap-2">
-            <div className="relative flex-1">
-              <Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input value={sheetUrl} onChange={(event) => setSheetUrl(event.target.value)} className="ws-input pl-10" />
-            </div>
-            <button
-              onClick={() => {
-                if (!sheetUrl.includes("docs.google.com/spreadsheets/")) {
-                  setNotice("Vui lòng nhập đúng đường dẫn Google Sheets.");
-                  return;
-                }
-                localStorage.setItem(sheetKey, sheetUrl);
-                setNotice("Đã lưu liên kết.");
-              }}
-              className="rounded-xl bg-blue-600 px-5 text-sm font-bold text-white"
-            >
-              Lưu
-            </button>
-          </div>
+        <div className="space-y-5 p-8">
+          <label className="block max-w-xs"><span className="mb-1 block text-sm font-bold">Tháng áp dụng</span><input type="month" value={month} onChange={event => setMonth(event.target.value)} className="ws-input" /></label>
+          <MonthlySheetLinkEditor idToken={idToken} month={month} module="work_schedule" title="Trang tính Lịch làm việc" description="Cấu hình dùng chung theo tháng; chỉ Admin nhìn thấy và chỉnh sửa." accent="blue" onLinkChange={setSheetUrl} />
           {notice && <p className={`mt-3 text-sm font-semibold ${notice.startsWith("Không") ? "text-rose-700" : "text-emerald-700"}`}>{notice}</p>}
           <div className="mt-5 flex gap-3">
-            <button disabled={syncing} onClick={() => void runSync()} className="inline-flex items-center gap-2 rounded-xl bg-[#0055da] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+            <button title={month !== currentMonth ? "Chỉ đồng bộ tự động trang tính của tháng hiện tại." : ""} disabled={syncing || !sheetUrl || month !== currentMonth} onClick={() => void runSync()} className="inline-flex items-center gap-2 rounded-xl bg-[#0055da] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
               <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
               {syncing ? "Đang đồng bộ..." : "Đồng bộ hai chiều"}
             </button>
-            <button onClick={() => window.open(sheetUrl, "_blank", "noopener,noreferrer")} className="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold">
+            <button disabled={!sheetUrl} onClick={() => window.open(sheetUrl, "_blank", "noopener,noreferrer")} className="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold disabled:opacity-50">
               <ExternalLink className="h-4 w-4" />
               Mở bảng tính
-            </button>
-            <button onClick={() => setSheetUrl(SHEET_TEMPLATE)} className="inline-flex items-center gap-2 px-4 text-sm font-bold text-blue-700">
-              <Settings2 className="h-4 w-4" />
-              Dùng Lịch công tác FT
             </button>
           </div>
         </div>
