@@ -7,7 +7,12 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from authentication.models import UserProfile, WorkspaceNotification
-from .assessment_lifecycle import assessment_retention_anchor, lifecycle_warning, run_assessment_lifecycle
+from .assessment_lifecycle import (
+    assessment_retention_anchor,
+    lifecycle_warning,
+    refresh_assessment_status,
+    run_assessment_lifecycle,
+)
 from .assessment_service import _sheet_attempt_row
 from .models import TrainingAssessment, TrainingAssessmentAttempt, TrainingPartner
 
@@ -33,9 +38,45 @@ class AssessmentLifecycleTests(TestCase):
         warning = lifecycle_warning(self.assessment)
         self.assertEqual(warning["label"], "Hãy chấm bài")
         self.assessment.closed_at = timezone.now() - timedelta(days=21)
-        self.assertEqual(lifecycle_warning(self.assessment)["remaining"], 9)
+        self.assertEqual(lifecycle_warning(self.assessment)["remaining"], 10)
         self.assessment.closed_at = timezone.now() - timedelta(days=28)
-        self.assertIn("2 ngày", lifecycle_warning(self.assessment)["label"])
+        self.assertIn("3 ngày", lifecycle_warning(self.assessment)["label"])
+
+    def test_status_becomes_graded_only_after_scores_are_complete(self):
+        self.attempt.manual_grading_required = False
+        self.attempt.save(update_fields=["manual_grading_required"])
+        refresh_assessment_status(self.assessment)
+        self.assessment.refresh_from_db()
+        self.assertEqual(self.assessment.status, "closed")
+        self.attempt.score = 1
+        self.attempt.max_score = 1
+        self.attempt.save(update_fields=["score", "max_score"])
+        refresh_assessment_status(self.assessment)
+        self.assessment.refresh_from_db()
+        self.assertEqual(self.assessment.status, "graded")
+
+    def test_reopen_clears_counter_and_closing_again_resets_it(self):
+        self.assessment.retention_started_at = timezone.now() - timedelta(days=20)
+        self.assessment.next_lifecycle_at = timezone.now() - timedelta(days=6)
+        self.assessment.retention_milestone = 14
+        self.assessment.save(update_fields=["retention_started_at", "next_lifecycle_at", "retention_milestone"])
+        response = self.client.patch(
+            f"/api/digital-training/assessments/{self.assessment.pk}", {"status": "published"}, format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assessment.refresh_from_db()
+        self.assertIsNone(self.assessment.retention_started_at)
+        self.assertIsNone(self.assessment.next_lifecycle_at)
+        response = self.client.patch(
+            f"/api/digital-training/assessments/{self.assessment.pk}", {"status": "closed"}, format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assessment.refresh_from_db()
+        self.assertAlmostEqual(
+            (self.assessment.next_lifecycle_at - self.assessment.retention_started_at).total_seconds(),
+            14 * 86400,
+            delta=2,
+        )
 
     def test_draft_delete_is_recoverable_for_three_days(self):
         draft = TrainingAssessment.objects.create(title="Nháp", partner=self.partner)
@@ -74,17 +115,33 @@ class AssessmentLifecycleTests(TestCase):
             expires_at=ended_at, submitted_at=ended_at,
         )
         self.assertEqual(assessment_retention_anchor(self.assessment).date(), ended_at.date())
-        self.assertIn("2 ng\u00e0y", lifecycle_warning(self.assessment)["label"])
+        self.assertIn("3 ng\u00e0y", lifecycle_warning(self.assessment)["label"])
 
     @patch("digital_training.assessment_lifecycle.verify_assessment_backup", side_effect=RuntimeError("Sheet unavailable"))
-    def test_day_30_hard_deletes_even_when_backup_fails_and_warns(self, _verify):
+    def test_day_31_moves_to_three_day_trash_when_backup_fails(self, _verify):
         assessment_id = self.assessment.pk
-        self.assessment.closed_at = timezone.now() - timedelta(days=30)
-        self.assessment.save(update_fields=["closed_at"])
+        self.assessment.retention_started_at = timezone.now() - timedelta(days=31)
+        self.assessment.next_lifecycle_at = timezone.now()
+        self.assessment.save(update_fields=["retention_started_at", "next_lifecycle_at"])
         result = run_assessment_lifecycle()
         self.assertEqual(result["failedBackup"], 1)
-        self.assertEqual(result["deleted"], 1)
-        self.assertFalse(TrainingAssessment.objects.filter(pk=assessment_id).exists())
-        warning = WorkspaceNotification.objects.get(event_key=f"assessment:{assessment_id}:backup-failed-before-hard-delete")
+        self.assertEqual(result["deleted"], 0)
+        self.assertEqual(result["trashed"], 1)
+        self.assertTrue(TrainingAssessment.objects.filter(pk=assessment_id).exists())
+        self.assessment.refresh_from_db()
+        self.assertIsNotNone(self.assessment.trashed_at)
+        self.assertAlmostEqual((self.assessment.purge_at - self.assessment.trashed_at).total_seconds(), 3 * 86400, delta=2)
+        warning = WorkspaceNotification.objects.get(title="Khẩn cấp: sao lưu lỗi trước khi xóa")
         self.assertEqual(warning.severity, "urgent")
         self.assertEqual(warning.target_modules, ["digital-training"])
+
+    @patch("digital_training.assessment_lifecycle.verify_assessment_backup", return_value=(True, {}))
+    def test_day_31_hard_deletes_after_verified_backup(self, _verify):
+        assessment_id = self.assessment.pk
+        self.assessment.retention_started_at = timezone.now() - timedelta(days=31)
+        self.assessment.next_lifecycle_at = timezone.now()
+        self.assessment.save(update_fields=["retention_started_at", "next_lifecycle_at"])
+        result = run_assessment_lifecycle()
+        self.assertEqual(result["backedUp"], 1)
+        self.assertEqual(result["deleted"], 1)
+        self.assertFalse(TrainingAssessment.objects.filter(pk=assessment_id).exists())

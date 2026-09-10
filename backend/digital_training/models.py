@@ -323,7 +323,7 @@ class TrainingAssessment(models.Model):
         ("draft", "Bản nháp"),
         ("published", "Đang mở"),
         ("closed", "Đã đóng"),
-        ("graded", "Đã chấm"),
+        ("graded", "Đã chấm bài"),
         ("backup_complete", "Đã hoàn thành sao lưu"),
     ]
     GENERATION_MODE_CHOICES = [("prepared", "Prepared variants"), ("auto_generate", "Auto-generate from import")]
@@ -359,6 +359,9 @@ class TrainingAssessment(models.Model):
     sync_status = models.CharField(max_length=20, default="pending")
     sync_error = models.TextField(blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
+    retention_started_at = models.DateTimeField(null=True, blank=True)
+    next_lifecycle_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    retention_milestone = models.PositiveSmallIntegerField(default=0)
     graded_at = models.DateTimeField(null=True, blank=True)
     backup_completed_at = models.DateTimeField(null=True, blank=True)
     backup_manifest = models.JSONField(default=dict, blank=True)

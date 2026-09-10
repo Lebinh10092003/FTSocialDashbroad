@@ -183,7 +183,7 @@ const statusLabel: Record<string, string> = {
   draft: "Bản nháp",
   published: "Đang mở",
   closed: "Đã đóng",
-  graded: "Đã chấm",
+  graded: "Đã chấm bài",
   backup_complete: "Đã hoàn thành sao lưu",
 };
 
@@ -1453,7 +1453,7 @@ export default function TrainingAssessmentsAdmin({
         <article className="assessment-detail-card overflow-hidden rounded-2xl border bg-white shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4 p-6">
             <div><p className="text-xs font-bold uppercase text-blue-600">Bài kiểm tra cuối khóa tập huấn</p><h2 className="mt-1 text-2xl font-extrabold">{selected.title}</h2><p className="mt-2 text-sm text-slate-500">{[selected.partner_name, selected.class_name].filter(Boolean).join(" · ")}</p></div>
-            <div className="flex flex-wrap gap-2"><button aria-disabled={!['closed', 'graded'].includes(selected.status)} disabled={busy} onClick={() => void openGrading()} title={['closed', 'graded'].includes(selected.status) ? "Chấm các bài đã nộp" : "Đóng bài trước khi chấm"} className={`ft-btn ft-btn-secondary ${!['closed', 'graded'].includes(selected.status) ? "cursor-not-allowed opacity-50" : ""}`}><Check className="h-4 w-4" />Chấm bài</button><a href={`${publicLink}?preview=creator`} target="_blank" rel="noreferrer" className="ft-btn ft-btn-secondary" title="Xem trước mặc định ở chế độ quản trị viên"><Layers3 className="h-4 w-4" />Xem trước</a>{!['published', 'backup_complete'].includes(selected.status) && <button disabled={busy} onClick={() => void changeStatus("published")} className="ft-primary"><Send className="h-4 w-4" />{['closed', 'graded'].includes(selected.status) ? "Mở lại bài" : "Phát hành"}</button>}{selected.status === "published" && <button disabled={busy} onClick={() => void changeStatus("closed")} className="ft-btn ft-btn-secondary">Đóng bài</button>}<button aria-label="Xóa bài kiểm tra" title="Xóa bài kiểm tra" onClick={() => void remove()} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-bold text-rose-700"><Trash2 className="h-4 w-4" /></button></div>
+            <div className="flex flex-wrap gap-2"><button aria-disabled={!['closed', 'graded'].includes(selected.status)} disabled={busy} onClick={() => void openGrading()} title={['closed', 'graded'].includes(selected.status) ? "Chấm các bài đã nộp" : "Đóng bài trước khi chấm"} className={`ft-btn ft-btn-secondary ${!['closed', 'graded'].includes(selected.status) ? "cursor-not-allowed opacity-50" : ""}`}><Check className="h-4 w-4" />Chấm bài</button><a href={`${publicLink}?preview=creator`} target="_blank" rel="noreferrer" className="ft-btn ft-btn-secondary" title="Xem trước mặc định ở chế độ quản trị viên"><Layers3 className="h-4 w-4" />Xem trước</a>{selected.status !== 'published' && <button disabled={busy} onClick={() => void changeStatus("published")} className="ft-primary"><Send className="h-4 w-4" />{['closed', 'graded', 'backup_complete'].includes(selected.status) ? "Mở lại bài" : "Phát hành"}</button>}{selected.status === "published" && <button disabled={busy} onClick={() => void changeStatus("closed")} className="ft-btn ft-btn-secondary">Đóng bài</button>}<button aria-label="Xóa bài kiểm tra" title="Xóa bài kiểm tra" onClick={() => void remove()} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-bold text-rose-700"><Trash2 className="h-4 w-4" /></button></div>
           </div>
           <div className="flex flex-wrap gap-2 border-t bg-white px-6 pt-4"><button type="button" onClick={() => setDetailTab("overview")} className={`rounded-lg px-4 py-2 text-sm font-bold ${detailTab === "overview" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>Tổng quan</button><button type="button" onClick={() => setDetailTab("settings")} className={`rounded-lg px-4 py-2 text-sm font-bold ${detailTab === "settings" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>Chi tiết bài kiểm tra</button></div>
           <div className={`${detailTab === "overview" ? "block" : "hidden"} border-t bg-slate-50 p-4 sm:p-6`}>
@@ -1518,14 +1518,14 @@ export default function TrainingAssessmentsAdmin({
   }
 
   if (showTrash) {
-    return <section className="mt-6 overflow-hidden rounded-2xl border bg-white shadow-sm"><div className="flex items-center justify-between border-b p-5"><div><h2 className="text-xl font-extrabold">Bản nháp đã xóa</h2><p className="mt-1 text-sm text-slate-500">Quản trị viên có thể khôi phục trong 3 ngày; sau hạn này dữ liệu bị xóa vĩnh viễn.</p></div><button onClick={() => setShowTrash(false)} className="ft-btn ft-btn-secondary"><ArrowLeft className="h-4 w-4" />Quay lại</button></div>{notice && <p className="m-5 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{notice}</p>}<div className="overflow-x-auto"><table className="ft-table"><thead><tr><th>Bài kiểm tra</th><th>Đơn vị</th><th>Hạn khôi phục</th><th /></tr></thead><tbody>{trashItems.length ? trashItems.map(item => <tr key={item.id}><td><b>{item.title}</b></td><td>{item.partner_name || '—'}</td><td>{item.purge_at ? new Date(item.purge_at).toLocaleString('vi-VN') : '—'}</td><td><button disabled={busy} onClick={() => void restoreDraft(item)} className="ft-btn ft-btn-secondary">Khôi phục</button></td></tr>) : <tr><td colSpan={4} className="py-10 text-center text-slate-500">Không có bản nháp trong thùng rác.</td></tr>}</tbody></table></div></section>;
+    return <section className="mt-6 overflow-hidden rounded-2xl border bg-white shadow-sm"><div className="flex items-center justify-between border-b p-5"><div><h2 className="text-xl font-extrabold">Thùng rác (3 ngày)</h2><p className="mt-1 text-sm text-slate-500">Quản trị viên có thể khôi phục trong 3 ngày; sau hạn này dữ liệu bị xóa vĩnh viễn.</p></div><button onClick={() => setShowTrash(false)} className="ft-btn ft-btn-secondary"><ArrowLeft className="h-4 w-4" />Quay lại</button></div>{notice && <p className="m-5 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{notice}</p>}<div className="overflow-x-auto"><table className="ft-table"><thead><tr><th>Bài kiểm tra</th><th>Đơn vị</th><th>Hạn khôi phục</th><th /></tr></thead><tbody>{trashItems.length ? trashItems.map(item => <tr key={item.id}><td><b>{item.title}</b></td><td>{item.partner_name || '—'}</td><td>{item.purge_at ? new Date(item.purge_at).toLocaleString('vi-VN') : '—'}</td><td><button disabled={busy} onClick={() => void restoreDraft(item)} className="ft-btn ft-btn-secondary">Khôi phục</button></td></tr>) : <tr><td colSpan={4} className="py-10 text-center text-slate-500">Không có bài kiểm tra trong thùng rác.</td></tr>}</tbody></table></div></section>;
   }
 
   return (
     <section className="mt-6 overflow-hidden rounded-2xl border bg-white shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3 p-5">
         <div><h2 className="text-xl font-extrabold">Bài kiểm tra cuối khóa tập huấn</h2><p className="mt-1 text-sm text-slate-500">Một link cho mỗi đơn vị/phân lớp, tự chia đều 4–5 mã đề và chấm điểm tập trung.</p></div>
-        {!isGuest && <div className="flex gap-2">{userRole === 'ADMIN' && <button onClick={() => void loadTrash()} className="ft-btn ft-btn-secondary"><Trash2 className="h-4 w-4" />Bản nháp đã xóa</button>}<button onClick={() => void load()} className="ft-btn ft-btn-secondary"><RefreshCw className="h-4 w-4" /></button><button onClick={openCreate} className="ft-primary"><Plus className="h-4 w-4" />Tạo bài kiểm tra</button></div>}
+        {!isGuest && <div className="flex gap-2">{userRole === 'ADMIN' && <button onClick={() => void loadTrash()} className="ft-btn ft-btn-secondary"><Trash2 className="h-4 w-4" />Thùng rác</button>}<button onClick={() => void load()} className="ft-btn ft-btn-secondary"><RefreshCw className="h-4 w-4" /></button><button onClick={openCreate} className="ft-primary"><Plus className="h-4 w-4" />Tạo bài kiểm tra</button></div>}
       </div>
       {/* Filter bar */}
       {items.length > 0 && (
@@ -1544,7 +1544,7 @@ export default function TrainingAssessmentsAdmin({
             <option value="draft">Bản nháp</option>
             <option value="published">Đang mở</option>
             <option value="closed">Đã đóng</option>
-            <option value="graded">Đã chấm</option>
+            <option value="graded">Đã chấm bài</option>
             <option value="backup_complete">Đã hoàn thành sao lưu</option>
           </select>
           {partnerOptions.length > 1 && (

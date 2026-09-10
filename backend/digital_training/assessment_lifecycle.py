@@ -11,12 +11,15 @@ from .assessment_service import prepare_assessment_google_sheet, rebuild_assessm
 from .models import TrainingAssessment
 
 
-RETENTION_DAYS = 30
+RETENTION_DELETE_DAY = 31
+RETENTION_MILESTONES = (14, 21, 28, RETENTION_DELETE_DAY)
 DRAFT_TRASH_DAYS = 3
 
 
 def assessment_retention_anchor(assessment):
     """Return the real end of the test, including a safe fallback for legacy rows."""
+    if assessment.retention_started_at:
+        return assessment.retention_started_at
     if assessment.closes_at:
         return assessment.closes_at
     if assessment.closed_at:
@@ -38,12 +41,33 @@ def refresh_assessment_status(assessment):
     if assessment.status not in {"closed", "graded", "backup_complete"}:
         return assessment
     completed = assessment.attempts.filter(status__in=["submitted", "timed_out"])
-    if completed.exists() and not completed.filter(manual_grading_required=True).exists():
+    if (
+        completed.exists()
+        and not completed.filter(manual_grading_required=True).exists()
+        and not completed.filter(score__isnull=True).exists()
+    ):
         if assessment.status == "closed":
             assessment.status = "graded"
         assessment.graded_at = assessment.graded_at or timezone.now()
         assessment.save(update_fields=["status", "graded_at", "updated_at"])
     return assessment
+
+
+def start_retention_counter(assessment, started_at=None):
+    """Reset the lifecycle clock whenever a published assessment is closed."""
+    started_at = started_at or timezone.now()
+    assessment.closed_at = started_at
+    assessment.retention_started_at = started_at
+    assessment.retention_milestone = 0
+    assessment.next_lifecycle_at = started_at + timedelta(days=RETENTION_MILESTONES[0])
+    assessment.save(update_fields=[
+        "closed_at", "retention_started_at", "retention_milestone", "next_lifecycle_at", "updated_at",
+    ])
+    return assessment
+
+
+def _next_milestone(days):
+    return next((milestone for milestone in RETENTION_MILESTONES if milestone > days), None)
 
 
 def _canonical(value):
@@ -139,13 +163,12 @@ def lifecycle_warning(assessment, now=None):
     if not anchor or assessment.trashed_at:
         return None
     days = max(0, (now.date() - anchor.date()).days)
-    remaining = max(0, RETENTION_DAYS - days)
-    ungraded = assessment.attempts.filter(status__in=["submitted", "timed_out"], manual_grading_required=True).exists()
+    remaining = max(0, RETENTION_DELETE_DAY - days)
     if days >= 28:
         return {"level": "urgent", "label": f"Dữ liệu sẽ bị xóa sau {remaining} ngày", "days": days, "remaining": remaining}
-    if ungraded and days >= 21:
+    if assessment.status == "closed" and days >= 21:
         return {"level": "strong", "label": f"Chưa chấm · dữ liệu sẽ bị xóa sau {remaining} ngày", "days": days, "remaining": remaining}
-    if ungraded and days >= 14:
+    if assessment.status == "closed" and days >= 14:
         return {"level": "warning", "label": "Hãy chấm bài", "days": days, "remaining": remaining}
     return None
 
@@ -155,7 +178,12 @@ def emit_lifecycle_notification(assessment, warning):
     anchor = assessment_retention_anchor(assessment)
     work_date = (assessment.opens_at or assessment.created_at).astimezone().strftime("%d/%m/%Y")
     if warning["days"] >= 28:
-        message = f"Bài kiểm tra cuối khóa tập huấn của đơn vị {organization} làm ngày {work_date} sẽ bị xóa sau {warning['remaining']} ngày. Vui lòng hoàn tất chấm và sao lưu."
+        next_action = {
+            "closed": "Vui lòng hoàn tất chấm bài và sao lưu.",
+            "graded": "Vui lòng hoàn tất sao lưu.",
+            "backup_complete": "Bản sao lưu đã hoàn tất.",
+        }.get(assessment.status, "Vui lòng kiểm tra dữ liệu.")
+        message = f"Bài kiểm tra cuối khóa tập huấn của đơn vị {organization} làm ngày {work_date} sẽ bị xóa sau {warning['remaining']} ngày. {next_action}"
         milestone = 28
     elif warning["days"] >= 21:
         message = f"Bài kiểm tra cuối khóa tập huấn của đơn vị {organization} làm ngày {work_date} vẫn chưa được chấm; dữ liệu sẽ bị xóa sau {warning['remaining']} ngày."
@@ -164,7 +192,7 @@ def emit_lifecycle_notification(assessment, warning):
         message = f"Bài kiểm tra cuối khóa tập huấn của đơn vị {organization} làm ngày {work_date} hiện vẫn chưa được chấm, vui lòng kiểm tra và chấm bài."
         milestone = 14
     notify_workspace(
-        event_key=f"assessment:{assessment.pk}:retention:{milestone}",
+        event_key=f"assessment:{assessment.pk}:retention:{int(anchor.timestamp())}:{milestone}",
         title=warning["label"], message=message,
         severity="urgent" if milestone >= 21 else "warning",
         category="digital-training", target_modules=["digital-training"],
@@ -181,20 +209,39 @@ def trash_draft(assessment):
 
 def run_assessment_lifecycle(now=None):
     now = now or timezone.now()
-    result = {"warned": 0, "backedUp": 0, "deleted": 0, "failedBackup": 0, "purgedDrafts": 0}
-    for assessment in TrainingAssessment.objects.filter(trashed_at__isnull=True).iterator():
-        if assessment.status == "published" and assessment.closes_at and assessment.closes_at <= now:
-            assessment.status = "closed"
-            assessment.closed_at = assessment.closes_at
-            assessment.attempts.filter(status="in_progress").update(status="timed_out", submitted_at=now)
-            assessment.save(update_fields=["status", "closed_at", "updated_at"])
+    result = {"warned": 0, "backedUp": 0, "deleted": 0, "failedBackup": 0, "trashed": 0, "purgedDrafts": 0}
+
+    # This is a due-only query, not a scan of every organization. Scheduled tests
+    # are closed once, then enter the same per-assessment milestone queue.
+    for assessment in TrainingAssessment.objects.filter(
+        status="published", trashed_at__isnull=True, closes_at__lte=now,
+    ).iterator():
+        assessment.status = "closed"
+        assessment.attempts.filter(status="in_progress").update(status="timed_out", submitted_at=now)
+        assessment.save(update_fields=["status", "updated_at"])
+        start_retention_counter(assessment, assessment.closes_at)
+
+    due = TrainingAssessment.objects.select_related("partner").filter(
+        status__in=["closed", "graded", "backup_complete"],
+        trashed_at__isnull=True,
+        next_lifecycle_at__lte=now,
+    )
+    for assessment in due.iterator():
         refresh_assessment_status(assessment)
         warning = lifecycle_warning(assessment, now)
         if warning:
             emit_lifecycle_notification(assessment, warning)
             result["warned"] += 1
         anchor = assessment_retention_anchor(assessment)
-        if not anchor or now < anchor + timedelta(days=RETENTION_DAYS):
+        if not anchor:
+            continue
+        days = max(0, (now.date() - anchor.date()).days)
+        if days < RETENTION_DELETE_DAY:
+            milestone = max((item for item in RETENTION_MILESTONES if item <= days), default=0)
+            next_milestone = _next_milestone(days)
+            assessment.retention_milestone = milestone
+            assessment.next_lifecycle_at = anchor + timedelta(days=next_milestone) if next_milestone else None
+            assessment.save(update_fields=["retention_milestone", "next_lifecycle_at", "updated_at"])
             continue
         try:
             ok, _ = verify_assessment_backup(assessment, rebuild=True)
@@ -206,16 +253,22 @@ def run_assessment_lifecycle(now=None):
         if not ok:
             result["failedBackup"] += 1
             notify_workspace(
-                event_key=f"assessment:{assessment.pk}:backup-failed-before-hard-delete",
+                event_key=f"assessment:{assessment.pk}:backup-failed:{int(anchor.timestamp())}:{now.date().isoformat()}",
                 title="Khẩn cấp: sao lưu lỗi trước khi xóa",
                 message=(
                     f"Bài “{assessment.title}” của đơn vị "
-                    f"{assessment.partner.name if assessment.partner else 'chưa xác định'} đã đủ 30 ngày. "
-                    "Bản Google Sheet có thể chưa đầy đủ nhưng dữ liệu trên hệ thống vẫn bị xóa hoàn toàn theo chính sách lưu trữ."
+                    f"{assessment.partner.name if assessment.partner else 'chưa xác định'} đã hết 30 ngày lưu trữ. "
+                    "Bản Google Sheet chưa đầy đủ nên bài đã được chuyển vào thùng rác trong 3 ngày để Admin khôi phục và xử lý."
                 ),
                 severity="urgent", category="digital-training", target_modules=["digital-training"],
                 action_url="/training-assessments",
             )
+            assessment.trashed_at = now
+            assessment.purge_at = now + timedelta(days=DRAFT_TRASH_DAYS)
+            assessment.next_lifecycle_at = None
+            assessment.save(update_fields=["trashed_at", "purge_at", "next_lifecycle_at", "updated_at"])
+            result["trashed"] += 1
+            continue
         else:
             result["backedUp"] += 1
         assessment_id = assessment.pk
@@ -224,7 +277,7 @@ def run_assessment_lifecycle(now=None):
         result["deleted"] += 1
         notify_workspace(
             event_key=f"assessment:{assessment_id}:retention-deleted",
-            title="Đã xóa bài kiểm tra đủ 30 ngày",
+            title="Đã xóa bài kiểm tra sau 30 ngày lưu trữ",
             message=f"Bài “{title}” đã được xóa hoàn toàn khỏi hệ thống theo chính sách lưu trữ tối đa 30 ngày.",
             severity="warning", category="digital-training", target_modules=["digital-training"],
             action_url="/training-assessments",

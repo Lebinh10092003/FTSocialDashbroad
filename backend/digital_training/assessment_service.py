@@ -1227,8 +1227,8 @@ def prepare_assessment_google_sheet(assessment):
             body={"requests": requests_body},
         ).execute()
 
-    retention_anchor = assessment.closes_at or assessment.closed_at
-    retention_deadline = retention_anchor + timedelta(days=30) if retention_anchor else None
+    retention_anchor = assessment.retention_started_at or assessment.closed_at or assessment.closes_at
+    retention_deadline = retention_anchor + timedelta(days=31) if retention_anchor else None
     overview_values = [
         ["KI\u1ec2M TRA CU\u1ed0I KH\u00d3A T\u1eacP HU\u1ea4N", assessment.title],
         ["Phi\u00ean b\u1ea3n c\u1ea5u tr\u00fac", "FT-ASSESSMENT-2.0"],

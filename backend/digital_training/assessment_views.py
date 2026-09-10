@@ -44,7 +44,7 @@ from .models import (
     TrainingAssessmentUpload,
     TrainingQuestionBankSnapshot,
 )
-from .assessment_lifecycle import refresh_assessment_status, trash_draft, verify_assessment_backup
+from .assessment_lifecycle import refresh_assessment_status, start_retention_counter, trash_draft, verify_assessment_backup
 from .serializers import (
     TrainingAssessmentAttemptSerializer,
     TrainingAssessmentSerializer,
@@ -439,7 +439,10 @@ def _sync_completed_attempt(attempt):
 def assessments(request):
     queryset = TrainingAssessment.objects.select_related("session", "partner", "training_class").filter(trashed_at__isnull=True)
     if request.method == "GET":
-        return Response(TrainingAssessmentSerializer(queryset, many=True, context={"request": request}).data)
+        rows = list(queryset)
+        for item in rows:
+            refresh_assessment_status(item)
+        return Response(TrainingAssessmentSerializer(rows, many=True, context={"request": request}).data)
     if not _can_manage(request):
         return _forbidden()
     serializer = TrainingAssessmentSerializer(data=request.data, context={"request": request})
@@ -501,7 +504,7 @@ def assessment_detail(request, pk):
         return Response(status=status.HTTP_204_NO_CONTENT)
     requested_status = str(request.data.get("status") or "")
     closing = requested_status == "closed"
-    reopening = requested_status == "published" and item.status in {"closed", "graded"}
+    reopening = requested_status == "published" and item.status in {"closed", "graded", "backup_complete"}
     if closing:
         item.attempts.filter(status="in_progress").update(status="timed_out", submitted_at=timezone.now())
     serializer = TrainingAssessmentSerializer(item, data=request.data, partial=True, context={"request": request})
@@ -512,13 +515,18 @@ def assessment_detail(request, pk):
         updated.graded_at = None
         updated.backup_completed_at = None
         updated.backup_manifest = {}
-        updated.save(update_fields=["closed_at", "graded_at", "backup_completed_at", "backup_manifest", "updated_at"])
-    if closing and not updated.closed_at:
-        updated.closed_at = timezone.now()
-        updated.save(update_fields=["closed_at", "updated_at"])
+        updated.retention_started_at = None
+        updated.next_lifecycle_at = None
+        updated.retention_milestone = 0
+        updated.save(update_fields=[
+            "closed_at", "graded_at", "backup_completed_at", "backup_manifest",
+            "retention_started_at", "next_lifecycle_at", "retention_milestone", "updated_at",
+        ])
+    if closing:
+        start_retention_counter(updated, timezone.now())
         refresh_assessment_status(updated)
         notify_workspace(
-            event_key=f"assessment:{updated.pk}:closed",
+            event_key=f"assessment:{updated.pk}:closed:{int(updated.retention_started_at.timestamp())}",
             title="Bài kiểm tra đã đóng", message=f"“{updated.title}” đã đóng và sẵn sàng để chấm.",
             category="digital-training", target_modules=["digital-training"],
             action_url=f"/training-assessments/{updated.pk}",
@@ -933,10 +941,13 @@ def assessment_restore(request, pk):
         return _forbidden()
     assessment = TrainingAssessment.objects.filter(pk=pk, trashed_at__isnull=False, purge_at__gt=timezone.now()).first()
     if not assessment:
-        return _assessment_error("Bản nháp không còn trong thời hạn khôi phục 3 ngày.", status.HTTP_404_NOT_FOUND)
+        return _assessment_error("Bài kiểm tra không còn trong thời hạn khôi phục 3 ngày.", status.HTTP_404_NOT_FOUND)
     assessment.trashed_at = None
     assessment.purge_at = None
-    assessment.save(update_fields=["trashed_at", "purge_at", "updated_at"])
+    if assessment.retention_started_at and assessment.status in {"closed", "graded", "backup_complete"}:
+        assessment.retention_milestone = 28
+        assessment.next_lifecycle_at = timezone.now() + timedelta(days=3)
+    assessment.save(update_fields=["trashed_at", "purge_at", "retention_milestone", "next_lifecycle_at", "updated_at"])
     return Response(TrainingAssessmentSerializer(assessment, context={"request": request}).data)
 
 
