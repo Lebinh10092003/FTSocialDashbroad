@@ -1,5 +1,5 @@
 import os
-from datetime import time, timedelta
+from datetime import date, time, timedelta
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -11,6 +11,7 @@ from authentication.models import UserProfile
 
 from .models import WorkItem, WorkScheduleSheetChange, WorkScheduleSheetInboundEvent, WorkScheduleSheetSyncLease
 from .sheet_parser import assessment_notes, parse_sheet_tasks, status_from_note, training_end
+from .retention import notification_from, retained_from
 from .sheet_sync import (
     EMPLOYEE_EMAILS,
     _build_content_format_runs,
@@ -29,6 +30,11 @@ from .training_sync import sync_work_item_from_training
 
 
 class WorkScheduleSheetParserTests(TestCase):
+    def test_rolling_history_and_notification_windows(self):
+        today = date(2026, 9, 10)
+        self.assertEqual(retained_from(today), date(2026, 7, 1))
+        self.assertEqual(notification_from(today), date(2026, 9, 1))
+
     def test_attendance_value_uses_the_visible_multiline_format(self):
         class Shift:
             def __init__(self, mode, start, end, day_off=False):

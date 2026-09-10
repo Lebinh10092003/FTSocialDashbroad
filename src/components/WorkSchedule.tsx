@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDot, ClipboardCheck, ExternalLink, FileSpreadsheet, LayoutDashboard, Link2, ListChecks, Pencil, Plus, RefreshCw, Search, Settings2, Trash2, UserCheck, X } from "lucide-react";
 import AccountMenu from "./AccountMenu";
 import { appDialog } from "./AppDialog";
+import Time24Input from "./Time24Input";
 
 type WorkStatus = "todo" | "doing" | "completed" | "reviewed";
 type Priority = "low" | "medium" | "high";
@@ -84,6 +85,7 @@ type WorkScheduleSnapshot = {
   staff: Person[];
   teamMembers: TeamMember[];
   teamTasks: WorkTask[];
+  retentionStart: string;
 };
 
 const WORK_SCHEDULE_MEMORY_TTL_MS = 5 * 60 * 1000;
@@ -391,6 +393,7 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     [staff, setStaff] = useState<Person[]>(cachedSnapshot?.staff || [{ email: userEmail, name: userName }]),
     [teamMembers, setTeamMembers] = useState<TeamMember[]>(cachedSnapshot?.teamMembers || []),
     [teamTasks, setTeamTasks] = useState<WorkTask[]>(cachedSnapshot?.teamTasks || []),
+    [retentionStart, setRetentionStart] = useState(cachedSnapshot?.retentionStart || ""),
     [selectedDate, setSelectedDate] = useState(iso(new Date())),
     [weekStart, setWeekStart] = useState(mondayOf(new Date())),
     [calendarPeriod, setCalendarPeriod] = useState<"week" | "month">(initialLocation.period),
@@ -445,11 +448,13 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
       const nextStaff = Array.isArray(people) ? people : [];
       const nextTeamMembers = Array.isArray(team.members) ? team.members : [];
       const nextTeamTasks = Array.isArray(team.items) ? team.items : [];
+      const nextRetentionStart = String(items.retentionStart || team.retentionStart || "");
       setTasks(nextTasks);
       setStaff(nextStaff);
       setTeamMembers(nextTeamMembers);
       setTeamTasks(nextTeamTasks);
-      workScheduleSnapshot = { owner: userEmail, savedAt: Date.now(), tasks: nextTasks, staff: nextStaff, teamMembers: nextTeamMembers, teamTasks: nextTeamTasks };
+      setRetentionStart(nextRetentionStart);
+      workScheduleSnapshot = { owner: userEmail, savedAt: Date.now(), tasks: nextTasks, staff: nextStaff, teamMembers: nextTeamMembers, teamTasks: nextTeamTasks, retentionStart: nextRetentionStart };
     } catch (cause: any) {
       setError(cause.message || "Không thể tải lịch làm việc.");
     } finally {
@@ -482,8 +487,8 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
   }, [idToken]);
   useEffect(() => {
     if (loading) return;
-    workScheduleSnapshot = { owner: userEmail, savedAt: Date.now(), tasks, staff, teamMembers, teamTasks };
-  }, [loading, staff, tasks, teamMembers, teamTasks, userEmail]);
+    workScheduleSnapshot = { owner: userEmail, savedAt: Date.now(), tasks, staff, teamMembers, teamTasks, retentionStart };
+  }, [loading, retentionStart, staff, tasks, teamMembers, teamTasks, userEmail]);
   useEffect(() => {
     if (!loading && view === "team" && teamMembers.length === 0) {
       navigateSchedule("board");
@@ -498,7 +503,8 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     [query, tasks],
   );
   const todayIso = iso(new Date()),
-    overdueTasks = tasks.filter((task) => task.executor.email === userEmail && task.date < todayIso && (task.status === "todo" || task.status === "doing")),
+    notificationStart = `${todayIso.slice(0, 7)}-01`,
+    overdueTasks = tasks.filter((task) => task.executor.email === userEmail && task.date >= notificationStart && task.date < todayIso && (task.status === "todo" || task.status === "doing")),
     overdueDates = [...new Set(overdueTasks.map((task) => task.date))].sort(),
     dailyTasks = filtered.filter((task) => task.date === selectedDate && task.executor.email === userEmail),
     completedCount = dailyTasks.filter((task) => task.status === "completed" || task.status === "reviewed").length,
@@ -508,6 +514,12 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
     canBulkDelete = selectedTasks.length > 0 && selectedTasks.every((task) => task.canDelete),
     canBulkEdit = selectedTasks.length > 0 && selectedTasks.every((task) => task.canEdit),
     canBulkManagePeople = selectedTasks.length > 0 && selectedTasks.every((task) => task.canManagePeople);
+  const historyEndDate = view === "board"
+    ? selectedDate
+    : view === "week" && visibleCalendarDays.length
+      ? iso(visibleCalendarDays[visibleCalendarDays.length - 1])
+      : "";
+  const unavailableHistory = Boolean(retentionStart && historyEndDate && historyEndDate < retentionStart);
 
   const saveTask = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -908,7 +920,18 @@ export default function WorkSchedule({ idToken, onBackToWorkspace, onAccountClic
               </button>
             </div>
           )}
-          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={tasks} userEmail={userEmail} idToken={idToken} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={(period: "week" | "month") => navigateSchedule("week", period)} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={(next: View) => navigateSchedule(next)} setEditing={setEditing} setDraggedId={setDraggedId} moveTask={moveTask} saveInlineDay={saveInlineDay} reloadTasks={load} /> : view === "team" ? <TeamSpreadsheetView members={teamMembers} tasks={teamTasks} userEmail={userEmail} setEditing={setEditing} saveInlineDay={saveInlineDay} reloadTasks={load} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} onSync={syncSheet} />}
+          {loading ? <div className="grid min-h-[420px] place-items-center text-sm font-semibold text-slate-500">Đang tải lịch làm việc...</div> : unavailableHistory ? (
+            <section className="grid min-h-[420px] place-items-center rounded-2xl border border-amber-200 bg-amber-50/70 p-8 text-center">
+              <div className="max-w-xl">
+                <FileSpreadsheet className="mx-auto h-12 w-12 text-amber-600" />
+                <h2 className="mt-4 text-xl font-extrabold text-amber-950">Dữ liệu không được lưu trữ trên hệ thống</h2>
+                <p className="mt-2 text-sm font-medium leading-6 text-amber-800">Hệ thống chỉ lưu tháng hiện tại và hai tháng liền trước. Vui lòng truy cập trang tính để kiểm tra dữ liệu cũ hơn.</p>
+                <a href={sheetUrl || SHEET_TEMPLATE} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 rounded-xl bg-amber-700 px-4 py-2.5 text-sm font-extrabold text-white hover:bg-amber-800">
+                  <ExternalLink className="h-4 w-4" />Mở trang tính
+                </a>
+              </div>
+            </section>
+          ) : view === "board" ? <BoardView tasks={dailyTasks} selectedDate={selectedDate} setSelectedDate={setSelectedDate} userEmail={userEmail} selectedIds={selectedIds} setSelectedIds={setSelectedIds} setEditing={setEditing} deleteTasks={deleteTasks} setDraggedId={setDraggedId} moveTask={moveTask} /> : view === "week" ? <WeekView tasks={tasks} userEmail={userEmail} idToken={idToken} visibleDays={visibleCalendarDays} anchor={weekStart} setAnchor={setWeekStart} period={calendarPeriod} setPeriod={(period: "week" | "month") => navigateSchedule("week", period)} layout={calendarLayout} setLayout={setCalendarLayout} setSelectedDate={setSelectedDate} setView={(next: View) => navigateSchedule(next)} setEditing={setEditing} setDraggedId={setDraggedId} moveTask={moveTask} saveInlineDay={saveInlineDay} reloadTasks={load} /> : view === "team" ? <TeamSpreadsheetView members={teamMembers} tasks={teamTasks} userEmail={userEmail} setEditing={setEditing} saveInlineDay={saveInlineDay} reloadTasks={load} /> : <SheetView sheetUrl={sheetUrl} setSheetUrl={setSheetUrl} sheetKey={sheetKey} notice={sheetNotice} setNotice={setSheetNotice} onSync={syncSheet} />}
         </div>
       </main>
       {editing && <TaskDialog draft={editing} setDraft={setEditing} staff={staff} userEmail={userEmail} saveTask={saveTask} saving={savingTask} saveProgressNote={saveProgressNote} deleteTasks={deleteTasks} review={review} />}
@@ -1642,11 +1665,11 @@ function TaskDialog({ draft, setDraft, staff, userEmail, saveTask, saving, saveP
             </label>
             <label>
               <span className="ws-label">Bắt đầu (không bắt buộc)</span>
-              <input disabled={!draft.canEdit} type="time" value={draft.startTime} onChange={(event) => setDraft({ ...draft, startTime: event.target.value })} className="ws-input disabled:bg-slate-50" />
+              <Time24Input disabled={!draft.canEdit} label="Bắt đầu" value={draft.startTime} onChange={(value) => setDraft({ ...draft, startTime: value })} />
             </label>
             <label>
               <span className="ws-label">Kết thúc (không bắt buộc)</span>
-              <input disabled={!draft.canEdit} type="time" value={draft.endTime} onChange={(event) => setDraft({ ...draft, endTime: event.target.value })} className="ws-input disabled:bg-slate-50" />
+              <Time24Input disabled={!draft.canEdit} label="Kết thúc" value={draft.endTime} onChange={(value) => setDraft({ ...draft, endTime: value })} />
             </label>
             <label>
               <span className="ws-label">Trạng thái</span>

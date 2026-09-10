@@ -341,14 +341,30 @@ export default function App() {
   // Check yesterday timesheet warning when workspace loads
   useEffect(() => {
     if (authChecking || isGuest || !idToken) return;
-    const dismissed = sessionStorage.getItem('timesheet_dismiss_yesterday');
-    if (dismissed) return;
-    fetch('/api/attendance/timesheet/prefill', { headers: { Authorization: `Bearer ${idToken}` } })
-      .then(r => r.json())
-      .then((pf: any) => {
-        if (pf.yesterdayWarning) setYesterdayWarning({ show: true, date: pf.yesterdayDate });
-      })
-      .catch(() => {});
+    let active = true;
+    const refreshWarning = (ignoreDismissed = false) => {
+      if (!ignoreDismissed && sessionStorage.getItem('timesheet_dismiss_yesterday')) return;
+      fetch('/api/attendance/timesheet/prefill', { headers: { Authorization: `Bearer ${idToken}` } })
+        .then(r => r.json())
+        .then((pf: any) => {
+          if (!active) return;
+          setYesterdayWarning(pf.yesterdayWarning
+            ? { show: true, date: pf.yesterdayDate }
+            : { show: false, date: pf.yesterdayDate || '' });
+        })
+        .catch(() => {});
+    };
+    const onTimesheetSaved = (event: Event) => {
+      const savedDate = (event as CustomEvent<{ date?: string }>).detail?.date;
+      setYesterdayWarning(previous => savedDate && savedDate === previous.date ? { ...previous, show: false } : previous);
+      refreshWarning(true);
+    };
+    refreshWarning();
+    window.addEventListener('ft-timesheet-saved', onTimesheetSaved);
+    return () => {
+      active = false;
+      window.removeEventListener('ft-timesheet-saved', onTimesheetSaved);
+    };
   }, [authChecking, isGuest, idToken]);
 
   const fmtDDMMYYYY = (iso: string) => { const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };

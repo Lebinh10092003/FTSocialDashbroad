@@ -15,6 +15,7 @@ from attendance.models import TimesheetEntry
 from integrations.google_sheets import build_sheets_service
 
 from .models import WorkItem, WorkScheduleSheetChange, WorkScheduleSheetSyncLease
+from .retention import purge_expired_work_schedule, retained_from
 from .sheet_parser import assessment_notes, parse_sheet_tasks, status_from_note, training_end
 from .signals import suppress_sheet_queue
 
@@ -122,14 +123,46 @@ def _canonical_row(row, columns):
     return [_cell(row, columns.get(name, -1)) if name in columns else "" for name in CANONICAL_COLUMNS]
 
 
-def _rows(service):
+def _retained_sheet_start_row(service, start_date):
+    """Resolve and cache the first Sheet row in the rolling retention window."""
+    cache_key = "work_schedule_sheet_window"
+    cached = SystemConfig.objects.filter(key=cache_key).first()
+    cached_data = cached.data if cached and isinstance(cached.data, dict) else {}
+    if cached_data.get("startDate") == start_date.isoformat():
+        try:
+            return max(3, int(cached_data.get("startRow")))
+        except (TypeError, ValueError):
+            pass
+
+    columns, _ = _sheet_columns(service)
+    date_column = _column_letter(columns["date"])
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{SHEET_NAME}'!{date_column}3:{date_column}",
+        valueRenderOption="FORMATTED_VALUE",
+    ).execute()
+    values = result.get("values", [])
+    start_row = len(values) + 3
+    for offset, row in enumerate(values, start=3):
+        row_date = _parse_date(_cell(row, 0))
+        if row_date and row_date >= start_date:
+            start_row = offset
+            break
+    SystemConfig.objects.update_or_create(
+        key=cache_key,
+        defaults={"data": {"startDate": start_date.isoformat(), "startRow": start_row}},
+    )
+    return start_row
+
+
+def _rows(service, start_row=2):
     columns, _ = _sheet_columns(service)
     last_column = _column_letter(max(columns.values()))
     result = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
         # Open-ended so rows appended after the original 6109-row grid are also
         # part of future full-sync scans.
-        range=f"'{SHEET_NAME}'!A2:{last_column}",
+        range=f"'{SHEET_NAME}'!A{start_row}:{last_column}",
         valueRenderOption="FORMATTED_VALUE",
     ).execute()
     return [_canonical_row(row, columns) for row in result.get("values", [])]
@@ -486,7 +519,8 @@ def pull_from_sheet(service, start_date, end_date):
     touched = set()
     today = timezone.localdate()
     with suppress_sheet_queue():
-        for offset, row in enumerate(_rows(service), start=2):
+        rows_start = _retained_sheet_start_row(service, max(start_date, retained_from()))
+        for offset, row in enumerate(_rows(service, rows_start), start=rows_start):
             work_date = _parse_date(_cell(row, 1))
             if not work_date or not (start_date <= work_date <= end_date):
                 continue
@@ -498,21 +532,21 @@ def pull_from_sheet(service, start_date, end_date):
     return {"created": created, "updated": updated, "deleted": deleted, "groups": touched}
 
 
-def _find_row(rows, email, work_date, items, row_index=None):
+def _find_row(rows, email, work_date, items, row_index=None, rows_start=2):
     if row_index is not None:
         matched = row_index.get((email, work_date))
         if matched:
             return matched
     else:
         employee_id = _sheet_employee_code(email)
-        for index, row in enumerate(rows, start=2):
+        for index, row in enumerate(rows, start=rows_start):
             if _parse_date(_cell(row, 1)) == work_date and employee_id and _cell(row, 7) == employee_id:
                 return index, row
     source_rows = {item.source_sheet_row for item in items if item.source_sheet_row}
     if len(source_rows) == 1:
         number = source_rows.pop()
-        if 2 <= number <= len(rows) + 1:
-            return number, rows[number - 2]
+        if rows_start <= number < rows_start + len(rows):
+            return number, rows[number - rows_start]
     return None, None
 
 
@@ -552,7 +586,7 @@ def _build_content_format_runs(content, items=None):
     return runs
 
 
-def _formula_content_rows(service, columns=None):
+def _formula_content_rows(service, columns=None, start_row=2):
     """Return 1-based rows whose column E value is produced by a formula.
 
     Google rejects textFormatRuns for computed values, even when their displayed
@@ -563,7 +597,7 @@ def _formula_content_rows(service, columns=None):
     content_column = _column_letter(columns["content"])
     result = service.spreadsheets().get(
         spreadsheetId=SPREADSHEET_ID,
-        ranges=[f"'{SHEET_NAME}'!{content_column}2:{content_column}"],
+        ranges=[f"'{SHEET_NAME}'!{content_column}{start_row}:{content_column}"],
         includeGridData=True,
         fields="sheets.data(startRow,rowData.values.userEnteredValue)",
     ).execute()
@@ -582,14 +616,16 @@ def push_groups_to_sheet(service, groups, force=False):
     columns = ensure_sync_columns(service)
     if not isinstance(columns, dict):  # compatibility with isolated test/mocked callers
         columns = LEGACY_COLUMNS
-    rows = _rows(service)
-    groups = set(groups)
+    retention_start = retained_from()
+    rows_start = _retained_sheet_start_row(service, retention_start)
+    rows = _rows(service, rows_start)
+    groups = {(email, work_date) for email, work_date in groups if work_date >= retention_start}
     updates = []
     conflicts = []
     synced = []
     update_rows = []
     row_index = {}
-    for row_number, row in enumerate(rows, start=2):
+    for row_number, row in enumerate(rows, start=rows_start):
         row_email = _row_employee_email(row)
         row_date = _parse_date(_cell(row, 1))
         if row_email and row_date:
@@ -619,11 +655,11 @@ def push_groups_to_sheet(service, groups, force=False):
     profiles = UserProfile.objects.in_bulk(
         {email for email, _ in groups}, field_name="email"
     )
-    next_row = max((i for i, row in enumerate(rows, start=2) if any(_cell(row, c) for c in range(min(9, len(row))))), default=2) + 1
+    next_row = max((i for i, row in enumerate(rows, start=rows_start) if any(_cell(row, c) for c in range(min(9, len(row))))), default=rows_start - 1) + 1
     for email, work_date in sorted(groups, key=lambda value: (value[1], value[0])):
         items = items_by_group[(email, work_date)]
         attendance = attendance_by_group[(email, work_date)]
-        row_number, current = _find_row(rows, email, work_date, items, row_index)
+        row_number, current = _find_row(rows, email, work_date, items, row_index, rows_start)
         if row_number is None:
             if not items and not attendance:
                 continue
@@ -672,7 +708,7 @@ def push_groups_to_sheet(service, groups, force=False):
             ).execute()
     # Apply bold+italic formatting to time-prefixed task lines in column E
     format_requests = []
-    formula_rows = _formula_content_rows(service, columns) if synced else set()
+    formula_rows = _formula_content_rows(service, columns, rows_start) if synced else set()
     for email, work_date, row_number, sync_hash, items in synced:
         if row_number in formula_rows:
             continue
@@ -739,6 +775,7 @@ def sync_lease(seconds=INCREMENTAL_SYNC_LEASE_SECONDS):
 
 
 def sync_to_sheet(google_token=None, force=False):
+    purge_expired_work_schedule()
     with sync_lease() as acquired:
         if not acquired:
             return {"busy": True, "message": "Một lượt đồng bộ khác đang chạy."}
@@ -767,6 +804,8 @@ def sync_to_sheet(google_token=None, force=False):
 
 
 def _two_way_sync(google_token, start, end):
+    purge_expired_work_schedule()
+    start = max(start, retained_from())
     service = _service(google_token)
     ensure_sync_columns(service)
     pulled = pull_from_sheet(service, start, end)
@@ -782,7 +821,7 @@ def _two_way_sync(google_token, start, end):
 
 def initial_two_way_sync(google_token=None):
     today = timezone.localdate()
-    start = today.replace(day=1)
+    start = retained_from(today)
     month_end = today.replace(day=monthrange(today.year, today.month)[1])
     end = month_end + timedelta(days=14)
     with sync_lease(seconds=TWO_WAY_SYNC_LEASE_SECONDS) as acquired:
@@ -792,11 +831,11 @@ def initial_two_way_sync(google_token=None):
 
 
 def full_two_way_sync(google_token=None):
-    """Re-read the complete configured Sheet range and reconcile all dated rows."""
+    """Re-read only the rolling retained Sheet window and reconcile dated rows."""
     with sync_lease(seconds=TWO_WAY_SYNC_LEASE_SECONDS) as acquired:
         if not acquired:
             return {"busy": True, "message": "Một lượt đồng bộ khác đang chạy."}
-        return _two_way_sync(google_token, datetime(1900, 1, 1).date(), datetime(9999, 12, 31).date())
+        return _two_way_sync(google_token, retained_from(), datetime(9999, 12, 31).date())
 
 
 def sync_status():

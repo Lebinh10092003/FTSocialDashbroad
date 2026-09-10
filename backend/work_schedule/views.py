@@ -17,6 +17,7 @@ from authentication.models import UserProfile
 from authentication.permissions import IsAuthenticated
 
 from .models import WorkItem, WorkScheduleSheetInboundEvent
+from .retention import purge_expired_work_schedule, retained_from
 from .training_sync import delete_training_for_work_item, sync_training_from_work_item
 
 logger = logging.getLogger(__name__)
@@ -284,7 +285,9 @@ def work_items(request):
         item = _visible_items(request.user, request.user_role).get(pk=item.pk)
         return Response({"message": "Đã thêm công việc.", "item": _payload(item, request.user, request.user_role)}, status=status.HTTP_201_CREATED)
 
-    rows = _related_items(request.user)
+    retention_start = retained_from()
+    purge_expired_work_schedule()
+    rows = _related_items(request.user).filter(work_date__gte=retention_start)
     start = parse_date(str(request.query_params.get("start") or ""))
     end = parse_date(str(request.query_params.get("end") or ""))
     if start:
@@ -292,19 +295,25 @@ def work_items(request):
     if end:
         rows = rows.filter(work_date__lte=end)
     rows = list(rows.order_by("work_date", "daily_order", "start_time", "created_at")[:1000])
-    return Response({"items": [_payload(item, request.user, request.user_role) for item in rows]})
+    return Response({
+        "items": [_payload(item, request.user, request.user_role) for item in rows],
+        "retentionStart": retention_start.isoformat(),
+        "sheetUrl": "https://docs.google.com/spreadsheets/d/1kWiJdTSM_6ZDeLTGCWvDA3num5n0DmRH2Tv-6AwuBYc/edit",
+    })
 
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def work_team(request):
+    retention_start = retained_from()
+    purge_expired_work_schedule()
     rows = UserProfile.objects.filter(employment_status="ACTIVE")
     if request.user_role != "ADMIN":
         rows = rows.filter(manager=request.user)
     rows = rows.select_related("department", "job_title").order_by("name", "email")
     member_ids = list(rows.values_list("email", flat=True))
     team_items = WorkItem.objects.select_related("creator", "executor", "reviewed_by").prefetch_related("supporters", "managers").filter(
-        executor_id__in=member_ids
+        executor_id__in=member_ids, work_date__gte=retention_start
     ).order_by("work_date", "daily_order", "start_time", "created_at")[:10000]
     return Response({"members": [
         {
@@ -315,7 +324,10 @@ def work_team(request):
             "jobTitle": profile.job_title.name if profile.job_title else "",
         }
         for profile in rows
-    ], "items": [_payload(item, request.user, request.user_role) for item in team_items]})
+    ], "items": [_payload(item, request.user, request.user_role) for item in team_items],
+        "retentionStart": retention_start.isoformat(),
+        "sheetUrl": "https://docs.google.com/spreadsheets/d/1kWiJdTSM_6ZDeLTGCWvDA3num5n0DmRH2Tv-6AwuBYc/edit",
+    })
 
 
 @api_view(["POST"])

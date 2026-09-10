@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Clock, Edit3, FileText, Globe, Laptop, Loader2, MapPin, Moon, Plus, Save, Search, Trash2, TriangleAlert, UserCheck, Users, X } from 'lucide-react';
+import Time24Input from './Time24Input';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -295,6 +296,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || 'Không thể ghi nhận ngày nghỉ.');
       setNotice(`Đã ghi nhận nghỉ làm ngày ${fmtDate(dateStr)}`);
+      window.dispatchEvent(new CustomEvent('ft-timesheet-saved', { detail: { date: dateStr } }));
       await load(true);
     } catch (e: any) {
       setError(e.message || 'Không thể ghi nhận ngày nghỉ.');
@@ -320,6 +322,7 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
       if (!res.ok) throw new Error(body.error || 'Không thể lưu.');
       setNotice(body.message || 'Đã lưu công ca.');
       setPopupOpen(false);
+      window.dispatchEvent(new CustomEvent('ft-timesheet-saved', { detail: { date: popupDate } }));
       await load(true);
     } catch (e: any) {
       setPopupError(e.message || 'Không thể lưu.');
@@ -374,21 +377,17 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
       <div className="flex min-h-dvh flex-1 flex-col">
         {/* Header */}
         <header className="border-b bg-white/90 backdrop-blur-xl">
-          <div className="mx-auto flex h-16 max-w-[1400px] items-center justify-between px-5 sm:px-8">
+          <div className="mx-auto flex h-24 max-w-[1400px] items-center justify-between px-5 sm:px-8">
             {!isPrivileged && <button type="button" onClick={onBackToWorkspace} className="ft-btn ft-btn-secondary"><ArrowLeft className="h-4 w-4" />Workspace</button>}
-            <div className="flex items-center gap-2.5"><div className="grid h-9 w-9 place-items-center rounded-lg bg-emerald-700 text-white"><UserCheck className="h-5 w-5" /></div><span className="text-sm font-extrabold">Công ca{selectedEmpName ? ` — ${selectedEmpName}` : ''}</span></div>
-            <div className="hidden text-right sm:block"><p className="text-base font-extrabold text-slate-600">{new Intl.DateTimeFormat('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit' }).format(new Date())}</p></div>
+            <div className="flex items-center gap-3"><div className="grid h-14 w-14 place-items-center rounded-xl bg-emerald-700 text-white"><UserCheck className="h-8 w-8" /></div><span className="text-xl font-extrabold">Công ca{selectedEmpName ? ` — ${selectedEmpName}` : ''}</span></div>
+            <div className="hidden text-right sm:block"><p className="text-xl font-extrabold text-slate-600">{new Intl.DateTimeFormat('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit' }).format(new Date())}</p></div>
           </div>
         </header>
 
         <main className="mx-auto w-full max-w-[1400px] flex-1 px-5 py-8 sm:px-8 sm:py-10">
           {/* Title row */}
-          <section className="mb-7 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="text-xs font-bold uppercase text-emerald-600">Xin chào, {userName}</p>
-              <h1 className="mt-1 text-2xl font-extrabold sm:text-3xl">Bảng công cá nhân</h1>
-            </div>
-            <button type="button" onClick={() => void openPopup()} className="ft-btn ft-btn-primary px-5 py-3 text-base"><Plus className="h-5 w-5" />Thêm công ca</button>
+          <section className="mb-7">
+            <p className="text-xl font-extrabold uppercase tracking-wide text-emerald-700 sm:text-2xl">Xin chào, {userName}</p>
           </section>
 
           {error && <div className="mb-5 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800"><TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" /><span>{error}</span></div>}
@@ -445,7 +444,8 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
                       const today = new Date().toISOString().slice(0, 10);
                       const isPast = dateStr < today;
                       const logs = editLogsByDate.get(dateStr) || [];
-                      const rowSpan = entries.length + 1;
+                      const showDailyTotal = !markedDayOff;
+                      const rowSpan = entries.length + (showDailyTotal ? 1 : 0);
 
                       return (
                         <React.Fragment key={dateStr}>
@@ -478,11 +478,11 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
                               </td>}
                             </tr>
                           ))}
-                          <tr className={`${defaultDayOff ? 'bg-slate-50' : 'bg-emerald-50/40'} font-bold`}>
+                          {showDailyTotal && <tr className="bg-emerald-50/40 font-bold">
                             <td colSpan={3} className="text-right text-xs uppercase tracking-wide text-slate-500">Tổng giờ trong ngày</td>
                             <td className="whitespace-nowrap tabular-nums text-emerald-800">{fmtHours(dayTotal)} giờ</td>
                             <td aria-hidden="true">—</td>
-                          </tr>
+                          </tr>}
                         </React.Fragment>
                       );
                     })}
@@ -543,8 +543,8 @@ export default function Attendance({ onBackToWorkspace, idToken, userName, userE
                   {shifts.map((shift, idx) => (
                     <div key={idx} className="grid grid-cols-[1fr_1fr_auto] items-start gap-3 rounded-xl border bg-slate-50 px-4 py-3">
                       <div className="grid grid-cols-2 gap-3">
-                        <label><span className="mb-1 block text-xs font-bold text-slate-500">Bắt đầu</span><input type="time" className="ft-input" value={shift.start} onChange={e => updateShift(idx, 'start', e.target.value)} /></label>
-                        <label><span className="mb-1 block text-xs font-bold text-slate-500">Kết thúc</span><input type="time" className="ft-input" value={shift.end} onChange={e => updateShift(idx, 'end', e.target.value)} /></label>
+                        <label><span className="mb-1 block text-xs font-bold text-slate-500">Bắt đầu (24h)</span><Time24Input label="Bắt đầu" value={shift.start} onChange={value => updateShift(idx, 'start', value)} /></label>
+                        <label><span className="mb-1 block text-xs font-bold text-slate-500">Kết thúc (24h)</span><Time24Input label="Kết thúc" value={shift.end} onChange={value => updateShift(idx, 'end', value)} /></label>
                       </div>
                       <div>
                         <span className="mb-1 block text-xs font-bold text-slate-500">Hình thức</span>
