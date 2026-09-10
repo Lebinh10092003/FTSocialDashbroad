@@ -365,6 +365,7 @@ class TrainingAssessment(models.Model):
     retention_milestone = models.PositiveSmallIntegerField(default=0)
     graded_at = models.DateTimeField(null=True, blank=True)
     backup_completed_at = models.DateTimeField(null=True, blank=True)
+    backup_retry_at = models.DateTimeField(null=True, blank=True, db_index=True)
     backup_manifest = models.JSONField(default=dict, blank=True)
     trashed_at = models.DateTimeField(null=True, blank=True)
     purge_at = models.DateTimeField(null=True, blank=True)

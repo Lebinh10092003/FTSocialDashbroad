@@ -9,6 +9,7 @@ from rest_framework.test import APIClient
 from authentication.models import UserProfile, WorkspaceNotification
 from .assessment_lifecycle import (
     assessment_retention_anchor,
+    refresh_and_backup_assessment,
     lifecycle_warning,
     refresh_assessment_status,
     run_assessment_lifecycle,
@@ -54,6 +55,65 @@ class AssessmentLifecycleTests(TestCase):
         refresh_assessment_status(self.assessment)
         self.assessment.refresh_from_db()
         self.assertEqual(self.assessment.status, "graded")
+
+    @patch("digital_training.assessment_lifecycle.verify_assessment_backup")
+    def test_finishing_the_last_grade_immediately_starts_and_completes_backup(self, verify):
+        def complete_backup(assessment, rebuild=True):
+            assessment.status = "backup_complete"
+            assessment.backup_completed_at = timezone.now()
+            assessment.backup_retry_at = None
+            assessment.save(update_fields=["status", "backup_completed_at", "backup_retry_at", "updated_at"])
+            return True, {"attemptCount": 1}
+
+        verify.side_effect = complete_backup
+        self.attempt.manual_grading_required = False
+        self.attempt.score = 1
+        self.attempt.max_score = 1
+        self.attempt.save(update_fields=["manual_grading_required", "score", "max_score"])
+
+        refresh_and_backup_assessment(self.assessment)
+
+        self.assessment.refresh_from_db()
+        self.assertEqual(self.assessment.status, "backup_complete")
+        self.assertIsNotNone(self.assessment.backup_completed_at)
+        verify.assert_called_once_with(self.assessment, rebuild=True)
+
+    @patch("digital_training.assessment_lifecycle.verify_assessment_backup", side_effect=RuntimeError("Drive unavailable"))
+    def test_failed_automatic_backup_stays_graded_and_is_scheduled_for_retry(self, _verify):
+        self.assessment.status = "graded"
+        self.assessment.graded_at = timezone.now()
+        self.assessment.save(update_fields=["status", "graded_at"])
+
+        refresh_and_backup_assessment(self.assessment)
+
+        self.assessment.refresh_from_db()
+        self.assertEqual(self.assessment.status, "graded")
+        self.assertEqual(self.assessment.sync_status, "error")
+        self.assertAlmostEqual(
+            (self.assessment.backup_retry_at - timezone.now()).total_seconds(),
+            86400,
+            delta=5,
+        )
+        self.assertTrue(WorkspaceNotification.objects.filter(title="Sao lưu bài kiểm tra chưa thành công").exists())
+
+    @patch("digital_training.assessment_lifecycle.verify_assessment_backup")
+    def test_assessment_list_catches_up_an_existing_graded_row(self, verify):
+        self.assessment.status = "graded"
+        self.assessment.graded_at = timezone.now() - timedelta(days=1)
+        self.assessment.save(update_fields=["status", "graded_at"])
+
+        def complete_backup(assessment, rebuild=True):
+            assessment.status = "backup_complete"
+            assessment.backup_completed_at = timezone.now()
+            assessment.save(update_fields=["status", "backup_completed_at", "updated_at"])
+            return True, {"attemptCount": 1}
+
+        verify.side_effect = complete_backup
+        response = self.client.get("/api/digital-training/assessments")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]["status"], "backup_complete")
+        verify.assert_called_once()
 
     def test_reopen_clears_counter_and_closing_again_resets_it(self):
         self.assessment.retention_started_at = timezone.now() - timedelta(days=20)

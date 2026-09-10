@@ -2,7 +2,7 @@ import hashlib
 import json
 from datetime import timedelta
 
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.utils import timezone
 
 from authentication.notifications import notify_workspace
@@ -14,6 +14,7 @@ from .models import TrainingAssessment
 RETENTION_DELETE_DAY = 31
 RETENTION_MILESTONES = (14, 21, 28, RETENTION_DELETE_DAY)
 DRAFT_TRASH_DAYS = 3
+BACKUP_RETRY_DELAY = timedelta(days=1)
 
 
 def assessment_retention_anchor(assessment):
@@ -150,11 +151,48 @@ def verify_assessment_backup(assessment, *, rebuild=True):
         return False, manifest
     assessment.status = "backup_complete"
     assessment.backup_completed_at = timezone.now()
+    assessment.backup_retry_at = None
     assessment.sync_status = "synced"
     assessment.sync_error = ""
     assessment.attempts.exclude(status="in_progress").update(sync_status="synced", sync_error="", synced_at=timezone.now())
-    assessment.save(update_fields=["status", "backup_completed_at", "backup_manifest", "sync_status", "sync_error", "updated_at"])
+    assessment.save(update_fields=["status", "backup_completed_at", "backup_retry_at", "backup_manifest", "sync_status", "sync_error", "updated_at"])
     return True, manifest
+
+
+def auto_backup_graded_assessment(assessment):
+    """Back up a fully graded assessment now and schedule a daily retry on failure."""
+    if assessment.status != "graded" or assessment.trashed_at:
+        return False
+    try:
+        complete, _ = verify_assessment_backup(assessment, rebuild=True)
+    except Exception as error:
+        complete = False
+        assessment.sync_status = "error"
+        assessment.sync_error = str(error)[:2000]
+    if complete:
+        return True
+    assessment.backup_retry_at = timezone.now() + BACKUP_RETRY_DELAY
+    assessment.save(update_fields=["sync_status", "sync_error", "backup_retry_at", "updated_at"])
+    graded_stamp = int((assessment.graded_at or timezone.now()).timestamp())
+    notify_workspace(
+        event_key=f"assessment:{assessment.pk}:auto-backup-failed:{graded_stamp}",
+        title="Sao lưu bài kiểm tra chưa thành công",
+        message=(
+            f"Bài “{assessment.title}” đã chấm xong nhưng chưa thể hoàn tất sao lưu Google Sheet/Drive. "
+            "Hệ thống sẽ tự động thử lại hằng ngày; vui lòng kiểm tra nếu cảnh báo tiếp tục xuất hiện."
+        ),
+        severity="warning", category="digital-training", target_modules=["digital-training"],
+        action_url=f"/training-assessments/{assessment.pk}",
+    )
+    return False
+
+
+def refresh_and_backup_assessment(assessment):
+    """Refresh grading state and immediately secure the final graded dataset."""
+    refresh_assessment_status(assessment)
+    if assessment.status == "graded":
+        auto_backup_graded_assessment(assessment)
+    return assessment
 
 
 def lifecycle_warning(assessment, now=None):
@@ -220,6 +258,24 @@ def run_assessment_lifecycle(now=None):
         assessment.attempts.filter(status="in_progress").update(status="timed_out", submitted_at=now)
         assessment.save(update_fields=["status", "updated_at"])
         start_retention_counter(assessment, assessment.closes_at)
+
+    # Back up every newly graded assessment as soon as possible. This also
+    # catches legacy rows that reached "graded" before automatic backup was
+    # introduced. Failed backups are retried once a day without scanning
+    # unrelated organizations or open assessments.
+    retryable_graded = TrainingAssessment.objects.select_related("partner").filter(
+        status="graded", trashed_at__isnull=True,
+    ).filter(
+        Q(backup_retry_at__isnull=True) | Q(backup_retry_at__lte=now),
+    )
+    for assessment in retryable_graded.iterator():
+        anchor = assessment_retention_anchor(assessment)
+        if anchor and (now.date() - anchor.date()).days >= RETENTION_DELETE_DAY:
+            continue
+        if auto_backup_graded_assessment(assessment):
+            result["backedUp"] += 1
+        else:
+            result["failedBackup"] += 1
 
     due = TrainingAssessment.objects.select_related("partner").filter(
         status__in=["closed", "graded", "backup_complete"],

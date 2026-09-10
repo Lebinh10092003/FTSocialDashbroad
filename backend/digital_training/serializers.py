@@ -501,7 +501,7 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
             "drive_folder_id", "storage_config", "audience_group", "participants", "participant_count",
             "max_people_per_variant", "sync_status", "sync_error", "sync_counts",
             "closed_at", "retention_started_at", "next_lifecycle_at", "retention_milestone",
-            "graded_at", "backup_completed_at", "backup_manifest",
+            "graded_at", "backup_completed_at", "backup_retry_at", "backup_manifest",
             "purge_at", "retention_warning",
             "created_by", "attempts_count", "submitted_count", "average_score",
             "variant_distribution", "created_at", "updated_at",
@@ -509,7 +509,7 @@ class TrainingAssessmentSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "partner", "public_slug", "created_by", "closed_at", "retention_started_at",
             "next_lifecycle_at", "retention_milestone", "graded_at",
-            "backup_completed_at", "backup_manifest", "purge_at", "retention_warning",
+            "backup_completed_at", "backup_retry_at", "backup_manifest", "purge_at", "retention_warning",
         ]
 
     def get_retention_warning(self, obj):

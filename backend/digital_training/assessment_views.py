@@ -44,7 +44,7 @@ from .models import (
     TrainingAssessmentUpload,
     TrainingQuestionBankSnapshot,
 )
-from .assessment_lifecycle import refresh_assessment_status, start_retention_counter, trash_draft, verify_assessment_backup
+from .assessment_lifecycle import refresh_and_backup_assessment, start_retention_counter, trash_draft, verify_assessment_backup
 from .serializers import (
     TrainingAssessmentAttemptSerializer,
     TrainingAssessmentSerializer,
@@ -441,7 +441,7 @@ def assessments(request):
     if request.method == "GET":
         rows = list(queryset)
         for item in rows:
-            refresh_assessment_status(item)
+            refresh_and_backup_assessment(item)
         return Response(TrainingAssessmentSerializer(rows, many=True, context={"request": request}).data)
     if not _can_manage(request):
         return _forbidden()
@@ -474,6 +474,7 @@ def assessment_detail(request, pk):
     if not item:
         return _assessment_error("Không tìm thấy bài đánh giá.", status.HTTP_404_NOT_FOUND)
     if request.method == "GET":
+        refresh_and_backup_assessment(item)
         return Response(TrainingAssessmentSerializer(item, context={"request": request}).data)
     if not _can_manage(request):
         return _forbidden()
@@ -514,17 +515,18 @@ def assessment_detail(request, pk):
         updated.closed_at = None
         updated.graded_at = None
         updated.backup_completed_at = None
+        updated.backup_retry_at = None
         updated.backup_manifest = {}
         updated.retention_started_at = None
         updated.next_lifecycle_at = None
         updated.retention_milestone = 0
         updated.save(update_fields=[
-            "closed_at", "graded_at", "backup_completed_at", "backup_manifest",
+            "closed_at", "graded_at", "backup_completed_at", "backup_retry_at", "backup_manifest",
             "retention_started_at", "next_lifecycle_at", "retention_milestone", "updated_at",
         ])
     if closing:
         start_retention_counter(updated, timezone.now())
-        refresh_assessment_status(updated)
+        refresh_and_backup_assessment(updated)
         notify_workspace(
             event_key=f"assessment:{updated.pk}:closed:{int(updated.retention_started_at.timestamp())}",
             title="Bài kiểm tra đã đóng", message=f"“{updated.title}” đã đóng và sẵn sàng để chấm.",
@@ -817,7 +819,7 @@ def assessment_result_grade(request, pk, attempt_pk):
             "manual_grading_required", "updated_at",
         ])
         _sync_completed_attempt(attempt)
-        refresh_assessment_status(attempt.assessment)
+        refresh_and_backup_assessment(attempt.assessment)
         return Response(_admin_attempt_payload(attempt, request))
     if grading_note:
         return Response(_admin_attempt_payload(attempt, request))
@@ -835,7 +837,7 @@ def assessment_result_grade(request, pk, attempt_pk):
         "sync_error", "synced_at", "purge_after", "updated_at",
     ])
     _sync_completed_attempt(attempt)
-    refresh_assessment_status(attempt.assessment)
+    refresh_and_backup_assessment(attempt.assessment)
     return Response(_admin_attempt_payload(attempt, request))
 
 
@@ -963,7 +965,7 @@ def assessment_import_sheet_grades(request, pk):
         return _assessment_error("Bài kiểm tra chưa liên kết Google Sheet.")
     try:
         result = sync_assessment_grades_from_google_sheet(assessment)
-        refresh_assessment_status(assessment)
+        refresh_and_backup_assessment(assessment)
         return Response(result)
     except Exception as error:
         return _assessment_error(f"Không thể đồng bộ điểm từ Google Sheet: {error}")
