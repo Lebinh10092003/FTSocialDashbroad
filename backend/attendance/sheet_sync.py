@@ -248,11 +248,14 @@ def push_groups_to_attendance_sheet(service, groups):
         for group in spreadsheet_groups:
             groups_by_tab[sheet_by_email[group[0]]["title"]].append(group)
 
+        spreadsheet_value_updates = []
+        spreadsheet_format_requests = []
         for title, tab_groups in groups_by_tab.items():
             properties = sheet_by_email[tab_groups[0][0]]
             month_year, visible_rows = _read_tab(service, spreadsheet_id, title)
             rows_by_day = _date_rows(visible_rows)
-            # Descending dates keep cached row numbers valid while rows are inserted.
+            # Insert overflow rows first. When an insertion shifts later dates,
+            # update the cached row map before composing the batched writes.
             for email, work_date in sorted(tab_groups, key=lambda item: item[1], reverse=True):
                 _validate_month(title, month_year, work_date)
                 matching_rows = rows_by_day.get(work_date.day, [])
@@ -262,56 +265,68 @@ def push_groups_to_attendance_sheet(service, groups):
                 required_rows = max(1, math.ceil(len(day_entries) / SHIFT_COLUMNS_PER_ROW))
                 if len(matching_rows) < required_rows:
                     missing = required_rows - len(matching_rows)
+                    insert_after = matching_rows[-1]
                     _insert_overflow_rows(
                         service,
                         spreadsheet_id,
                         properties["sheetId"],
-                        matching_rows[-1],
+                        insert_after,
                         missing,
                     )
-                    matching_rows.extend(range(matching_rows[-1] + 1, matching_rows[-1] + missing + 1))
+                    for day, row_numbers in rows_by_day.items():
+                        rows_by_day[day] = [
+                            row_number + missing if row_number > insert_after else row_number
+                            for row_number in row_numbers
+                        ]
+                    rows_by_day[work_date.day].extend(
+                        range(insert_after + 1, insert_after + missing + 1)
+                    )
+                    rows_by_day[work_date.day].sort()
                     inserted_rows += missing
+
+            for email, work_date in sorted(tab_groups, key=lambda item: item[1]):
+                matching_rows = rows_by_day[work_date.day]
+                day_entries = entries_by_group[(email, work_date)]
                 quoted = _quote_sheet_name(title)
-                value_updates = []
-                yellow_requests = []
                 for index, row_number in enumerate(matching_rows):
                     row_entries = day_entries[index * 3:(index + 1) * 3]
-                    value_updates.append({
+                    spreadsheet_value_updates.append({
                         "range": f"{quoted}!C{row_number}:K{row_number}",
                         "values": [_row_values(row_entries)],
                     })
                     note_lines = notes_by_group[(email, work_date)] if index == 0 else []
                     note = "\n".join(dict.fromkeys(note_lines))
-                    value_updates.append({
+                    spreadsheet_value_updates.append({
                         "range": f"{quoted}!R{row_number}",
                         "values": [[note]],
                     })
-                    if note:
-                        yellow_requests.append({
-                            "repeatCell": {
-                                "range": {
-                                    "sheetId": properties["sheetId"],
-                                    "startRowIndex": row_number - 1,
-                                    "endRowIndex": row_number,
-                                    "startColumnIndex": 17,
-                                    "endColumnIndex": 18,
-                                },
-                                "cell": {"userEnteredFormat": {"backgroundColor": YELLOW}},
-                                "fields": "userEnteredFormat.backgroundColor",
-                            }
-                        })
-                # Write each date immediately. Later descending inserts occur
-                # above already-synced rows and Sheets moves those cells safely.
-                service.spreadsheets().values().batchUpdate(
-                    spreadsheetId=spreadsheet_id,
-                    body={"valueInputOption": "USER_ENTERED", "data": value_updates},
-                ).execute()
-                if yellow_requests:
-                    service.spreadsheets().batchUpdate(
-                        spreadsheetId=spreadsheet_id,
-                        body={"requests": yellow_requests},
-                    ).execute()
+                    spreadsheet_format_requests.append({
+                        "repeatCell": {
+                            "range": {
+                                "sheetId": properties["sheetId"],
+                                "startRowIndex": row_number - 1,
+                                "endRowIndex": row_number,
+                                "startColumnIndex": 17,
+                                "endColumnIndex": 18,
+                            },
+                            "cell": {"userEnteredFormat": {"backgroundColor": YELLOW}} if note else {"userEnteredFormat": {}},
+                            "fields": "userEnteredFormat.backgroundColor",
+                        }
+                    })
                 total_groups += 1
+
+        # A batch counts as one Sheets write request regardless of the number
+        # of ranges, keeping full-sync deployments below per-minute quotas.
+        if spreadsheet_value_updates:
+            service.spreadsheets().values().batchUpdate(
+                    spreadsheetId=spreadsheet_id,
+                    body={"valueInputOption": "USER_ENTERED", "data": spreadsheet_value_updates},
+            ).execute()
+        if spreadsheet_format_requests:
+            service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={"requests": spreadsheet_format_requests},
+            ).execute()
 
     return {
         "groups": total_groups,

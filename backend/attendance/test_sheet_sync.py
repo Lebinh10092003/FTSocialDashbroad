@@ -116,7 +116,11 @@ class AttendanceSheetSyncTests(TestCase):
             "range": "'Nguyễn Thanh Phong'!R11",
             "values": [[""]],
         })
-        service.spreadsheets.return_value.batchUpdate.assert_not_called()
+        format_body = service.spreadsheets.return_value.batchUpdate.call_args.kwargs["body"]
+        self.assertEqual(
+            format_body["requests"][0]["repeatCell"]["cell"],
+            {"userEnteredFormat": {}},
+        )
 
     def test_more_than_three_shifts_inserts_inherited_row_and_continues(self):
         for number, hour in enumerate((8, 10, 13, 16), start=1):
