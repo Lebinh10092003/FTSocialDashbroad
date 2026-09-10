@@ -1053,6 +1053,21 @@ def _actor_name(request):
 @permission_classes([IsWorkspaceAuthenticated])
 def workspace_notifications(request):
     profile = request.user
+    if str(profile.role).upper() in {"ADMIN", "MANAGER"}:
+        for token_notice in _token_notification_payloads():
+            token_identity = token_notice["id"] or hashlib.sha1(
+                f"{token_notice['platform']}|{token_notice['label']}|{'|'.join(token_notice['affectedPages'])}".encode("utf-8")
+            ).hexdigest()[:16]
+            notify_workspace(
+                event_key=f"social-token:{token_identity}:{token_notice['expiresAt']}",
+                title=f"Token {token_notice['platformLabel']} sắp hết hạn",
+                message=f"Còn {max(0, token_notice['daysRemaining'])} ngày. Ảnh hưởng: {', '.join(token_notice['affectedPages']) or token_notice['label']}.",
+                severity="urgent" if token_notice["daysRemaining"] <= 3 else "warning",
+                category="social-dashboard",
+                action_url="/social-dashboard/config",
+                target_roles=["ADMIN", "MANAGER"],
+                expires_at=token_notice["expiresAtValue"] + timedelta(days=7),
+            )
     rows = WorkspaceNotification.objects.prefetch_related("read_receipts").all()[:250]
     visible = [item for item in rows if notification_visible_to(item, profile)][:100]
     read_ids = set(WorkspaceNotificationRead.objects.filter(user=profile, notification__in=visible).values_list("notification_id", flat=True))
@@ -1168,6 +1183,11 @@ def list_logins(request):
 @api_view(["GET"])
 @permission_classes([IsManagerOrAdmin])
 def token_notifications(request):
+    notifications = _token_notification_payloads()
+    return Response({"notifications": [{key: value for key, value in item.items() if key not in {"expiresAtValue", "platformLabel"}} for item in notifications], "warningDays": TOKEN_WARNING_DAYS})
+
+
+def _token_notification_payloads():
     config = _get_config()
     now = timezone.now()
     notifications = []
@@ -1194,13 +1214,15 @@ def token_notifications(request):
             notifications.append({
                 "id": str(item.get("id") or ""),
                 "platform": item.get("platform", "facebook"),
+                "platformLabel": "Facebook" if item.get("platform", "facebook") == "facebook" else "Zalo",
                 "label": item.get("label") or item.get("pageName") or "Token Facebook",
                 "affectedPages": [str(page) for page in affected_pages if str(page).strip()],
                 "issuedAt": item.get("issuedAt") or "",
                 "expiresAt": parsed_expiry.isoformat(),
+                "expiresAtValue": parsed_expiry,
                 "daysRemaining": days_remaining,
             })
-    return Response({"notifications": notifications, "warningDays": TOKEN_WARNING_DAYS})
+    return notifications
 
 
 @api_view(["GET", "POST"])

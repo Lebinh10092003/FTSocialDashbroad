@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, LogIn, LogOut, Palette, Settings } from 'lucide-react';
 import AppearanceSettings, { APPEARANCE_STORAGE_KEY, readWorkspaceAppearance, WorkspaceAppearance } from './AppearanceSettings';
-import WorkspaceNotifications from './WorkspaceNotifications';
 
 export type AccountMenuProps = {
   userName?: string | null;
@@ -47,7 +46,6 @@ export default function AccountMenu({ userName, photoURL, userRole, isGuest, onA
 
   const actionItems = (
     <>
-      {!isGuest && <WorkspaceNotifications menuItem />}
       <button type="button" onClick={openAction} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-sky-50 hover:text-blue-700" role="menuitem">
         {isGuest ? <LogIn className="h-4 w-4" /> : <Settings className="h-4 w-4" />}
         {isGuest ? 'Đăng nhập' : 'Chỉnh sửa hồ sơ'}

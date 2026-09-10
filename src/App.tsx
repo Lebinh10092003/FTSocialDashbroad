@@ -7,6 +7,7 @@ import Sidebar from './components/social-dashboard/Sidebar';
 import LoginModal from './components/LoginModal';
 import AccountProfileModal from './components/AccountProfileModal';
 import AccountMenu from './components/AccountMenu';
+import WorkspaceNotifications from './components/WorkspaceNotifications';
 import { readWorkspaceAppearance, WorkspaceAppearance } from './components/AppearanceSettings';
 
 const lazyWithRecovery = <T extends React.ComponentType<any>>(loader: () => Promise<{ default: T }>) => lazy(async () => {
@@ -659,16 +660,19 @@ export default function App() {
                 Không gian làm việc <span className="ft-gradient-text">FermatTech Workspace</span>
               </h1>
             </div>
-            <AccountMenu
-              userName={user.displayName}
-              userRole={userRole}
-              photoURL={user.photoURL}
-              isGuest={isGuest}
-              onAccountClick={openAccount}
-              onLogin={() => { setAuthError(''); setShowLoginModal(true); }}
-              onLogout={handleLogout}
-              variant="header"
-            />
+            <div className="flex items-center gap-2.5">
+              {!isGuest && <WorkspaceNotifications token={idToken} />}
+              <AccountMenu
+                userName={user.displayName}
+                userRole={userRole}
+                photoURL={user.photoURL}
+                isGuest={isGuest}
+                onAccountClick={openAccount}
+                onLogin={() => { setAuthError(''); setShowLoginModal(true); }}
+                onLogout={handleLogout}
+                variant="header"
+              />
+            </div>
           </div>
         </header>
 

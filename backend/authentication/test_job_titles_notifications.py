@@ -1,7 +1,7 @@
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from .models import JobTitle, UserProfile
+from .models import JobTitle, UserProfile, WorkspaceNotification
 
 
 class JobTitleAndNotificationTests(TestCase):
@@ -34,9 +34,30 @@ class JobTitleAndNotificationTests(TestCase):
         self.assertEqual(response.data["notifications"][0]["category"], "personnel")
 
     def test_notification_without_target_is_broadcast(self):
-        from .models import WorkspaceNotification
         employee = UserProfile.objects.create(email="employee@example.test", role="EMPLOYEE")
         WorkspaceNotification.objects.create(event_key="broadcast", title="Biến động Workspace", message="Nội dung")
         self.client.force_authenticate(employee)
         response = self.client.get("/api/notifications")
         self.assertEqual(response.data["notifications"][0]["title"], "Biến động Workspace")
+
+    def test_notification_read_states_and_action_url(self):
+        notification = WorkspaceNotification.objects.create(
+            event_key="work-item:42",
+            title="Công việc cần xử lý",
+            message="Mở đúng công việc được giao.",
+            category="work-schedule",
+            action_url="/work-schedule/personal?task=42",
+        )
+        before = self.client.get("/api/notifications")
+        self.assertEqual(before.data["unreadCount"], 1)
+        self.assertFalse(before.data["notifications"][0]["read"])
+        self.assertEqual(before.data["notifications"][0]["actionUrl"], "/work-schedule/personal?task=42")
+
+        self.assertEqual(self.client.post(f"/api/notifications/{notification.pk}/read").status_code, 200)
+        after = self.client.get("/api/notifications")
+        self.assertEqual(after.data["unreadCount"], 0)
+        self.assertTrue(after.data["notifications"][0]["read"])
+
+        WorkspaceNotification.objects.create(event_key="work-item:43", title="Việc khác", message="Nội dung")
+        self.assertEqual(self.client.post("/api/notifications/read-all").status_code, 200)
+        self.assertEqual(self.client.get("/api/notifications").data["unreadCount"], 0)

@@ -8,7 +8,6 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { UserRole } from '../../types';
-import TokenNotifications from './TokenNotifications';
 import AccountMenu from '../AccountMenu';
 
 interface SidebarProps {
@@ -74,9 +73,7 @@ export default function Sidebar({ activeTab, setActiveTab, user, userRole, idTok
           <ArrowLeft className="w-4 h-4 text-slate-500" />
           <span>Quay lại Workspace</span>
         </button>
-        <div className="mb-2 flex justify-end">
-          <TokenNotifications idToken={idToken} userRole={userRole} />
-        </div>        <AccountMenu
+        <AccountMenu
           userName={user?.displayName}
           photoURL={user?.photoURL}
           userRole={userRole}

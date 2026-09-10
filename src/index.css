@@ -1403,3 +1403,8 @@ body.workspace-app-theme.workspace-theme-light .ft-sidebar-footer { border-color
   padding: .5rem .75rem;
   box-shadow: 0 3px 10px rgba(15,55,95,.1);
 }
+
+/* The notification center belongs to the Workspace home header only. */
+.ft-module-shell .ft-module-header .lucide-bell {
+  display: none;
+}
